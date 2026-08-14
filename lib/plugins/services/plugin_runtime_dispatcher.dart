@@ -447,7 +447,10 @@ class PluginRuntimeDispatcher {
     final jsonPayload = jsonEncode(payload);
     debugPrint('PluginRuntimeDispatcher: Dispatching $topic');
 
-    for (final entry in _controllersByPlugin.entries) {
+    // עותק: register/unregisterController יכולים לרוץ בין ה-await-ים
+    // שבתוך הלולאה (למשל טאב נסגר בזמן שליחת אירוע לתוסף אחר), ואיטרציה
+    // על המפה החיה במקביל לשינוי שלה קורסת עם Concurrent modification.
+    for (final entry in _controllersByPlugin.entries.toList()) {
       final pluginId = entry.key;
       final instances = entry.value;
       if (instances.isEmpty) continue;

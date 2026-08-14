@@ -85,6 +85,24 @@ class _FakeWebViewController extends Fake implements InAppWebViewController {
 class _FakeController extends Fake implements InAppWebViewController {}
 
 // ── fake controller שמתעד pause/resume ואירועי lifecycle ל-JS ─────────────
+/// מריץ callback בתוך evaluateJavascript — מדמה dispose/initState של דף תוסף
+/// שרץ בין ה-await-ים של הדיספצ'ר ומשנה את מפת ה-controllers.
+class _MutatingFakeController extends Fake implements InAppWebViewController {
+  _MutatingFakeController(this.onEvaluate);
+  final void Function() onEvaluate;
+  final List<String> jsEvents = [];
+
+  @override
+  Future<dynamic> evaluateJavascript({
+    required String source,
+    ContentWorld? contentWorld,
+  }) async {
+    jsEvents.add(source);
+    onEvaluate();
+    return null;
+  }
+}
+
 class _LifecycleFakeController extends Fake implements InAppWebViewController {
   int pauseCalls = 0;
   int resumeCalls = 0;
@@ -1123,6 +1141,61 @@ void main() {
       );
 
       expect(opened, isEmpty);
+    });
+  });
+
+  group('שינוי מפת ה-controllers תוך כדי שידור', () {
+    const first = 'iter.a.plugin';
+    const middle = 'iter.b.plugin';
+    const last = 'iter.c.plugin';
+
+    setUp(() {
+      _d.repositoryForTesting = _FakeRegistryRepo(
+        enabled: true,
+        permission: true,
+      );
+      for (final id in const [first, middle, last]) {
+        _d.invalidatePlugin(id);
+      }
+    });
+
+    tearDown(() {
+      for (final id in const [first, middle, last, 'iter.new.plugin']) {
+        _d.unregisterController(id);
+      }
+      _d.repositoryForTesting = PluginRegistryRepository();
+    });
+
+    test('ביטול רישום של תוסף אחר באמצע שידור לא מפיל את הלולאה', () async {
+      final tail = _LifecycleFakeController();
+      _d.registerController(
+        first,
+        _MutatingFakeController(() => _d.unregisterController(middle)),
+      );
+      _d.registerController(middle, _LifecycleFakeController());
+      _d.registerController(last, tail);
+
+      await _d.dispatchEvent('navigation.changed', {'screen': 'library'});
+
+      expect(tail.jsEvents, hasLength(1));
+    });
+
+    test('רישום תוסף חדש באמצע שידור לא מפיל את הלולאה', () async {
+      final tail = _LifecycleFakeController();
+      _d.registerController(
+        first,
+        _MutatingFakeController(
+          () => _d.registerController(
+            'iter.new.plugin',
+            _LifecycleFakeController(),
+          ),
+        ),
+      );
+      _d.registerController(last, tail);
+
+      await _d.dispatchEvent('navigation.changed', {'screen': 'library'});
+
+      expect(tail.jsEvents, hasLength(1));
     });
   });
 }
