@@ -1,0 +1,150 @@
+name: Windows Dev Build
+
+# בונה ואורז את התוכנה לווינדוס (x64) מענף dev בלבד.
+# רץ רק בהפעלה ידנית (Actions -> Windows Dev Build -> Run workflow, עם ענף dev).
+# מפיק: ZIP נייד + מתקין (Inno Setup), שניפם זמינים בלשונית Artifacts של הריצה.
+
+on:
+  workflow_dispatch:
+
+# ריצה חדשה על dev מבטלת ריצה ישנה שעדיין רצה
+concurrency:
+  group: windows-dev-build
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build_windows:
+    # הגנה: גם בהפעלה ידנית רץ רק על ענף dev
+    if: github.ref == 'refs/heads/dev'
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: true
+
+      - name: Create Google Calendar credentials (if secrets exist)
+        shell: pwsh
+        env:
+          GC_ID: ${{ secrets.GOOGLE_CALENDAR_CLIENT_ID }}
+          GC_SECRET: ${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:GC_ID) -or [string]::IsNullOrWhiteSpace($env:GC_SECRET)) {
+            Write-Host "::warning::Google Calendar secrets are missing - building without Google Calendar sync."
+            exit 0
+          }
+          $content = @"
+          class GoogleCalendarCredentials {
+            static const String clientId = '$($env:GC_ID)';
+            static const String clientSecret = '$($env:GC_SECRET)';
+          }
+          "@
+          $content | Out-File -FilePath "lib/tools/calendar/services/google_calendar_credentials.dart" -Encoding UTF8
+          Write-Host "Google Calendar credentials file created"
+
+      - name: Install dependencies and generate code
+        shell: pwsh
+        run: |
+          git config --global core.longpaths true
+          flutter pub get
+          dart run tool/generate_search_index.dart
+          dart run tool/generate_settings_l10n.dart
+
+      # ארוז ליד otzaria.exe את ה-DLLs של MSVC (app-local), כמו ב-build-and-announce.yml.
+      # ה-CMakeLists קולט אותם מ-installer\vcredist\x64.
+      - name: Stage VC++ runtime DLLs (app-local)
+        shell: pwsh
+        run: |
+          $destDir = "installer\vcredist\x64"
+          New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+          $dlls = @(
+            'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll',
+            'msvcp140_atomic_wait.dll', 'msvcp140_codecvt_ids.dll',
+            'vcruntime140.dll', 'vcruntime140_1.dll', 'vcruntime140_threads.dll',
+            'concrt140.dll', 'vccorlib140.dll'
+          )
+          foreach ($d in $dlls) {
+            $src = Join-Path $env:SystemRoot "System32\$d"
+            if (Test-Path $src) {
+              Copy-Item $src (Join-Path $destDir $d) -Force
+              Write-Host "copied $d"
+            } else {
+              Write-Host "::warning::$d not found in System32 - skipping"
+            }
+          }
+
+      - name: Build Flutter Windows app
+        shell: pwsh
+        env:
+          UseMultiToolTask: 'true'
+          EnforceProcessCountAcrossBuilds: 'true'
+          CMAKE_BUILD_PARALLEL_LEVEL: '4'
+          BIO_OBF_KEY: ${{ secrets.BIO_OBF_KEY }}
+        run: |
+          flutter build windows --release --dart-define=BIO_OBF_KEY=$env:BIO_OBF_KEY
+
+      - name: Zip Windows build (portable)
+        shell: pwsh
+        run: |
+          $relDir = Get-ChildItem -Directory build\windows |
+            Where-Object { Test-Path "$($_.FullName)\runner\Release" } |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $relDir) { throw 'Release directory not found' }
+          Compress-Archive -Path "$relDir\runner\Release\*" -DestinationPath otzaria-windows-dev.zip
+          # portable.marker הופך את ה-ZIP לנייד (נארז ל-ZIP בלבד, לא לתיקיית Release)
+          $marker = Join-Path $env:RUNNER_TEMP 'portable.marker'
+          New-Item -ItemType File -Path $marker -Force | Out-Null
+          Compress-Archive -Path $marker -Update -DestinationPath otzaria-windows-dev.zip
+
+      - name: Download bundled plugins for installer
+        shell: pwsh
+        run: .\installer\download_bundled_plugins.ps1 -Platform windows
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (Test-Path .\installer\install_inno_setup.ps1) {
+            .\installer\install_inno_setup.ps1
+          } else {
+            choco install innosetup -y --no-progress
+          }
+          $iscc = (Get-ChildItem "C:\Program Files*\Inno Setup*\ISCC.exe" -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName)
+          if (-not $iscc) { throw "ISCC.exe not found" }
+          "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build Inno Setup installer
+        shell: pwsh
+        run: |
+          & "$env:ISCC" installer\otzaria.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup build failed" }
+          $setup = Get-ChildItem -Recurse -Filter "otzaria-*-windows.exe" |
+            Where-Object { $_.FullName -notmatch 'build\\windows' } |
+            Select-Object -First 1
+          if (-not $setup) { throw "Installer exe not found" }
+          Copy-Item $setup.FullName "otzaria-windows-dev-setup.exe"
+
+      - name: Upload ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: otzaria-windows-dev-zip
+          path: otzaria-windows-dev.zip
+          if-no-files-found: error
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: otzaria-windows-dev-installer
+          path: otzaria-windows-dev-setup.exe
+          if-no-files-found: error
