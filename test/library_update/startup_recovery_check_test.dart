@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/data/sqlite/sqlite3_api.dart';
 import 'package:otzaria/library_update/services/startup_recovery_check.dart';
 import 'package:seforim_library_updater/seforim_library_updater.dart';
 
@@ -155,4 +156,65 @@ void main() {
     expect(File('$dbPath.backup').existsSync(), isFalse);
     expect(File(dbPath).readAsStringSync(), 'fake-db');
   });
+
+  test(
+    'שחזור בעלייה אינו משנה קובצי .old או sidecars ללא בעלות ידועה',
+    () async {
+      for (final emptyMain in [false, true]) {
+        if (File(dbPath).existsSync()) File(dbPath).deleteSync();
+        if (emptyMain) File(dbPath).writeAsStringSync('');
+        File('$dbPath.old').writeAsStringSync('retired-db');
+        for (final suffix in ['-wal', '-shm', '-journal']) {
+          File('$dbPath$suffix').writeAsStringSync('preserve$suffix');
+        }
+
+        await buildCheck(quickCheckResult: true).run(dbPath);
+
+        expect(File(dbPath).existsSync(), emptyMain);
+        if (emptyMain) expect(File(dbPath).lengthSync(), 0);
+        expect(File('$dbPath.old').readAsStringSync(), 'retired-db');
+        for (final suffix in ['-wal', '-shm', '-journal']) {
+          expect(File('$dbPath$suffix').readAsStringSync(), 'preserve$suffix');
+        }
+      }
+    },
+  );
+  for (final emptyMain in [false, true]) {
+    test('WAL שמור של .old נשמר כשמסד ${emptyMain ? 'ריק' : 'חסר'}', () async {
+      final sourcePath = '${tmp.path}/source.db';
+      final source = sqlite3.open(sourcePath);
+      try {
+        source.execute('PRAGMA journal_mode=WAL');
+        source.execute('CREATE TABLE books (id INTEGER PRIMARY KEY)');
+        source.execute('INSERT INTO books VALUES (1)');
+        source.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+        source.execute('INSERT INTO books VALUES (2)');
+        File(sourcePath).copySync('$dbPath.old');
+        for (final suffix in ['-wal', '-shm']) {
+          File('$sourcePath$suffix').copySync('$dbPath$suffix');
+        }
+      } finally {
+        source.close();
+      }
+      File(dbPath).deleteSync();
+      if (emptyMain) File(dbPath).writeAsStringSync('');
+      final wal = File('$dbPath-wal').readAsBytesSync();
+
+      await buildCheck(quickCheckResult: true).run(dbPath);
+
+      expect(File('$dbPath-wal').readAsBytesSync(), wal);
+      expect(File('$dbPath.old').existsSync(), isTrue);
+      if (emptyMain) File(dbPath).deleteSync();
+      File('$dbPath.old').renameSync(dbPath);
+      final restored = sqlite3.open(dbPath);
+      try {
+        expect(restored.select('SELECT id FROM books').map((r) => r['id']), [
+          1,
+          2,
+        ]);
+      } finally {
+        restored.close();
+      }
+    });
+  }
 }

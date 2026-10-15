@@ -25,7 +25,6 @@ import 'package:otzaria/tour/bloc/tour_cubit.dart';
 import 'package:otzaria/tour/bloc/tour_state.dart';
 import 'package:otzaria/tour/models/live_tip.dart';
 import 'package:otzaria/widgets/navigation/panel_tab_header.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
 
@@ -133,7 +132,8 @@ void main() {
         expect(
           find.byType(CommentatorsListView),
           findsOneWidget,
-          reason: 'במצב מפרשים מתחת, הקיצור צריך לפתוח את חלונית בחירת המפרשים (issue #1161)',
+          reason:
+              'במצב מפרשים מתחת, הקיצור צריך לפתוח את חלונית בחירת המפרשים (issue #1161)',
         );
       },
     );
@@ -196,8 +196,6 @@ TextBookLoaded _loadedState(TextBook book, {required bool showSplitView}) {
     pinLeftPane: false,
     searchText: '',
     currentTitle: 'סימן א',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
     searchMode: SearchMode.exact,
   );
 }

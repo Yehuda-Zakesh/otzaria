@@ -177,6 +177,8 @@ Widget _buildTile({
             filePath: 'book.pdf',
             mergedCount: 1,
             merged: const [],
+            textStatus: TextStatus.ok,
+            continuesToNextLine: false,
           ),
           onTap: () {},
           height: 50,

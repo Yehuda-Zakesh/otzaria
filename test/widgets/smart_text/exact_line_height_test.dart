@@ -340,7 +340,6 @@ void main() {
               ),
             ],
             baseStyle: base,
-            onLineTap: (_) {},
           ),
         ),
       );
@@ -374,7 +373,6 @@ void main() {
                 ),
               ],
               baseStyle: base,
-              onLineTap: (_) {},
             ),
           ),
         ),

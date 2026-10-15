@@ -88,12 +88,8 @@ Future<ReaderLocationSnapshot?> _resolveTextBookLocation(
   TextBookTab tab,
 ) async {
   final state = tab.bloc.state;
-  final resolvedIndex = state is TextBookLoaded
-      ? state.selectedIndex ??
-            (state.visibleIndices.isNotEmpty
-                ? state.visibleIndices.first
-                : tab.index)
-      : tab.index;
+  final resolvedIndex =
+      (state is TextBookLoaded ? state.selectedIndex : null) ?? tab.index;
 
   // ניסיון ראשון: currentTitle מה-ValueNotifier
   final notifierTitle = tab.currentTitle.value.trim();

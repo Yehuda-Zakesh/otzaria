@@ -102,25 +102,38 @@ class PersonalBooksImportService {
     final errors = <String>[];
 
     for (final sourcePath in sourcePaths) {
-      // שער התוכן ולא הסיומת בלבד: ‎.xml‎ שאינו מסמך Word היה מועתק, ואז
+      // שער התוכן ולא הסיומת בלבד: .xml שאינו מסמך Word היה מועתק, ואז
       // מדולג בשקט בסריקה — המשתמש רואה "יובא" וספר שלעולם אינו מופיע.
       if (!await isSupportedBookFileByContent(sourcePath)) {
         skippedUnsupported++;
         continue;
       }
       final fileName = p.basename(sourcePath);
+      final targetPath = p.join(folderPath, fileName);
+      Directory? temporary;
       try {
-        final targetPath = p.join(folderPath, fileName);
         // העתקת קובץ על עצמו (openRead+openWrite לאותו נתיב) מרוקנת אותו.
         if (p.equals(sourcePath, targetPath)) {
           copied++;
           continue;
         }
+        // אותה מערכת קבצים ל-rename; שם קצר וייחודי שאינו תלוי בשם הספר.
+        temporary = await Directory(folderPath).createTemp('.import-');
+        final partial = File(p.join(temporary.path, 'book.part'));
         // העתקה בזרימה — קבצי PDF עלולים להיות גדולים מהזיכרון הפנוי.
-        await File(sourcePath).openRead().pipe(File(targetPath).openWrite());
+        await File(sourcePath).openRead().pipe(partial.openWrite());
+        await partial.rename(targetPath);
         copied++;
       } catch (e) {
         errors.add(describeCopyError(fileName, e));
+      } finally {
+        if (temporary != null) {
+          try {
+            await temporary.delete(recursive: true);
+          } on FileSystemException {
+            // ניקוי best-effort: כשל בו אינו מסתיר את שגיאת הייבוא או עוצר את האצווה.
+          }
+        }
       }
     }
 

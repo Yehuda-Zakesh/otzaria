@@ -149,39 +149,42 @@ void main() {
       },
     );
 
-    testWidgets('scrollable: false אינו עוטף ב-Scrollable ועובד ב-SliverFillRemaining', (
-      tester,
-    ) async {
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: CustomScrollView(
-              slivers: [
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: OtzariaEmptyState(
-                    scrollable: false,
-                    icon: FluentIcons.info_24_regular,
-                    title: 'בדיקת סליבר',
-                    message: 'ללא עטיפת גלילה פנימית',
+    testWidgets(
+      'scrollable: false אינו עוטף ב-Scrollable ועובד ב-SliverFillRemaining',
+      (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          const MaterialApp(
+            home: Scaffold(
+              body: CustomScrollView(
+                slivers: [
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: OtzariaEmptyState(
+                      scrollable: false,
+                      icon: FluentIcons.info_24_regular,
+                      title: 'בדיקת סליבר',
+                      message: 'ללא עטיפת גלילה פנימית',
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
-      );
+        );
 
-      expect(tester.takeException(), isNull);
-      expect(find.text('בדיקת סליבר'), findsOneWidget);
-      // מוודא שאין SingleChildScrollView פנימי שנבנה בתוך ה-empty state
-      expect(
-        find.descendant(
-          of: find.byType(OtzariaEmptyState),
-          matching: find.byType(SingleChildScrollView),
-        ),
-        findsNothing,
-      );
-    });
+        expect(tester.takeException(), isNull);
+        expect(find.text('בדיקת סליבר'), findsOneWidget);
+        // מוודא שאין SingleChildScrollView פנימי שנבנה בתוך ה-empty state
+        expect(
+          find.descendant(
+            of: find.byType(OtzariaEmptyState),
+            matching: find.byType(SingleChildScrollView),
+          ),
+          findsNothing,
+        );
+      },
+    );
   });
 }

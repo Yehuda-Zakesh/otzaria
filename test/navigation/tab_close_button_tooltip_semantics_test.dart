@@ -1,6 +1,6 @@
 // issue #1399: קריסת התוכנה ב-Windows בעקבות עץ נגישות שנשבר.
 //
-// ה-X של כרטיסיה נושא tooltip ("CTRL + W") ויושב בתוך הכרטיסיה, שגם לה יש
+// ה-X של כרטיסיה נושא tooltip ("סגור כרטיסיה") ויושב בתוך הכרטיסיה, שגם לה יש
 // tooltip (הכותרת המלאה). Tooltip חיצוני אינו יוצר צומת סמנטיקה משלו — הודעתו
 // ועוגן ה-OverlayPortal של הבלון מתמזגים לצומת הקרוב, כאן צומת הכרטיסיה, ולצומת
 // יש מקום לעוגן אחד בלבד. עוגן ה-X נשמט, ובריחוף עליו הבלון נשלח למערכת
@@ -31,7 +31,6 @@ import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../helpers/memory_settings_cache.dart';
 import '../helpers/semantics_update_recorder.dart';
@@ -62,7 +61,8 @@ void main() {
     'ריחוף על ה-X של כרטיסיה בעלת tooltip כותרת אינו שולח צומת נגישות יתום '
     '(issue #1399)',
     (tester) async {
-      final closeTooltip = ShortcutHelper.formatShortcutForDisplay('ctrl+w');
+      final closeTooltip =
+          'סגור כרטיסיה (${ShortcutHelper.formatShortcutForDisplay('ctrl+w')})';
       final tab = _makeTextTab('ספר א', currentTitle: 'פרק א');
       final tabsBloc = _TestTabsBloc(
         TabsState(tabs: [tab], currentTabIndex: 0),
@@ -233,8 +233,6 @@ TextBookTab _makeTextTab(String title, {String currentTitle = ''}) {
       pinLeftPane: false,
       searchText: '',
       currentTitle: currentTitle,
-      scrollController: ItemScrollController(),
-      positionsListener: ItemPositionsListener.create(),
     ),
   );
   final tab = TextBookTab(book: book, index: 0, blocOverride: bloc);

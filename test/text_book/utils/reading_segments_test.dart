@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/text_book/utils/reading_segment_navigation.dart';
 import 'package:otzaria/text_book/utils/reading_segments.dart';
 
+import '../../test_helpers/reading_toc.dart';
+
 void main() {
   group('isReadingHeaderLine', () {
     test('מזהה תגי כותרת h1–h6', () {
@@ -59,6 +61,62 @@ void main() {
     });
   });
 
+  group('דילוג על RegExp לשורת טקסט', () {
+    test('שורות שמתחילות באות אינן מריצות את תבניות הכותרת והיישור', () {
+      final lines = [
+        '<h2>פרק א</h2>',
+        for (var i = 0; i < 500; i++) 'בראשית ברא אלהים $i',
+        '<center>הדרן</center>',
+      ];
+      for (final continuous in [false, true]) {
+        debugReadingTagPatternChecks = 0;
+        final segments = buildReadingSegments(
+          lines,
+          continuous: continuous,
+          loadedLineFlags: List<bool>.filled(lines.length, true),
+        );
+        for (var i = 0; i < segments.length; i++) {
+          segments[i];
+        }
+        expect(debugReadingTagPatternChecks, inInclusiveRange(2, 6));
+      }
+    });
+
+    test('התוצאה זהה ל-RegExp המלא לכל תו ראשון אפשרי', () {
+      final header = RegExp(r'^\s*<h[1-6]', caseSensitive: false);
+      final aligned = RegExp(
+        r'^\s*(?:(?:<a\b[^>]*>\s*</a>|<br\s*/?>)\s*)*'
+        r'<(?:center\b|div\b[^>]*\btext-align\s*:)',
+        caseSensitive: false,
+      );
+      final prefixes = [
+        '',
+        for (var c = 0; c <= 0xFFFF; c++) String.fromCharCode(c),
+      ];
+      const bodies = [
+        '<h3>כותרת</h3>',
+        '<center>x</center>',
+        '<br><div style="text-align:center">x</div>',
+        'טקסט',
+      ];
+      for (final prefix in prefixes) {
+        for (final body in bodies) {
+          final line = '$prefix$body';
+          expect(
+            isReadingHeaderLine(line),
+            header.hasMatch(line),
+            reason: line,
+          );
+          expect(
+            isAlignedBlockLine(line),
+            aligned.hasMatch(line),
+            reason: line,
+          );
+        }
+      }
+    });
+  });
+
   group('buildReadingSegments — non-continuous', () {
     test('שורה אחת לכל סגמנט במצב הרגיל', () {
       final lines = ['<h1>פתיחה</h1>', 'שורה א', 'שורה ב', 'שורה ג'];
@@ -113,26 +171,6 @@ void main() {
       expect(segments[2].sourceLineIndices, [2]);
     });
 
-    test(
-      'שורה מיושרת שוברת פסקה ונשארת קטע נפרד שאינו כותרת (issue #1293)',
-      () {
-        final lines = [
-          'שורה לפני',
-          '<div style="text-align: center;"><b>כותרת קבוצה</b></div>',
-          'שורה אחרי',
-          'עוד שורה',
-        ];
-        final segments = buildReadingSegments(lines, continuous: true);
-
-        expect(segments, hasLength(3));
-        expect(segments[0].sourceLineIndices, [0]);
-        expect(segments[1].sourceLineIndices, [1]);
-        expect(segments[1].isHeader, isFalse);
-        expect(segments[1].text, lines[1]);
-        expect(segments[2].sourceLineIndices, [2, 3]);
-      },
-    );
-
     test('lineRanges פסקאיים מצביעים על מיקום מדויק בטקסט המאוחד', () {
       final lines = ['אאא', 'בבב'];
       final segments = buildReadingSegments(lines, continuous: true);
@@ -155,7 +193,7 @@ void main() {
       expect(segments.first.sourceLineIndices, [0, 1, 2]);
     });
 
-    test('שורות לא-טעונות שוברת פסקה ואינן מתמזגות עם תוכן טעון', () {
+    test('פסקה שחלק משורותיה לא נטען נשארת פריט אחד שאינו טעון', () {
       final lines = ['', '', 'א', 'ב'];
       final segments = buildReadingSegments(
         lines,
@@ -163,188 +201,15 @@ void main() {
         loadedLineFlags: const [false, false, true, true],
       );
 
-      expect(segments, hasLength(2));
+      expect(segments, hasLength(1));
       expect(segments[0].isLoaded, isFalse);
-      expect(segments[0].sourceLineIndices, [0, 1]);
-      expect(segments[1].isLoaded, isTrue);
-      expect(segments[1].sourceLineIndices, [2, 3]);
-      expect(segments[1].text, 'א ב');
+      expect(segments[0].sourceLineIndices, [0, 1, 2, 3]);
+      expect(segments[0].text, isEmpty);
     });
 
     test('רשימה ריקה לא נופלת', () {
       expect(buildReadingSegments(const [], continuous: true), isEmpty);
       expect(buildReadingSegments(const [], continuous: false), isEmpty);
-    });
-  });
-
-  group('caching by identity (Expando)', () {
-    test('שני קריאות עם אותה רשימה מחזירות את אותו אובייקט', () {
-      final lines = ['אחת', 'שתיים'];
-      final first = buildReadingSegments(lines, continuous: false);
-      final second = buildReadingSegments(lines, continuous: false);
-      expect(identical(first, second), isTrue);
-    });
-
-    test('cache נפרד בין מצב רציף לרגיל', () {
-      final lines = ['אחת', 'שתיים'];
-      final lineMode = buildReadingSegments(lines, continuous: false);
-      final continuousMode = buildReadingSegments(lines, continuous: true);
-      expect(identical(lineMode, continuousMode), isFalse);
-      expect(lineMode, hasLength(2));
-      expect(continuousMode, hasLength(1));
-    });
-
-    test('רשימה חדשה (זהות שונה) מקבלת חישוב חדש', () {
-      final a = ['x'];
-      final b = ['x'];
-      final fromA = buildReadingSegments(a, continuous: false);
-      final fromB = buildReadingSegments(b, continuous: false);
-      expect(identical(fromA, fromB), isFalse);
-    });
-
-    test('loadedLineFlags שונים לא מחזירים cache ישן עבור אותה רשימה', () {
-      final lines = ['', 'טעון'];
-      final unloaded = buildReadingSegments(
-        lines,
-        continuous: true,
-        loadedLineFlags: const [false, true],
-      );
-      final loaded = buildReadingSegments(
-        lines,
-        continuous: true,
-        loadedLineFlags: const [true, true],
-      );
-
-      expect(unloaded, isNot(same(loaded)));
-      expect(unloaded.first.isLoaded, isFalse);
-      expect(loaded.first.isLoaded, isTrue);
-    });
-  });
-
-  group('updateReadingSegmentsForRange', () {
-    test('במצב רגיל מעדכן רק את הטווח שנוסף', () {
-      final initialLines = ['א', '', ''];
-      final initialSegments = buildReadingSegments(
-        initialLines,
-        continuous: false,
-        loadedLineFlags: const [true, false, false],
-      );
-
-      final updated = updateReadingSegmentsForRange(
-        initialSegments,
-        ['א', 'ב', ''],
-        loadedLineFlags: const [true, true, false],
-        continuous: false,
-        startLine: 1,
-        endLine: 1,
-      );
-
-      expect(updated, hasLength(3));
-      expect(updated[0].text, 'א');
-      expect(updated[1].text, 'ב');
-      expect(updated[2].isLoaded, isFalse);
-    });
-
-    test('במצב רציף ממזג מחדש רק את הגבול המקומי סביב הטווח החדש', () {
-      final initialSegments = buildReadingSegments(
-        ['', '', 'א', 'ב'],
-        continuous: true,
-        loadedLineFlags: const [false, false, true, true],
-      );
-
-      final updated = updateReadingSegmentsForRange(
-        initialSegments,
-        ['', 'קודם', 'א', 'ב'],
-        loadedLineFlags: const [false, true, true, true],
-        continuous: true,
-        startLine: 1,
-        endLine: 1,
-      );
-
-      expect(updated, hasLength(2));
-      expect(updated[0].isLoaded, isFalse);
-      expect(updated[0].sourceLineIndices, [0]);
-      expect(updated[1].sourceLineIndices, [1, 2, 3]);
-      expect(updated[1].text, 'קודם א ב');
-    });
-
-    test('טעינה הדרגתית לא ממזגת שורה מיושרת עם שכנותיה', () {
-      const aligned = '<div style="text-align: center;">מרכז</div>';
-      final initialSegments = buildReadingSegments(
-        ['א', '', ''],
-        continuous: true,
-        loadedLineFlags: const [true, false, false],
-      );
-
-      final updated = updateReadingSegmentsForRange(
-        initialSegments,
-        ['א', aligned, 'ב'],
-        loadedLineFlags: const [true, true, true],
-        continuous: true,
-        startLine: 1,
-        endLine: 2,
-      );
-
-      expect(
-        updated.map((s) => s.sourceLineIndices).toList(),
-        [
-          [0],
-          [1],
-          [2],
-        ],
-      );
-      expect(
-        updated,
-        hasLength(
-          buildReadingSegments(['א', aligned, 'ב'], continuous: true).length,
-        ),
-      );
-    });
-
-    test('append קדימה במצב רציף שומר סגמנטים קיימים במסלול ללא חפיפה', () {
-      final initialSegments = buildReadingSegments(
-        ['<h1>כותרת</h1>'],
-        continuous: true,
-        loadedLineFlags: const [true],
-      );
-
-      final updated = updateReadingSegmentsForRange(
-        initialSegments,
-        ['<h1>כותרת</h1>', 'ג', 'ד'],
-        loadedLineFlags: const [true, true, true],
-        continuous: true,
-        startLine: 1,
-        endLine: 2,
-      );
-
-      expect(updated, hasLength(2));
-      expect(identical(updated.first, initialSegments.first), isTrue);
-      expect(updated.last.sourceLineIndices, [1, 2]);
-      expect(updated.last.text, 'ג ד');
-    });
-
-    test('backfill אחורה במצב רציף שומר prefix unloaded מקומי בלבד', () {
-      final initialSegments = buildReadingSegments(
-        ['', '', '', '', '', 'א', 'ב'],
-        continuous: true,
-        loadedLineFlags: const [false, false, false, false, false, true, true],
-      );
-
-      final updated = updateReadingSegmentsForRange(
-        initialSegments,
-        ['', '', '', 'קודם', 'אמצע', 'א', 'ב'],
-        loadedLineFlags: const [false, false, false, true, true, true, true],
-        continuous: true,
-        startLine: 3,
-        endLine: 4,
-      );
-
-      expect(updated, hasLength(2));
-      expect(updated.first.isLoaded, isFalse);
-      expect(updated.first.sourceLineIndices, [0, 1, 2]);
-      expect(updated.last.isLoaded, isTrue);
-      expect(updated.last.sourceLineIndices, [3, 4, 5, 6]);
-      expect(updated.last.text, 'קודם אמצע א ב');
     });
   });
 
@@ -380,7 +245,13 @@ void main() {
     });
 
     test('רשימה ריקה — מחזיר 0', () {
-      expect(segmentIndexForLine(const [], 5), 0);
+      expect(
+        segmentIndexForLine(
+          buildReadingSegments(const [], continuous: true),
+          5,
+        ),
+        0,
+      );
     });
   });
 

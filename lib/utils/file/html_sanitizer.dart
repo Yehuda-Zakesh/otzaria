@@ -104,10 +104,12 @@ class BookHtmlSanitizer {
     if (value == null) return;
     final safe = value
         .split(RegExp(r'\s+'))
-        .where((name) =>
-            name == 'footnote-marker' ||
-            name == 'footnote' ||
-            name.startsWith('language-'))
+        .where(
+          (name) =>
+              name == 'footnote-marker' ||
+              name == 'footnote' ||
+              name.startsWith('language-'),
+        )
         .toList();
     if (safe.isEmpty) {
       node.attributes.remove('class');

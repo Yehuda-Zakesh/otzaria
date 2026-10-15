@@ -49,11 +49,6 @@ abstract class TikkunEngine {
 
   List<TikkunToken> tokenizeText(String cleaned);
 
-  List<TikkunToken> markSpecialSections(
-    List<TikkunToken> tokens,
-    String bookName,
-  );
-
   /// [widths] הוא מודל רוחב גופן הסת"ם — הפריסה נגזרת ממנו, ולכן כל מטמון
   /// שורות חייב לכלול את `widths.id` במפתח שלו.
   List<TikkunLine> paginateAllTokens(
@@ -94,21 +89,6 @@ abstract class TikkunEngine {
 
   bool precededBySetuma(List<TikkunToken> tokens, int fromCh, int fromVs);
 
-  int findWordSequence(
-    List<TikkunToken> tokens,
-    List<String> words,
-    int fromIdx,
-  );
-
-  int findParashaStart(
-    List<TikkunToken> tokens,
-    String normalizedParashaName,
-    int fromIdx,
-  );
-
-  /// י-ה-ו-ה → י-ק-ו-ק תוך שמירת הניקוד והטעמים.
-  String maskDivineName(String text);
-
   /// מיזוג עליות עוקבות/חופפות לטווחים רציפים — לכותרת הקריאה.
   List<VerseRange> computeContinuousSegments(List<ReadingAliya> aliyot);
 }
@@ -138,9 +118,6 @@ abstract class TikkunDataSource {
 
   /// שם עליה לתצוגה ("עליה א" → "ראשון").
   String aliyaDisplayName(String aliyaKey);
-
-  /// הפרשה המחוברת שאליה שייכת פרשה בודדת, אם יש.
-  String? combinedParashaOf(String parashaName);
 
   /// חומש ופרשה לפי שם שהגיע מהלוח (עם ניקוד / פרשה כפולה), או `null`.
   ({String bookId, String parashaName})? resolveParasha(String calendarName);

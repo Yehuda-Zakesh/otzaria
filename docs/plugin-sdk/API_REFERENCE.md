@@ -4,6 +4,16 @@
 
 ---
 
+## כפתור לשונית חדשה של תוסף
+
+`plugin.setNewTabPage({enabled: true})` דורש `navigation.write` ומחזיר boolean.
+בעלים ראשון מקבל את כפתור `+`; בקשה מתחרה מחזירה `false` ומציגה הודעה למשתמש
+עם אפשרות לבחור בעלים. החלטת `plugin.new_tab_page` נשמרת בהרשאות התוספים רק
+אחרי בקשת רישום בפועל; אין צורך להוסיף אותה למניפסט. אין תור של בקשות נדחות.
+המשתמש יכול לשנות את הבחירה בהרשאות התוסף. דחיית '+' אינה שוללת ניווט רגיל.
+`enabled: false` משחרר את הרישום ומאפשר בקשה חדשה, אך אינו מבטל חסימה שהמשתמש בחר. שלילת הרשאת
+הכפתור או `navigation.write`, השבתה והסרה משחררות את הבעלות הפעילה.
+
 ## זהות ספר אחידה
 
 ב־APIs ובאירועים המפורטים להלן, אוצריא מחזירה שדות זהות נוספים לספר:
@@ -41,6 +51,7 @@
 | `library.openBookFile` | קלט | קלט | קלט | קלט |
 | `reader.openBook` | קלט | קלט | קלט | קלט |
 | `reader.openBookAtRef` | קלט | קלט | קלט | קלט |
+| `reader.printRange` | קלט | קלט | קלט | קלט |
 
 \* ב-`library.resolveRef` השדות `id`/`type`/`bookUid` חסרים כשההתאמה היא ספר
 אישי או PDF ממערכת הקבצים — ראה את האזהרה בתיאור המתודה.
@@ -166,10 +177,18 @@ if (response.success) {
 | `search.fullText` | 0.9.89 |
 | `search.query` | 0.9.97 |
 | `search.getOptions` | 0.9.97 |
+| `search.setFieldText` | 0.9.99 |
+| `search.setFieldActionState` | 0.9.99 |
+| `search.endFieldSession` | 0.9.99 |
 | `reader.openBook` | 0.9.89 |
 | `reader.openBookAtRef` | 0.9.89 |
+| `reader.printRange` | 0.9.99 |
 | `reader.openSearchTab` | 0.9.89 |
 | `reader.getCurrentState` | 0.9.89 |
+| `reader.getDefaultTextReader` | 0.9.98 |
+| `reader.reportTextReaderLocation` | 0.9.98 |
+| `reader.setDefaultTextReader` | 0.9.98 |
+| `reader.setTextReaderFontSize` | 0.9.98 |
 | `reader.getCurrentRef` | 0.9.89 |
 | `reader.closeTab` | 0.9.97 |
 | `reader.activateTab` | 0.9.97 |
@@ -204,6 +223,7 @@ if (response.success) {
 | `workspace.switch` | 0.9.97 |
 | `navigation.goTo` | 0.9.89 |
 | `plugin.openSelf` | 0.9.96 |
+| `plugin.setNewTabPage` | 0.9.97 |
 | `plugin.openOther` | 0.9.97 |
 | `plugin.backgroundDone` | 0.9.97 |
 | `plugin.listInstalled` | 0.9.97 |
@@ -244,6 +264,7 @@ if (response.success) {
 | `fs.revokeFolder` | 0.9.98 |
 | `feedback.sendEmail` | 0.9.89 |
 | `feedback.report` | 0.9.97 |
+| `feedback.submitBookCorrection` | 0.9.99 |
 | `feedback.hasReporterEmail` | 0.9.97 |
 | `history.list` | 0.9.89 |
 | `history.listSearches` | 0.9.89 |
@@ -467,10 +488,12 @@ Otzaria.on('plugin.boot', async (payload) => {
 
 ```javascript
 await Otzaria.call('app.openUrl', { url: 'https://example.com' });
-// מחזיר true בהצלחה
+// מחזיר true כשהכתובת נפתחה, ו-false כשהמשתמש סירב
 ```
 
 מותרות אך ורק כתובות `http`/`https`. סכמות אחרות (`file://`, `javascript:`, פרוטוקולים מותאמים) נדחות עם `error.forbidden`.
+
+כתובת שהתוסף רשאי לפנות אליה ממילא ברשת (`network.allowlist` שאושר) נפתחת מיד. כל כתובת אחרת נפתחת רק אחרי שהמשתמש מאשר אותה בדיאלוג — הכתובת עצמה יכולה לשאת מידע לאתר. ממופע רקע, שאין לו דיאלוג, כתובת כזו אינה נפתחת.
 
 ### `app.registerShortcut` / `app.unregisterShortcut` / `app.updateShortcut`
 **הרשאה נדרשת:** `app.shortcuts`
@@ -947,8 +970,9 @@ const { data } = await Otzaria.call('library.refreshUserBooks');
 
 מחליף את רשימת הספרים של ספק שהתוסף הצהיר עליו ב-
 [`contributes.startup.libraryBooks`](#ספרים-בחיפוש-הספרייה-librarybooks).
-הספרים מופיעים באיתור הספרים של מסך הספרייה, ולחיצה על ספר כזה נמסרת לתוסף
-באירוע [`library.providerBook.openRequested`](#event-libraryproviderbookopenrequested).
+הספרים מופיעים באיתור הספרים של מסך הספרייה, ולחיצה על ספר כזה מבצעת את
+`openAction` של הספק, או — בלעדיה — נמסרת לתוסף באירוע
+[`library.providerBook.openRequested`](#event-libraryproviderbookopenrequested).
 
 ```javascript
 const { data } = await Otzaria.call('library.setProviderBooks', {
@@ -1350,6 +1374,8 @@ const { data } = await Otzaria.call('search.fullText', {
 - `type` — סוג הספר: `"text"` לספר טקסט, `"pdf"` ל-PDF
 - `book` — שם הספר
 - `text` — קטע הטקסט
+- `textStatus` — מצב הטקסט (ראו `search.query` להלן)
+- `continuesToNextLine` — הביטוי נמשך לשורה הבאה (ראו `search.query` להלן)
 - `index` — אינדקס השורה/עמוד בספר
 
 > **הערה:** `search.fullText` אינו מחזיר `id` כי מנוע החיפוש (Tantivy) אינו שומר את מזהה הספר מה-DB. כדי לקבל את `id` — יש לקרוא ל-`library.getBookMetadata({ bookId, type })` עם התוצאה. `search.query` (להלן) כן מחזיר זהות מלאה.
@@ -1435,6 +1461,8 @@ for await (const chunk of chunks) {
     book: 'ויקרא', categoryPath: '/הלכה/משנה תורה',
     reference: 'ויקרא, פרק יט',
     text: 'ואהבת לרעך כמוך...',
+    textStatus: 'ok',     // 'ok' | 'stale' | 'unavailable' — ראו להלן
+    continuesToNextLine: false, // הביטוי נמשך מסוף השורה לשורה הבאה — ראו להלן
     index: 1234,          // אינדקס השורה/עמוד לפתיחה עם reader.openBook
     mergedCount: 1,       // מספר התוצאות שאוחדו לכרטיס (במצב grouping)
     merged: [{ id, type, bookId, source, book, categoryPath, reference, index }]
@@ -1448,6 +1476,19 @@ for await (const chunk of chunks) {
   bookCounts: [{ id, type, bookId, source, title, count }]  // רק עם includeBookCounts
 }
 ```
+
+**`textStatus`** — האם `text` הוא השורה שבה נמצאה ההתאמה:
+- `'ok'` — כן.
+- `'stale'` — הספר השתנה מאז עדכון אינדקס החיפוש; `text` הוא השורה הנוכחית
+  באותו מיקום, בלי הדגשה, או ריק אם השורה כבר אינה קיימת.
+- `'unavailable'` — הטקסט אינו זמין כעת (למשל בזמן עדכון ספרייה); `text` ריק.
+
+בגרסאות קודמות השדה חסר; יש להתייחס להיעדרו כ-`'ok'`.
+
+**`continuesToNextLine`** — `true` כשהביטוי מתחיל בסוף השורה `index` ונמשך
+בתחילת השורה הבאה (`index + 1`). `text` מחבר אז את סוף השורה ואת תחילת הבאה
+במעבר שורה (`<br>`), והמילים מודגשות בשתיהן. התוצאה נספרת פעם אחת, לשורה `index`.
+בגרסאות קודמות השדה חסר; יש להתייחס להיעדרו כ-`false`.
 
 אין לצבור את כל התוצאות לפני ציור המסך: יש להוסיף כל `results` מיד עם הגעת
 ה־chunk. אם החיפוש נכשל, האיטרטור זורק שגיאה; chunks שכבר התקבלו נשארים בידי
@@ -1496,6 +1537,58 @@ const { data } = await Otzaria.call('search.getOptions', {});
 > `wordMatchMode` וכל פרמטרי ה-`negative*` דורשים `mode: 'advanced'`; המצב
 > `'fuzzy'` אינו מקבל אפשרויות מילה כלל; המצב `'exact'` מקבל רק את
 > `wordOptions.exact` שלמעלה.
+
+### `search.setFieldText`
+**הרשאה:** `search.field_actions` · **מגרסה:** 0.9.99
+
+כותב טקסט לשדה חיפוש בתוך סשן שהמשתמש פתח בלחיצה על כפתור התוסף בשדה
+(ראו [כפתורים בשדות החיפוש](#כפתורים-בשדות-החיפוש-searchfieldactions)).
+
+```javascript
+await Otzaria.call('search.setFieldText', { sessionId, text: 'ברכות דף ב' });
+```
+
+- התוסף שולח **תמיד את כל הטקסט שלו** בסשן, לא תוספות. כל קריאה מחליפה את
+  הקריאה הקודמת.
+- אוצריא שומרת את הטקסט שהיה בשדה מחוץ לבחירה ברגע הלחיצה (`before` ו-`after`),
+  ומרכיבה `before + text + after`. כשאין רווח בגבול, נוסף רווח מפריד. הסמן
+  ממוקם בסוף הטקסט של התוסף.
+- עד 1000 תווים בקריאה. תווי בקרה (כמו שבירת שורה) מוחלפים ברווח. טקסט
+  שהשדה המורכב ממנו מכיל `://` נדחה (`error.invalid_params`), כולל טקסט שנשמר
+  מחוץ לבחירה: Enter בחלק מהשדות פותח קישורי
+  `otzaria://`, ותוסף אינו רשאי להפעיל אותם בדרך זו.
+- השדה מגיב כמו להקלדה: חיפוש תוך כדי הקלדה (בספרייה, בתוך ספר, באיתור מקור)
+  מתעדכן. החיפוש בטקסט המלא רץ רק ב-`submit`.
+- סשן שאינו קיים, שהסתיים, או של תוסף אחר: `error.not_found`.
+
+### `search.setFieldActionState`
+**הרשאה:** `search.field_actions` · **מגרסה:** 0.9.99
+
+משנה את מראה הכפתור בזמן הסשן.
+
+```javascript
+await Otzaria.call('search.setFieldActionState', {
+  sessionId,
+  state: 'active',          // 'idle' | 'active' | 'busy'
+  tooltip: 'מקשיב... לחץ לעצירה',
+});
+```
+
+- `active` מציג את `activeIcon`, `busy` מציג חיווי התקדמות, `idle` את האייקון הרגיל.
+  כל עוד הסשן פתוח הכפתור מודגש.
+- `tooltip` (לא חובה, עד 120 תווים בשורה אחת) מחליף את הכותרת בזמן הסשן.
+
+### `search.endFieldSession`
+**הרשאה:** `search.field_actions` · **מגרסה:** 0.9.99
+
+```javascript
+await Otzaria.call('search.endFieldSession', { sessionId, submit: true });
+```
+
+מסיים את הסשן. `submit: true` מריץ את החיפוש כאילו המשתמש לחץ Enter. גם כאן
+התוסף מקבל `search.fieldAction.ended` עם `reason: 'plugin'`. אם השדה מכיל
+`://`, הגשה נדחית ב-`error.invalid_params` גם אם התוסף לא כתב טקסט; אפשר לסיים
+את הסשן ללא הגשה. Enter של המשתמש ממשיך לעבוד כרגיל.
 
 ---
 
@@ -1750,6 +1843,50 @@ await Otzaria.call('reader.openBookAtRef', {
 - אם ההתייחסות כוללת טווח (`'לג:ה-ז'`) — הניווט הוא לתחילת הטווח.
 - `highlight` חל גם על התאמה ברמת כותרת; אם ההתייחסות לא נמצאה כלל — אין הדגשה,
   והטקסט מועבר לתיבת החיפוש כגיבוי (התנהגות קיימת).
+
+### `reader.printRange`
+**הרשאה:** `reader.open` · **מגרסה:** 0.9.99
+
+פותח את מסך ההדפסה של אוצריא — אותו מסך שכפתור ההדפסה בקורא פותח — על טווח
+שורות בספר טקסט, כשהטווח כבר מסומן. המשתמש בוחר בו גופן, עימוד, ניקוד,
+מפרשים ויעד (מדפסת, PDF או Word) כמו בהדפסה רגילה מהקורא, ויכול גם לשנות את
+הטווח. התוסף אינו מקבל את הטקסט.
+
+קלט: זהות ספר (`bookUid` מומלץ, או `id` / `bookId` + `type`), `startIndex`
+(שורת ההתחלה, 0-based) ו-`endIndex` (אופציונלי, **בלעדי**). אלה אותם
+אינדקסים ש-`library.getBookToc` מחזיר, כך שטווח של פרק הוא מה-`index` של
+כותרת הפרק עד ה-`index` של הכותרת הבאה. כשהטווח מתחיל ומסתיים בדיוק בגבולות
+כותרות, המסך מציג אותו כבחירת כותרות ("מפרק א עד פרק ט"); אחרת — כטווח שורות.
+בלי `endIndex` המסך נפתח על הכותרת שסביב `startIndex`, כמו בהדפסה מהקורא.
+
+`commentators` הוא מערך אופציונלי של שמות מפרשים מקושרים (עד 256 שמות), לבחירה
+התחלתית במסך. `[]` משאיר את הבחירה ריקה. כשהפרמטר חסר, נבחרים המפרשים הפעילים
+בחלונית הקריאה של **אותו `bookUid`**, ואם אינה פתוחה — כל המפרשים המקושרים.
+המשתמש יכול להפעיל "כלול מפרשים" ולשנות את הבחירה במסך; מצב הקורא אינו משתנה.
+הקריאה ממתינה לסגירת מסך ההדפסה ללא פסק הזמן הכללי של 30 שניות; ביטול מחזיר
+`{ printed: false }` גם אחרי המתנה ממושכת.
+
+```javascript
+// לחיצה של המשתמש בלבד — כמו ui.print
+button.onclick = async () => {
+  const toc = (await Otzaria.call('library.getBookToc', { bookId: 'תהילים' })).data;
+  const from = toc.find((e) => e.text === 'פרק א').index;
+  const to = toc.find((e) => e.text === 'פרק י').index;   // בלעדי: פרקים א–ט
+  const res = await Otzaria.call('reader.printRange', {
+    bookId: 'תהילים', startIndex: from, endIndex: to
+  });
+  // res.data = { printed: true } — הודפס/יוצא; { printed: false } — בוטל
+};
+```
+
+הערות:
+- **דורש מחוות משתמש.** כמו `ui.print`, הקריאה תקפה רק מתוך handler של לחיצה,
+  ואם כבר פתוח דיאלוג מערכת של המופע מוחזר `error.forbidden`.
+- נתמך רק בספרי טקסט; ספר PDF מחזיר `error.unsupported`, ספר שלא נמצא —
+  `error.not_found`.
+- `endIndex` שאינו גדול מ-`startIndex`, או אינדקס שלילי/לא שלם, מחזירים
+  `error.invalid_params`. גם `commentators` שאינו מערך של שמות לא ריקים מחזיר
+  `error.invalid_params`; מפרש שאינו מקושר לספר מחזיר `error.not_found`.
 
 ### `reader.getCurrentState`
 **הרשאה:** `reader.open`
@@ -2278,7 +2415,7 @@ for (const plugin of data) {
 | `enabled` | `boolean` | האם התוסף מופעל. |
 | `showInTools` | `boolean` | האם התוסף מוגדר להצגה באזור הכלים של אוצריא. זהו ערך ההגדרה של התוסף ואינו מציין האם התוסף פתוח כרגע. |
 | `sourceType` | `string` | מאיפה התוסף הותקן: `packaged` — מארכיון (חנות או קובץ), `development` — תוסף פיתוח שנטען מתיקייה, `localhost_dev` — תוסף פיתוח שנטען משרת פיתוח מקומי. **מ-0.9.98**; בגרסאות קודמות השדה חסר. |
-| `toolTabIconName` | `string` | שם אייקון ה-Fluent שבו התוסף משתמש באזור הכלים. אם שם האייקון שהוגדר בתוסף אינו אייקון Fluent מוכר (או שלא הוגדר), מוחזר `puzzle_piece_24_regular`. |
+| `toolTabIconName` | `string` | שם האייקון (מאוצריא או מ-Fluent) שבו התוסף משתמש באזור הכלים. אם שם האייקון שהוגדר בתוסף אינו מוכר באף אחת מהספריות (או שלא הוגדר), מוחזר `puzzle_piece_24_regular`. |
 
 **למה `sourceType` חשוב לתוסף שבודק עדכונים.** תוסף פיתוח נטען מתיקייה שהמפתח
 עורך, והגרסה שלו אינה באה מהחנות — אין שום משמעות להציע לו „עדכון”, וקל להתקין
@@ -3201,6 +3338,35 @@ const { data } = await Otzaria.call('feedback.report', {
 
 **שגיאות אפשריות:** `error.invalid_params` — `details` חסר או ריק. `error.internal` — דחייה קבועה של השרת (HTTP 400/422), או מצב לא-מקוון כשהמשתמש כיבה את תור הדיווחים בהגדרות. דחייה קבועה אינה נכנסת לתור.
 
+### `feedback.submitBookCorrection`
+
+מגיש דיווח שגיאה בספר דרך `DirectErrorReportService` של אוצריא, באותו חוזה v2, תור והיסטוריית דיווחים של התוכנה. אינו משנה את טקסט הספר. דורש הרשאת `feedback.send_email`, המוצהרת במניפסט ומאושרת בידי המשתמש, וכתובת מייל שמורה בהגדרות אוצריא; אינו מקבל כתובת מהתוסף.
+
+גרסת המינימום של ה־API היא `0.9.99`. הוא זמין בבנייה הכוללת את ההרחבה; הוא אינו קיים במהדורת 0.9.98 הרשמית המקורית. בגרסה רשמית ללא התוספת מתקבלת שיטת API לא מוכרת.
+
+```js
+const result = await Otzaria.call('feedback.submitBookCorrection', {
+  reportId: 'stable-correction-id',
+  bookId: 'שם הספר', bookUid: 'id:42',
+  sectionIndex: 7,
+  snapshots: [{ index: 7, text: 'לפני המקור אחרי' }],
+  original: 'המקור', proposed: 'התיקון',
+  sourceStart: 5, sourceEnd: 10,
+  allowQueue: false
+});
+```
+
+- `reportId` הוא מזהה יציב באורך 1–160 תווים מתוך `[A-Za-z0-9_.:-]`. `details` אופציונלי ומוגבל ל־20,000 יחידות UTF-16.
+- זהות הספר דורשת `bookId` כמחרוזת; `bookUid` אופציונלי. כאשר נמסר UID, ההתאמה אליו מחמירה וללא חזרה לחיפוש לפי כותרת. ללא UID, הכותרת חייבת לזהות ספר יחיד.
+- `sectionIndex/endSectionIndex` הם אינדקסי מקור אפסיים; ברירת המחדל של הסיום היא פסקת ההתחלה. עד 32 פסקאות. `snapshots` מכסה את כולן ברצף, והטקסט חייב להתאים למקור הרשמי העדכני לאחר ניקוי HTML של אוצריא.
+- `original/proposed` נשמרים ללא נרמול, עד 20,000 יחידות UTF-16 כל אחד. הצעה ריקה היא מחיקה. `sourceStart/sourceEnd` הם טווח מקומי בתוך פסקה יחידה; יש להעביר את שניהם או להשמיט את שניהם. הוספה ריקה דורשת טווח מפורש כדי לבנות תיקון מובנה.
+- אוצריא בונה מיקום, מקור, גרסת ספרייה, digest ופרטי לקוח מהמידע שלה. תיקון חד־משמעי בפסקה אחת מקבל `text_correction` עם מקור HTML גולמי; טווח שאינו ממופה בבטחה או שינוי בין פסקאות מקבלים `free_text` v2 עם נוסח לפני/אחרי, בלי להמציא טווח DB. טווחי `sourceStart/sourceEnd` שנמסרו נשמרים גם בדיווח `free_text`.
+- נתמכים רק ספרי טקסט רשמיים ממסד הספרייה, ללא ספר אישי, מסד מצורף, קובץ חיצוני או מהדורה חלופית. גוף הדיווח מוגבל ל־256 KiB UTF-8.
+- `allowQueue` ברירת מחדל true. כאשר false, מצב מנותק או כשל רשת מחזירים `error.report_failed` ללא שמירה בתור. התוסף משאיר את הטיוטה וניסיון חוזר משתמש באותו `reportId`.
+- `forceFreeText: true` מגיש v2 חופשי גם כאשר טווח יחיד ניתן למיפוי. יש להשתמש בו בחלקים של תיקון גדול, כדי שלא ליצור הצעות שורה שלמה חלופיות עבור חלקי הוספה אחת. פירוט סדר החלקים נמצא ב־`details`.
+- תוצאה: `{status: 'sent'|'queued', reportId, nativeReportId, message, duplicate, correctionSupported}`. `queued` מעביר בעלות לשירות אוצריא; `correctionSupported` הוא null עד שיש אישור שרת. כשל או שינוי במקור מחזירים שגיאה ואינם מאשרים את התיקון.
+- `error.report_id_conflict` מציין התנגשות בתור המקומי או HTTP 409: יש ליצור `reportId` חדש לפני ניסיון נוסף. כשל זמני משתמש באותו מזהה ובאותו תוכן.
+
 ### `feedback.hasReporterEmail`
 **הרשאה:** אינה נדרשת — מוחזר ביט קיום בלבד, בלי הכתובת עצמה.
 
@@ -3756,6 +3922,8 @@ const { data } = await Otzaria.call('calendar.getJewishDate');
 //   monthName: "ניסן",
 //   isLeapYear: false,
 //   isShabbat: false,
+//   parasha: "אחרי מות",
+//   dafYomi: { masechet: "ברכות", daf: 2 },
 //   holidays: [
 //     { text: "שביעי של פסח", kind: "yomTov" }
 //   ]
@@ -3767,6 +3935,8 @@ const { data } = await Otzaria.call('calendar.getJewishDate');
 - `monthName` - שם החודש בעברית.
 - `isLeapYear` - האם השנה העברית היא שנה מעוברת.
 - `isShabbat` - האם התאריך חל בשבת.
+- `parasha` - שם פרשת השבוע הקרובה מהתאריך הנתון (ה-Shabbat הבא, או התאריך עצמו אם הוא שבת). מושפע מ-`inIsrael` של הלוח הנבחר עבור פרשיות מחוברות (כגון ויקהל-פקודי) שבהן בארץ קוראים פרשה אחת ובחו"ל שתיים.
+- `dafYomi` - הדף היומי (בבלי) לתאריך, בפורמט `{ masechet, daf }` (שם מסכת בעברית ומספר דף). `null` עבור תאריכים שקדמו לתחילת המחזור הראשון (י"א בספטמבר 1923).
 - `holidays` - רשימת חגים/ימים מיוחדים לתאריך, בפורמט `{ text, kind }`.
 
 ערכי `kind` אפשריים:
@@ -3928,7 +4098,8 @@ const { data } = await Otzaria.call('database.query', {
 });
 ```
 
-פתיחת ספר של אוצר החכמה לפי `book_id` (נפתח בדפדפן, כמו מהספרייה):
+פתיחת ספר של אוצר החכמה לפי `book_id` (בתוכנת אוצר החכמה כשהיא מותקנת והספר
+על הכונן, אחרת בדפדפן):
 
 ```javascript
 await Otzaria.call('reader.openBook', { external: { provider: 'otzar', id: 1234 } });
@@ -4233,6 +4404,7 @@ Otzaria.on('event.name', (data) => {
 - `workspace.changed` - שינוי סביבת העבודה (הרשאה: `events.subscribe:workspace.changed`)
 - `settings.changed` - שינוי הגדרה (הרשאה: `events.subscribe:settings.changed`)
 - `plugin.permissions_changed` - שינוי הרשאות (מחזיר `{ permissions: string[] }` - רשימת כל ההרשאות המאושרות) (הרשאה: `events.subscribe:plugin.permissions_changed`)
+- `search.fieldAction.invoked` / `search.fieldAction.stopRequested` / `search.fieldAction.ended` - סשן של כפתור התוסף בשדה חיפוש. נשלחים רק לתוסף הבעלים, ללא הרשאת subscribe (מגרסה 0.9.99; ראו [כפתורים בשדות החיפוש](#כפתורים-בשדות-החיפוש-searchfieldactions))
 
 ### הבדלים חשובים בין אירועי הקורא:
 
@@ -4439,6 +4611,7 @@ async function scheduleReminder(title, body, dateTime) {
 | `publishedData` | `{type, key, payload, scope?}` | `published_data.write` |
 | `programs` | תכניות חישוב Host מוולדות | הרשאות הפקודות שבתכנית |
 | `searchDialogItems` | שורות checkbox סטטיות בדיאלוג החיפוש | `search.dialog` |
+| `searchFieldActions` | כפתורי פעולה בתוך שדות החיפוש | `search.field_actions` |
 | `externalEditions` | קונפיגורציית מהדורות מקבילות חיצוניות (טבלת מיפוי במקור DB מוכרז) | `database.read` וגם `library.books.read` |
 | `libraryBooks` | ספקי ספרים שמתווספים לאיתור הספרים במסך הספרייה | `library.books.provide` |
 | `activationEvents` | שמות אירועים או `app.startup`; אפשר גם `{topic, when}` | הרשאת ה-subscribe של כל נושא |
@@ -4666,6 +4839,7 @@ async function scheduleReminder(title, body, dateTime) {
     הודעת מערכת. `severity`: `"info"` (ברירת מחדל), `"success"`, `"error"`.
     ההודעה מוצגת עם ייחוס לתוסף — `<message> · מאת <שם התוסף>` — כדי שהמשתמש
     ידע איזה תוסף פנה אליו; אין צורך להוסיף את שם התוסף ל-`message` בעצמכם.
+- מ־0.9.98 קיימת פעולת host לשירות מקומי — [`localService.post`](#localservicepost--פנייה-לשירות-מקומי).
 - מ־0.9.97 פעולה יכולה גם לכתוב לאחסון התוסף בלי להעיר את המנוע:
   `storage.set` (‏`args: {key, value}`) ו־`storage.remove` (‏`args: {key}`),
   בהרשאה `plugin.storage.write`. הכתיבה נעולה למרחב האחסון הרגיל של התוסף
@@ -4774,6 +4948,94 @@ async function scheduleReminder(title, body, dateTime) {
 | `word.acronyms` | ראשי תיבות |
 | `word.nikud` / `word.taamim` | ניקוד / טעמים |
 
+### כפתורים בשדות החיפוש (searchFieldActions)
+
+מגרסה 0.9.99, `startup.searchFieldActions` מוסיף כפתור לתוך שדות החיפוש של
+אוצריא. התוסף יכול לכתוב טקסט לשדה, אבל רק אחרי שהמשתמש לחץ על הכפתור.
+השימוש העיקרי הוא הקלדה בדיבור: מנוע הזיהוי רץ מחוץ לאוצריא, והתוסף מעביר
+לשדה את מה שזוהה. אותו מנגנון מתאים גם לתעתיק, למקלדת וירטואלית ועוד.
+
+הכפתור נבנה מהמניפסט בלבד: הצגתו אינה מפעילה את התוסף. לחיצה מעירה את מנוע
+הרקע בעצלנות, כמו פקד בשורת העיון (`headless` הוא המבנה המתאים). בלי
+`app.run_on_startup`, לחיצה פותחת את דף התוסף ומוסרת אליו את האירוע.
+
+```json
+{
+  "minAppVersion": "0.9.99",
+  "headless": true,
+  "permissions": [
+    "app.startup_contributions",
+    "app.run_on_startup",
+    "search.field_actions"
+  ],
+  "contributes": {
+    "startup": {
+      "searchFieldActions": [
+        {
+          "id": "dictate",
+          "title": "חיפוש בדיבור",
+          "icon": "mic_24_regular",
+          "activeIcon": "mic_24_filled",
+          "fields": ["fullText", "library", "inBook", "findRef"]
+        }
+      ]
+    }
+  }
+}
+```
+
+| שדה | חובה | תיאור |
+|---|---:|---|
+| `id` | כן | מזהה ייחודי בתוסף (עד 64 תווים); אותיות ASCII, מספרים, `.`, `_`, `-`. |
+| `title` | כן | כותרת הכפתור (tooltip), עד 120 תווים. |
+| `icon` | לא | שם אייקון, כמו ב-`toolbarItems` (ראו ICONS.md). |
+| `activeIcon` | לא | האייקון כשהתוסף מדווח `state: 'active'`. |
+| `fields` | לא | באילו שדות להציג. בלי השדה: בכל השדות הנתמכים. ערך לא מוכר מדולג. |
+
+עד 2 כפתורים לתוסף, ועד 3 כפתורים של תוספים בשדה אחד.
+
+השדות הנתמכים:
+
+| ערך | השדה |
+|---|---|
+| `fullText` | החיפוש בטקסט המלא של הספרייה |
+| `library` | איתור ספר או מחבר במסך הספרייה |
+| `inBook` | חיפוש בתוך ספר פתוח (טקסט או PDF) |
+| `findRef` | איתור מקור |
+
+**סשן.** לחיצה על הכפתור פותחת סשן ושולחת לתוסף (בלי הרשאת subscribe, רק
+לתוסף הבעלים):
+
+```javascript
+Otzaria.on('search.fieldAction.invoked', async ({ actionId, sessionId, field,
+                                                 text, selectionStart, selectionEnd }) => {
+  await Otzaria.call('search.setFieldActionState', { sessionId, state: 'active' });
+  // ... לאחר זיהוי:
+  await Otzaria.call('search.setFieldText', { sessionId, text: recognized });
+});
+Otzaria.on('search.fieldAction.stopRequested', ({ sessionId }) => { /* עצירה */ });
+Otzaria.on('search.fieldAction.ended', ({ sessionId, reason }) => { /* ניקוי */ });
+```
+
+- `text`, `selectionStart` ו-`selectionEnd` מתארים את השדה ברגע הלחיצה. הטקסט
+  המסומן הוא מה שהתוסף יחליף.
+- לחיצה נוספת על הכפתור בזמן סשן פתוח שולחת `search.fieldAction.stopRequested`
+  ואינה סוגרת את הסשן; התוסף מחליט מתי לסיים (`search.endFieldSession`).
+- `search.fieldAction.ended` נשלח בכל סיום, עם `reason`:
+  `"plugin"` (התוסף סיים), `"edited"` (המשתמש שינה את הטקסט בשדה),
+  `"closed"` (השדה או הכרטיסייה נסגרו, או שהתוסף הושבת), `"replaced"` (נפתח
+  סשן חדש באותו שדה, או סשן אחר של אותו תוסף).
+- סשן אחד לכל שדה ולכל תוסף בכל רגע.
+
+**אבטחה.** סשן נוצר רק מלחיצת משתמש על כפתור של התוסף בשדה מסוים. הקריאות
+`search.setFieldText` / `setFieldActionState` / `endFieldSession` נכשלות
+ב-`error.not_found` עבור סשן שאינו קיים, שהסתיים או ששייך לתוסף אחר. המופע
+של התוסף שקרא ראשון בסשן "נועל" אותו, וקריאות ממופע אחר נדחות. עריכה של
+המשתמש בשדה סוגרת את הסשן מיד, כך שהתוסף אינו יכול לדרוס את מה שהמשתמש הקליד.
+
+**זיהוי תמיכה.** בגרסה ללא התכונה הכפתור לא יוצג, ו-`search.setFieldText` מחזיר
+`error.unknown_method`. מומלץ להצהיר `minAppVersion: "0.9.99"`.
+
 ### מהדורות מקבילות חיצוניות (externalEditions)
 
 מגרסה 0.9.97, `startup.externalEditions` מצהיר על טבלת מיפוי במקור נתונים
@@ -4825,7 +5087,8 @@ Host — יצרפו את מהדורות הספק לספר הפתוח, אחרי �
 
 מגרסה 0.9.98, `startup.libraryBooks` מצהיר על ספק ספרים משל התוסף. ספרי הספק
 מצטרפים לתוצאות איתור הספר או המחבר במסך הספרייה — לצד הספרים של אוצריא ושל
-הקטלוגים החיצוניים — ולחיצה על ספר כזה נמסרת לתוסף, שפותח אותו. הרשימה עצמה
+הקטלוגים החיצוניים — ולחיצה על ספר כזה נמסרת לתוסף, שפותח אותו, או מבצעת את
+`openAction` של הספק בלי להעיר את המנוע. הרשימה עצמה
 נשלחת בזמן ריצה ב-[`library.setProviderBooks`](#librarysetproviderbooks) ונשמרת
 אצל אוצריא, כך שהספרים מופיעים מעליית התוכנה בלי להעיר את מנוע התוסף. עד 2
 ספקים לתוסף.
@@ -4857,6 +5120,56 @@ Host — יצרפו את מהדורות הספק לספר הפתוח, אחרי �
 | `title` | כן | שם הספק לתצוגה (עד 40 תווים) — בכפתור "פתח ב-..." של התצוגה המקדימה. |
 | `icon` | לא | אייקון 24px לכרטיסי הספרים (ראו [ICONS.md](ICONS.md)). ברירת מחדל: `contributes.toolTab.iconName` של התוסף, ובלעדיו אייקון ספר. |
 | `when` | לא | תנאי [`when`](#when--תרומה-תלוית-הגדרה). כשאינו מתקיים הספרים אינם מוצגים, ומוצגים שוב מיד כשהוא מתקיים — כך הגדרה בתוסף מדליקה ומכבה את ההצגה בלי לשלוח את הרשימה מחדש. |
+| `openAction` | לא | פעולת host שמבוצעת בלחיצה על ספר, בלי להעיר את מנוע התוסף. בלעדיה הלחיצה נמסרת באירוע [`library.providerBook.openRequested`](#event-libraryproviderbookopenrequested). |
+
+#### `openAction` — פתיחה בלי מנוע
+
+פעולת host כמו ב-[`action` של תפריט הקשר](#action--פעולת-host-על-פריט-תפריט-הקשר),
+עם אותן הפעולות ו-`$storage`, אבל במקום `$selection` ההפניה היא `$book` — הספר
+שנבחר:
+
+| נתיב `$book` | ערך |
+|---|---|
+| `id` | המזהה מ-`books[].id` |
+| `title` | שם הספר |
+| `author` | המחבר, כשנשלח (אחרת `null`) |
+| `provider` | שם הספק |
+
+לדוגמה, פתיחה בתוכנה חיצונית דרך שירות מקומי:
+
+```json
+{
+  "permissions": [
+    "app.startup_contributions",
+    "library.books.provide",
+    "network.localhost",
+    "plugin.storage.read"
+  ],
+  "network": { "enabled": true, "allowlist": ["127.0.0.1"] },
+  "contributes": {
+    "startup": {
+      "libraryBooks": [
+        {
+          "id": "books",
+          "provider": "mylib",
+          "title": "הספרייה שלי",
+          "openAction": {
+            "type": "localService.post",
+            "args": {
+              "port": { "$storage": "servicePort" },
+              "path": "/book/open",
+              "body": { "id": { "$book": "id" } },
+              "unavailableMessage": "התוכנה שלי אינה פועלת"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+הרשאת הפעולה נבדקת בהתקנה ושוב בלחיצה, כמו בתפריט ההקשר.
 
 **רק מחיפוש הספרייה.** ספרי ספק אינם נפתרים דרך `library.resolveBooks` או
 `reader.openBook`: כך תוסף אחד אינו יכול להעיר תוסף אחר בשם "פתיחת ספר".
@@ -4908,9 +5221,10 @@ API — מפונה. הפינוי שקוף באותו אופן ככיבוי אח�
 `submenu`) יכול לשאת `action` — פעולה שהתוכנה מבצעת בלחיצה **בלי להעיר את
 מנוע התוסף**. סותר את `onClickEvent` ואת `openPlugin` על אותו פריט.
 הפעולות הן אותן פעולות של פקדי הסרגל (`reader.openBook`,
-`reader.openBookInSidePane`, `storage.set`, `storage.remove`), אך במקום
-`$output`/`$item` ההפניה היחידה היא `$selection` — נתוני הסימון בזמן
-הלחיצה (לצד `$literal` ו-`$concat`):
+`reader.openBookInSidePane`, `storage.set`, `storage.remove`, ומ־0.9.98 גם
+`localService.post`), אך במקום `$output`/`$item` ההפניות הן `$selection` —
+נתוני הסימון בזמן הלחיצה — ומ־0.9.98 גם `$storage` (לצד `$literal`
+ו-`$concat`):
 
 | נתיב `$selection` | ערך |
 |---|---|
@@ -4919,6 +5233,10 @@ API — מפונה. הפינוי שקוף באותו אופן ככיבוי אח�
 | `currentBook` / `currentBookId` | שם הספר |
 | `currentIndex` | אינדקס השורה |
 | `id` / `type` / `source` | זהות הספר (לבניית `identity`) |
+
+מ־0.9.98, ערך טקסט מנתוני הלחיצה (`$selection`, `$book`) מותאם לבדיקת
+הפעולה: מעברי שורה ותווי בקרה אחרים הופכים לרווח (סימון של כמה שורות מגיע
+כשורה אחת), וטקסט ארוך מ-4096 תווים נחתך לאורך הזה.
 
 דוגמה — "הוסף את הספר הפתוח לרשימה" בלי מנוע, כולל הסתרה מיידית דרך `when`:
 
@@ -4947,6 +5265,81 @@ API — מפונה. הפינוי שקוף באותו אופן ככיבוי אח�
 ההרשאה של הפעולה נבדקת בהתקנה (הצהרה במניפסט), ושוב בזמן הלחיצה מול
 ההרשאות המוענקות. `action` עובד גם ברישום דינמי דרך
 `reader.addContextMenuItem`; שם הצהרת ההרשאה נבדקת רק בלחיצה.
+
+#### `$storage` — ערך מאחסון התוסף
+
+מ-`minAppVersion: 0.9.98`, בהרשאה `plugin.storage.read` שחייבת להיות מוצהרת
+ומוענקת בזמן הלחיצה. ‏`{ "$storage": "key" }` נפתר בזמן הלחיצה לערך
+שהתוסף שמר ב-`storage.set` (אותו מרחב אחסון של `storage.get`), או ל-`null`
+כשהמפתח אינו קיים. כך דף התוסף שומר פעם אחת נתון שמשתנה בין מחשבים — למשל
+הפורט של שירות מקומי — והפעולה משתמשת בו בלי מנוע. זמין בפעולות לחיצה בלבד:
+תפריט הקשר ו-[`openAction`](#ספרים-בחיפוש-הספרייה-librarybooks) של ספק ספרים.
+ערך שאינו מתאים לפעולה נדחה בזמן הלחיצה, ושום דבר אינו מבוצע (חריג אחד:
+`port` ריק ב-`localService.post`, למטה). כדי שפריט לא יוצג לפני שהערך נשמר,
+מצרפים לו `when` עם `{ "storage": { "key": "...", "exists": true } }`.
+
+#### `localService.post` — פנייה לשירות מקומי
+
+מ-`minAppVersion: 0.9.98`, בהרשאה `network.localhost`. שולח בקשת `POST`
+עם גוף JSON לשירות שהתוסף מתקין על המחשב, ומציג למשתמש את התשובה — בלי
+להעיר את מנוע התוסף. זמין בכל מקום שבו יש פעולת host: פקדי הסרגל, תפריט
+הקשר ו-`openAction` של ספק ספרים.
+
+```json
+{
+  "contextMenuItems": [
+    {
+      "id": "search-in-service",
+      "title": "חיפוש בתוכנה שלי",
+      "action": {
+        "type": "localService.post",
+        "args": {
+          "port": { "$storage": "servicePort" },
+          "path": "/text/search",
+          "body": { "text": { "$selection": "selectedText" } },
+          "pendingMessage": "מחפש…",
+          "unavailableMessage": "התוכנה שלי אינה פועלת. פתחו את לשונית התוסף.",
+          "timeoutMs": 60000
+        }
+      }
+    }
+  ]
+}
+```
+
+| ארגומנט | חובה | תיאור |
+|---|---:|---|
+| `port` | כן | פורט 1–65535. היעד תמיד `http://127.0.0.1:<port>`; אין דרך לבנות כתובת אחרת. `null` (למשל `$storage` שעוד לא נשמר) פירושו שהשירות לא עלה: מוצגת `unavailableMessage`, בלי בקשה. |
+| `path` | כן | נתיב מוחלט: אותיות לטיניות, ספרות, `-`, `_`, `.`, `~` ו-`/`, עד 256 תווים. בלי query, בלי `//` ובלי `.`/`..`. |
+| `body` | לא | אובייקט JSON קטן (עד 256 צמתים, עומק עד 10, מחרוזות עד 4096 תווים, בלי תווי בקרה). ברירת מחדל: `{}`. |
+| `pendingMessage` | לא | הודעת המתנה שמוצגת מיד ונשארת עד התשובה (עד 200 תווים). |
+| `unavailableMessage` | לא | הודעה כשהשירות אינו עונה — חיבור שנדחה, זמן המתנה שעבר או `port` ריק (עד 200 תווים). ברירת מחדל: הודעה כללית של אוצריא. |
+| `timeoutMs` | לא | 1000–120000. ברירת מחדל: 30000. |
+
+ערך מילולי של ארגומנט (שאינו הפניה) נבדק כבר בהתקנה; הפניות נבדקות אחרי הפתרון, בזמן הלחיצה. `port` ריק מותר רק בפעולת
+לחיצה (תפריט הקשר, `openAction`); בפקדים ובתכניות הוא שגיאה.
+
+**הרשאה ויעד.** כמו `network.fetchStream`: המניפסט מצהיר על
+`network.enabled` ועל `127.0.0.1` ב-`network.allowlist` (כשהפורט נשמר
+ב-`$storage` ומשתנה בין מחשבים, `127.0.0.1` בלי פורט), וההרשאה
+`network.localhost` מוענקת. כל אלה נבדקים בזמן הלחיצה, לפני שהבקשה יוצאת;
+יעד חסום מציג הודעה שהגישה חסומה בהגדרות הרשת.
+
+**לחיצה כפולה.** בזמן שבקשה זהה של התוסף (אותה כתובת ואותו גוף) עוד רצה,
+לחיצה נוספת אינה שולחת אותה שוב ואינה מחליפה את הודעת ההמתנה הקיימת.
+בקשה עם גוף אחר (למשל טקסט מסומן אחר) נשלחת, והשירות מחליט אם הוא פנוי.
+
+**התשובה.** השירות עונה JSON בצורה
+`{ "message": "...", "severity": "info" | "success" | "error" }` (שני
+השדות אופציונליים). `message` מוצג כהודעת מערכת עם ייחוס לתוסף, כמו
+`ui.showSnack`; הודעה ארוכה מ-200 תווים מקוצרת. בלי `severity`, תשובת 2xx
+מוצגת כהצלחה וכל קוד אחר כשגיאה. שגיאה בלי `message`, או תשובה שאינה
+UTF-8 תקין, מציגה הודעה כללית; הצלחה בלי `message` רק מסירה את הודעת
+ההמתנה. מהתשובה נקראים כ-64 אלף תווים לכל היותר, ותוכן אחר בה אינו מגיע
+לתוסף.
+
+הבקשה נשלחת מאוצריא (Dart), בלי `Origin` ובלי כותרות `Sec-Fetch-*`, עם
+`Content-Type: application/json; charset=utf-8`.
 
 ### when — תרומה תלוית-הגדרה
 
@@ -5081,6 +5474,7 @@ Otzaria.on('plugin.boot', async (payload) => {
     "library.refresh",
     "library.books.provide",
     "search.fulltext.read",
+    "search.field_actions",
     "reader.open",
     "navigation.write",
     "notes.read",
@@ -5236,9 +5630,12 @@ await Otzaria.call('reader.addContextMenuItem', {
   הטקסט המסומן ולפעול עליו בדף שלו.
 - `type` יכול להיות `item`,‏ `submenu`,‏ `color-row` או `separator`
 - תת־תפריט מקבל `children`; שורת צבעים מקבלת `colors` עם `id`,‏ `color`,‏ `label`,‏ `selected` ו־`icon` אופציונלי. כאשר `icon` קיים הוא מוצג במקום גוש הצבע ומתאים לפעולות קומפקטיות כמו מחק
-- `contexts` הוא מערך ויכול להכיל את `reader-selection`, את `reader-page-shape-selection`, או את שניהם באותו פריט. מ-`0.9.97` נתמך גם `reader-highlight` (ראו למטה). ערכי `contexts` חייבים להיות חוקיים וייחודיים. פריט שלא מגדיר `contexts` מופיע בשני הקשרי הבחירה (כהתנהגות הרישום המקורית).
+- `contexts` הוא מערך ויכול להכיל את `reader-selection`, את `reader-page-shape-selection`, או את שניהם באותו פריט. מ-`0.9.97` נתמך גם `reader-highlight` (ראו למטה), ומ־`0.9.99` נתמך `reader-book` ללא סימון. ערכי `contexts` חייבים להיות חוקיים וייחודיים. פריט שלא מגדיר `contexts` מופיע בשני הקשרי הבחירה (כהתנהגות הרישום המקורית).
 - ילד שלא מגדיר `contexts` יורש את המערך של אביו. ילד שמגדיר `contexts` במפורש מוצג רק בהקשרים שלו, ללא איחוד אוטומטי עם הקשר האב; ההקשרים המפורשים חייבים להיות תת־קבוצה של הקשרי האב.
 - אפשר להגדיר `onClickEvent` או `onColorClickEvent` כאירוע מותאם אישית
+
+**פעולה ללא סימון — `reader-book` (מ־`0.9.99`):**
+אפשר לרשום `contexts: ['reader-book']` להצגת פעולה בלחיצה ימנית ללא סימון, בשני קוראי הטקסט: הקורא הרגיל וקורא צורת הדף. ה־payload כולל את זהות הספר ואת `sectionIndex` ו־`currentIndex` של הפסקה שנלחצה. בשדה `selection`, הערך `text` הוא מחרוזת ריקה, `start` ו־`end` הם `null`, ואין `sourceRange`. ברירות המחדל של פריט ללא `contexts` נשארות שני הקשרי הבחירה; ילדים ללא `contexts` יורשים את הקשרי האב גם עבור `reader-book`.
 
 **בחירה חוצת־פסקאות — `selection.sections` (מ-`0.9.97`):**
 כשהבחירה משתרעת על כמה פסקאות, ה־`selection` שנמסר לאירועי הלחיצה של
@@ -5352,7 +5749,8 @@ Otzaria.on('library.providerBook.openRequested', async ({ provider, id, title, a
 
 האירוע נמסר עם `preferBackground`: לתוסף שאושרה לו `app.run_on_startup` — למנוע
 הרקע, בלי שהמשתמש יעזוב את מסך הספרייה; בלי ההרשאה — נפתח דף התוסף והאירוע
-נמסר אליו, כך שהלחיצה תמיד עובדת.
+נמסר אליו, כך שהלחיצה תמיד עובדת. ספק עם `openAction` אינו מקבל את האירוע:
+הלחיצה מבצעת את הפעולה.
 
 ### Event: `reader.context_menu_item_clicked`
 **הרשאה:** אין צורך בהרשאה נוספת — נשלח רק לפלאגין שרשם את הפריט
@@ -5760,3 +6158,6 @@ if (data.created) {
 ```
 
 > **למה צריך הרשאה + אישור?** יצירת קובץ בשולחן העבודה היא פעולה שהמשתמש צריך להיות מודע לה. לכן נדרשת גם הרשאת `ui.create_shortcut` ב-manifest (נאכפת בשכבת ה-RPC לפני שהפעולה רצה) וגם אישור מפורש בזמן ריצה — שתי שכבות שמונעות מתוסף ליצור קיצורים ללא ידיעת המשתמש.
+## קורא תוספים משובץ
+
+למימוש תצוגת טקסט חלופית בתוך כרטיסיית ספר, ראו [קורא טקסט באמצעות תוסף](DEFAULT_TEXT_READER.md): בחירת משתמש, מופע לכל כרטיסייה, ניווט ושמירת מיקום, פרופיל תצוגה וחזרה לקורא המובנה.

@@ -23,8 +23,6 @@ class ScrollbarTargetLabelController {
   String _text = '';
   ScrollbarLabelSide _side = ScrollbarLabelSide.left;
 
-  bool get isShowing => _entry != null;
-
   /// מציג או מעדכן את התווית. [anchor] הוא מיקום גלובלי (נקודת העכבר על
   /// הסרגל), [text] הכתובת להצגה, ו-[side] קובע לאיזה כיוון תיפתח התווית.
   void show(

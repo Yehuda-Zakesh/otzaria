@@ -6,7 +6,9 @@ import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart'
     hide SwitchSettingsTile;
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/attached_libraries/bloc/attached_libraries_bloc.dart';
 import 'package:otzaria/attached_libraries/view/attached_libraries_panel.dart';
+import 'package:otzaria/attached_libraries/view/external_link_index_tile.dart';
 import 'package:otzaria/settings/engine/settings_engine_exports.dart';
 import 'package:otzaria/settings/l10n/settings_text.dart';
 import 'package:otzaria/settings/search/settings_search_models.dart';
@@ -36,6 +38,7 @@ import 'package:otzaria/settings/services/orphan_library_service.dart';
 import 'package:otzaria/settings/services/safer_mode_guard.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/settings/widgets/settings_tab_scroll_view.dart';
+import 'package:otzaria/utils/file/open_in_file_manager.dart';
 
 /// טאב הגדרות ספרייה
 class LibrarySettingsTab extends StatefulWidget {
@@ -74,6 +77,14 @@ class LibrarySettingsTab extends StatefulWidget {
         'איפוס',
         'עדכן',
       ],
+    ),
+    SettingsSearchEntry(
+      id: 'library.search.link_index_status',
+      title: 'אינדקס קישורים',
+      subtitle: 'סטטוס ועדכון אינדקס הקישורים של מסדי הספרים המצורפים',
+      tab: SettingsTab.library,
+      cardId: 'library.repository',
+      keywords: ['קישורים', 'אינדקס', 'בנייה', 'מעודכן', 'מסד', 'מפרשים'],
     ),
     SettingsSearchEntry(
       id: 'library.location.hebrewbooks',
@@ -251,18 +262,6 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
     }
   }
 
-  /// פותח נתיב במנהל הקבצים של מערכת ההפעלה.
-  void _openInFileManager(String path) {
-    if (path.isEmpty) return;
-    if (Platform.isWindows) {
-      unawaited(Process.run('explorer', [path]));
-    } else if (Platform.isMacOS) {
-      unawaited(Process.run('open', [path]));
-    } else if (Platform.isLinux) {
-      unawaited(Process.run('xdg-open', [path]));
-    }
-  }
-
   /// מחיל בחירת תיקיית שורש של הספרייה: ה-DB מאותר תחת <שורש>/books, ואם אינו
   /// שם — ישירות תחת התיקייה שנבחרה (תמיכה במי שמצביע על תיקיית הספרים עצמה).
   Future<void> _applyLibraryRootChange(String root) async {
@@ -421,8 +420,8 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
       },
       requestChangeLocation: (_) => _openLibraryDialog(booksPath),
       changeLocationLabel: 'מתקדם',
-      onOpenFolder: () => _openInFileManager(rootPath),
-      onOpenPath: _openInFileManager,
+      onOpenFolder: () => openInFileManager(rootPath),
+      onOpenPath: openInFileManager,
       pathTargets: [
         PathTarget(
           label: context.settingsText('תיקייה ראשית'),
@@ -470,7 +469,7 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
                   _afterMoveUpdateBloc(newPath, UpdateHebrewBooksPath.new)
             : null,
       ),
-      onOpenFolder: () => _openInFileManager(hasPath ? pathStr : ''),
+      onOpenFolder: () => openInFileManager(hasPath ? pathStr : ''),
       onClearPath: () => _removeHebrewBooksPath(context),
     );
   }
@@ -519,24 +518,18 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // מאגר הספרים (רק בדסקטופ)
-                    if (!(Platform.isAndroid || Platform.isIOS)) ...[
-                      SettingsCard(
-                        cardId: 'library.repository',
-                        title: context.settingsText('מאגר הספרים וחיפוש'),
-                        subtitle: context.settingsText(
-                          'תיקיות הספרים והאינדקס ומצב האינדקס',
-                        ),
-                        children: [
-                          ..._buildRepositoryCardChildren(
-                            context,
-                            libraryEmpty,
-                          ),
-                          ..._buildSearchChildren(context, state, libraryState),
-                        ],
+                    SettingsCard(
+                      cardId: 'library.repository',
+                      title: context.settingsText('מאגר הספרים וחיפוש'),
+                      subtitle: context.settingsText(
+                        'תיקיות הספרים והאינדקס ומצב האינדקס',
                       ),
-                      kSettingsCardSpacing,
-                    ],
+                      children: [
+                        ..._buildRepositoryCardChildren(context, libraryEmpty),
+                        ..._buildSearchChildren(context, state, libraryState),
+                      ],
+                    ),
+                    kSettingsCardSpacing,
 
                     // הפאנל המשותף (תצוגה + ספרים נוספים) - כעת כולל את תיקיית היברובוקס בתוכו!
                     LibrarySettingsPanel(
@@ -623,21 +616,6 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
                     AttachedLibrariesPanel(
                       supportsLinking: attachedLibrariesSupportLinking,
                     ),
-
-                    // חיפוש ואינדקס — במובייל ככרטיס נפרד, ללא שורת מיקום
-                    // הספרייה (בדסקטופ מוצג בתוך כרטיס מאגר הספרים וחיפוש)
-                    if (Platform.isAndroid || Platform.isIOS) ...[
-                      kSettingsCardSpacing,
-                      SettingsCard(
-                        cardId: 'library.repository',
-                        title: context.settingsText('חיפוש ואינדקס'),
-                        children: _buildSearchChildren(
-                          context,
-                          state,
-                          libraryState,
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -653,6 +631,11 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
     SettingsState state,
     LibraryState libraryState,
   ) {
+    final linkSlugs = context.select<AttachedLibrariesBloc, String>(
+      (bloc) => externalLinkLibraries(
+        bloc.state.libraries,
+      ).map((library) => library.slug).join(','),
+    );
     return [
       SettingsActionTile.switchTile(
         icon: FluentIcons.arrow_clockwise_24_regular,
@@ -792,6 +775,8 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
           );
         },
       ),
+      if (linkSlugs.isNotEmpty)
+        ExternalLinkIndexTile(slugs: linkSlugs.split(',')),
     ];
   }
 }

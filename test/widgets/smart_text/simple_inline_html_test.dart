@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/widgets/smart_text/simple_inline_html.dart';
@@ -138,6 +140,69 @@ void main() {
           expect(SimpleInlineHtml.tryParse(html, baseStyle), isNull);
         });
       });
+    });
+  });
+
+  group('SimpleInlineHtml.tryParse — מטמון', () {
+    const html = '<b>דיבור המתחיל</b> ביאור <small>(א)</small>';
+
+    test('אותו קלט מחזיר את אותו span בלי לפרסר מחדש', () {
+      final first = SimpleInlineHtml.tryParse(html, baseStyle);
+      final second = SimpleInlineHtml.tryParse(html, baseStyle);
+      expect(first, isNotNull);
+      expect(identical(first, second), isTrue);
+    });
+
+    test('סגנון בסיס אחר מקבל תוצאה משלו', () {
+      final small = SimpleInlineHtml.tryParse(html, baseStyle)!;
+      final large = SimpleInlineHtml.tryParse(
+        html,
+        const TextStyle(fontSize: 30),
+      )!;
+      final smallChild = small.children!.cast<TextSpan>().last;
+      final largeChild = large.children!.cast<TextSpan>().last;
+      expect(smallChild.style?.fontSize, closeTo(20 * 5 / 6, 1e-9));
+      expect(largeChild.style?.fontSize, closeTo(30 * 5 / 6, 1e-9));
+    });
+
+    test('שורה שנופלת ל-HtmlWidget נשארת null גם בקריאה חוזרת', () {
+      const fallback = '<a href="x">קישור</a>';
+      expect(SimpleInlineHtml.tryParse(fallback, baseStyle), isNull);
+      expect(SimpleInlineHtml.tryParse(fallback, baseStyle), isNull);
+    });
+  });
+
+  group('SimpleInlineHtml.tryParse — כיווץ רווחים', () {
+    test('כיווץ וקיטום זהים לכללי הרווחים של HTML', () {
+      final collapse = RegExp(r'[\t\n\f\r ]+');
+      final random = Random(7);
+      const pieces = [
+        'א',
+        'b',
+        ' ',
+        '  ',
+        '\t',
+        '\n',
+        '\r\n',
+        '\f',
+        '\u00A0',
+        '\u2009',
+      ];
+      for (var n = 0; n < 2000; n++) {
+        final text = [
+          for (var i = random.nextInt(12); i > 0; i--)
+            pieces[random.nextInt(pieces.length)],
+        ].join();
+        final expected = text
+            .replaceAll(collapse, ' ')
+            .replaceFirst(RegExp(r'^ '), '')
+            .replaceFirst(RegExp(r' $'), '');
+        final span = SimpleInlineHtml.tryParse(
+          text,
+          const TextStyle(fontSize: 13),
+        );
+        expect(span?.toPlainText(), expected, reason: text);
+      }
     });
   });
 }

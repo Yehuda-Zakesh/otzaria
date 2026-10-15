@@ -47,46 +47,6 @@ class TocDao {
     return rows.map((row) => TocEntry.fromMap(row)).toList();
   }
 
-  Future<TocEntry?> selectTocById(int id) async {
-    final queries = await _resolved();
-    if (queries == null) return null;
-    final db = await database;
-    final result = db.select(queries['selectTocById']!, [id]).toMapList();
-    if (result.isEmpty) return null;
-    return TocEntry.fromMap(result.first);
-  }
-
-  Future<List<TocEntry>> selectRootByBookId(int bookId) async {
-    final queries = await _resolved();
-    if (queries == null) return const [];
-    final db = await database;
-    return db
-        .select(queries['selectRootByBookId']!, [bookId])
-        .toMapList()
-        .map((row) => TocEntry.fromMap(row))
-        .toList();
-  }
-
-  Future<List<TocEntry>> selectChildren(int parentId) async {
-    final queries = await _resolved();
-    if (queries == null) return const [];
-    final db = await database;
-    return db
-        .select(queries['selectChildren']!, [parentId])
-        .toMapList()
-        .map((row) => TocEntry.fromMap(row))
-        .toList();
-  }
-
-  Future<TocEntry?> selectByLineId(int lineId) async {
-    final queries = await _resolved();
-    if (queries == null) return null;
-    final db = await database;
-    final result = db.select(queries['selectByLineId']!, [lineId]).toMapList();
-    if (result.isEmpty) return null;
-    return TocEntry.fromMap(result.first);
-  }
-
   Future<int> insertTocEntry(TocEntry entry) async {
     final db = await database;
     return insertTocEntrySync(db, entry);
@@ -107,38 +67,9 @@ class TocDao {
     return db.lastInsertRowId;
   }
 
-  Future<int> updateLineId(int tocId, int lineId) async {
-    final db = await database;
-    db.execute(_queries['updateLineId']!, [lineId, tocId]);
-    return db.updatedRows;
-  }
-
-  Future<int> updateIsLastChild(int tocId, bool isLastChild) async {
-    final db = await database;
-    db.execute(_queries['updateIsLastChild']!, [isLastChild ? 1 : 0, tocId]);
-    return db.updatedRows;
-  }
-
-  Future<int> updateHasChildren(int tocId, bool hasChildren) async {
-    final db = await database;
-    db.execute(_queries['updateHasChildren']!, [hasChildren ? 1 : 0, tocId]);
-    return db.updatedRows;
-  }
-
   Future<int> delete(int id) async {
     final db = await database;
     db.execute(_queries['delete']!, [id]);
     return db.updatedRows;
-  }
-
-  Future<int> deleteByBookId(int bookId) async {
-    final db = await database;
-    db.execute(_queries['deleteByBookId']!, [bookId]);
-    return db.updatedRows;
-  }
-
-  Future<int> getLastInsertRowId() async {
-    final db = await database;
-    return db.lastInsertRowId;
   }
 }

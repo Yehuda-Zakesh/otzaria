@@ -443,7 +443,7 @@ void main() {
       await attached.rescan();
       final catalog = await buildCatalog();
 
-      final stored = const AttachedLibraryStore().loadLibraries().single;
+      final stored = const AttachedLibraryStore().loadLibrariesOrNull()!.single;
       expect(stored.status, AttachedLibraryStatus.unreachable);
       expect(stored.slug, library.slug);
       expect(stored.path, path);

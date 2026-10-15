@@ -23,7 +23,7 @@ class ReadingAreaWidth extends InheritedWidget {
 
 /// רוחב מרבי לעמודת הטקסט לפי הגדרת "רוחב הטקסט".
 ///
-/// [setting]: 0 = ללא הגבלה, ערך שלילי = רמה (‎-11 = 45%), ערך חיובי = פיקסלים
+/// [setting]: 0 = ללא הגבלה, ערך שלילי = רמה (-11 = 45%), ערך חיובי = פיקסלים
 /// (פורמט ישן). האחוז מחושב מ-[baseWidth], והתוצאה מוגבלת ל-[availableWidth]
 /// כך שהעמודה מצטמצמת רק כשאין מקום.
 double resolveTextColumnMaxWidth({

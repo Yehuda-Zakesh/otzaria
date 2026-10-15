@@ -160,6 +160,29 @@ String? buildLineRefKey(String heRef, Iterable<String> titleAliases) {
   return tokens.sublist(longestMatch.length).join(' ');
 }
 
+/// ה-hash של המפתח המלא והמפתחות החלקיים של שורה; ריק לשורה בלי מפתח.
+List<int> lineRefKeyHashes(String heRef, String bookTitle) => [
+  if (buildLineRefKey(heRef, [bookTitle]) case final key?) ...[
+    refKeyHash(key),
+    for (final partial in partialLineRefKeys(heRef, [bookTitle]))
+      refKeyHash(partial),
+  ],
+];
+
+/// רשומות `line_ref` של ספר: (hash, lineIndex) לכל מפתח של כל שורה.
+/// שורות תחת אותה כותרת חולקות heRef, ולכן [hashesOf] נקרא פעם אחת לכל heRef.
+List<(int, int)> lineRefIndexEntries(
+  Iterable<({int lineIndex, String heRef})> refs,
+  List<int> Function(String heRef) hashesOf,
+) {
+  final hashesByHeRef = <String, List<int>>{};
+  return [
+    for (final ref in refs)
+      for (final hash in hashesByHeRef[ref.heRef] ??= hashesOf(ref.heRef))
+        (hash, ref.lineIndex),
+  ];
+}
+
 /// מסמן מפתח חלקי. טוקנים מנורמלים אינם מכילים אותו, ולכן מפתח חלקי לא
 /// יתנגש במפתח מלא, ומסד ישן פשוט לא יחזיר עבורו כלום.
 const String partialRefKeyMarker = '~';

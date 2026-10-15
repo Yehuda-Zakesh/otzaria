@@ -12,10 +12,7 @@ import 'package:path/path.dart' as p;
 
 import '../../support/search_engine_test_init.dart';
 
-/// אינדקס שסכמתו אינה תואמת למנוע: בדיקת התאימות מכריעה `rebuild_required`,
-/// ופתיחתו במנוע היא panic (לא חריגה רגילה). הספק חייב לא לנסות לפתוח אותו
-/// כלל — הכשל היה נספר בסנטינל ככשל-פתיחה, ואחרי שני כשלים אינדקס תקין
-/// (רק ישן) היה מוזז הצידה כ"פגום" בלי אישור המשתמש.
+/// סכמה לא תואמת חייבת להיחסם לפני הפתיחה, כדי שלא תיספר כאינדקס פגום.
 Future<void> main() async {
   final engineReady = await tryInitSearchEngine();
 
@@ -110,9 +107,7 @@ Future<void> main() async {
   });
 }
 
-/// בונה אינדקס אמיתי במנוע הנוכחי ואז משנה את סכמת Tantivy שלו ומוחק את
-/// קובץ ה-sidecar — כמו אינדקס מגרסה ישנה: `rebuild_required` עם
-/// `foundSchemaVersion` ריק, ופתיחתו ב-`SearchEngine.newInstance` היא panic.
+/// מסיר שדה חובה מהסכמה ואת קובץ התאימות כדי לייצר אינדקס שאסור לפתוח.
 Future<void> _writeIncompatibleIndex(Directory indexDir) async {
   final engine = await SearchEngine.newInstance(path: indexDir.path);
   await engine.addDocument(
@@ -132,7 +127,9 @@ Future<void> _writeIncompatibleIndex(Directory indexDir) async {
   final metaFile = File(p.join(indexDir.path, 'meta.json'));
   final meta = jsonDecode(metaFile.readAsStringSync()) as Map<String, dynamic>;
   final schema = meta['schema'] as List<dynamic>;
-  schema.removeLast();
+  schema.removeWhere(
+    (field) => (field as Map<String, dynamic>)['name'] == 'text',
+  );
   metaFile.writeAsStringSync(jsonEncode(meta));
 }
 

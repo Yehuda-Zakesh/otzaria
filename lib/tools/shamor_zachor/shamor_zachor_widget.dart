@@ -12,8 +12,6 @@ import 'screens/book_detail_screen.dart';
 class ShamorZachorFocusController {
   VoidCallback? _requestKeyboardFocus;
 
-  bool get isAttached => _requestKeyboardFocus != null;
-
   void requestKeyboardFocus() {
     _requestKeyboardFocus?.call();
   }

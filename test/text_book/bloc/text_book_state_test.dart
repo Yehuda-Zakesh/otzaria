@@ -4,7 +4,6 @@ import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart'
     show SearchScope;
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 void main() {
   group('TextBookLoaded equality', () {
@@ -213,7 +212,5 @@ TextBookLoaded _loadedState({
     spacingValues: spacingValues,
     searchMode: searchMode,
     matchPolicy: matchPolicy,
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }

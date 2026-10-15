@@ -11,17 +11,25 @@ import 'package:otzaria/plugins/bloc/plugin_system_state.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
+import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/tools/tool_catalog_entry.dart';
+import 'package:otzaria/tools/tool_query.dart';
 
 /// פותח כלי ככרטיסיה במסך העיון.
 ///
-/// כלי שכבר פתוח ממוקד (dedupeKey); מופע נוסף נפתח דרך
+/// כלי שכבר פתוח ממוקד (dedupeKey) ומקבל את [query]; מופע נוסף נפתח דרך
 /// [openNewToolTabInstance].
-void openToolTab(BuildContext context, ToolCatalogEntry entry) {
+void openToolTab(
+  BuildContext context,
+  ToolCatalogEntry entry, {
+  ToolQuery? query,
+}) {
   context.read<TabsBloc>().add(
-    OpenOrFocusTab(ToolTab(toolId: entry.toolId, title: entry.label)),
+    OpenOrFocusTab(
+      ToolTab(toolId: entry.toolId, title: entry.label, query: query),
+    ),
   );
   context.read<NavigationBloc>().add(
     const NavigateToScreen(Screen.reading),
@@ -50,7 +58,11 @@ void openNewToolTabInstance(BuildContext context, ToolCatalogEntry entry) {
 /// כשמערכת התוספים עדיין נטענת הכרטיסיה נפתחת אופטימיסטית עם כותרת גיבוי;
 /// `ToolTabScreen` מציג טעינה עד שהמצב האמיתי ידוע. בכל סיבת אי-זמינות אחרת
 /// מוצגת הודעה מפורשת במקום שתיקה.
-void openToolTabById(BuildContext context, String toolId) {
+void openToolTabById(
+  BuildContext context,
+  String toolId, {
+  ToolQuery? query,
+}) {
   final settingsState = context.read<SettingsBloc>().state;
   final result = lookupTool(
     toolId,
@@ -61,11 +73,15 @@ void openToolTabById(BuildContext context, String toolId) {
 
   switch (result) {
     case ToolAvailable(:final entry):
-      openToolTab(context, entry);
+      openToolTab(context, entry, query: query);
     case ToolUnavailable(reason: ToolUnavailableReason.loading):
       context.read<TabsBloc>().add(
         OpenOrFocusTab(
-          ToolTab(toolId: toolId, title: ToolTab.fallbackTitleFor(toolId)),
+          ToolTab(
+            toolId: toolId,
+            title: ToolTab.fallbackTitleFor(toolId),
+            query: query,
+          ),
         ),
       );
       context.read<NavigationBloc>().add(
@@ -124,6 +140,35 @@ void closeUninstalledPluginTabs(BuildContext context) {
   for (final tab in orphaned) {
     tabsBloc.add(RemoveTab(tab));
   }
+}
+
+/// טאבי תוסף שעדיין נושאים את כותרת הגיבוי, ממופים לשם האמיתי של התוסף.
+/// טאב שנפתח בזמן שרישום התוספים נטען מקבל "כלי" ונשמר כך עם סביבת העבודה.
+Map<ToolTab, String> pluginTabsWithFallbackTitle(
+  List<OpenedTab> tabs,
+  PluginSystemState pluginState,
+) {
+  if (pluginState is! PluginSystemLoaded) return const {};
+  final titles = {
+    for (final plugin in pluginState.plugins)
+      plugin.pluginId: ToolCatalogEntry.fromPlugin(plugin).label,
+  };
+  return {
+    for (final tab in tabs.expand(leafPanes).whereType<ToolTab>())
+      if (tab.isPlugin &&
+          tab.title == ToolTab.fallbackTitleFor(tab.toolId) &&
+          titles[tab.toolId] != null)
+        tab: titles[tab.toolId]!,
+  };
+}
+
+/// מחליף את כותרת הגיבוי של טאבי תוסף בשם התוסף.
+void retitleFallbackPluginTabs(BuildContext context) {
+  final tabsBloc = context.read<TabsBloc>();
+  pluginTabsWithFallbackTitle(
+    tabsBloc.state.tabs,
+    context.read<PluginSystemBloc>().state,
+  ).forEach((tab, title) => tabsBloc.add(RenameTab(tab, title)));
 }
 
 /// הודעת השגיאה המתאימה לסיבת אי-הזמינות.

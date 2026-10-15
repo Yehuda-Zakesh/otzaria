@@ -1,5 +1,6 @@
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
-import 'package:otzaria/text_book/utils/category_settings_utils.dart'
+import 'package:otzaria/book_common/utils/commentator_name_matching.dart';
+import 'package:otzaria/book_common/utils/category_settings_utils.dart'
     as category_utils;
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_commentary_selection.dart';
 
@@ -70,7 +71,7 @@ class PageShapeSettingsManager {
     String? fullName, {
     String? commentedBookTitle,
   }) {
-    return pageShapeCommentatorBaseName(
+    return commentatorBaseName(
       fullName,
       commentedBookTitle: commentedBookTitle,
     );
@@ -511,12 +512,6 @@ class PageShapeSettingsManager {
 
   // ==================== איפוס הגדרות ====================
 
-  /// איפוס כל הגדרות פר-ספר (מפרשים + תצוגה)
-  static Future<void> resetBookSettings(String bookTitle) async {
-    await resetBookCommentatorConfig(bookTitle);
-    await resetBookDisplaySettings(bookTitle);
-  }
-
   /// איפוס הגדרות מפרשים פר-ספר בלבד
   static Future<void> resetBookCommentatorConfig(String bookTitle) async {
     await _removeConfiguration('$_bookConfigPrefix$bookTitle');
@@ -584,10 +579,5 @@ class PageShapeSettingsManager {
       '${_workspaceVisibilityPrefix}bottomRight_$workspaceId',
       null,
     );
-  }
-
-  /// איפוס הגדרות קטגוריה
-  static Future<void> resetCategorySettings(String category) async {
-    await _removeConfiguration('$_categoryConfigPrefix$category');
   }
 }

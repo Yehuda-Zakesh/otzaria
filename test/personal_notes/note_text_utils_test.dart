@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/personal_notes/utils/note_text_utils.dart';
 
@@ -19,6 +21,65 @@ void main() {
 
     test('שורות ריקות באמצע נשמרות', () {
       expect(splitBookContentIntoLines('א\n\nב'), ['א', '', 'ב']);
+    });
+
+    test('זהה למימוש הייחוס בקצוות: \\r בודד, ריקות וסיום', () {
+      for (final input in [
+        '',
+        '\n',
+        '\r\n',
+        '\n\n',
+        'א\r',
+        'א\rב\nג',
+        'א\r\r\nב',
+        '\r\n\r\nא\r\n',
+        'א\n\r\nב\n\n',
+      ]) {
+        expect(
+          splitBookContentIntoLines(input),
+          _oracleSplit(input),
+          reason: 'קלט: ${input.codeUnits}',
+        );
+      }
+    });
+
+    test('זהה למימוש הייחוס על קלט אקראי עם \\r ו-\\n', () {
+      const alphabet = ['א', 'ב', ' ', '\r', '\n', '\r\n'];
+      for (var seed = 0; seed < 500; seed++) {
+        final random = Random(seed);
+        final input = [
+          for (var i = random.nextInt(30); i > 0; i--)
+            alphabet[random.nextInt(alphabet.length)],
+        ].join();
+        expect(
+          splitBookContentIntoLines(input),
+          _oracleSplit(input),
+          reason: 'קלט: ${input.codeUnits}',
+        );
+      }
+    });
+
+    test('מהיר לפחות פי 1.5 מהמימוש הקודם על ספר גדול', () {
+      final line = 'וְזֶה לְשׁוֹן הַשּׁוּלְחָן עָרוּךְ ' * 6;
+      final content = List.filled(30000, line).join('\n');
+      int timeMicros(List<String> Function(String) split) {
+        final stopwatch = Stopwatch()..start();
+        expect(split(content), hasLength(30000));
+        return stopwatch.elapsedMicroseconds;
+      }
+
+      // מינימום של מדידות לסירוגין: מסנן הפרעות GC ו-JIT בסביבת CI עמוסה.
+      var oracle = 1 << 62;
+      var current = 1 << 62;
+      for (var round = 0; round < 5; round++) {
+        oracle = min(oracle, timeMicros(_oracleSplit));
+        current = min(current, timeMicros(splitBookContentIntoLines));
+      }
+      expect(
+        current * 3,
+        lessThan(oracle * 2),
+        reason: 'oracle ${oracle}us, current ${current}us',
+      );
     });
   });
 
@@ -48,20 +109,6 @@ void main() {
 
     test('שורה ריקה מחזירה רשימה ריקה', () {
       expect(extractReferenceWordsFromLine(''), isEmpty);
-    });
-  });
-
-  group('extractReferenceWordsFromLines', () {
-    final lines = ['שורה ראשונה', 'שורה שניה'];
-
-    test('מספור שורות הוא 1-based', () {
-      expect(extractReferenceWordsFromLines(lines, 1), ['שורה', 'ראשונה']);
-      expect(extractReferenceWordsFromLines(lines, 2), ['שורה', 'שניה']);
-    });
-
-    test('מספר שורה מחוץ לטווח מחזיר רשימה ריקה', () {
-      expect(extractReferenceWordsFromLines(lines, 0), isEmpty);
-      expect(extractReferenceWordsFromLines(lines, 3), isEmpty);
     });
   });
 
@@ -141,4 +188,12 @@ void main() {
       expect(computeWordOverlapRatio(['שלום,'], ['"שלום']), 1.0);
     });
   });
+}
+
+List<String> _oracleSplit(String content) {
+  final lines = content.replaceAll('\r\n', '\n').split('\n');
+  if (lines.isNotEmpty && lines.last.isEmpty) {
+    lines.removeLast();
+  }
+  return lines;
 }

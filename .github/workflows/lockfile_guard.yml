@@ -1,0 +1,61 @@
+name: Lockfile Guard
+
+# pubspec.lock pins the exact dependency versions every build uses. A change
+# to it is a dependency upgrade, so it belongs in a pull request that also
+# changes pubspec.yaml, or in one labeled "dependencies" on purpose. This
+# catches the common accident of committing the result of `flutter pub
+# upgrade` together with an unrelated change.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: lockfile-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: pubspec.lock changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check pubspec.lock changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEPENDENCIES_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'dependencies') }}
+        run: |
+          set -euo pipefail
+          files=$(gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" \
+            --jq '.[] | .status + " " + (if .previous_filename == "pubspec.lock" then .previous_filename else .filename end)')
+
+          lock_status=$(awk '$2 == "pubspec.lock" { print $1 }' <<<"$files")
+          if [ -z "$lock_status" ]; then
+            echo "pubspec.lock is unchanged."
+            exit 0
+          fi
+          # Only the pull request that starts tracking the file adds it.
+          if [ "$lock_status" = "added" ]; then
+            echo "pubspec.lock is added."
+            exit 0
+          fi
+          if awk '$2 == "pubspec.yaml" { found = 1 } END { exit !found }' <<<"$files"; then
+            echo "pubspec.lock changes together with pubspec.yaml."
+            exit 0
+          fi
+          if [ "$DEPENDENCIES_LABEL" = "true" ]; then
+            echo "pubspec.lock changes in a pull request labeled 'dependencies'."
+            exit 0
+          fi
+
+          echo "::error file=pubspec.lock::This pull request changes pubspec.lock without changing pubspec.yaml. This usually comes from running 'flutter pub upgrade' locally. To drop the change, restore the file from $BASE_REF of $REPO, for example: git fetch https://github.com/$REPO $BASE_REF && git checkout FETCH_HEAD -- pubspec.lock, then commit. If the upgrade is intended, ask a maintainer to add the 'dependencies' label."
+          exit 1

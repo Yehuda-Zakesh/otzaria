@@ -3,9 +3,12 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/app_report/services/app_crash_session.dart';
+import 'package:otzaria/app_report/services/crash_report_decision.dart';
 import 'package:otzaria/app_report/services/unclean_exit_detector.dart';
 import 'package:otzaria/core/startup_timeline.dart';
 import 'package:path/path.dart' as p;
+
+import 'minidump_fixture.dart';
 
 void main() {
   late Directory tmp;
@@ -50,7 +53,7 @@ void main() {
   String entry(String title, DateTime at, {String body = ''}) =>
       '=== $title ${at.toIso8601String()} ===\n$body\n';
 
-  test('startSession ו-markCleanExit כותבים ומוחקים את הנעילה', () async {
+  test('startSession ו-markCleanExitSync כותבים ומוחקים את הנעילה', () async {
     final d = detector();
     await d.startSession(version: '0.9.98');
     final lock = SessionLock.tryParse(File(d.lockPath).readAsStringSync())!;
@@ -58,10 +61,9 @@ void main() {
     expect(lock.version, '0.9.98');
     expect(lock.startedAt, thisStart);
 
-    await d.markCleanExit();
+    d.markCleanExitSync();
     expect(File(d.lockPath).existsSync(), isFalse);
     // מחיקה חוזרת אינה זורקת.
-    await d.markCleanExit();
     d.markCleanExitSync();
   });
 
@@ -207,6 +209,77 @@ void main() {
     expect(candidate, isNotNull);
     expect(candidate!.hasMinidump, isTrue);
     expect(candidate.signature, isNull);
+  });
+
+  group('חתימה מ-minidump (issue #1978)', () {
+    UncleanExitDetector freshDetector() => UncleanExitDetector(
+      logsDirectory: logs.path,
+      sentryDatabaseDirs: [sentry.path],
+      isProcessAlive: (_) => false,
+      currentPid: 2000,
+      processStartedAt: DateTime.now().add(const Duration(minutes: 1)),
+    );
+
+    File dump(String name, {DateTime? modified, int code = 0xc0000005}) {
+      final reports = Directory(p.join(sentry.path, 'reports'))
+        ..createSync(recursive: true);
+      final file = File(p.join(reports.path, name))
+        ..writeAsBytesSync(buildMinidump(exceptionCode: code));
+      if (modified != null) file.setLastModifiedSync(modified);
+      return file;
+    }
+
+    test(
+      'בלי ראיה של Dart — החתימה והכותרת מה-dump החדש ביותר (issue #1978)',
+      () async {
+        final now = DateTime.now();
+        writeLock(startedAt: now.subtract(const Duration(minutes: 5)));
+        dump(
+          'old.dmp',
+          modified: now.subtract(const Duration(minutes: 3)),
+          code: 0x80000003,
+        );
+        dump('new.dmp', modified: now.subtract(const Duration(minutes: 1)));
+        dump(
+          'stale.dmp',
+          modified: now.subtract(const Duration(days: 2)),
+          code: 0xc00000fd,
+        );
+
+        final candidate = await freshDetector().detectPreviousCrash();
+        expect(candidate!.hasMinidump, isTrue);
+        expect(
+          candidate.signature!.exceptionType,
+          '0xc0000005 flutter_windows.dll+0x1e220',
+        );
+        expect(candidate.signature!.frames, ['flutter_windows.dll+0x1e220']);
+        expect(p.basename(candidate.minidump!.path), 'new.dmp');
+        expect(
+          CrashReportDecision.titleFor(candidate),
+          '0xc0000005 flutter_windows.dll+0x1e220',
+        );
+      },
+    );
+
+    test('ראיה של Dart גוברת על ה-dump (issue #1978)', () async {
+      final now = DateTime.now();
+      final start = now.subtract(const Duration(minutes: 5));
+      writeLock(startedAt: start);
+      writeErrors(
+        entry(
+          'Unhandled Error',
+          start.add(const Duration(minutes: 1)),
+          body:
+              'Exception: StateError: Bad state\nStack:\n'
+              '#0      A.b (package:otzaria/a.dart:1:2)\n',
+        ),
+      );
+      dump('new.dmp');
+
+      final candidate = await freshDetector().detectPreviousCrash();
+      expect(candidate!.hasMinidump, isTrue);
+      expect(candidate.signature!.exceptionType, 'StateError');
+    });
   });
 
   test('בלי בדיקת תהליך: נעילה ישנה מתחילת התהליך נחשבת לא-חיה', () async {

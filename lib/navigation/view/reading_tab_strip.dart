@@ -55,7 +55,7 @@ class ReadingTabStrip extends StatefulWidget {
   /// האם הרצועה עצמה נגללת. ברצועה האופקית הרוחבים מחושבים כך שהכל נכנס.
   final bool scrollable;
 
-  /// במגע נדרשת לחיצה ארוכה, כדי שהחלקה או גלילה לא יגררו כרטיסיה בטעות.
+  /// לחיצה ארוכה לגרירה בנייד; בדסקטופ הגרירה מתחילה בתנועה.
   final bool requireLongPressToDrag;
 
   /// רקע הרצועה — הרקע שמאחורי הכרטיסיה במוק החלון שנגרר.
@@ -446,6 +446,9 @@ class _ReadingTabStripState extends State<ReadingTabStrip> {
                         extent: widget.widths[i],
                         crossExtent: widget.crossExtent,
                         requireLongPress: widget.requireLongPressToDrag,
+                        touchDragAffinity: widget.scrollable
+                            ? (isVertical ? Axis.horizontal : Axis.vertical)
+                            : null,
                         stripColor: widget.stripColor,
                         onDragStarted: widget.onDragStarted == null
                             ? null
@@ -558,6 +561,7 @@ class _DraggableTab extends StatefulWidget {
   final double extent;
   final double? crossExtent;
   final bool requireLongPress;
+  final Axis? touchDragAffinity;
 
   /// רקע הרצועה — ראו [ReadingTabStrip.stripColor].
   final Color stripColor;
@@ -583,6 +587,7 @@ class _DraggableTab extends StatefulWidget {
     required this.extent,
     required this.crossExtent,
     required this.requireLongPress,
+    required this.touchDragAffinity,
     required this.stripColor,
     required this.onDragStarted,
     required this.onTabSnapshot,
@@ -821,7 +826,8 @@ class _DraggableTabState extends State<_DraggableTab> {
             },
             child: child,
           )
-        : Draggable<OpenedTab>(
+        : _ScrollAwareDraggable(
+            affinity: widget.touchDragAffinity,
             data: widget.tab,
             // חובה: ה-offset שמקבלים יעדי ההפלה הוא פינת ה-feedback, ולכן עוגן
             // ברירת המחדל מסיט את אזור ההפלה בכחצי רוחב כרטיסיה.
@@ -842,6 +848,80 @@ class _DraggableTabState extends State<_DraggableTab> {
       child: draggable,
     );
   }
+}
+
+/// במגע ברצועה נגללת מתחילים לרוחב ציר הגלילה; אחרי ההתחלה גוררים בחופשיות.
+class _ScrollAwareDraggable extends Draggable<OpenedTab> {
+  const _ScrollAwareDraggable({
+    super.affinity,
+    required super.child,
+    required super.feedback,
+    super.data,
+    super.childWhenDragging,
+    super.dragAnchorStrategy,
+    super.onDragStarted,
+    super.onDragEnd,
+    super.onDraggableCanceled,
+  });
+
+  @override
+  MultiDragGestureRecognizer createRecognizer(
+    GestureMultiDragStartCallback onStart,
+  ) => affinity == null
+      ? super.createRecognizer(onStart)
+      : (_TouchAxisDragRecognizer(affinity!)..onStart = onStart);
+}
+
+class _TouchAxisDragRecognizer extends ImmediateMultiDragGestureRecognizer {
+  _TouchAxisDragRecognizer(this.axis);
+
+  final Axis axis;
+
+  @override
+  MultiDragPointerState createNewPointerState(PointerDownEvent event) {
+    if (event.kind != PointerDeviceKind.touch &&
+        event.kind != PointerDeviceKind.stylus &&
+        event.kind != PointerDeviceKind.invertedStylus) {
+      return super.createNewPointerState(event);
+    }
+    return _TouchAxisPointerState(
+      event.position,
+      event.kind,
+      gestureSettings,
+      axis,
+    );
+  }
+}
+
+class _TouchAxisPointerState extends MultiDragPointerState {
+  _TouchAxisPointerState(
+    super.initialPosition,
+    super.kind,
+    super.gestureSettings,
+    this.axis,
+  );
+
+  final Axis axis;
+
+  @override
+  void checkForResolutionAfterMove() {
+    final delta = pendingDelta!;
+    final along = (axis == Axis.horizontal ? delta.dx : delta.dy).abs();
+    final across = (axis == Axis.horizontal ? delta.dy : delta.dx).abs();
+    if (math.max(along, across) <= computeHitSlop(kind, gestureSettings)) {
+      return;
+    }
+    // החלקה אלכסונית שרובה לאורך הרצועה שייכת לגלילה.
+    resolve(
+      along > across
+          ? GestureDisposition.accepted
+          : GestureDisposition.rejected,
+    );
+  }
+
+  @override
+  void accepted(GestureMultiDragStartCallback starter) =>
+      starter(initialPosition);
 }
 
 /// הכרטיסיה הצפה תחת הסמן בזמן גרירה — **עם התוכן שלה**.

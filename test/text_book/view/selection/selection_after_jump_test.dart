@@ -20,7 +20,6 @@ import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/combined_view/combined_book_screen.dart';
 import 'package:otzaria/widgets/lists/scroll_position_reanchor.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../test_helpers/memory_cache_provider.dart';
 
@@ -92,8 +91,6 @@ void main() {
       selectedIndex: null,
       pinLeftPane: false,
       searchText: '',
-      scrollController: ItemScrollController(),
-      positionsListener: ItemPositionsListener.create(),
     );
     final textBookBloc = _TestTextBookBloc(state);
     final personalNotesBloc = _TestPersonalNotesBloc(
@@ -181,7 +178,7 @@ void main() {
     final tab = await pumpView(tester);
     if (scrolledBy > 0) {
       unawaited(
-        tab.mainOffsetController.animateScroll(
+        tab.lines.offsetController.animateScroll(
           offset: scrolledBy,
           duration: const Duration(milliseconds: 100),
         ),
@@ -196,12 +193,52 @@ void main() {
     expect(selectedText(tester), expected);
   }
 
+  testWidgets('בחירת מקלדת אינה משאירה שורות במטמון', (tester) async {
+    await pumpView(tester);
+    final dynamic state = tester.state(find.byType(CombinedView));
+    final region = tester.state<SelectableRegionState>(
+      find.descendant(
+        of: find.byType(SelectionArea),
+        matching: find.byType(SelectableRegion),
+      ),
+    );
+    region.selectAll();
+    await tester.pump();
+    expect(selectedText(tester), isNotEmpty);
+    expect(state.debugSelectionCachedLineCount, 0);
+    region.clearSelection();
+    await tester.pump();
+    expect(selectedText(tester), isEmpty);
+    expect(state.debugSelectionCachedLineCount, 0);
+  });
+
+  for (final cancel in [false, true]) {
+    testWidgets('מטמון גרירה מתנקה בשחרור סמן, cancel=$cancel', (tester) async {
+      await pumpView(tester);
+      final dynamic state = tester.state(find.byType(CombinedView));
+      final line = lineRect(tester, 8);
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.down(Offset(line.right - 20, line.center.dy));
+      await gesture.moveBy(const Offset(-70, 0));
+      await tester.pump();
+      expect(selectedText(tester), isNotEmpty);
+      expect(state.debugSelectionCachedLineCount, greaterThan(0));
+      if (cancel) {
+        await gesture.cancel();
+      } else {
+        await gesture.up();
+      }
+      await tester.pump();
+      expect(state.debugSelectionCachedLineCount, 0);
+    });
+  }
+
   for (final scrolledBy in [0.0, 150.0]) {
     testWidgets('jumpTo אחרי גלילה של $scrolledBy', (tester) async {
       await selectThenMove(
         tester,
         scrolledBy: scrolledBy,
-        move: (tab) async => tab.scrollController.jumpTo(index: 50),
+        move: (tab) async => tab.lines.itemController.jumpTo(index: 50),
         expected: isEmpty,
       );
     });
@@ -210,7 +247,7 @@ void main() {
         tester,
         scrolledBy: scrolledBy,
         move: (tab) async => unawaited(
-          tab.scrollController.scrollTo(
+          tab.lines.itemController.scrollTo(
             index: 50,
             duration: const Duration(milliseconds: 300),
           ),
@@ -224,7 +261,7 @@ void main() {
   testWidgets('גלילה של יותר ממסך וחזרה שומרת את הבחירה', (tester) async {
     Future<void> scrollBy(TextBookTab tab, double offset) async {
       unawaited(
-        tab.mainOffsetController.animateScroll(
+        tab.lines.offsetController.animateScroll(
           offset: offset,
           duration: const Duration(milliseconds: 100),
         ),

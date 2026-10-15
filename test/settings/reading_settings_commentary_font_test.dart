@@ -26,7 +26,6 @@ import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/widgets/misc/app_dropdown_field.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../test_helpers/memory_cache_provider.dart';
 
@@ -67,31 +66,31 @@ void main() {
       expect(find.text('גופן מפרשים'), findsOneWidget);
       // כל אחת מארבע ההגדרות מקבלת אייקון משלה: גודל/גופן × טקסט/מפרשים.
       expect(
-        find.byIcon(OtzariaIcons.alef_near_alef_24_regular),
+        find.byIcon(OtzariaIcons.alef_near_alef_24_filled),
         findsOneWidget,
       );
-      expect(find.byIcon(OtzariaIcons.alef_alef_24_regular), findsOneWidget);
+      expect(find.byIcon(OtzariaIcons.alef_alef_24_filled), findsOneWidget);
       expect(
-        find.byIcon(OtzariaIcons.beit_near_alef_24_regular),
-        findsOneWidget,
-      );
-      expect(
-        find.byIcon(OtzariaIcons.beit_behind_alef_24_regular),
+        find.byIcon(OtzariaIcons.beit_near_alef_24_filled),
         findsOneWidget,
       );
       expect(
-        find.byIcon(OtzariaIcons.alef_with_score_24_regular),
+        find.byIcon(OtzariaIcons.beit_behind_alef_24_filled),
         findsOneWidget,
       );
       expect(
-        find.byIcon(OtzariaIcons.alef_with_punctuation_24_regular),
+        find.byIcon(OtzariaIcons.alef_niqqud_24_filled),
+        findsOneWidget,
+      );
+      expect(
+        find.byIcon(OtzariaIcons.alef_punctuation_24_filled),
         findsOneWidget,
       );
 
       await tester.tap(find.byType(AppDropdownField<String>).first);
       await tester.pumpAndSettle();
       expect(
-        find.byIcon(OtzariaIcons.alef_behind_alef_24_regular),
+        find.byIcon(OtzariaIcons.alef_behind_alef_24_filled),
         findsWidgets,
       );
     });
@@ -183,8 +182,6 @@ TextBookLoaded _loaded({required bool showPageShapeView}) => TextBookLoaded(
   selectedIndex: null,
   pinLeftPane: false,
   searchText: '',
-  scrollController: ItemScrollController(),
-  positionsListener: ItemPositionsListener.create(),
 );
 
 class _TestSettingsBloc extends Bloc<SettingsEvent, SettingsState>

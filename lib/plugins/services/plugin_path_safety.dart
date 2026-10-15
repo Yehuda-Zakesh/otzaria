@@ -143,7 +143,7 @@ Future<List<String>> pluginProtectedFolderRoots() async {
     roots.addAll(const ['/etc', '/usr', '/bin', '/System', '/Library']);
     final home = env['HOME'];
     if (home != null && home.isNotEmpty) {
-      // ‎~/.config מכיל autostart, ו-‎~/.ssh את מפתחות המשתמש.
+      // ~/.config מכיל autostart, ו-~/.ssh את מפתחות המשתמש.
       roots.add(p.join(home, '.ssh'));
       roots.add(p.join(home, '.config'));
     }

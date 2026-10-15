@@ -4,15 +4,10 @@
 library;
 
 import 'package:otzaria/tools/tikkun_korim/data/tikkun_data.dart';
-import 'package:otzaria/tools/tikkun_korim/engine/aliyot_annotator.dart'
-    as annotator;
-import 'package:otzaria/tools/tikkun_korim/engine/divine_name.dart' as divine;
 import 'package:otzaria/tools/tikkun_korim/engine/line_paginator.dart'
     as paginator;
 import 'package:otzaria/tools/tikkun_korim/engine/raw_text_cleaner.dart'
     as cleaner;
-import 'package:otzaria/tools/tikkun_korim/engine/special_sections_marker.dart'
-    as marker;
 import 'package:otzaria/tools/tikkun_korim/engine/stam_width_model.dart';
 import 'package:otzaria/tools/tikkun_korim/engine/tikkun_processor.dart'
     as processor;
@@ -31,12 +26,6 @@ class TikkunEngineImpl implements TikkunEngine {
   @override
   List<TikkunToken> tokenizeText(String cleaned) =>
       tokenizer.tokenizeText(cleaned);
-
-  @override
-  List<TikkunToken> markSpecialSections(
-    List<TikkunToken> tokens,
-    String bookName,
-  ) => marker.markSpecialSections(tokens, bookName);
 
   @override
   List<TikkunLine> paginateAllTokens(
@@ -92,23 +81,6 @@ class TikkunEngineImpl implements TikkunEngine {
       slicer.precededBySetuma(tokens, fromCh, fromVs);
 
   @override
-  int findWordSequence(
-    List<TikkunToken> tokens,
-    List<String> words,
-    int fromIdx,
-  ) => annotator.findWordSequence(tokens, words, fromIdx);
-
-  @override
-  int findParashaStart(
-    List<TikkunToken> tokens,
-    String normalizedParashaName,
-    int fromIdx,
-  ) => annotator.findParashaStart(tokens, normalizedParashaName, fromIdx);
-
-  @override
-  String maskDivineName(String text) => divine.maskDivineName(text);
-
-  @override
   List<VerseRange> computeContinuousSegments(List<ReadingAliya> aliyot) =>
       slicer.computeContinuousSegments(aliyot);
 }
@@ -160,15 +132,6 @@ class TikkunDataSourceImpl implements TikkunDataSource {
   @override
   String aliyaDisplayName(String aliyaKey) =>
       TikkunData.aliyaDisplayNames[aliyaKey] ?? aliyaKey;
-
-  @override
-  String? combinedParashaOf(String parashaName) {
-    final info =
-        TikkunData.combinedParashaMap[parashaName] ??
-        TikkunData.combinedParashaMap[normalizeParashaName(parashaName)];
-    if (info == null) return null;
-    return (info as Map)['combined'] as String?;
-  }
 
   @override
   ({String bookId, String parashaName})? resolveParasha(String calendarName) {

@@ -13,6 +13,7 @@ import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
 import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
+import 'package:otzaria/find_ref/book_name_match.dart';
 import 'package:otzaria/find_ref/repository/alt_toc_flat_entry.dart';
 import 'package:otzaria/find_ref/repository/attached_find_ref_worker.dart';
 import 'package:otzaria/find_ref/repository/db_commentator_entry.dart';
@@ -1288,16 +1289,19 @@ class FindRefRepository {
     return bookMatchRanks;
   }
 
-  static DbReferenceResult _bookResult(ReferenceBookHit hit) =>
-      DbReferenceResult(
-        title: hit.title,
-        reference: hit.title,
-        segment: 0,
-        isPdf: hit.fileType == 'pdf',
-        filePath: hit.filePath,
-        orderIndex: hit.orderIndex,
-        bookId: hit.bookId,
-      );
+  static DbReferenceResult _bookResult(
+    ReferenceBookHit hit, {
+    bool isCategoryMatch = false,
+  }) => DbReferenceResult(
+    title: hit.title,
+    reference: hit.title,
+    segment: 0,
+    isPdf: hit.fileType == 'pdf',
+    filePath: hit.filePath,
+    orderIndex: hit.orderIndex,
+    bookId: hit.bookId,
+    isCategoryMatch: isCategoryMatch,
+  );
 
   static Iterable<DbReferenceResult> _dibburResults(
     ReferenceBookHit hit,
@@ -1352,6 +1356,7 @@ class FindRefRepository {
       bookMatchRanks: search.bookMatchRanks,
       directMatches: directMatches,
       preserveSubstringTail: true,
+      rawQuery: search.rawQuery,
     );
     return await _awaitCurrent(_enrichWithPaths(ranked));
   }
@@ -1422,6 +1427,7 @@ class FindRefRepository {
           dibburim: search.dibburim,
           exactLines: exactLines[hit.bookId] ?? const <_ExactLine>[],
           toc: requestIndex == null ? null : tocResponses[requestIndex],
+          isOverCap: plan.isOverCap,
         ),
       );
     }
@@ -1454,6 +1460,7 @@ class FindRefRepository {
       queryTokens,
       bookMatchRanks: search.bookMatchRanks,
       directMatches: directMatches,
+      rawQuery: search.rawQuery,
     );
     return await _awaitCurrent(_enrichWithPaths(ranked));
   }
@@ -1489,10 +1496,11 @@ class FindRefRepository {
     final requests = <TocBatchRequest>[];
     for (final hit in bookHits) {
       final remainingTokens = remainingByHit[hit]!;
-      // טוקן-ספר עצמאי אחרי השם ("תורה אור") יוצר התאמות חוצות-ספרים — אלא אם
-      // הוא חלק מהכותרת הנוכחית, או שבזנב ציטוט דף ("זהר בראשית דף לו").
+      // טוקן-ספר אחרי השם ("תורה אור") יוצר התאמות חוצות-ספרים — אלא אם הספר נקרא
+      // בשמו המדויק ("זוהר בראשית"), הטוקן בכותרתו, או שבזנב ציטוט דף.
       final suppressTocForCrossBook =
           hasExactNextTokenMatch &&
+          !hit.namesBookExactly &&
           !hit.titleTokens.contains(nextToken) &&
           !_isSectionThenDafCitation(remainingTokens);
       if (remainingTokens.isEmpty || suppressTocForCrossBook) {
@@ -1589,6 +1597,7 @@ class FindRefRepository {
     required Map<int, List<_Dibbur>> dibburim,
     required List<_ExactLine> exactLines,
     required TocBatchResult? toc,
+    bool isOverCap = false,
   }) {
     final title = hit.title;
     final bookId = hit.bookId;
@@ -1613,7 +1622,19 @@ class FindRefRepository {
 
     // הוקלדה רק כותרת הספר — הספר בלבד, בלי ערכי TOC.
     if (remainingTokens.isEmpty) return results..add(_bookResult(hit));
-    if (toc == null) return results;
+    if (toc == null) {
+      // בדיקת הקטגוריה אינה שאילתה, ולכן אינה כפופה לתקרת ה-TOC: "רמבם זמנים"
+      // תופס עשרות ספרי "רמבם על משנה" שקודמים לספרי משנה תורה.
+      // כשה-TOC דולג כי הזנב הוא שם ספר ("רמבם שופטים"), נדרש שם התיקייה כולו.
+      if (_remainingTokensAreLeafCategory(
+        bookId,
+        remainingTokens,
+        wholeName: !isOverCap,
+      )) {
+        results.add(_bookResult(hit, isCategoryMatch: true));
+      }
+      return results;
+    }
 
     final resultsBeforeToc = results.length;
     for (final entry in toc.toc) {
@@ -1663,7 +1684,7 @@ class FindRefRepository {
     // כשה-TOC לא החזיר כלום, כדי שכותרת פנימית תמיד תגבר.
     if (results.length == resultsBeforeToc &&
         _remainingTokensAreLeafCategory(bookId, remainingTokens)) {
-      results.add(_bookResult(hit));
+      results.add(_bookResult(hit, isCategoryMatch: true));
     }
     return results;
   }
@@ -2272,6 +2293,11 @@ class FindRefRepository {
   }) async {
     final queryTokens = search.queryTokens;
     final folderMatchLengths = <ReferenceBookHit, int>{};
+    // רק המילה האחרונה עשויה להיות באמצע הקלדה, וראשי-תיבות בגרשיים הם מילה שלמה
+    final quoted = quotedWordsOf(search.rawQuery, _normalizeForMatch);
+    final partialFolderToken = quoted.contains(queryTokens.last)
+        ? -1
+        : queryTokens.length - 1;
     final books = _BookSearch(
       queryTokens: queryTokens,
       visibility: search.visibility,
@@ -2285,6 +2311,7 @@ class FindRefRepository {
         search.visibility,
         source,
         folderMatchLengths,
+        partialFolderToken,
       ),
     );
     final detection = _detectBooks(books, queryTokens);
@@ -2481,6 +2508,7 @@ class FindRefRepository {
     FindRefVisibility visibility,
     BookSource source,
     Map<ReferenceBookHit, int> matchLengths,
+    int partialFolderToken,
   ) {
     final phraseLength = phrase.split(' ').length;
     final found = {for (final hit in hits) hit.bookId};
@@ -2504,6 +2532,8 @@ class FindRefRepository {
           candidate,
           queryTokens,
           queryTokens.length.clamp(0, candidate.length),
+          wholeWords: candidate.length - book.titleTokens.length,
+          partialIndex: partialFolderToken,
         );
         // ההתאמה חייבת לכסות את כל מילות התיקייה שבשם — אחרת 'שות' לבדה
         // הייתה גוררת את כל תוכן התיקייה.
@@ -2532,17 +2562,23 @@ class FindRefRepository {
   }
 
   /// מספר הטוקנים המובילים הארוך ביותר (עד [cap]) שכל אחד מהם תחילית של
-  /// הטוקן שבאותו מקום ב-[nameTokens].
+  /// הטוקן שבאותו מקום ב-[nameTokens]. [wholeWords] הראשונים (מילות התיקייה)
+  /// נדרשים במלואם, חוץ מ-[partialIndex] — אחרת "רא"ש" התאים לכל תיקיית "ראשונים".
   static int? _leadingPrefixMatch(
     List<String> nameTokens,
     List<String> queryTokens,
-    int cap,
-  ) {
+    int cap, {
+    int wholeWords = 0,
+    int partialIndex = -1,
+  }) {
     for (var n = cap; n >= 1; n--) {
       if (n > nameTokens.length) continue;
       var ok = true;
       for (var i = 0; i < n; i++) {
-        if (!nameTokens[i].startsWith(queryTokens[i])) {
+        final name = bookNameMatchToken(nameTokens[i]);
+        final query = bookNameMatchToken(queryTokens[i]);
+        final whole = i < wholeWords && i != partialIndex;
+        if (whole ? name != query : !name.startsWith(query)) {
           ok = false;
           break;
         }
@@ -2843,28 +2879,64 @@ class FindRefRepository {
   /// האם כל [remainingTokens] הם מילים בשם הקטגוריה *הישירה* של הספר. רק
   /// העלה נבדק — segment אב ("הלכה", "מפרשים") משותף לאלפי ספרים והיה מחזיר
   /// כל אחד מהם. טוקן בן אות-שתיים הוא טוקן מיקום ולא שם קטגוריה.
+  /// [wholeName] — הזנב חייב לכסות גם את כל מילות השם, מלבד "ספר".
   bool _remainingTokensAreLeafCategory(
     int bookId,
-    List<String> remainingTokens,
-  ) {
+    List<String> remainingTokens, {
+    bool wholeName = false,
+  }) {
+    final leaf = _leafCategory(bookId);
+    if (leaf == null) return false;
+    return _tokensNameLeafCategory(
+      leaf,
+      remainingTokens,
+      wholeName: wholeName,
+    );
+  }
+
+  String? _leafCategory(int bookId) {
     final resolver =
         getCategoryPathSync ??
         ReferenceBooksCache.instance.getCategoryPathForBookSync;
     final path = resolver(bookId);
-    if (path == null || path.isEmpty) return false;
-    return _tokensNameLeafCategory(path.split(', ').last, remainingTokens);
+    if (path == null || path.isEmpty) return null;
+    return path.split(', ').last;
+  }
+
+  Set<String> _leafCategoryTokens(int bookId) {
+    final leaf = _leafCategory(bookId);
+    if (leaf == null) return const {};
+    return titleMatchTokens(_normalizeForMatch(leaf));
   }
 
   /// האם כל [remainingTokens] הם מילים בשם הקטגוריה [leaf].
-  bool _tokensNameLeafCategory(String leaf, List<String> remainingTokens) {
+  bool _tokensNameLeafCategory(
+    String leaf,
+    List<String> remainingTokens, {
+    bool wholeName = false,
+  }) {
     if (remainingTokens.isEmpty) return false;
     if (remainingTokens.any((t) => t.length < 3)) return false;
-    final leafTokens = titleMatchTokens(_normalizeForMatch(leaf));
-    return remainingTokens.every((qt) {
-      if (leafTokens.contains(qt)) return true;
+    final leafWords = _normalizeForMatch(leaf).split(' ');
+    final leafTokens = titleMatchTokensOf(leafWords);
+    final matched = <String>{};
+    for (final qt in remainingTokens) {
+      if (leafTokens.contains(qt)) {
+        matched.add(qt);
+        continue;
+      }
       final bare = titleTokenWithoutConjunction(qt, allowVav: true);
-      return bare != null && leafTokens.contains(bare);
-    });
+      if (bare == null || !leafTokens.contains(bare)) return false;
+      matched.add(bare);
+    }
+    if (!wholeName) return true;
+    for (var i = 0; i < leafWords.length; i++) {
+      final word = leafWords[i];
+      if (word.isEmpty || word == 'ספר' || matched.contains(word)) continue;
+      final bare = titleTokenWithoutConjunction(word, allowVav: i > 0);
+      if (bare == null || !matched.contains(bare)) return false;
+    }
+    return true;
   }
 
   List<String> _getRemainingTokens(
@@ -2901,6 +2973,17 @@ class FindRefRepository {
               t.length >= 2 &&
               prefixEligible.contains(t) &&
               token.startsWith(t),
+        );
+      }
+      // כמו בזיהוי הספר: וו/יי כפולות וה"א לפני ראשי-תיבות ([bookNameMatchToken]).
+      if (idx == -1) {
+        final matchToken = bookNameMatchToken(token);
+        idx = remaining.indexWhere(
+          (t) =>
+              t.length >= 2 &&
+              (bookNameMatchToken(t) == matchToken ||
+                  (prefixEligible.contains(t) &&
+                      matchToken.startsWith(bookNameMatchToken(t)))),
         );
       }
       if (idx != -1) {
@@ -2964,10 +3047,47 @@ class FindRefRepository {
     return queryTokens.every((t) => heading.contains(t) || !own.contains(t));
   }
 
+  /// האם הספר כותב בגרשיים את כל [quotedWords] — בשמו או באחד מכינוייו.
+  static bool _spellsQuotedWords(
+    DbReferenceResult r,
+    Set<String> quotedWords,
+  ) {
+    final own = quotedWordsOf(r.title, normalizeForFindRefMatch);
+    final aliases = r.source.isOfficial && r.bookId > 0
+        ? AcronymsCache.instance.quotedWordsForBook(r.bookId)
+        : const <String>{};
+    return quotedWords.every((w) => own.contains(w) || aliases.contains(w));
+  }
+
   static String _dedupeBookKey(DbReferenceResult r) {
     // ל-PDF מהדיסק אין bookId ייחודי; ב-DB נתיב ריק של fallback אינו ספר אחר.
     final filePathKey = r.bookId == -1 ? r.filePath : '';
     return '${r.bookId}|${r.source.wireKey}|${r.title}|${r.isPdf}|$filePathKey';
+  }
+
+  /// שם שהותאם בקירוב אינו שווה לשאילתה מילולית; משווים מילה מול מילה, כדי
+  /// ש"עירובים" יקדים את "עירובין" ל"משנה עירובין" כמו בכתיב הנכון.
+  static ({bool exactMatch, bool startsWithMatch, List<String> titleTokens})
+  _fuzzyTitleMatch(
+    FindRefRankQuery query,
+    String normTitle,
+    ({bool exactMatch, bool startsWithMatch, List<String> titleTokens}) literal,
+  ) {
+    final titleWords = bookNameMatchForm(
+      normTitle,
+    ).split(' ').where((w) => w.isNotEmpty).toList();
+    final queryWords = query.matchTokens;
+    var startsWith = queryWords.length <= titleWords.length;
+    for (var i = 0; startsWith && i < queryWords.length; i++) {
+      startsWith =
+          queryWords[i] == titleWords[i] ||
+          bookSearchWordPairMatches(queryWords[i], titleWords[i]);
+    }
+    return (
+      exactMatch: startsWith && queryWords.length == titleWords.length,
+      startsWithMatch: startsWith,
+      titleTokens: literal.titleTokens,
+    );
   }
 
   List<DbReferenceResult> _rankResults(
@@ -2976,8 +3096,11 @@ class FindRefRepository {
     Map<_BookKey, int> bookMatchRanks = const {},
     Set<DbReferenceResult> directMatches = const {},
     bool preserveSubstringTail = false,
+    String rawQuery = '',
   }) {
     if (results.length < 2) return results;
+    final quotedWords = quotedWordsOf(rawQuery, _normalizeForMatch);
+    final punctuationAgrees = <String, bool>{};
 
     final query = FindRefRankQuery(queryTokens);
     // ה-dedupe עשוי לשמור תוצאת ספר שהופיעה לפני AltToc גלובלי באותו מקטע.
@@ -3002,6 +3125,11 @@ class FindRefRepository {
             match,
           })
         >{};
+    final fuzzyTitleKeys =
+        <
+          String,
+          ({bool exactMatch, bool startsWithMatch, List<String> titleTokens})
+        >{};
     final decorated = List<FindRefRankKey<DbReferenceResult>>.generate(
       results.length,
       (i) {
@@ -3010,30 +3138,43 @@ class FindRefRepository {
           final normTitle = _normalizeForMatch(r.title);
           return (normTitle: normTitle, match: query.titleMatch(normTitle));
         });
+        final fuzzyBookMatch =
+            !r.isSourceLine &&
+            !directMatches.contains(r) &&
+            !directSegments.contains((
+              r.bookId,
+              r.source,
+              r.title,
+              r.isPdf,
+              r.segment,
+            )) &&
+            !directReferences.contains((
+              r.bookId,
+              r.source,
+              r.title,
+              r.isPdf,
+              r.reference,
+            )) &&
+            bookMatchRanks[_bookKey(r.source, r.bookId, r.filePath)] ==
+                ReferenceBooksCache.fuzzyMatchRank;
+        final match = fuzzyBookMatch
+            ? fuzzyTitleKeys.putIfAbsent(
+                r.title,
+                () => _fuzzyTitleMatch(query, title.normTitle, title.match),
+              )
+            : title.match;
         return FindRefRankKey(
           item: r,
           normTitle: title.normTitle,
-          fuzzyBookMatch:
-              !r.isSourceLine &&
-              !directMatches.contains(r) &&
-              !directSegments.contains((
-                r.bookId,
-                r.source,
-                r.title,
-                r.isPdf,
-                r.segment,
-              )) &&
-              !directReferences.contains((
-                r.bookId,
-                r.source,
-                r.title,
-                r.isPdf,
-                r.reference,
-              )) &&
-              bookMatchRanks[_bookKey(r.source, r.bookId, r.filePath)] ==
-                  ReferenceBooksCache.fuzzyMatchRank,
-          exactMatch: title.match.exactMatch,
-          startsWithMatch: title.match.startsWithMatch,
+          fuzzyBookMatch: fuzzyBookMatch,
+          exactMatch: match.exactMatch,
+          startsWithMatch: match.startsWithMatch,
+          punctuationAgrees:
+              quotedWords.isEmpty ||
+              punctuationAgrees.putIfAbsent(
+                '${r.bookId}|${r.source.wireKey}|${r.title}',
+                () => _spellsQuotedWords(r, quotedWords),
+              ),
           titleTokens: title.match.titleTokens,
           citationMatch: findRefCitationMatch(
             query.isDafCitation,
@@ -3050,6 +3191,9 @@ class FindRefRepository {
           reference: r.reference,
           segment: r.segment,
           bookId: r.bookId,
+          categoryTokens: r.isCategoryMatch
+              ? _leafCategoryTokens(r.bookId)
+              : const {},
         );
       },
     );
@@ -3111,7 +3255,7 @@ class FindRefRepository {
   /// מקבל מיקום התחלה כלשהו, לא רק 0 — כדי שכותרת כמו "פני יהושע על בבא קמא"
   /// תתפוס שאילתה "בבא קמא" (start=3). שמירה על רציפות מונעת התאמות חוצות-
   /// ענפים: שאילתה "בבא קמא" לא תתפוס "פסקי בבא בתרא סימן קמא" כי "בבא"
-  /// ו"קמא" אינם רצופים שם.
+  /// ו"קמא" אינם רצופים שם. ההשוואה ב-[bookNameMatchToken], כמו זיהוי הספר.
   static bool _phraseAppearsAsTokens(
     List<String> titleTokens,
     List<String> phraseTokens,
@@ -3122,7 +3266,9 @@ class FindRefRepository {
     for (var start = 0; start <= maxStart; start++) {
       var ok = true;
       for (var i = 0; i < phraseTokens.length; i++) {
-        if (!titleTokens[start + i].startsWith(phraseTokens[i])) {
+        if (!bookNameMatchToken(
+          titleTokens[start + i],
+        ).startsWith(bookNameMatchToken(phraseTokens[i]))) {
           ok = false;
           break;
         }

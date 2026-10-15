@@ -17,9 +17,9 @@ import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/models/search_results.dart';
 import 'package:otzaria/text_book/utils/section_search_utils.dart';
 import 'package:otzaria/text_book/view/text_book_search_screen.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../../support/search_engine_test_init.dart';
 import '../../test_helpers/memory_cache_provider.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 
 Future<void> main() async {
   // sanitizeQuery/splitQueryWords מאצילים למנוע ה-Rust; הטסטים שלהם דורשים
@@ -66,7 +66,7 @@ Future<void> main() async {
           child: Scaffold(
             body: TextBookSearchView(
               contentLoader: () async => ['את השמים ואת הארץ'],
-              scrollControler: ItemScrollController(),
+              lines: LineScrollController(),
               focusNode: focusNode,
               closeLeftPaneCallback: () {},
               initialQuery: '',
@@ -120,7 +120,7 @@ Future<void> main() async {
           child: Scaffold(
             body: TextBookSearchView(
               contentLoader: () async => ['את השמים ואת הארץ'],
-              scrollControler: ItemScrollController(),
+              lines: LineScrollController(),
               focusNode: focusNode,
               closeLeftPaneCallback: () {},
               initialQuery: 'שמים',
@@ -134,12 +134,12 @@ Future<void> main() async {
 
     // ההעדפה כבויה — המתג מתחיל במצב "חצאי מילים".
     expect(
-      find.byIcon(OtzariaIcons.alef_half_filled_24_regular),
+      find.byIcon(OtzariaIcons.alef_mix_24_regular),
       findsOneWidget,
     );
     final runsBeforeToggle = searchRuns;
 
-    await tester.tap(find.byIcon(OtzariaIcons.alef_half_filled_24_regular));
+    await tester.tap(find.byIcon(OtzariaIcons.alef_mix_24_regular));
     await tester.pumpAndSettle();
 
     expect(find.byIcon(OtzariaIcons.alef_24_regular), findsOneWidget);
@@ -193,7 +193,7 @@ Future<void> main() async {
               return Scaffold(
                 body: TextBookSearchView(
                   contentLoader: () async => ['אב אברהם'],
-                  scrollControler: ItemScrollController(),
+                  lines: LineScrollController(),
                   focusNode: focusNode,
                   closeLeftPaneCallback: () {},
                   initialQuery: queryProp,
@@ -249,7 +249,7 @@ Future<void> main() async {
           child: Scaffold(
             body: TextBookSearchView(
               contentLoader: () async => throw Exception('טעינה נכשלה'),
-              scrollControler: ItemScrollController(),
+              lines: LineScrollController(),
               focusNode: focusNode,
               closeLeftPaneCallback: () {},
               initialQuery: '',
@@ -316,7 +316,7 @@ Future<void> main() async {
                 return Scaffold(
                   body: TextBookSearchView(
                     contentLoader: () async => ['אב אברהם'],
-                    scrollControler: ItemScrollController(),
+                    lines: LineScrollController(),
                     focusNode: focusNode,
                     closeLeftPaneCallback: () {},
                     initialQuery: queryProp,
@@ -409,7 +409,7 @@ Future<void> main() async {
           child: Scaffold(
             body: TextBookSearchView(
               contentLoader: () async => ['אב אברהם'],
-              scrollControler: ItemScrollController(),
+              lines: LineScrollController(),
               focusNode: focusNode,
               closeLeftPaneCallback: () {},
               initialQuery: '',
@@ -474,7 +474,7 @@ Future<void> main() async {
           child: Scaffold(
             body: TextBookSearchView(
               contentLoader: () async => ['שורה'],
-              scrollControler: ItemScrollController(),
+              lines: LineScrollController(),
               focusNode: focusNode,
               closeLeftPaneCallback: () {},
               initialQuery: '',
@@ -655,7 +655,7 @@ Future<void> main() async {
             child: Scaffold(
               body: TextBookSearchView(
                 contentLoader: () async => ['שורה'],
-                scrollControler: ItemScrollController(),
+                lines: LineScrollController(),
                 focusNode: focusNode,
                 closeLeftPaneCallback: () {},
                 initialQuery: '',
@@ -921,7 +921,7 @@ Future<void> main() async {
             child: Scaffold(
               body: TextBookSearchView(
                 contentLoader: () async => ['שורה'],
-                scrollControler: ItemScrollController(),
+                lines: LineScrollController(),
                 focusNode: focusNode,
                 closeLeftPaneCallback: () {},
                 initialQuery: '',
@@ -1036,7 +1036,7 @@ Future<void> main() async {
             child: Scaffold(
               body: TextBookSearchView(
                 contentLoader: () async => ['שורה'],
-                scrollControler: ItemScrollController(),
+                lines: LineScrollController(),
                 focusNode: focusNode,
                 closeLeftPaneCallback: () {},
                 initialQuery: '',
@@ -1102,8 +1102,6 @@ TextBookLoaded _loadedState({List<int> visibleIndices = const [0]}) {
     selectedIndex: 0,
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }
 

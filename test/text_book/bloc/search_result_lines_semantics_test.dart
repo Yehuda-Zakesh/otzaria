@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 /// סמנטיקת searchResultLines בהדגשת חיפוש:
 ///
@@ -61,7 +60,5 @@ TextBookLoaded _loadedState({Set<int>? searchResultLines}) {
     pinLeftPane: false,
     searchText: 'אמר רבי',
     searchResultLines: searchResultLines,
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }

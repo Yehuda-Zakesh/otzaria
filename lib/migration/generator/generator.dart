@@ -47,11 +47,8 @@ class DatabaseGenerator {
   final Set<String> _processedPriorityBookKeys = {};
 
   /// Overall progress across books
-  int _totalBooksToProcess = 0;
+  final int _totalBooksToProcess = 0;
   int _processedBooksCount = 0;
-
-  /// Getter for total books to process (for subclasses)
-  int get totalBooksToProcess => _totalBooksToProcess;
 
   /// Book contents cache: maps library-relative key -> list of lines
   final Map<String, List<String>> _bookContentCache = {};
@@ -59,75 +56,10 @@ class DatabaseGenerator {
   DatabaseGenerator(this.sourceDirectory, this.repository, {this.onProgress})
     : _libraryRoot = sourceDirectory;
 
-  /// Sets the total books to process for progress reporting.
-  void setTotalBooksToProcess(int total) {
-    _totalBooksToProcess = total;
-  }
-
-  Future<void> _restoreDurability() async {
-    await repository.setSynchronous('NORMAL');
-    await repository.setJournalMode('WAL');
-  }
-
   /// Initializes the generator for sync operations where generate() is not called.
   /// [libraryRoot] Optional root path for library-relative calculations.
   void initializeForSync({String? libraryRoot}) {
     _libraryRoot = libraryRoot ?? sourceDirectory;
-  }
-
-  /// Generates the database by processing metadata, directories, and links.
-  /// This is the main entry point for the database generation process.
-  Future<void> generate() async {
-    try {
-      // Disable foreign keys for better performance
-      await _disableForeignKeys();
-
-      // יצירה מאפס: קריסה באמצע מחייבת ממילא יצירה מחדש, לכן מוותרים על עמידות.
-      await repository.setSynchronous('OFF');
-      await repository.setJournalMode('MEMORY');
-
-      // Process hierarchy - expect sourceDirectory to be the parent folder containing "אוצריא"
-      final libraryPath = path.join(sourceDirectory, 'אוצריא');
-
-      final libraryDir = Directory(libraryPath);
-      if (!await libraryDir.exists()) {
-        throw StateError(
-          'התיקייה "אוצריא" לא נמצאה בתיקייה שנבחרה. נא לבחור את תיקיית האב של אוצריא.',
-        );
-      }
-
-      _libraryRoot = libraryPath;
-
-      // Estimate total number of books for progress tracking
-      _totalBooksToProcess = await _countFiles(libraryPath);
-
-      // Preload all book contents into RAM
-      await processDirectory(libraryPath, null, 0);
-
-      // Process links
-      await processLinks();
-
-      // Build category closure table
-      await repository.rebuildCategoryClosure();
-
-      // Restore PRAGMAs
-      await _enableForeignKeys();
-      await _restoreDurability();
-    } catch (e, stackTrace) {
-      // Restore settings on error
-      try {
-        await _enableForeignKeys();
-        await _restoreDurability();
-      } catch (innerEx) {
-        _log.warning(
-          'Error restoring database settings after failure',
-          innerEx,
-        );
-      }
-
-      _log.severe('Error during generation', e, stackTrace);
-      rethrow;
-    }
   }
 
   /// Processes a directory recursively, creating categories and books.
@@ -196,7 +128,7 @@ class DatabaseGenerator {
       ' | path=$bookPath'
       ' | declared=${declared?.extension}'
       ' | detected=${e.format?.extension}'
-      // הפורמט שזוהה קודם למוצהר: ל-‎.wbk‎ אין מנוע משל עצמו, ורק התוכן
+      // הפורמט שזוהה קודם למוצהר: ל-.wbk אין מנוע משל עצמו, ורק התוכן
       // מגלה איזו גרסת ממיר רצה בפועל.
       ' | converterVersion=${converterVersionFor(e.format ?? declared)}'
       ' | error=$e',
@@ -513,7 +445,11 @@ class DatabaseGenerator {
   Future<void> _processPdfOutline(String bookPath, int bookId) async {
     PdfDocument? document;
     try {
-      document = await PdfDocument.openFile(bookPath);
+      // progressive: בלעדיו pdfium מפענח כל עמוד לפני ה-outline (שניות בסריקה).
+      document = await PdfDocument.openFile(
+        bookPath,
+        useProgressiveLoading: true,
+      );
       final outline = await document.loadOutline();
 
       if (outline.isEmpty) {
@@ -823,49 +759,6 @@ class DatabaseGenerator {
     _sourceNameToId[resolvedSourceName] = id;
     return id;
   }
-
-  /// Count txt files in directory for progress tracking
-  Future<int> _countFiles(String dirPath) async {
-    try {
-      final dir = Directory(dirPath);
-      var count = 0;
-      await for (final entity in dir.list(recursive: true)) {
-        if (entity is File && await isSupportedBookFileByContent(entity.path)) {
-          count++;
-        }
-      }
-      return count;
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  /// Disables foreign key constraints
-  Future<void> _disableForeignKeys() async {
-    await repository.executeRawQuery('PRAGMA foreign_keys = OFF');
-  }
-
-  /// Re-enables foreign key constraints
-  Future<void> _enableForeignKeys() async {
-    await repository.executeRawQuery('PRAGMA foreign_keys = ON');
-  }
-
-  /// Sanitizes an acronym term by removing diacritics, maqaf, gershayim and geresh.
-  ///
-  /// [raw] The raw acronym term to sanitize.
-  /// Returns the sanitized term.
-  static String sanitizeAcronymTerm(String raw) {
-    var s = raw.trim();
-    if (s.isEmpty) return '';
-
-    s = hebrew_text_utils.removeAllDiacritics(s);
-    s = hebrew_text_utils.replaceMaqaf(s, replacement: ' ');
-    s = s.replaceAll('\u05F4', ''); // remove Hebrew gershayim (״)
-    s = s.replaceAll('\u05F3', ''); // remove Hebrew geresh (׳)
-    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
-
-    return s;
-  }
 }
 
 /// Structure to store TOC entry data during processing
@@ -897,6 +790,8 @@ String cleanHtml(String html) {
 }
 
 int detectHeaderLevel(String line) {
+  // הורדת אותיות רק לשורה שנפתחת ב-<h — שורות הטקסט ארוכות ורובן כאלה.
+  if (!line.startsWith('<h') && !line.startsWith('<H')) return 0;
   final lowerLine = line.toLowerCase();
   final int level;
   if (lowerLine.startsWith('<h1')) {

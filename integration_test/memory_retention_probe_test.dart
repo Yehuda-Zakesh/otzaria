@@ -72,9 +72,9 @@ void main() {
       await _pumpFor(tester, const Duration(milliseconds: 500));
     }
     final firstTab = tabsBloc.state.tabs.whereType<TextBookTab>().firstOrNull;
-    if (firstTab != null && firstTab.scrollController.isAttached) {
-      firstTab.scrollController.scrollTo(
-        index: 120,
+    if (firstTab != null && firstTab.lines.isAttached) {
+      firstTab.lines.scrollToLine(
+        120,
         duration: const Duration(milliseconds: 800),
         curve: Curves.easeInOut,
       );

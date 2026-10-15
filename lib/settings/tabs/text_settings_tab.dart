@@ -250,7 +250,8 @@ class TextSettingsTab extends StatelessWidget {
           child: AdaptiveRow(
             children: [
               _FontSizeSlider(
-                icon: OtzariaIcons.alef_near_alef_24_regular,
+                applyWhileDragging: isDialog,
+                icon: OtzariaIcons.alef_near_alef_24_filled,
                 label: context.settingsText('גודל גופן הספר'),
                 value: state.fontSize.clamp(15, 60),
                 min: 15,
@@ -260,7 +261,7 @@ class TextSettingsTab extends StatelessWidget {
                 },
               ),
               _FontDropdown(
-                icon: OtzariaIcons.alef_alef_24_regular,
+                icon: OtzariaIcons.alef_alef_24_filled,
                 label: context.settingsText('גופן טקסט'),
                 value: state.fontFamily,
                 onChanged: (value) {
@@ -284,7 +285,8 @@ class TextSettingsTab extends StatelessWidget {
             children: [
               if (!hideCommentaryFontSize)
                 _FontSizeSlider(
-                  icon: OtzariaIcons.beit_near_alef_24_regular,
+                  applyWhileDragging: isDialog,
+                  icon: OtzariaIcons.beit_near_alef_24_filled,
                   label: context.settingsText('גודל גופן מפרשים'),
                   value: state.commentatorsFontSize.clamp(10, 40),
                   min: 10,
@@ -296,7 +298,7 @@ class TextSettingsTab extends StatelessWidget {
                   },
                 ),
               _FontDropdown(
-                icon: OtzariaIcons.beit_behind_alef_24_regular,
+                icon: OtzariaIcons.beit_behind_alef_24_filled,
                 label: context.settingsText('גופן מפרשים'),
                 value: state.commentatorsFontFamily,
                 onChanged: (value) {
@@ -328,6 +330,7 @@ class TextSettingsTab extends StatelessWidget {
               ),
               child: isNarrow
                   ? _FontSizeSlider(
+                      applyWhileDragging: isDialog,
                       icon: FluentIcons
                           .text_align_distributed_vertical_24_regular,
                       label: context.settingsText('מרווח בין שורות'),
@@ -346,6 +349,7 @@ class TextSettingsTab extends StatelessWidget {
                       children: [
                         Expanded(
                           child: _FontSizeSlider(
+                            applyWhileDragging: isDialog,
                             icon: FluentIcons
                                 .text_align_distributed_vertical_24_regular,
                             label: context.settingsText('מרווח בין שורות'),
@@ -559,6 +563,10 @@ class _FontSizeSlider extends StatefulWidget {
   final int? divisions;
   final ValueChanged<double> onChanged;
 
+  /// במסך ההגדרות המלא הספרים מוסתרים, וכל צעד בונה מחדש את כל הכרטיסיות
+  /// הפתוחות; לכן שם הערך מוחל רק בסוף הגרירה.
+  final bool applyWhileDragging;
+
   const _FontSizeSlider({
     required this.icon,
     required this.label,
@@ -567,6 +575,7 @@ class _FontSizeSlider extends StatefulWidget {
     required this.max,
     this.divisions,
     required this.onChanged,
+    required this.applyWhileDragging,
   });
 
   @override
@@ -627,8 +636,9 @@ class _FontSizeSliderState extends State<_FontSizeSlider> {
               : _currentValue.toStringAsFixed(0),
           onChanged: (value) {
             setState(() => _currentValue = value);
-            widget.onChanged(value);
+            if (widget.applyWhileDragging) widget.onChanged(value);
           },
+          onChangeEnd: widget.applyWhileDragging ? null : widget.onChanged,
         ),
       ],
     );

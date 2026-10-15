@@ -17,9 +17,10 @@ import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/commentary_list_base.dart';
+import 'package:otzaria/text_book/view/selection/selected_text_copy.dart';
 import 'package:otzaria/text_book/view/selection/selection_sync_controller.dart';
+import 'package:otzaria/text_display/text_display_exports.dart';
 import 'package:otzaria/widgets/text/selection_copy_shortcuts.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../../test_helpers/memory_cache_provider.dart';
 
 /// issues #530 ו-#674: מעבר בעלות בחירה בין אזורים לא יהרוס את ה-SelectionArea
@@ -234,6 +235,50 @@ void main() {
     );
   });
 
+  testWidgets('Ctrl+C במפרש לפי ערוץ ההעתקה של המפרשים', (
+    tester,
+  ) async {
+    final copied = <String>[];
+    debugSelectedTextCopyHandler = (content) => copied.add(content.plainText);
+    addTearDown(() => debugSelectedTextCopyHandler = null);
+    addTearDown(textBookBloc.close);
+    textBookBloc = _TestTextBookBloc(
+      _loadedState().copyWith(
+        displayPolicy: TextDisplayPolicy.empty.merged(
+          TextDisplayBookClass.general,
+          const TextDisplaySlot(
+            target: TextTarget.commentary,
+            view: TextView.regular,
+            channel: TextChannel.copy,
+          ),
+          const TextDisplayPatch(nikud: MarkVisibility.hide),
+        ),
+      ),
+    );
+    final controller = SelectionSyncController();
+    addTearDown(controller.dispose);
+    await _pump(
+      tester,
+      textBookBloc: textBookBloc,
+      settingsBloc: settingsBloc,
+      controller: controller,
+      autofocus: true,
+    );
+
+    _regionState(tester).selectAll();
+    await _pumpUntil(
+      tester,
+      () => controller.activeSelectionText?.contains('טֶקְסְט') == true,
+    );
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+
+    expect(copied, [contains('פירוש לבדיקה עם טקסט')]);
+  });
+
   testWidgets('בחירת מפרש מתפרסמת ב-controller', (tester) async {
     final controller = SelectionSyncController();
     addTearDown(controller.dispose);
@@ -397,8 +442,6 @@ TextBookLoaded _loadedState() {
     selectedIndex: 0,
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }
 
@@ -482,7 +525,7 @@ class _FakeLibraryProvider implements LibraryProvider {
 
   @override
   Future<String> getLinkContent(Link link) async {
-    return 'זהו פירוש לבדיקה עם טקסט שניתן לבחור';
+    return 'זהו פירוש לבדיקה עם טֶקְסְט שניתן לבחור';
   }
 
   @override

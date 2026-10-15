@@ -15,6 +15,7 @@ import 'package:otzaria/plugins/services/plugin_store_link_parser.dart';
 import 'package:otzaria/search/models/search_configuration.dart'
     show SearchMode;
 import 'package:otzaria/settings/view/settings_screen.dart' show SettingsTab;
+import 'package:otzaria/tools/tool_query.dart' show ToolQuery;
 import 'package:otzaria/utils/book_link_builder.dart';
 
 /// פעולה הנגזרת מקישור `otzaria://...` חיצוני.
@@ -29,9 +30,12 @@ class OpenScreenAction extends ExternalUriAction {
 }
 
 /// פתיחת לשונית כלי במסך הכלים לפי מזהה (built-in או תוסף).
+///
+/// [query] — טקסט לחיפוש מיידי בכלי, רק לכלים שב-[ToolQuery.supportedToolIds].
 class OpenToolAction extends ExternalUriAction {
   final String toolId;
-  const OpenToolAction(this.toolId);
+  final ToolQuery? query;
+  const OpenToolAction(this.toolId, {this.query});
 }
 
 /// פתיחת תוסף ישירות לפי מזהה התוסף — גם אם אינו מוצמד ללשוניות.
@@ -134,10 +138,12 @@ class OpenSettingsTabAction extends ExternalUriAction {
 ///
 /// [mode] — מצב החיפוש מהפרמטר `mode=` (מתקדם/מדויק/מקורב). כאשר null
 /// (ללא פרמטר או ערך לא מוכר) החיפוש רץ במצב ברירת המחדל (מתקדם).
+/// [smart] — `mode=smart`: חיפוש חכם בכרטיסייה חכמה במקום חיפוש מילולי.
 class RunSearchAction extends ExternalUriAction {
   final String query;
   final SearchMode? mode;
-  const RunSearchAction(this.query, {this.mode});
+  final bool smart;
+  const RunSearchAction(this.query, {this.mode, this.smart = false});
 }
 
 /// פתיחת דיאלוג איתור מקורות (FindRefDialog) עם טקסט מילוי-מראש.
@@ -162,6 +168,11 @@ class OpenSdkAction extends ExternalUriAction {
 /// פתיחת פאנל הכלים (רשת הקוביות) — הכלים עצמם נפתחים ככרטיסיות בעיון.
 class OpenToolsLauncherAction extends ExternalUriAction {
   const OpenToolsLauncherAction();
+}
+
+/// פתיחת טופס הדיווח על התוכנה (תקלה, קריסה, ביצועים או הצעה).
+class OpenAppReportAction extends ExternalUriAction {
+  const OpenAppReportAction();
 }
 
 /// פתיחת הדף היומי — פותח את ספר ה-PDF של התלמוד הבבלי בדף הנכון ליום.
@@ -206,11 +217,15 @@ class ShowInfoAction extends ExternalUriAction {
 /// * `otzaria://open/measurements`          – מדות ושיעורים
 /// * `otzaria://open/aramaic_dictionary`    – מילון ארמי-עברי
 /// * `otzaria://open/acronyms_dictionary`   – ראשי תיבות
+/// * `otzaria://open/tikkun_korim`          – תיקון קוראים
+/// * `otzaria://open/biographies`           – ביוגרפיות
+/// * `?q=<text>` (גם ב-`tool/<id>`)          – חיפוש מיידי בביוגרפיות, בראשי
+///   תיבות, במילון ובגימטריה; `&from=hebrew` במילון: מעברית לארמית
 /// * `otzaria://open/library`               – ספרייה
 /// * `otzaria://open/search`                – פותח את מסך החיפוש (ללא הפעלת חיפוש)
 /// * `otzaria://open/search?q=<text>`        – פותח לשונית חיפוש חדשה ומפעיל חיפוש
-///   - `&mode=advanced|exact|fuzzy` מצב החיפוש (מתקדם/מדויק/מקורב); ערך לא
-///     מוכר או חסר — מצב ברירת המחדל (מתקדם)
+///   - `&mode=advanced|exact|fuzzy|smart` מצב החיפוש (מתקדם/מדויק/מקורב/חכם);
+///     ערך לא מוכר או חסר — מצב ברירת המחדל (מתקדם)
 /// * `otzaria://open/settings`              – הגדרות (הלשונית הנוכחית)
 /// * `otzaria://open/settings/design`       – הגדרות › מראה
 /// * `otzaria://open/settings/text`         – הגדרות › כתב
@@ -227,6 +242,7 @@ class ShowInfoAction extends ExternalUriAction {
 /// * `otzaria://open/inspection`            – פותח מסך עיון בספר האחרון שנפתח
 /// * `otzaria://open/sdk`                   – פותח הגדרות ← כלים (ניהול תוספים)
 /// * `otzaria://open/daily_page`            – פותח את הדף היומי (PDF תלמוד בבלי בדף הנכון)
+/// * `otzaria://open/report`                – פותח את טופס הדיווח על התוכנה
 /// * `otzaria://open/tool/<tool-id>`        – כרטיסיית כלי בעיון לפי מזהה מלא
 /// * `otzaria://open/plugin/<plugin-id>`    – פתיחת תוסף ישירות לפי מזהה (גם לא-מוצמד)
 /// * `otzaria://open/tab/<index>`           – מעבר לטאב פתוח לפי מיקומו (0-based; Jump List)
@@ -244,7 +260,7 @@ class ShowInfoAction extends ExternalUriAction {
 ///     (ה-callback חייב להיות באותו origin של כתובת ההורדה)
 /// * `otzaria://plugin/install-local?path=<abs-path>` – התקנת תוסף מקובץ מקומי
 ///   (משמש לשיוך קובץ `.otzplugin` במערכת ההפעלה). הנתיב חייב להיות מוחלט,
-///   להסתיים ב-`.otzplugin`, ואינו נתיב UNC/התקן (ראה `_isSafeLocalPluginPath`).
+///   להסתיים ב-`.otzplugin`, ואינו נתיב UNC/התקן (ראה `_localPluginPathRejection`).
 /// * `otzaria://window/new`                – פתיחת חלון אוצריא חדש וריק
 /// * `otzaria://library/reindex`            – רענון הספרייה מהדיסק ועדכון האינדקס
 ///   (מיועד לתוכנה חיצונית שמעדכנת את קבצי הספרייה)
@@ -279,6 +295,7 @@ class ExternalUriRouter {
     'tikkun_korim': 'builtin.tikkun_korim',
     'aramaic_dictionary': 'builtin.aramaic_dictionary',
     'acronyms_dictionary': 'builtin.acronyms_dictionary',
+    'biographies': 'builtin.biographies',
   };
 
   static const Map<String, Screen> _screenAliases = {
@@ -454,7 +471,35 @@ class ExternalUriRouter {
     return ShowInfoAction(topic, errorLimit: errorLimit, fileLimit: fileLimit);
   }
 
+  /// `q=` לכלי שיודע לקבל אותו; `from=hebrew` הופך את כיוון המילון הארמי.
+  static ToolQuery? _toolQueryOf(
+    String toolId,
+    Map<String, String> parameters,
+  ) {
+    if (!ToolQuery.supportedToolIds.contains(toolId)) return null;
+    final text = parameters['q']?.trim() ?? '';
+    if (text.isEmpty) return null;
+    final from = parameters['from']?.trim().toLowerCase();
+    return ToolQuery(
+      text,
+      hebrewToAramaic:
+          toolId == 'builtin.aramaic_dictionary' && from == 'hebrew',
+    );
+  }
+
   static String? _parseLocalInstall(Uri uri) {
+    final rawPath = _rawLocalInstallPath(uri);
+    if (rawPath == null || _localPluginPathRejection(rawPath) != null) {
+      return null;
+    }
+    return rawPath;
+  }
+
+  static String? _rawLocalInstallPath(Uri uri) {
+    if (uri.scheme.toLowerCase() != 'otzaria' ||
+        uri.host.toLowerCase() != 'plugin') {
+      return null;
+    }
     final segments = uri.pathSegments
         .where((segment) => segment.isNotEmpty)
         .map((segment) => segment.toLowerCase())
@@ -464,10 +509,15 @@ class ExternalUriRouter {
     if (!isLocalInstall) return null;
 
     final rawPath = _queryParametersOf(uri)['path']?.trim();
-    if (rawPath == null || rawPath.isEmpty) return null;
-    if (!_isSafeLocalPluginPath(rawPath)) return null;
+    return rawPath == null || rawPath.isEmpty ? null : rawPath;
+  }
 
-    return rawPath;
+  /// קישור install-local שהנתיב בו נדחה: הנתיב שהתקבל והסיבה, או `null`.
+  static ({String path, String reason})? rejectedLocalInstall(Uri uri) {
+    final rawPath = _rawLocalInstallPath(uri);
+    if (rawPath == null) return null;
+    final reason = _localPluginPathRejection(rawPath);
+    return reason == null ? null : (path: rawPath, reason: reason);
   }
 
   /// הקשר הנתיבים לאימות `install-local` — סמנטיקת הפלטפורמה הנוכחית.
@@ -475,23 +525,27 @@ class ExternalUriRouter {
   @visibleForTesting
   static p.Context pathContext = p.context;
 
-  /// בודקת שנתיב מקומי בטוח להתקנת תוסף. קישור `otzaria://` ניתן להפעלה
+  /// הסיבה לדחיית נתיב מקומי להתקנת תוסף, או `null` כשהוא בטוח. קישור `otzaria://` ניתן להפעלה
   /// מדף אינטרנט, ולכן הנתיב אינו מהימן:
   /// - נתיב UNC/התקן (`\\server\share`, `\\.\`, `\\?\`, `//host`) נדחה —
   ///   עצם קריאתו גורמת ל-Windows לפתוח חיבור SMB ולדלוף אישורי NTLM לתוקף.
   /// - חובה נתיב מוחלט בסמנטיקת הפלטפורמה הנוכחית (החוזה הוא `<abs-path>`);
   ///   נתיב יחסי נפתר מול תיקיית העבודה ולכן אינו מהימן מקישור חיצוני.
   /// - חובה סיומת `.otzplugin` כדי לא לקרוא קובץ שרירותי מהדיסק.
-  static bool _isSafeLocalPluginPath(String path) {
-    if (path.startsWith(r'\\') || path.startsWith('//')) return false;
-    if (!pathContext.isAbsolute(path)) return false;
+  static String? _localPluginPathRejection(String path) {
+    if (path.startsWith(r'\\') || path.startsWith('//')) {
+      return 'UNC or device paths are not allowed';
+    }
+    if (!pathContext.isAbsolute(path)) return 'path is not absolute';
     // ב-Windows נתיב כמו `\foo` נחשב rooted אך יחסי-לכונן הנוכחי — נדרש
     // כונן מפורש כדי שהנתיב יהיה מוחלט באמת.
     if (pathContext.style == p.Style.windows &&
         !RegExp(r'^[A-Za-z]:').hasMatch(path)) {
-      return false;
+      return 'path has no drive letter';
     }
-    return path.toLowerCase().endsWith('.otzplugin');
+    return path.toLowerCase().endsWith('.otzplugin')
+        ? null
+        : 'not a .otzplugin file';
   }
 
   static ExternalUriAction? _parseOpen(Uri uri) {
@@ -512,7 +566,11 @@ class ExternalUriRouter {
         final rawQuery = queryParameters['q']?.trim();
         if (rawQuery != null && rawQuery.isNotEmpty) {
           final rawMode = queryParameters['mode']?.trim().toLowerCase();
-          return RunSearchAction(rawQuery, mode: _searchModeAliases[rawMode]);
+          return RunSearchAction(
+            rawQuery,
+            mode: _searchModeAliases[rawMode],
+            smart: rawMode == 'smart',
+          );
         }
       }
 
@@ -538,6 +596,10 @@ class ExternalUriRouter {
         return const OpenDailyPageAction();
       }
 
+      if (firstLower == 'report') {
+        return const OpenAppReportAction();
+      }
+
       // settings בלי sub-tab — פותח הגדרות ללא ניווט לטאב ספציפי.
       if (firstLower == 'settings') {
         return const OpenSettingsTabAction();
@@ -555,7 +617,10 @@ class ExternalUriRouter {
 
       final toolId = _toolAliases[firstLower];
       if (toolId != null) {
-        return OpenToolAction(toolId);
+        return OpenToolAction(
+          toolId,
+          query: _toolQueryOf(toolId, queryParameters),
+        );
       }
       if (firstLower == 'tools') {
         return const OpenToolsLauncherAction();
@@ -581,7 +646,7 @@ class ExternalUriRouter {
       if (rawId.isEmpty) {
         return null;
       }
-      return OpenToolAction(rawId);
+      return OpenToolAction(rawId, query: _toolQueryOf(rawId, queryParameters));
     }
 
     if (segments.length == 2 && firstLower == 'plugin') {

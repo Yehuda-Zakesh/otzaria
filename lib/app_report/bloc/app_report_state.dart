@@ -1,7 +1,6 @@
 import 'package:equatable/equatable.dart';
-import 'package:otzaria/app_report/models/app_report.dart';
-import 'package:otzaria/app_report/models/app_report_image.dart';
 import 'package:otzaria/app_report/services/app_report_service.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 
 /// שלב השליחה של הטופס.
 enum AppReportSubmission { idle, sending, finished }
@@ -30,10 +29,14 @@ class AppReportEditing extends AppReportState {
     this.errorLog,
     this.includeDiagnostics = true,
     this.includeErrorLog = true,
+    this.minidump,
+    this.includeMinidump = true,
     this.images = const [],
     this.submission = AppReportSubmission.idle,
     this.result,
     this.invalidField,
+    this.hasDraft = false,
+    this.draftSaved = false,
   });
 
   final AppReportType type;
@@ -49,6 +52,10 @@ class AppReportEditing extends AppReportState {
   final bool includeDiagnostics;
   final bool includeErrorLog;
 
+  /// minidump של הקריסה (בהצעה שאחרי קריסה נייטיבית בלבד). `null` כשאין.
+  final AppReportMinidump? minidump;
+  final bool includeMinidump;
+
   /// צילומי המסך שצורפו לדיווח.
   final List<AppReportImage> images;
   final AppReportSubmission submission;
@@ -56,6 +63,12 @@ class AppReportEditing extends AppReportState {
 
   /// השדה שנכשל בבדיקת התקינות המקומית (`title`/`description`/`reporterEmail`).
   final String? invalidField;
+
+  /// הטופס נטען מטיוטה שמורה.
+  final bool hasDraft;
+
+  /// הטופס נשמר כטיוטה, וצריך להיסגר.
+  final bool draftSaved;
 
   bool get isSending => submission == AppReportSubmission.sending;
   bool get isFinished => submission == AppReportSubmission.finished;
@@ -70,11 +83,14 @@ class AppReportEditing extends AppReportState {
     String? errorLog,
     bool? includeDiagnostics,
     bool? includeErrorLog,
+    bool? includeMinidump,
     List<AppReportImage>? images,
     AppReportSubmission? submission,
     AppReportDeliveryResult? result,
     String? invalidField,
     bool clearInvalidField = false,
+    bool? hasDraft,
+    bool? draftSaved,
   }) {
     return AppReportEditing(
       type: type ?? this.type,
@@ -86,12 +102,16 @@ class AppReportEditing extends AppReportState {
       errorLog: errorLog ?? this.errorLog,
       includeDiagnostics: includeDiagnostics ?? this.includeDiagnostics,
       includeErrorLog: includeErrorLog ?? this.includeErrorLog,
+      minidump: minidump,
+      includeMinidump: includeMinidump ?? this.includeMinidump,
       images: images ?? this.images,
       submission: submission ?? this.submission,
       result: result ?? this.result,
       invalidField: clearInvalidField
           ? null
           : (invalidField ?? this.invalidField),
+      hasDraft: hasDraft ?? this.hasDraft,
+      draftSaved: draftSaved ?? this.draftSaved,
     );
   }
 
@@ -106,9 +126,13 @@ class AppReportEditing extends AppReportState {
     errorLog,
     includeDiagnostics,
     includeErrorLog,
+    minidump,
+    includeMinidump,
     images,
     submission,
     result,
     invalidField,
+    hasDraft,
+    draftSaved,
   ];
 }

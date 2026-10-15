@@ -86,7 +86,7 @@ const _expectedFailures = {
   'fake.odt': CorruptedDocumentException,
   'invalid.wbk': UnsupportedDocumentFormatException,
   'not_word.xml': UnsupportedDocumentFormatException,
-  // חבילת ZIP בסיומת ‎.html‎: פענוח הבייטים שלה כטקסט היה מייצר ג'יבריש
+  // חבילת ZIP בסיומת .html: פענוח הבייטים שלה כטקסט היה מייצר ג'יבריש
   // עברי שנראה כספר תקין לגמרי.
   'fake.html': UnsupportedDocumentFormatException,
 };

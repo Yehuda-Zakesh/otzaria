@@ -70,4 +70,49 @@ void main() {
   test('שורת כותרת אינה מקבלת מפתח', () {
     expect(buildLineRefKey('ישעיהו', const ['ישעיהו']), isNull);
   });
+
+  group('lineRefIndexEntries', () {
+    // מפתחות כל שורה בנפרד — מה שהאינדקס חייב להכיל, באותו סדר.
+    List<(int, int)> perLine(
+      List<({int lineIndex, String heRef})> refs,
+      String title,
+    ) => [
+      for (final ref in refs)
+        if (buildLineRefKey(ref.heRef, [title]) case final key?) ...[
+          (refKeyHash(key), ref.lineIndex),
+          for (final partial in partialLineRefKeys(ref.heRef, [title]))
+            (refKeyHash(partial), ref.lineIndex),
+        ],
+    ];
+
+    // כמה שורות לכל heRef, heRef שחוזר אחרי הפסקה, שורת כותרת וכותרת זרה.
+    const refs = [
+      (lineIndex: 0, heRef: 'טור'),
+      (lineIndex: 1, heRef: 'טור, חושן משפט, שט, ג'),
+      (lineIndex: 2, heRef: 'טור, חושן משפט, שט, ג'),
+      (lineIndex: 3, heRef: 'טור, חושן משפט, שט, ד'),
+      (lineIndex: 4, heRef: 'טור, חושן משפט, שט, ג'),
+      (lineIndex: 5, heRef: 'טור, יורה דעה, שט, ג'),
+      (lineIndex: 6, heRef: 'ספר אחר, א, ב'),
+      (lineIndex: 7, heRef: 'ספר אחר, א, ב'),
+    ];
+
+    test('זהה למפתחות שמחושבים לכל שורה בנפרד, כולל חלקיים', () {
+      final entries = lineRefIndexEntries(
+        refs,
+        (heRef) => lineRefKeyHashes(heRef, 'טור'),
+      );
+      expect(entries, perLine(refs, 'טור'));
+      expect(entries.length, greaterThan(refs.length));
+    });
+
+    test('המפתחות מחושבים פעם אחת לכל heRef', () {
+      final computed = <String>[];
+      lineRefIndexEntries(refs, (heRef) {
+        computed.add(heRef);
+        return lineRefKeyHashes(heRef, 'טור');
+      });
+      expect(computed, refs.map((ref) => ref.heRef).toSet().toList());
+    });
+  });
 }

@@ -1,9 +1,16 @@
-import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/text_book/utils/section_search_utils.dart';
+import 'dart:math';
 
+import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/text_book/utils/inline_notes_utils.dart' as notes;
+import 'package:otzaria/text_book/utils/section_search_utils.dart';
+import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
+
+import '../../support/search_engine_test_init.dart';
 import 'literal_pattern_test_helper.dart';
 
-void main() {
+Future<void> main() async {
+  final engineReady = await tryInitSearchEngine();
+
   tearDown(() async {
     await resetSectionSearchWorkerForTesting();
   });
@@ -531,6 +538,131 @@ void main() {
     });
   });
 
+  group('searchInContent - ביטוי שנמשך לשורה הבאה (issue #1703)', () {
+    const content = [
+      '<h2>פרק א</h2>',
+      'ויבדל בין המים אשר מתחת לרקיע ובין המים',
+      '(ג) ויאמר אלהים יקוו המים',
+      '<h2>פרק ב</h2>',
+      'ויאמר אלהים יהי מאורת',
+    ];
+
+    test('נמצא פעם אחת, בשורה שבה הוא מתחיל, עם שתי השורות בקטע', () async {
+      final results = await searchInContent(
+        content: content,
+        query: 'ובין המים ויאמר אלהים',
+        patternSource: literalPatternSource('ובין המים ויאמר אלהים'),
+      );
+      expect(results, hasLength(1));
+      final result = results.single;
+      expect(result.index, 1);
+      expect(result.continuesToNextLine, isTrue);
+      expect(result.snippet, contains('ובין המים\nויאמר אלהים'));
+      expect(result.snippet, isNot(contains('(ג)')));
+      expect(result.matchOffset, content[1].indexOf('ובין'));
+    });
+
+    test('הופעה בתוך שורה אינה מסומנת כנמשכת', () async {
+      final results = await searchInContent(
+        content: content,
+        query: 'יקוו המים',
+        patternSource: literalPatternSource('יקוו המים'),
+      );
+      expect(results.map((r) => (r.index, r.continuesToNextLine)), [
+        (2, false),
+      ]);
+    });
+
+    test('כותרת עוצרת ביטוי', () async {
+      final results = await searchInContent(
+        content: content,
+        query: 'המים פרק',
+        patternSource: literalPatternSource('המים פרק'),
+      );
+      expect(results, isEmpty);
+      final across = await searchInContent(
+        content: content,
+        query: 'יקוו המים ויאמר',
+        patternSource: literalPatternSource('יקוו המים ויאמר'),
+      );
+      expect(across, isEmpty);
+    });
+
+    test('ביטוי שנמשך אל מחוץ לטווח אינו נספר', () async {
+      final results = await searchInContent(
+        content: content,
+        query: 'ובין המים ויאמר',
+        patternSource: literalPatternSource('ובין המים ויאמר'),
+        range: (start: 0, end: 2),
+      );
+      expect(results, isEmpty);
+    });
+
+    test('רק שאילתה של כמה מילים נבדקת מעבר לשורה', () {
+      expect(queryCanCrossLines('המים'), isFalse);
+      expect(queryCanCrossLines('  המים  '), isFalse);
+      expect(queryCanCrossLines('ובין המים'), isTrue);
+      expect(queryCanCrossLines('אשר־שמע'), isTrue);
+      expect(queryCanCrossLines('הלכה\u0085ברורה'), isTrue);
+      expect(queryCanCrossLines('\u0085הלכה\u0085'), isFalse);
+      expect(queryCanCrossLines('הלכה\uFEFFברורה'), isTrue);
+    });
+
+    for (final wholeWord in [true, false]) {
+      test(
+        'מפריד NEL מוצא ביטוי בין שורות עם המנוע, wholeWord=$wholeWord',
+        () async {
+          final results = await searchInContent(
+            content: const ['<h2>פרק א</h2>', 'תחילת הלכה', 'ברורה סוף'],
+            query: 'הלכה\u0085ברורה',
+            wholeWord: wholeWord,
+          );
+          expect(
+            results.map(
+              (r) => (r.index, r.matchOffset, r.continuesToNextLine),
+            ),
+            [(1, 6, true)],
+          );
+          expect(results.single.snippet, contains('הלכה\nברורה'));
+        },
+        skip: engineReady ? false : searchEngineSkipReason,
+      );
+    }
+
+    test('מילה בסוף שורה ובתחילת הבאה — תוצאה לכל הופעה, בלי המשך', () async {
+      final results = await searchInContent(
+        content: content,
+        query: 'המים',
+        patternSource: literalPatternSource('המים'),
+      );
+      expect(results.map((r) => (r.index, r.continuesToNextLine)), [
+        (1, false),
+        (1, false),
+        (2, false),
+      ]);
+    });
+
+    test('שאילתה של מילה אחת אינה סורקת מעבר לשורה', () async {
+      // תבנית-גשש שמתאימה רק מעבר לשורה: תוצאה בה מוכיחה שהסריקה רצה.
+      const probe = 'המים\\nויאמר';
+      final oneWord = await searchInContent(
+        content: content,
+        query: 'המים',
+        patternSource: probe,
+      );
+      expect(oneWord, isEmpty);
+
+      final phrase = await searchInContent(
+        content: content,
+        query: 'המים ויאמר',
+        patternSource: probe,
+      );
+      expect(phrase.map((r) => (r.index, r.continuesToNextLine)), [
+        (1, true),
+      ]);
+    });
+  });
+
   group('matchFractionInLine', () {
     test('מילה בתחילת השורה — שבר 0', () {
       expect(
@@ -745,5 +877,57 @@ void main() {
     test('שאילתה ריקה — שקר', () {
       expect(queryMatchesInlineNoteOnly(noteLine, ''), isFalse);
     });
+  });
+  test('cleanLineForSearch זהה לכיווץ הרווחים ב-regex (perf)', () {
+    // אורקל: המימוש הקודם.
+    String oracle(String rawLine) => utils
+        .removeVolwels(
+          utils.stripHtmlIfNeeded(notes.stripInlineNotesForSearch(rawLine)),
+        )
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    final inputs = <String>[
+      // כל יחידת קוד, לבד ובין אותיות ורווחים.
+      for (var c = 0; c <= 0xFFFF; c++) ...[
+        'א${String.fromCharCode(c)}ב',
+        'א ${String.fromCharCode(c)}${String.fromCharCode(c)}ב',
+      ],
+    ];
+    const pieces = [
+      ' ',
+      '  ',
+      '\t',
+      '\n',
+      '\r\n',
+      '\u00A0',
+      '\u2003',
+      '\u3000',
+      '\uFEFF',
+      '\u0085',
+      '\u180E',
+      'א',
+      'שלום',
+      'וַיֹּאמֶר',
+      '־',
+      '|',
+      '<b>',
+      '</b>',
+      '<br>',
+      '&nbsp;',
+      'x',
+    ];
+    final random = Random(3);
+    for (var i = 0; i < 5000; i++) {
+      inputs.add(
+        [
+          for (var j = random.nextInt(12); j > 0; j--)
+            pieces[random.nextInt(pieces.length)],
+        ].join(),
+      );
+    }
+    for (final input in inputs) {
+      expect(cleanLineForSearch(input), oracle(input), reason: input);
+    }
   });
 }

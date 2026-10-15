@@ -5,8 +5,8 @@ import 'package:otzaria/plugins/utils/fluent_icon_resolver.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 
 /// `docs/plugin-sdk/ICONS.md` הוא הרשימה שמחברי תוספים עובדים לפיה, והיא
-/// נגזרת משתי ספריות שממשיכות לגדול (`pubspec.lock` אינו במעקב, וגרסת
-/// `otzaria_icons` מתחלפת בכל עדכון `ref`).
+/// נגזרת משתי ספריות שממשיכות לגדול (גרסת `otzaria_icons` מתחלפת בכל
+/// עדכון `ref`).
 ///
 /// לכן הרשימה **מגונררת ולא נערכת ביד**: הבדיקה בונה את הבלוק מהספריות
 /// ומשווה אותו לקובץ, וב-`--dart-define=update_icons_doc=true` כותבת אותו

@@ -17,7 +17,7 @@ import 'package:path/path.dart' as p;
 /// כללי מיון של סורק הספרייה ([`_collectBookFilesRecursive`] ב-
 /// `database_library_provider.dart` ו-`_findNewFiles` ב-`file_sync_service.dart`):
 /// דילוג על קבצים מוסתרים/מערכת, סיומת מתוך [kProductionBookFormats], ובדיקת
-/// *תוכן* לסיומות הגנריות (‎.xml‎, ‎.wbk‎). בלי אותם כללים הדוח היה מדווח על
+/// *תוכן* לסיומות הגנריות (.xml, .wbk). בלי אותם כללים הדוח היה מדווח על
 /// קבצים שהסורק לעולם לא יקלוט, והמשתמש היה מחפש ספר שאינו אמור להופיע.
 class PersonalFoldersInfo {
   const PersonalFoldersInfo._();
@@ -140,7 +140,7 @@ class PersonalFoldersInfo {
 
           final format = documentFormatFromExtension(entity.path);
           if (format == null || !format.isProductionSupported) continue;
-          // ‎.xml‎ ו-‎.wbk‎ נאספים רק אם תוכנם אכן מסמך — אותו שער שבסורק.
+          // .xml ו-.wbk נאספים רק אם תוכנם אכן מסמך — אותו שער שבסורק.
           if (format.needsContentSniffing &&
               !await isSupportedBookFileByContent(entity.path)) {
             continue;

@@ -8,7 +8,7 @@ msix_config:
   publisher_display_name: "אוצריא"
   identity_name: F8854998.otzaria
   description: "ספריית ספרים יהודיים עם אפשרויות חיפוש חכם"
-  msix_version: 0.9.97.2
+  msix_version: 0.9.98.0
   logo_path: assets/icon/iconnew.png
   publisher: CN=B3B520D1-500C-4859-986C-448583CC927B
   capabilities: "internetClient"
@@ -23,7 +23,7 @@ msix_config:
     force_update_from_any_version: false
 
 
-version: 0.9.97+99702
+version: 0.9.98+99800
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
@@ -39,20 +39,20 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   flutter_settings_screens: ^0.3.4
-  hive_ce: ^2.20.1
+  hive_ce: ^2.20.2
   path_provider: ^2.1.6
   # RAM פיזי לגודל ה-cache של SQLite בעדכון הספרייה ב-mobile.
-  device_info_plus: ^13.2.0
+  device_info_plus: ^13.3.0
   html: ^0.15.7
   pdfrx: ^2.6.5
   # FPDF_ImportNPagesToOne: הדפסת כמה עמודים בגיליון נשארת וקטורית.
   pdfium_dart: ^0.3.1
-  url_launcher: ^6.3.2
+  url_launcher: ^6.3.3
   # ליבה בלבד: החבילה המורחבת רושמת בעלייה plugins של וידאו/אודיו/WebView.
   flutter_widget_from_html_core: ^0.17.4
   fwfh_svg: ^0.16.1
   fwfh_url_launcher: ^0.16.1
-  scrollable_positioned_list: ^0.3.8
+  scrollable_positioned_list: ^0.3.8+1
   fuzzywuzzy: ^1.2.0
   flutter_svg: ^2.3.0  
   fluentui_system_icons: ^1.1.273
@@ -64,8 +64,8 @@ dependencies:
   otzaria_icons:
     git:
       url: https://github.com/Otzaria/otzaria_icons
-      ref: 5a614a7046c17e4321af31066cd9f0feae7c2e47
-  file_picker: 12.3.0
+      ref: 5225cd36c59097fe1f24a39fb60f9c2c0e15e47c
+  file_picker: ^13.1.0
   provider: ^6.1.5+1
   multi_split_view: ^3.6.2
   updat: ^1.4.0
@@ -78,8 +78,8 @@ dependencies:
   # they are placed. Already in the graph through `pdf`; declared for direct use.
   bidi: ^2.0.13
   kosher_dart: ^2.0.20
-  archive: ^4.3.0
-  package_info_plus: ^10.2.1
+  archive: ^4.5.1
+  package_info_plus: ^10.2.2
   convert: ^3.1.2
   crypto: ^3.0.7
   # גופן הסת"ם של "תיקון קוראים"; הגרסה ננעלת ב-pubspec.lock.
@@ -100,11 +100,10 @@ dependencies:
   googleapis_auth: ^2.3.4
   characters: ^1.4.1
   collection: ^1.19.1
-  # מתאם ההדגשה והמיפוי החדשים דורשים את שלושת תיקוני המנוע יחד.
-  otzaria_search_engine:
-    git:
-      url: https://github.com/Otzaria/otzaria_search_engine
-      ref: e5295afdcd64d993dc8991cd33b9e05da839c34c
+  otzaria_search_engine: ^3.1.0
+  # חוזה הדיווחים מול השרת, משותף עם "עדכוני אוצריא" (Dart טהור).
+  otzaria_report_contract:
+    path: packages/otzaria_report_contract
   seforim_library_updater:
     git:
       url: https://github.com/Otzaria/otzaria_library_updater
@@ -116,8 +115,8 @@ dependencies:
   logging: ^1.3.0
   sqlite3: ^3.7.0
   super_clipboard: ^0.9.1
-  flutter_local_notifications: ^22.3.1
-  timezone: ^0.11.1
+  flutter_local_notifications: ^22.3.2
+  timezone: ^0.11.2
   flutter_single_instance: ^1.7.0
   xml: ^7.0.1
   markdown: ^7.3.1
@@ -127,26 +126,26 @@ dependencies:
   flutter_inappwebview:
     git:
       url: https://github.com/Otzaria/flutter_inappwebview
-      ref: 4adb7a73771a889e04e8c8eb458e91a1a348eddd
+      ref: f95fc3b0d14ebb4be9ae1c45047a0d8e531cdd14
       path: flutter_inappwebview
   # נדרש ישירות עבור WindowsFileDropManager (גרירת קבצים אל החלון).
   flutter_inappwebview_windows: any
   custom_mouse_cursor: ^1.1.3
-  wakelock_plus: ^1.8.0
+  wakelock_plus: ^1.8.1
 
 dependency_overrides:
-  # TODO: להחזיר ל-pub.dev רק אחרי שכל ה-PR ימוזגו וישוחררו: espresso3389/pdfrx#724,
-  # #729, #730, #731 ו-#732. עד אז שתי החבילות מוצמדות לאותו קומיט בפורק;
+  # TODO: לחזור ל-pub.dev אחרי שחרור espresso3389/pdfrx#724, #729–#733, #740 ושילוב
+  # תיקון שימור הבחירה מ-palmoni5/pdfrx#1. שתי החבילות מוצמדות לאותו קומיט.
   # pdfrx_engine נדרש עבור Pdfrx.normalizeHebrewText.
   pdfrx:
     git:
       url: https://github.com/palmoni5/pdfrx
-      ref: 75089f96d3f9dbcb4dcfc73ebbb0b07dc98df3ac
+      ref: 9854a7239bd75027fd2628ab4ab0e0ba275d1637
       path: packages/pdfrx
   pdfrx_engine:
     git:
       url: https://github.com/palmoni5/pdfrx
-      ref: 75089f96d3f9dbcb4dcfc73ebbb0b07dc98df3ac
+      ref: 9854a7239bd75027fd2628ab4ab0e0ba275d1637
       path: packages/pdfrx_engine
   # TODO: להחזיר ל-pub.dev כשיתמזג וישוחרר MaikuB/flutter_local_notifications#2826
   # (קריאות WinRT ב-thread ייעודי). עד אז הפורק Otzaria, מוצמד לקומיט.
@@ -165,39 +164,39 @@ dependency_overrides:
       ref: master
       path: packages/scrollable_positioned_list
   matcher: ^0.12.20
-  analyzer: ^14.2.0
-  device_info_plus: ^13.2.0
+  analyzer: ^14.5.0
+  device_info_plus: ^13.3.0
   # הגרסה שב-pub.dev חסרה את תיקון גלילת הטאצ'פד.
   flutter_inappwebview_windows:
     git:
       url: https://github.com/Otzaria/flutter_inappwebview
-      ref: 4adb7a73771a889e04e8c8eb458e91a1a348eddd
+      ref: f95fc3b0d14ebb4be9ae1c45047a0d8e531cdd14
       path: flutter_inappwebview_windows
   flutter_inappwebview_platform_interface:
     git:
       url: https://github.com/Otzaria/flutter_inappwebview
-      ref: 4adb7a73771a889e04e8c8eb458e91a1a348eddd
+      ref: f95fc3b0d14ebb4be9ae1c45047a0d8e531cdd14
       path: flutter_inappwebview_platform_interface
   flutter_inappwebview_ios:
     git:
       url: https://github.com/Otzaria/flutter_inappwebview
-      ref: 4adb7a73771a889e04e8c8eb458e91a1a348eddd
+      ref: f95fc3b0d14ebb4be9ae1c45047a0d8e531cdd14
       path: flutter_inappwebview_ios
   flutter_inappwebview_macos:
     git:
       url: https://github.com/Otzaria/flutter_inappwebview
-      ref: 4adb7a73771a889e04e8c8eb458e91a1a348eddd
+      ref: f95fc3b0d14ebb4be9ae1c45047a0d8e531cdd14
       path: flutter_inappwebview_macos
   flutter_inappwebview_linux:
     git:
       url: https://github.com/Otzaria/flutter_inappwebview
-      ref: 4adb7a73771a889e04e8c8eb458e91a1a348eddd
+      ref: f95fc3b0d14ebb4be9ae1c45047a0d8e531cdd14
       path: flutter_inappwebview_linux
   # הגרסה שב-pub.dev קוראת ל-setStatusBarColor שהוצא משימוש ב-Android 15.
   flutter_inappwebview_android:
     git:
       url: https://github.com/Otzaria/flutter_inappwebview
-      ref: 4adb7a73771a889e04e8c8eb458e91a1a348eddd
+      ref: f95fc3b0d14ebb4be9ae1c45047a0d8e531cdd14
       path: flutter_inappwebview_android
 
 flutter_launcher_icons:
@@ -223,9 +222,9 @@ dev_dependencies:
   sentry_dart_plugin: ^3.4.0
   # מחולל spec.json של התוספים (tool/plugins) מפרסר AST של קוד המקור.
   # מוצמד ל-major: צורת ה-AST משתנה בין גרסאות ראשיות ושוברת את המחולל.
-  analyzer: ^14.4.0
+  analyzer: ^14.5.0
   # לטעינת ספריית המנוע הנייטיבית בטסטים (ExternalLibrary).
-  flutter_rust_bridge: ^2.12.0
+  flutter_rust_bridge: ^2.13.0
   fake_async: ^1.3.3
   flutter_test:
     sdk: flutter
@@ -233,13 +232,13 @@ dev_dependencies:
     sdk: flutter
 
   flutter_lints: ^6.0.0
-  test: ^1.31.0
+  test: ^1.31.1
   yaml: ^3.1.4
-  build_runner: ^2.16.1
+  build_runner: ^2.16.2
   bloc_test: ^10.0.0
   mockito: ^5.8.1
   mocktail: ^1.0.5
-  path_provider_platform_interface: ^2.1.2
+  path_provider_platform_interface: ^2.1.3
   hooks: ^2.2.0
   dart_pre_commit: ^6.1.5
   msix: ^3.18.0
@@ -257,10 +256,10 @@ flutter:
     - assets/bio/
     - assets/logos/
     - assets/ca/
-    - assets/icon/שמור וזכור מקור.png
-    - assets/icon/שמור וזכור שחור ריק.png
+    - assets/icon/shamor_zachor.png
     - assets/icon/shamor_zachor_with_v.png
     - assets/icon/iconnew.png
+    - assets/icon/iconnew_256.png
     - assets/icon/mount_sinai_tablets.svg
     - assets/icon/otzplugin_file_icon.png
     - assets/logo_books/
@@ -271,6 +270,8 @@ flutter:
     - assets/Acronyms.json
     - assets/support_organizations.json
     - assets/export_restricted_books.json
+    # זהות המודל הסמנטי (model.json מ-otzaria-semantic-search)
+    - assets/semantic/meivin-round2-onnx/
 
   fonts:
     # החבילה מספקת את הגופן אך אינה מצהירה עליו, ולכן שני אייקוני ה-light

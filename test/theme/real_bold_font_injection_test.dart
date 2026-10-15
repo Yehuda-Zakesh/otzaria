@@ -162,7 +162,6 @@ void main() {
                   ),
                 ],
                 baseStyle: TextStyle(fontSize: 20, fontFamily: 'Rubik'),
-                onLineTap: _noopLineTap,
               ),
             ),
           ),
@@ -200,7 +199,6 @@ void main() {
                 ),
               ],
               baseStyle: TextStyle(fontSize: 20, fontFamily: 'FrankRuhlCLM'),
-              onLineTap: _noopLineTap,
             ),
           ),
         ),
@@ -243,5 +241,3 @@ List<TextSpan> _spansContaining(InlineSpan root, String needle) {
   walk(root);
   return matches;
 }
-
-void _noopLineTap(int _) {}

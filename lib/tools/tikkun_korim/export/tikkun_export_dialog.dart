@@ -22,6 +22,7 @@ const double kTikkunExportDialogWidth = 460;
 /// כשלא, מוצע רק עימוד בזרימה. [verseDomain] (פרק → הפסוק האחרון בו) מאפשר
 /// בחירת טווח פסוקים; `null` מסתיר את האפשרות. [parashaName] ו-[parashaRange]
 /// מציעים את עמודי הפרשה הנוכחית, והיא ברירת המחדל כשהם קיימים.
+/// [isTorah] — "הכל" הוא החומש, ונוספת האפשרות "כל התורה".
 Future<TikkunExportOptions?> showTikkunExportDialog({
   required BuildContext context,
   required int columnCount,
@@ -30,6 +31,7 @@ Future<TikkunExportOptions?> showTikkunExportDialog({
   Map<int, int>? verseDomain,
   String? parashaName,
   ({int from, int to})? parashaRange,
+  bool isTorah = false,
   String title = 'הדפסה',
   String confirmText = 'המשך',
   TikkunExportOptions initial = const TikkunExportOptions(),
@@ -70,6 +72,7 @@ Future<TikkunExportOptions?> showTikkunExportDialog({
       allowOriginalPages: allowOriginalPages,
       verseDomain: domain,
       parashaName: parasha == null ? null : parashaName,
+      isTorah: isTorah,
       onChanged: (value) => options = value,
     ),
   );
@@ -85,6 +88,7 @@ class TikkunExportForm extends StatefulWidget {
 
   /// שם הפרשה הנוכחית; `null` מסתיר את היקף הפרשה.
   final String? parashaName;
+  final bool isTorah;
   final ValueChanged<TikkunExportOptions> onChanged;
 
   const TikkunExportForm({
@@ -95,6 +99,7 @@ class TikkunExportForm extends StatefulWidget {
     this.allowOriginalPages = true,
     this.verseDomain,
     this.parashaName,
+    this.isTorah = false,
   });
 
   @override
@@ -134,7 +139,15 @@ class _TikkunExportFormState extends State<TikkunExportForm> {
       ),
     if (widget.parashaName != null)
       const SegmentOption(value: TikkunExportScope.parasha, label: 'הפרשה'),
-    const SegmentOption(value: TikkunExportScope.all, label: 'הכל'),
+    SegmentOption(
+      value: TikkunExportScope.all,
+      label: widget.isTorah ? 'החומש' : 'הכל',
+    ),
+    if (widget.isTorah)
+      const SegmentOption(
+        value: TikkunExportScope.wholeTorah,
+        label: 'כל התורה',
+      ),
     if (widget.columnCount > 1)
       const SegmentOption(
         value: TikkunExportScope.range,
@@ -207,7 +220,6 @@ class _TikkunExportFormState extends State<TikkunExportForm> {
                 'היקף',
                 AppSegmentedControl<TikkunExportScope>(
                   expandToFillWidth: true,
-                  showSelectedIcon: false,
                   currentValue: _options.scope,
                   options: _scopeOptions,
                   onChanged: (value) =>
@@ -234,7 +246,6 @@ class _TikkunExportFormState extends State<TikkunExportForm> {
                 'עימוד',
                 AppSegmentedControl<TikkunExportMode>(
                   expandToFillWidth: true,
-                  showSelectedIcon: false,
                   currentValue: _options.mode,
                   options: const [
                     SegmentOption(
@@ -253,7 +264,6 @@ class _TikkunExportFormState extends State<TikkunExportForm> {
               'טורים',
               AppSegmentedControl<TikkunExportColumns>(
                 expandToFillWidth: true,
-                showSelectedIcon: false,
                 currentValue: _options.columns,
                 options: const [
                   SegmentOption(

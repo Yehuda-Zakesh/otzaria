@@ -1,4 +1,3 @@
-import 'package:otzaria/models/books.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 
@@ -53,12 +52,6 @@ class UpdateDistanceWithoutSearch extends SearchEvent {
   UpdateDistanceWithoutSearch(this.distance);
 }
 
-/// עדכון טווח הקרבה בין מילות החיפוש (מרווח מילים / פסקה / כותרת).
-class UpdateProximityScope extends SearchEvent {
-  final SearchScope scope;
-  UpdateProximityScope(this.scope);
-}
-
 class UpdateProximityScopeWithoutSearch extends SearchEvent {
   final SearchScope scope;
   UpdateProximityScopeWithoutSearch(this.scope);
@@ -96,11 +89,6 @@ class UpdatePluginSearchSelectionsWithoutSearch extends SearchEvent {
   const UpdatePluginSearchSelectionsWithoutSearch(this.selections);
 }
 
-class UpdateBooksToSearch extends SearchEvent {
-  final Set<Book> books;
-  UpdateBooksToSearch(this.books);
-}
-
 class AddFacet extends SearchEvent {
   final String facet;
   AddFacet(this.facet);
@@ -127,7 +115,10 @@ class SetFacet extends SearchEvent {
 /// הגדרת מספר facets בבת אחת ללא הפעלת חיפוש
 class SetFacetsWithoutSearch extends SearchEvent {
   final List<String> facets;
-  const SetFacetsWithoutSearch(this.facets);
+
+  /// בחירה מתוך עץ התוצאות: ההיקף נשאר, כדי שהשורש יחזיר אליו.
+  final bool keepScope;
+  const SetFacetsWithoutSearch(this.facets, {this.keepScope = false});
 }
 
 class UpdateSortOrder extends SearchEvent {

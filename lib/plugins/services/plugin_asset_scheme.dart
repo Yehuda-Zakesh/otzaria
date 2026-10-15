@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:otzaria/plugins/services/plugin_content_security_policy.dart';
 import 'package:otzaria/plugins/services/plugin_headless_shell.dart';
 import 'package:path/path.dart' as p;
 
@@ -43,12 +44,18 @@ WebUri pluginAssetUri({
 /// מחזירה `null` כשהנתיב חורג מתיקיית התוסף או שהקובץ אינו קיים — ואז
 /// ה-WebView מקבל כשל טעינה, בדיוק כמו בקובץ חסר תחת `file://`.
 /// [headlessEntrypoint] מגיש גם את המעטפת הווירטואלית של תוסף ללא ממשק.
+/// [contentSecurityPolicy] מצורף לכל תשובה — גם סקריפט של Worker מקבל ממנה את
+/// המדיניות שלו.
 Future<CustomSchemeResponse?> servePluginAsset({
   required WebUri url,
   required String pluginId,
   required String rootPath,
   String? headlessEntrypoint,
+  String? contentSecurityPolicy,
 }) async {
+  final headers = contentSecurityPolicy == null
+      ? null
+      : {pluginContentSecurityPolicyHeader: contentSecurityPolicy};
   // host אחר הוא origin אחר — התוסף אינו רשאי לייצר לעצמו כאלה.
   if (url.host != pluginAssetHost(pluginId)) return null;
   if (headlessEntrypoint != null &&
@@ -58,6 +65,7 @@ Future<CustomSchemeResponse?> servePluginAsset({
         pluginHeadlessShellHtml(headlessEntrypoint, module: true),
       ),
       contentType: 'text/html',
+      headers: headers,
     );
   }
   final file = resolvePluginAssetFile(urlPath: url.path, rootPath: rootPath);
@@ -66,6 +74,7 @@ Future<CustomSchemeResponse?> servePluginAsset({
     return CustomSchemeResponse(
       data: await file.readAsBytes(),
       contentType: pluginAssetContentType(file.path),
+      headers: headers,
     );
   } on FileSystemException {
     return null;
@@ -129,7 +138,6 @@ const Map<String, String> _contentTypes = {
 ///
 /// חובה שיהיה מדויק ל-JS: WebKit מסרב להריץ מודול או Worker שהוגש עם טיפוס
 /// שאינו JavaScript.
-@visibleForTesting
 String pluginAssetContentType(String filePath) =>
     _contentTypes[p.extension(filePath).toLowerCase()] ??
     'application/octet-stream';

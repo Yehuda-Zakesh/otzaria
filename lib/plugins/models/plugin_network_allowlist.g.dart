@@ -45,4 +45,9 @@ const List<String> pluginNetworkAllowlist = <String>[
   'https://github.com/yakov100/otzaria-moadei-yisrael-data/releases/download',
   'https://raw.githubusercontent.com/yakov100/otzaria-moadei-yisrael-data/main',
   'https://tora-forum.co.il/forums',
+  'https://get.geojs.io/v1/ip/geo.json',
+  'https://nominatim.openstreetmap.org/reverse',
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://hameshiv.com',
 ];

@@ -118,6 +118,75 @@ void main() {
       expect(reference.single.connectionType, 'REFERENCE');
     });
 
+    test('כתובת וספר חוזרים נפתרים פעם אחת לכל קובץ', () async {
+      final rows = StringBuffer('מקור,ספר_יעד,מיקום_יעד,סוג,יעד_אישי\n');
+      for (var i = 1; i <= 300; i++) {
+        rows.writeln('$i,ברכות,${i.isEven ? 'ב.' : 'ב:'},פירוש,לא');
+      }
+      final links = writeCsv('ביאורי יוסף.links.csv', rows.toString());
+      var resolveCalls = 0;
+
+      final result = await UserContentImporter.importFiles(
+        [links],
+        db,
+        resolveRef:
+            ({
+              required targetTitle,
+              required targetCategoryId,
+              required targetIsUserBook,
+              required ref,
+            }) async {
+              resolveCalls++;
+              return ref == 'ב.' ? 10 : 20;
+            },
+      );
+
+      expect(result.errors, isEmpty);
+      expect(result.linksApplied, 300);
+      expect(resolveCalls, 2);
+      final forward = await repo.forwardUserLinks(
+        'ברכות',
+        sourceIsUserBook: false,
+      );
+      expect(forward.map((l) => l.sourceLineIndex).toSet(), {10, 20});
+    });
+
+    test('מקור רשמי וכתובת שלא נפתרת: חיפוש אחד', () async {
+      final rows = StringBuffer(
+        'מקור,ספר_מקור,מקור_אישי,ספר_יעד,מיקום_יעד,סוג,יעד_אישי\n',
+      );
+      for (var i = 1; i <= 50; i++) {
+        rows.writeln('$i,ברכות,לא,שולחן ערוך,לא קיים,הפניה,לא');
+      }
+      final links = writeCsv('קישורים.csv', rows.toString());
+      var resolveCalls = 0;
+      var sourceCalls = 0;
+
+      final result = await UserContentImporter.importFiles(
+        [links],
+        db,
+        resolveRef:
+            ({
+              required targetTitle,
+              required targetCategoryId,
+              required targetIsUserBook,
+              required ref,
+            }) async {
+              resolveCalls++;
+              return null;
+            },
+        sourceExists:
+            ({required title, categoryId, required isUserBook}) async {
+              sourceCalls++;
+              return true;
+            },
+      );
+
+      expect(result.errors, hasLength(50));
+      expect(resolveCalls, 1);
+      expect(sourceCalls, 1);
+    });
+
     test('קובץ ייבוא ב-ANSI עברית נקלט כמו UTF-8', () async {
       // קובץ CSV שנשמר מאקסל בעברית הוא Windows-1255, ו-`readAsString` היה
       // זורק עליו — הייבוא כולו נכשל בהודעת "קריאת הקובץ נכשלה".

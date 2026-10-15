@@ -15,19 +15,15 @@ import 'package:otzaria/navigation/bloc/navigation_event.dart';
 import 'package:otzaria/navigation/bloc/navigation_state.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
-import 'package:otzaria/tabs/models/commentators_tab.dart';
-import 'package:otzaria/tabs/models/pdf_commentators_tab.dart';
-import 'package:otzaria/tabs/models/pdf_tab.dart';
-import 'package:otzaria/tabs/models/tab.dart';
-import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/models/books.dart';
+import 'package:otzaria/bookmarks/utils/bookmark_from_tab.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/messages/notes_messages.dart';
-import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 import 'package:otzaria/widgets/controls/action_buttons.dart';
 import 'package:otzaria/widgets/lists/items_list_view.dart';
 import 'package:otzaria/widgets/dialogs/app_dialogs.dart';
 import 'package:otzaria/widgets/dialogs/input_dialog.dart';
+import 'package:otzaria/utils/calendar_days.dart';
 
 class BookmarksDialog extends StatelessWidget {
   /// אם מסופק, יוצגו רק סימניות של ספר זה (הדיאלוג הופך לתצוגת
@@ -64,6 +60,8 @@ class _BookmarkViewState extends State<BookmarkView> {
   /// כשרשימת הסימניות לא משתנה.
   List<Bookmark>? _cachedBookmarks;
   Map<String, int>? _cachedCountPerBook;
+
+  final _dateGroups = BookmarkDateGroups();
 
   @override
   void initState() {
@@ -117,84 +115,12 @@ class _BookmarkViewState extends State<BookmarkView> {
     return bDate.compareTo(aDate);
   }
 
-  /// מפתח מיון לפי תקופת זמן — משמש לקיבוץ בתצוגת "לפי תאריך הוספה".
-  /// השבוע מתחיל ביום ראשון (מנהג ישראלי).
-  static String _dateGroupKey(DateTime? date) {
-    if (date == null) return '8_older';
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final yesterday = today.subtract(const Duration(days: 1));
-    // ראשון=weekday 7 → 7%7=0, שני=1, ..., שבת=6
-    final startOfThisWeek = today.subtract(Duration(days: today.weekday % 7));
-    final startOfLastWeek = startOfThisWeek.subtract(const Duration(days: 7));
-    final startOfThisMonth = DateTime(now.year, now.month, 1);
-    final startOfPrevMonth = now.month == 1
-        ? DateTime(now.year - 1, 12, 1)
-        : DateTime(now.year, now.month - 1, 1);
-    final startOfThisYear = DateTime(now.year, 1, 1);
-
-    final d = DateTime(date.year, date.month, date.day);
-    if (!d.isBefore(today)) return '1_today';
-    if (!d.isBefore(yesterday)) return '2_yesterday';
-    if (!d.isBefore(startOfThisWeek)) return '3_this_week';
-    if (!d.isBefore(startOfLastWeek)) return '4_last_week';
-    if (!d.isBefore(startOfThisMonth)) return '5_this_month';
-    if (!d.isBefore(startOfPrevMonth)) return '6_prev_month';
-    if (!d.isBefore(startOfThisYear)) return '7_this_year';
-    return '8_older';
-  }
-
-  static String _dateGroupLabel(DateTime? date) => const {
-    '1_today': 'היום',
-    '2_yesterday': 'אתמול',
-    '3_this_week': 'השבוע',
-    '4_last_week': 'שבוע שעבר',
-    '5_this_month': 'החודש',
-    '6_prev_month': 'חודש קודם',
-    '7_this_year': 'השנה',
-    '8_older': 'ישן יותר',
-  }[_dateGroupKey(date)]!;
-
-  /// בונה את ה-Tab המתאים לסימניה. עבור [BookmarkTargetKind.commentators]
-  /// יוצרים sourceTab בלתי-תלוי וגורסה אותו ל-PdfCommentatorsTab/CommentatorsTab,
-  /// בדומה לזרימה ב-HistoryScreen.
-  OpenedTab _buildTabForBookmark(Bookmark bookmark) {
-    final openLeftPane = shouldAutoOpenReadingLeftPane();
-    if (bookmark.targetKind == BookmarkTargetKind.commentators) {
-      if (bookmark.book is PdfBook) {
-        final sourceTab = PdfBookTab(
-          book: bookmark.book as PdfBook,
-          pageNumber: bookmark.index,
-          openLeftPane: openLeftPane,
-        )..activeCommentators = bookmark.commentatorsToShow.toSet();
-        return PdfCommentatorsTab(sourceTab: sourceTab);
-      }
-
-      final sourceTab =
-          OpenedTab.fromBook(
-                bookmark.book,
-                bookmark.index,
-                commentators: bookmark.commentatorsToShow,
-                openLeftPane: openLeftPane,
-              )
-              as TextBookTab;
-      return CommentatorsTab(sourceTab: sourceTab);
-    }
-
-    return OpenedTab.fromBook(
-      bookmark.book,
-      bookmark.index,
-      commentators: bookmark.commentatorsToShow,
-      openLeftPane: openLeftPane,
-    );
-  }
-
   void _openBook(
     BuildContext context,
     Bookmark bookmark, {
     String? targetTitle,
   }) {
-    final tab = _buildTabForBookmark(bookmark);
+    final tab = tabFromBookmark(bookmark);
 
     context.read<TabsBloc>().add(
       OpenOrFocusTab(
@@ -219,7 +145,7 @@ class _BookmarkViewState extends State<BookmarkView> {
     for (final bookmark in group.items) {
       tabsBloc.add(
         OpenOrFocusTab(
-          _buildTabForBookmark(bookmark),
+          tabFromBookmark(bookmark),
           targetTitle: bookmark.ref,
           navigateToPositionIfReused: true,
         ),
@@ -229,7 +155,7 @@ class _BookmarkViewState extends State<BookmarkView> {
     if (group.items.length > 1) {
       final first = group.items.first;
       tabsBloc.add(
-        OpenOrFocusTab(_buildTabForBookmark(first), targetTitle: first.ref),
+        OpenOrFocusTab(tabFromBookmark(first), targetTitle: first.ref),
       );
     }
     context.read<NavigationBloc>().add(const NavigateToScreen(Screen.reading));
@@ -412,10 +338,10 @@ class _BookmarkViewState extends State<BookmarkView> {
               ? null
               : (item) => bookIdentity(item.book) == filterIdentity,
           groupKeyBuilder: byDate
-              ? (item) => _dateGroupKey((item as Bookmark).createdAt)
+              ? (item) => _dateGroups.keyFor((item as Bookmark).createdAt)
               : (item) => bookmarkGroupKey(item as Bookmark),
           groupTitleBuilder: byDate
-              ? (item) => _dateGroupLabel((item as Bookmark).createdAt)
+              ? (item) => _dateGroups.labelFor((item as Bookmark).createdAt)
               : (item) => bookmarkGroupTitle(item as Bookmark),
           onItemTap: (ctx, item, originalIndex) => _openBook(
             ctx,
@@ -508,4 +434,83 @@ class _BookmarkViewState extends State<BookmarkView> {
       ),
     );
   }
+}
+
+/// קיבוץ "לפי תאריך הוספה". השבוע מתחיל ביום ראשון (מנהג ישראלי).
+/// הגבולות נשמרים כל עוד היום והיסטי אזור הזמן שלהם לא השתנו.
+@visibleForTesting
+class BookmarkDateGroups {
+  static const _keys = [
+    '1_today',
+    '2_yesterday',
+    '3_this_week',
+    '4_last_week',
+    '5_this_month',
+    '6_prev_month',
+    '7_this_year',
+  ];
+
+  static const _labels = {
+    '1_today': 'היום',
+    '2_yesterday': 'אתמול',
+    '3_this_week': 'השבוע',
+    '4_last_week': 'שבוע שעבר',
+    '5_this_month': 'החודש',
+    '6_prev_month': 'חודש קודם',
+    '7_this_year': 'השנה',
+    '8_older': 'ישן יותר',
+  };
+
+  List<DateTime> _starts = const [];
+  List<Duration> _offsets = const [];
+
+  /// תחילת כל תקופה ב-[_keys], מהחדשה לישנה.
+  List<DateTime> periodStarts(DateTime now) {
+    if (_starts.isNotEmpty) {
+      final today = _starts.first;
+      if (today.year == now.year &&
+          today.month == now.month &&
+          today.day == now.day &&
+          _offsetsUnchanged()) {
+        return _starts;
+      }
+    }
+    final today = DateTime(now.year, now.month, now.day);
+    // ראשון=weekday 7 → 7%7=0, שני=1, ..., שבת=6
+    final startOfThisWeek = addCalendarDays(today, -(today.weekday % 7));
+    _starts = [
+      today,
+      addCalendarDays(today, -1),
+      startOfThisWeek,
+      addCalendarDays(startOfThisWeek, -7),
+      DateTime(now.year, now.month, 1),
+      now.month == 1
+          ? DateTime(now.year - 1, 12, 1)
+          : DateTime(now.year, now.month - 1, 1),
+      DateTime(now.year, 1, 1),
+    ];
+    _offsets = [for (final start in _starts) start.timeZoneOffset];
+    return _starts;
+  }
+
+  bool _offsetsUnchanged() {
+    // ההיסט ב-DateTime ישן מחושב מחדש; גם גבול היסטורי יכול לשנות היסט לבדו.
+    for (var i = 0; i < _starts.length; i++) {
+      if (_starts[i].timeZoneOffset != _offsets[i]) return false;
+    }
+    return true;
+  }
+
+  String keyFor(DateTime? date, {DateTime? now}) {
+    if (date == null) return '8_older';
+    final starts = periodStarts(now ?? DateTime.now());
+    final d = DateTime(date.year, date.month, date.day);
+    for (var i = 0; i < starts.length; i++) {
+      if (!d.isBefore(starts[i])) return _keys[i];
+    }
+    return '8_older';
+  }
+
+  String labelFor(DateTime? date, {DateTime? now}) =>
+      _labels[keyFor(date, now: now)]!;
 }

@@ -11,14 +11,6 @@ class PubDate {
     required this.date,
   });
 
-  /// Creates a PubDate instance from a map (e.g., a database row).
-  factory PubDate.fromMap(Map<String, dynamic> map) {
-    return PubDate(
-      id: map['id'] as int,
-      date: map['date'] as String,
-    );
-  }
-
   /// Creates a PubDate instance from JSON.
   factory PubDate.fromJson(Map<String, dynamic> json) {
     return PubDate(
@@ -33,16 +25,6 @@ class PubDate {
       'id': id,
       'date': date,
     };
-  }
-
-  PubDate copyWith({
-    int? id,
-    String? date,
-  }) {
-    return PubDate(
-      id: id ?? this.id,
-      date: date ?? this.date,
-    );
   }
 
   @override

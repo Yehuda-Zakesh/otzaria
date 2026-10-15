@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -221,15 +222,16 @@ void main() {
     expect(buttonX < screenCenterX, panelX < screenCenterX);
   });
 
-  testWidgets('תוויות הסגמנט בחלונית אינן נשברות לשתי שורות', (
+  testWidgets('תוויות הסגמנט בחלונית מוצגות במלואן', (
     tester,
   ) async {
     await pumpScreen(tester);
     await tester.tap(find.byTooltip('הגדרות'));
     await tester.pumpAndSettle();
-    final label = tester.widget<Text>(find.text('מיקום אחרון'));
-    expect(label.maxLines, 1);
-    expect(label.overflow, TextOverflow.ellipsis);
+    final label = tester.renderObject<RenderParagraph>(
+      find.text('מיקום אחרון'),
+    );
+    expect(label.didExceedMaxLines, isFalse);
   });
 
   testWidgets('מקש Escape סוגר את חלונית ההגדרות', (tester) async {

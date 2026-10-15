@@ -1,14 +1,5 @@
 -- Queries for table of contents texts
 
-selectAll:
-SELECT * FROM tocText ORDER BY text;
-
-selectById:
-SELECT * FROM tocText WHERE id = ?;
-
-selectByText:
-SELECT * FROM tocText WHERE text = ? LIMIT 1;
-
 insert:
 INSERT INTO tocText (text)
 VALUES (?)
@@ -26,6 +17,3 @@ DELETE FROM tocText WHERE id = ?;
 
 countAll:
 SELECT COUNT(*) FROM tocText;
-
-lastInsertRowId:
-SELECT last_insert_rowid();

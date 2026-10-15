@@ -6,11 +6,19 @@ final RegExp wordPattern = RegExp(r'[\p{L}\d]+', unicode: true);
 final RegExp wordCharPattern = RegExp(r'[\p{L}\d]', unicode: true);
 
 List<String> splitBookContentIntoLines(String content) {
-  final normalized = content.replaceAll('\r\n', '\n');
-  final lines = normalized.split('\n');
-  if (lines.isNotEmpty && lines.last.isEmpty) {
-    lines.removeLast();
+  // מעבר אחד בלי replaceAll: אין עותק נוסף של ספר שלם בכל פעולה על הערה.
+  final lines = <String>[];
+  var start = 0;
+  for (
+    var i = content.indexOf('\n');
+    i != -1;
+    i = content.indexOf('\n', start)
+  ) {
+    final end = i > start && content.codeUnitAt(i - 1) == 0x0D ? i - 1 : i;
+    lines.add(content.substring(start, end));
+    start = i + 1;
   }
+  if (start < content.length) lines.add(content.substring(start));
   return lines;
 }
 
@@ -46,23 +54,6 @@ String _stripHtmlTags(String htmlText) {
   // Remove HTML tags
   final RegExp htmlTagPattern = RegExp(r'<[^>]*>');
   return htmlText.replaceAll(htmlTagPattern, '').trim();
-}
-
-List<String> extractReferenceWordsFromLines(
-  List<String> lines,
-  int lineNumber, {
-  int limit = kReferenceWordsLimit,
-  String? excludeBookTitle,
-}) {
-  final index = lineNumber - 1;
-  if (index < 0 || index >= lines.length) {
-    return const [];
-  }
-  return extractReferenceWordsFromLine(
-    lines[index],
-    limit: limit,
-    excludeBookTitle: excludeBookTitle,
-  );
 }
 
 /// Extract the beginning of a line as display text (without normalization).

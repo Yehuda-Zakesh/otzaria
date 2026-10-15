@@ -1,11 +1,10 @@
-import 'package:otzaria/library/hidden/hidden_library_selection.dart';
+import 'package:otzaria/text_book/view/page_shape/utils/page_shape_default_commentators.dart';
 import 'package:otzaria/library/hidden/hidden_library_store.dart';
 import 'package:otzaria/library/hidden/hidden_titles.dart';
-import 'package:otzaria/core/windowing/settings_sync.dart';
 import 'dart:async';
+import 'dart:math';
 import 'package:otzaria/core/error_log_file.dart';
 import 'package:bloc_concurrency/bloc_concurrency.dart';
-import 'package:flutter/animation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
@@ -15,12 +14,11 @@ import 'package:otzaria/models/links.dart';
 import 'package:otzaria/models/link_types.dart';
 import 'package:otzaria/services/commentary_service.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_display/text_display_exports.dart';
-import 'package:otzaria/text_book/models/commentator_group.dart';
+import 'package:otzaria/book_common/models/commentator_group.dart';
 import 'package:otzaria/utils/text/ref_helper.dart';
-import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
@@ -31,20 +29,19 @@ import 'package:otzaria/search/utils/in_book_search_routing.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
 import 'package:otzaria/text_book/utils/per_book_display_settings.dart';
-import 'package:otzaria/text_book/view/page_shape/utils/default_commentators.dart';
+import 'package:otzaria/book_common/utils/default_commentators.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_commentary_selection.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_settings_manager.dart';
 import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/text_book/utils/link_processing.dart';
 import 'package:otzaria/text_book/utils/he_categories_enricher.dart';
-import 'package:otzaria/text_book/utils/commentator_group_builder.dart';
+import 'package:otzaria/book_common/utils/commentator_group_builder.dart';
 import 'package:otzaria/text_book/utils/inline_notes_utils.dart' as notes;
-import 'package:otzaria/text_book/utils/reading_segment_navigation.dart';
+import 'package:otzaria/text_book/utils/reading_position.dart';
 import 'package:otzaria/text_book/utils/reading_segments.dart';
 import 'package:otzaria/utils/file/toc_parser.dart';
 import 'package:otzaria/utils/file/markdown_to_otzaria.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
   // השאילתה עצמה רצה ב-Isolate, אבל כל טעינה גוררת פענוח התוצאה, מיזוג
@@ -72,13 +69,13 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
   /// ספר קצר מזה לא משוחרר במעבר לרקע — הרווח זניח והשחרור גורר rebuild.
   static const int _releaseContentMinLines = 2000;
   static const int _contentReloadThresholdLines = 60;
+
   static const Duration _visibleIndicesDebounceDuration = Duration(
     milliseconds: 160,
   );
 
-  /// קצב מרבי לשידור מיידי של visibleIndices בזמן גלילה. במצב קריאה רציף
-  /// השורה הגלויה נגזרת משבר הגלילה בתוך פסקה ממוזגת ולכן משתנה כמעט בכל
-  /// פריים; בלי הגבלה זו כל פריים גורר emit ו-rebuild של הפסקה כולה.
+  /// קצב מרבי לשידור visibleIndices במצב רציף, שבו כמעט כל פריים משנה את
+  /// השורה הגלויה בפסקה ממוזגת וגורר rebuild שלה. במצב רגיל אין הגבלה.
   static const Duration _visibleIndicesThrottleInterval = Duration(
     milliseconds: 100,
   );
@@ -94,14 +91,17 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     BookSource preferSource,
   })
   _quickPreviewLoader;
-  final ItemScrollController scrollController;
-  final ItemPositionsListener positionsListener;
-  final ScrollOffsetController? scrollOffsetController;
+
+  /// המיקום הנמדד של הקורא; מקור ה-visibleIndices.
+  final ValueListenable<ReadingPosition?>? readingPosition;
+
+  /// מזהה הקורא לזיכרון הפריסה ([readingLayoutOf]).
+  final Object _readerIdentity = Object();
 
   Timer? _debounceTimer;
   Timer? _highlightTimer;
   DateTime? _lastVisibleIndicesDispatchAt;
-  VoidCallback? _positionListenerCallback;
+  bool _listeningToReadingPosition = false;
   int? _loadedLinksStart;
   int? _loadedLinksEnd;
   String? _loadedLinksBookTitle;
@@ -142,8 +142,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
   /// על סריקות עתידיות גם אם 'הערות' לא נוסף ל-availableCommentators.
   bool _inlineNotesFullScanDone = false;
   Set<String> _hiddenCommentatorTitlesCache = const {};
-  StreamSubscription<HiddenLibrarySelection>? _hiddenSelectionSubscription;
-  StreamSubscription<String>? _settingsSyncSubscription;
+  StreamSubscription<void>? _hiddenSelectionSubscription;
   int _commentatorsLoadGeneration = 0;
   int _visibilityRefreshGeneration = 0;
 
@@ -181,9 +180,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     })?
     quickPreviewLoader,
     required TextBookInitial initialState,
-    required this.scrollController,
-    required this.positionsListener,
-    this.scrollOffsetController,
+    this.readingPosition,
   }) : _quickPreviewLoader =
            quickPreviewLoader ??
            SqliteDataProvider.instance.getBookQuickPreview,
@@ -222,16 +219,8 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     on<RefreshLinksForCurrentWindow>(_onRefreshLinksForCurrentWindow);
     on<LoadAllLinksForIndices>(_onLoadAllLinksForIndices);
     on<SetTabVisibility>(_onSetTabVisibility);
-    _hiddenSelectionSubscription = const HiddenLibraryStore().changes.listen(
-      (_) => add(const RefreshCommentatorVisibility()),
-    );
-    _settingsSyncSubscription = SettingsSync.instance.changes.listen((key) {
-      if (key.isEmpty ||
-          key == HiddenLibraryStore.bookKeysSetting ||
-          key == HiddenLibraryStore.categoryPathsSetting) {
-        add(const RefreshCommentatorVisibility());
-      }
-    });
+    _hiddenSelectionSubscription = const HiddenLibraryStore().visibilityChanges
+        .listen((_) => add(const RefreshCommentatorVisibility()));
   }
 
   void _onSetTabVisibility(
@@ -257,9 +246,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
         currentState.visibleIndices,
       );
       _warmContentCacheInBackground(currentState.book);
-    } else if (!currentState.continuousReadingMode) {
-      // שחרור אסור במצב קריאה רציף: הוא מכווץ את רשימת הסגמנטים, וגם רשימת
-      // טאב רקע חיה (KeepAlive) — ה-clamp דורס את מקום הקריאה (issue #912).
+    } else {
       _releaseContentOutsideWindow(currentState, emit);
     }
   }
@@ -276,7 +263,10 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       return;
     }
 
-    final window = _calculateContentWindow(currentState.visibleIndices);
+    final window = _calculateContentWindow(
+      currentState,
+      currentState.visibleIndices,
+    );
     final keepStart = window.startLine.clamp(0, content.length - 1);
     final keepEnd = window.endLine.clamp(0, content.length - 1);
 
@@ -310,11 +300,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       currentState.copyWith(
         content: nextContent,
         contentVersion: currentState.contentVersion + 1,
-        readingSegments: buildReadingSegments(
-          nextContent,
-          continuous: currentState.continuousReadingMode,
-          loadedLineFlags: nextFlags,
-        ),
+        loadedLineFlags: _loadedContentFlags,
       ),
     );
   }
@@ -335,20 +321,21 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
   /// - ספר שלא תומך → תמיד false.
   /// - אם הדגל [preserveFlag] פעיל ו-currentState הוא Loaded → שומרים
   ///   את הערך הקודם של המשתמש.
-  /// - אחרת — ברירת המחדל הגלובלית [globalDefault]. זה גם המסלול של
-  ///   `_resetPerBookSettings` (חוזר לברירת המחדל) ושל פתיחת ספר חדש.
+  /// - אחרת — הגדרת הספר [perBookValue], ובלעדיה ברירת המחדל הגלובלית
+  ///   [globalDefault]: כך כבר ה-Loaded הראשון בונה את הפריסה הנכונה.
   @visibleForTesting
   static bool resolvePreservedContinuousReadingMode({
     required bool supportsContinuous,
     required bool preserveFlag,
     required TextBookState? currentState,
     bool globalDefault = false,
+    bool? perBookValue,
   }) {
     if (!supportsContinuous) return false;
     if (preserveFlag && currentState is TextBookLoaded) {
       return currentState.continuousReadingMode;
     }
-    return globalDefault;
+    return perBookValue ?? globalDefault;
   }
 
   /// האם לשדר עכשיו עדכון `visibleIndices`, או לדלג ולהשאיר את השידור
@@ -706,7 +693,8 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       searchResultLines = initial.initialSearchResultLines;
       showLeftPane = initial.showLeftPane;
       commentators = initial.commentators;
-      visibleIndices = [initial.index < 0 ? 0 : initial.index];
+      final startIndex = event.startIndex ?? initial.index;
+      visibleIndices = [startIndex < 0 ? 0 : startIndex];
       initialShowPageShapeView = initial.showPageShapeView;
       pinpointHighlightIndex = initial.pinpointHighlightIndex;
       pinpointHighlightText = initial.pinpointHighlightText;
@@ -714,7 +702,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       emit(
         TextBookLoading(
           book,
-          initial.index,
+          visibleIndices.first,
           initial.showLeftPane,
           initial.commentators,
         ),
@@ -867,10 +855,11 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
             SettingsRepository.keyEnablePerBookSettings,
           ) ??
           false;
-      final bookDisplayLayer = perBookSettingsEnabled
-          ? (await TextBookPerBookSettings.load(book))?.effectiveDisplayLayer ??
-                TextDisplayLayer.empty
-          : TextDisplayLayer.empty;
+      final perBookSettings = perBookSettingsEnabled
+          ? await TextBookPerBookSettings.load(book)
+          : null;
+      final bookDisplayLayer =
+          perBookSettings?.effectiveDisplayLayer ?? TextDisplayLayer.empty;
       // שינוי הגדרות ניקוד/פיסוק גלובלי מפיל את העקיפה הזמנית של הגוף באותו
       // שדה כדי שהערך החדש ייראה; שינוי גופן בלבד משמר את בחירת המשתמש.
       // עקיפות כרטיסיית המפרשים נשמרות תמיד.
@@ -884,18 +873,11 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
                   )
                 : patch,
           );
-      final supportsContinuousReading = await FileSystemData.instance
-          .supportsContinuousReadingMode(
-            book.title,
-            categoryId: book.categoryId,
-            fileType: book.fileType,
-          );
+      final supportsContinuousReading = await repository
+          .supportsContinuousReadingMode(book);
 
-      // מצב הרצף שומר את הערך הנוכחי רק כש-preserveContinuousReadingMode=true.
-      // הלוגיקה הזו מנופית ל-`resolvePreservedContinuousReadingMode` כדי
-      // שתוכל להיבדק טהורה: _resetPerBookSettings סומך על default=false,
-      // וה-listener על שינוי גופן/ניקוד מעביר preserveFlag=true כדי לא
-      // לכבות מצב רצף שהמשתמש בחר.
+      // טעינה מחדש בשינוי גופן/ניקוד (preserveFlag) שומרת את בחירת המשתמש;
+      // פתיחה ואיפוס הגדרות הספר — הגדרת הספר או ברירת המחדל.
       final defaultContinuousReading =
           Settings.getValue<bool>('key-continuous-reading-mode') ?? false;
       final effectiveContinuousReading = resolvePreservedContinuousReadingMode(
@@ -903,99 +885,24 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
         preserveFlag: event.preserveContinuousReadingMode,
         currentState: state,
         globalDefault: defaultContinuousReading,
+        perBookValue: perBookSettings?.continuousReadingMode,
       );
-      final readingSegments = buildReadingSegments(
-        contentLines,
-        continuous: effectiveContinuousReading,
-        loadedLineFlags: loadedLineFlags,
-      );
-
+      if (effectiveContinuousReading &&
+          _supportsContentRangeLoading &&
+          !(state is TextBookLoaded && event.preserveState) &&
+          visibleIndices.isNotEmpty) {
+        await _loadInitialItemRange(
+          book,
+          contentLines,
+          loadedLineFlags,
+          tableOfContents,
+          visibleIndices.first,
+        );
+      }
       const List<Link> emptyLinks = [];
       const List<Link> emptyVisibleLinks = [];
 
-      if (_positionListenerCallback != null) {
-        positionsListener.itemPositions.removeListener(
-          _positionListenerCallback!,
-        );
-      }
-
-      _positionListenerCallback = () {
-        final rawPositions = positionsListener.itemPositions.value.toList()
-          ..sort((a, b) => a.index.compareTo(b.index));
-        final currentState = state;
-        if (currentState is! TextBookLoaded) {
-          return;
-        }
-
-        final visibleIndicesNow = _resolveVisibleSourceIndices(
-          currentState,
-          rawPositions,
-        );
-        if (visibleIndicesNow.isEmpty) {
-          return;
-        }
-
-        if (!_hasMeaningfulVisibleIndicesChange(
-          currentState.visibleIndices,
-          visibleIndicesNow,
-        )) {
-          return;
-        }
-
-        final initialSyncClassification =
-            _classifyRawPositionsDuringInitialPageShapeVisibleSync(
-              awaitingInitialPageShapeVisibleSync:
-                  _awaitingInitialPageShapeVisibleSync,
-              showPageShapeView: currentState.showPageShapeView,
-              currentVisibleIndices: currentState.visibleIndices,
-              selectedIndex: currentState.selectedIndex,
-              nextVisibleIndices: visibleIndicesNow,
-            );
-        if (initialSyncClassification.shouldIgnore) {
-          return;
-        }
-        if (initialSyncClassification.shouldDispatchImmediately) {
-          _debounceTimer?.cancel();
-          _dispatchVisibleIndices(visibleIndicesNow);
-          return;
-        }
-
-        final lastDispatchAt = _lastVisibleIndicesDispatchAt;
-        if (shouldDispatchVisibleIndicesNow(
-          continuousReadingMode: currentState.continuousReadingMode,
-          sinceLastDispatch: lastDispatchAt == null
-              ? null
-              : DateTime.now().difference(lastDispatchAt),
-        )) {
-          _dispatchVisibleIndices(visibleIndicesNow);
-        }
-        _debounceTimer?.cancel();
-        _debounceTimer = Timer(_visibleIndicesDebounceDuration, () {
-          if (isClosed) {
-            return;
-          }
-
-          final debouncedRawPositions =
-              positionsListener.itemPositions.value.toList()
-                ..sort((a, b) => a.index.compareTo(b.index));
-          final latestState = state;
-          if (latestState is TextBookLoaded) {
-            final visibleIndicesNow = _resolveVisibleSourceIndices(
-              latestState,
-              debouncedRawPositions,
-            );
-            if (visibleIndicesNow.isNotEmpty &&
-                _hasMeaningfulVisibleIndicesChange(
-                  latestState.visibleIndices,
-                  visibleIndicesNow,
-                )) {
-              _dispatchVisibleIndices(visibleIndicesNow);
-            }
-          }
-        });
-      };
-
-      positionsListener.itemPositions.addListener(_positionListenerCallback!);
+      _listenToReadingPosition();
 
       _setAwaitingInitialPageShapeVisibleSync(initialShowPageShapeView);
 
@@ -1033,7 +940,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
         displayOverrides: displayOverrides,
         supportsContinuousReadingMode: supportsContinuousReading,
         continuousReadingMode: effectiveContinuousReading,
-        readingSegments: readingSegments,
+        loadedLineFlags: loadedLineFlags,
         // בלי בחירת מפרשים הקישורים נטענים רק אחרי שהבחירה נפתרה (ראה למטה),
         // והחלונית מציגה "טוען" עד אז ולא "לא נמצאו" (issue #1130).
         linksLoading: event.loadCommentators && commentators.isEmpty,
@@ -1063,9 +970,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
           ),
         ),
         searchResultLines: searchResultLines,
-        scrollController: scrollController,
-        positionsListener: positionsListener,
-        scrollOffsetController: scrollOffsetController,
+        readerIdentity: _readerIdentity,
         currentTitle: currentTitle,
         visibleLinks: emptyVisibleLinks,
         selectedLinkTypes: _loadSelectedLinkTypes(),
@@ -1095,6 +1000,8 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       }
 
       emit(loadedState);
+      // מיקום שפורסם לפני הטעינה (ניווט לטאב באמצע LoadContent) לא שודר.
+      _onReadingPosition();
 
       _pendingPinpoint = null;
       _pendingFontSize = null;
@@ -1270,17 +1177,6 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
         updatedState.visibleIndices,
         force: true,
       );
-
-      if (!event.show && currentState.selectedIndex != null) {
-        Future.delayed(const Duration(milliseconds: 100), () {
-          if (scrollController.isAttached) {
-            scrollController.scrollTo(
-              index: currentState.selectedIndex!,
-              duration: const Duration(milliseconds: 300),
-            );
-          }
-        });
-      }
     }
   }
 
@@ -1459,11 +1355,6 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     emit(
       currentState.copyWith(
         continuousReadingMode: effectiveEnabled,
-        readingSegments: buildReadingSegments(
-          currentState.content,
-          continuous: effectiveEnabled,
-          loadedLineFlags: _loadedContentFlags,
-        ),
       ),
     );
   }
@@ -1531,17 +1422,12 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
           ? const <int>{}
           : currentState.selectedIndices;
 
-      final List<Link> visibleLinks;
-      if (currentState.showLeftPane || index != null) {
-        visibleLinks = computeVisibleLinks(
-          links: currentState.links,
-          visibleIndices: event.visibleIndecies,
-          selectedIndices: newIndices,
-          linksByLine: currentState.linksByLine,
-        );
-      } else {
-        visibleLinks = currentState.visibleLinks;
-      }
+      final visibleLinks = computeVisibleLinks(
+        links: currentState.links,
+        visibleIndices: event.visibleIndecies,
+        selectedIndices: newIndices,
+        linksByLine: currentState.linksByLine,
+      );
 
       emit(
         currentState.copyWith(
@@ -1679,7 +1565,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     if (storedConfiguration != null) {
       configuration = storedConfiguration;
     } else {
-      final defaults = await DefaultCommentators.getPageShapeDefaults(
+      final defaults = await PageShapeDefaultCommentators.getPageShapeDefaults(
         state.book,
         availableCommentators: candidateCommentators,
       );
@@ -1785,6 +1671,69 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     return true;
   }
 
+  void _listenToReadingPosition() {
+    final source = readingPosition;
+    if (source == null || _listeningToReadingPosition) return;
+    _listeningToReadingPosition = true;
+    source.addListener(_onReadingPosition);
+  }
+
+  List<int> _currentVisibleLines() =>
+      readingPosition?.value?.visibleLines ?? const [];
+
+  void _onReadingPosition() {
+    final currentState = state;
+    if (currentState is! TextBookLoaded) return;
+    final visibleIndicesNow = _currentVisibleLines();
+    if (visibleIndicesNow.isEmpty ||
+        !_hasMeaningfulVisibleIndicesChange(
+          currentState.visibleIndices,
+          visibleIndicesNow,
+        )) {
+      return;
+    }
+
+    final initialSyncClassification =
+        _classifyRawPositionsDuringInitialPageShapeVisibleSync(
+          awaitingInitialPageShapeVisibleSync:
+              _awaitingInitialPageShapeVisibleSync,
+          showPageShapeView: currentState.showPageShapeView,
+          currentVisibleIndices: currentState.visibleIndices,
+          selectedIndex: currentState.selectedIndex,
+          nextVisibleIndices: visibleIndicesNow,
+        );
+    if (initialSyncClassification.shouldIgnore) return;
+    if (initialSyncClassification.shouldDispatchImmediately) {
+      _debounceTimer?.cancel();
+      _dispatchVisibleIndices(visibleIndicesNow);
+      return;
+    }
+
+    final lastDispatchAt = _lastVisibleIndicesDispatchAt;
+    if (shouldDispatchVisibleIndicesNow(
+      continuousReadingMode: currentState.continuousReadingMode,
+      sinceLastDispatch: lastDispatchAt == null
+          ? null
+          : DateTime.now().difference(lastDispatchAt),
+    )) {
+      _dispatchVisibleIndices(visibleIndicesNow);
+    }
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(_visibleIndicesDebounceDuration, () {
+      if (isClosed) return;
+      final latestState = state;
+      final latest = _currentVisibleLines();
+      if (latestState is TextBookLoaded &&
+          latest.isNotEmpty &&
+          _hasMeaningfulVisibleIndicesChange(
+            latestState.visibleIndices,
+            latest,
+          )) {
+        _dispatchVisibleIndices(latest);
+      }
+    });
+  }
+
   /// שידור עדכון `visibleIndices` תוך רישום מועד השידור, שעליו נשענת
   /// הגבלת הקצב ב-[shouldDispatchVisibleIndicesNow].
   void _dispatchVisibleIndices(List<int> visibleIndices) {
@@ -1806,72 +1755,6 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
 
     return currentIndices.first != nextIndices.first ||
         currentIndices.last != nextIndices.last;
-  }
-
-  List<int> _resolveVisibleSourceIndices(
-    TextBookLoaded state,
-    Iterable<ItemPosition> visibleItemPositions,
-  ) {
-    final allItemPositions = visibleItemPositions.toList();
-    if (allItemPositions.isEmpty) {
-      return const [];
-    }
-
-    // גלילה ע"י ניווט משתמשת ב-alignment: 0.05, כך שהקטע הקודם נשאר גלוי
-    // ב-5% העליונים של ה-viewport. בלי סינון, visibleIndices.first נופל על
-    // השורה האחרונה של הקטע הקודם, וזיהוי הכותרת (currentTitle ו-
-    // closestTocEntryIndex) מצביע על הסעיף הקודם במקום על זה שאליו ניווטו.
-    final itemPositions = _filterBarelyVisiblePositions(allItemPositions);
-
-    if (!state.continuousReadingMode) {
-      return itemPositions.map((position) => position.index).toSet().toList()
-        ..sort();
-    }
-
-    // במצב רציף: ה-positions הם segmentIndex. ממירים בחזרה לשורות מקור
-    // כדי ש-visibleIndices ב-state יישאר תמיד ברמת שורות.
-    return sourceLineIndicesForSegmentViewports(
-      state.readingSegments,
-      itemPositions.map(
-        (position) => ReadingSegmentViewport(
-          segmentIndex: position.index,
-          leadingEdge: position.itemLeadingEdge,
-          trailingEdge: position.itemTrailingEdge,
-        ),
-      ),
-      isLineRemnant: isRemnantAbovePositionAnchor,
-    );
-  }
-
-  /// סינון item positions שאינם חלק מ"המיקום הנוכחי" בספר:
-  /// - קטע שנוכחותו מתחת לקו העוגן זניחה הוא שייר של הסעיף הקודם שאליו הניווט
-  ///   מיישר (isRemnantAbovePositionAnchor) - גם אם הוא שורה קצרה הגלויה
-  ///   במלואה סביב קו העוגן.
-  /// - קטע שגלוי פחות מ-15% מה-extent שלו (שייר בתחתית ה-viewport).
-  ///
-  /// אם הסינון מותיר רשימה ריקה (לא צפוי בפועל), חוזרים לרשימה המקורית.
-  @visibleForTesting
-  static List<ItemPosition> filterBarelyVisiblePositionsForTesting(
-    List<ItemPosition> positions,
-  ) => _filterBarelyVisiblePositions(positions);
-
-  static List<ItemPosition> _filterBarelyVisiblePositions(
-    List<ItemPosition> positions,
-  ) {
-    if (positions.length <= 1) return positions;
-    final filtered = positions.where((p) {
-      final extent = p.itemTrailingEdge - p.itemLeadingEdge;
-      if (extent <= 0) return false;
-      if (isRemnantAbovePositionAnchor(p.itemLeadingEdge, p.itemTrailingEdge)) {
-        return false;
-      }
-      final visibleTop = p.itemLeadingEdge.clamp(0.0, 1.0);
-      final visibleBottom = p.itemTrailingEdge.clamp(0.0, 1.0);
-      final visiblePortion = visibleBottom - visibleTop;
-      if (visiblePortion <= 0) return false;
-      return visiblePortion / extent >= 0.15;
-    }).toList();
-    return filtered.isEmpty ? positions : filtered;
   }
 
   void _onUpdateSelectedIndex(
@@ -1962,33 +1845,14 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
   ) {
     if (state is TextBookLoaded) {
       final currentState = state as TextBookLoaded;
-      final scrollIndex = event.scrollToIndex ?? event.permanentHighlightLine;
-      // ניווט deep-link לא נשען על ה-position listener של גלילת הטקסט (שנבלע
-      // כשהטאב ברקע וה-controller לא מחובר). מעדכנים ישירות את המיקום הגלוי
-      // וטוענים את קישורי חלון היעד, אחרת חלוניות המפרשים נשארות על המיקום הקודם.
-      final navigateCommentary =
-          scrollIndex != null &&
-          _shouldLoadLinksForVisibleIndicesChange(currentState);
       emit(
         currentState.copyWith(
           highlightText: event.highlightText,
           permanentHighlightLine: event.permanentHighlightLine,
           clearPermanentHighlight: event.permanentHighlightLine == null,
           searchText: '',
-          visibleIndices: navigateCommentary ? [scrollIndex] : null,
         ),
       );
-      // גלילה לסעיף המבוקש כדי שההדגשה תהיה גלויה
-      if (scrollIndex != null && scrollController.isAttached) {
-        scrollController.scrollTo(
-          index: scrollIndex,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-        );
-      }
-      if (navigateCommentary) {
-        _loadLinksInBackground(currentState.book, [scrollIndex]);
-      }
     } else {
       // Initial או Loading — שומרים כ-pending, יוחל ב-_onLoadContent
       _pendingPinpoint = (
@@ -2126,11 +1990,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       currentState.copyWith(
         content: event.content,
         contentVersion: currentState.contentVersion + 1,
-        readingSegments: buildReadingSegments(
-          event.content,
-          continuous: currentState.continuousReadingMode,
-          loadedLineFlags: nextLoadedFlags,
-        ),
+        loadedLineFlags: _loadedContentFlags,
       ),
     );
     // אחרי שסרקנו את התוכן המלא, אין יותר טעם בסריקה נוספת על הרחבות
@@ -2248,35 +2108,12 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     _setLoadedContentFlags(currentState.book, nextLoadedFlags);
     markAllRanges();
 
-    // מיזוג טווחים סמוכים/חופפים: עדכון הסגמנטים מעתיק את הרשימה המלאה לכל
-    // טווח, ואצוות חימום הן כמעט תמיד רצף אחד — כך נשארת העתקה אחת לאצווה.
-    var mergedRanges = const <({int startLine, int endLine})>[];
-    for (final range in applicable) {
-      mergedRanges = mergeLoadedContentRanges(
-        mergedRanges,
-        startLine: range.startLine,
-        endLine: range.startLine + range.lines.length - 1,
-      );
-    }
-
-    var readingSegments = currentState.readingSegments;
-    for (final range in mergedRanges) {
-      readingSegments = updateReadingSegmentsForRange(
-        readingSegments,
-        nextContent,
-        loadedLineFlags: nextLoadedFlags,
-        continuous: currentState.continuousReadingMode,
-        startLine: range.startLine,
-        endLine: range.endLine,
-      );
-    }
-
     emit(
       _withInlineNotesCommentator(
         currentState.copyWith(
           content: nextContent,
           contentVersion: currentState.contentVersion + 1,
-          readingSegments: readingSegments,
+          loadedLineFlags: _loadedContentFlags,
         ),
         // אופטימיזציה: לסרוק רק את השורות החדשות במקום את כל ה-content
         // המצטבר (מונע עבודה ריבועית במהלך warming הדרגתי של ספר ארוך).
@@ -2395,18 +2232,12 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     _debounceTimer?.cancel();
     _highlightTimer?.cancel();
     final hiddenSelectionCancellation = _hiddenSelectionSubscription?.cancel();
-    final settingsSyncCancellation = _settingsSyncSubscription?.cancel();
 
-    if (_positionListenerCallback != null) {
-      positionsListener.itemPositions.removeListener(
-        _positionListenerCallback!,
-      );
-    }
+    readingPosition?.removeListener(_onReadingPosition);
 
     final blocClosure = super.close();
     await Future.wait<void>([
       ?hiddenSelectionCancellation,
-      ?settingsSyncCancellation,
       blocClosure,
     ]);
   }
@@ -2420,6 +2251,56 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       range.totalLines > range.endLine + 1
       ? range.totalLines
       : range.endLine + 1;
+
+  /// במצב רציף שורת הפתיחה מוצגת בתוך פסקה שלמה; טוענים את כל שורותיה לפני
+  /// הציור הראשון, כדי שהקורא ייפתח בשורה עצמה ולא במקום שמור.
+  Future<void> _loadInitialItemRange(
+    TextBook book,
+    List<String> content,
+    List<bool> loadedLineFlags,
+    List<TocEntry> tableOfContents,
+    int line,
+  ) async {
+    if (content.isEmpty || loadedLineFlags.length < content.length) return;
+    final layout = continuousReadingLayout(
+      lineCount: content.length,
+      tableOfContents: tableOfContents,
+    );
+    final item = layout.itemForLine(line);
+    final first = layout.firstLineOf(item);
+    final last = layout.lastLineOf(item);
+    if (!loadedLineFlags.sublist(first, last + 1).contains(false)) return;
+    // כישלון כאן אינו מכשיל את הפתיחה: הפסקה תיטען כמו כל פריט שלא נטען.
+    final BookContentRange? range;
+    try {
+      range = await repository.getBookContentRange(
+        book,
+        startLine: first,
+        endLine: last,
+      );
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint(
+          '⚠️ TextBookBloc::loadInitialItemRange failed for ${book.title}: $e',
+        );
+      }
+      return;
+    }
+    if (range == null) return;
+    for (var offset = 0; offset < range.lines.length; offset++) {
+      final target = range.startLine + offset;
+      if (target < 0 || target >= content.length) continue;
+      content[target] = range.lines[offset];
+      loadedLineFlags[target] = true;
+    }
+    _setLoadedContentFlags(book, loadedLineFlags);
+    _markLoadedContentRange(
+      book,
+      range.startLine,
+      range.endLine,
+      totalLines: range.totalLines,
+    );
+  }
 
   List<String> _contentWithAppliedRange(BookContentRange range) {
     final content = List<String>.filled(_fullContentLength(range), '');
@@ -2506,13 +2387,31 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     );
   }
 
+  /// החלון כולל את כל שורות הפריטים הגלויים: פריט חלקי מוצג כמקום שמור
+  /// עד שכל שורותיו נטענות.
   ({int startLine, int endLine}) _calculateContentWindow(
+    TextBookLoaded? state,
     List<int> visibleIndices,
   ) {
-    final firstVisible = visibleIndices.isEmpty ? 0 : visibleIndices.first;
-    final lastVisible = visibleIndices.isEmpty
+    var firstVisible = visibleIndices.isEmpty ? 0 : visibleIndices.first;
+    var lastVisible = visibleIndices.isEmpty
         ? firstVisible
         : visibleIndices.last;
+    // פריט חלקי בשולי התצוגה מסונן מ-visibleIndices אך עדיין מוצג.
+    final measured = readingPosition?.value;
+    if (measured != null &&
+        visibleIndices.isNotEmpty &&
+        measured.topLine == firstVisible) {
+      firstVisible = min(firstVisible, measured.windowFirstLine);
+      lastVisible = max(lastVisible, measured.windowLastLine);
+    }
+    if (state != null) {
+      final layout = readingLayoutOf(state);
+      if (layout.isNotEmpty) {
+        firstVisible = layout.firstLineOf(layout.itemForLine(firstVisible));
+        lastVisible = layout.lastLineOf(layout.itemForLine(lastVisible));
+      }
+    }
 
     return (
       startLine: firstVisible - _contentLookBehindLines,
@@ -2527,7 +2426,13 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
   }) async {
     if (_requiresWholeBookContent(book)) return;
 
-    final window = _calculateContentWindow(visibleIndices);
+    final loadedState = state;
+    final window = _calculateContentWindow(
+      loadedState is TextBookLoaded && loadedState.book.title == book.title
+          ? loadedState
+          : null,
+      visibleIndices,
+    );
     if (!force &&
         _isContentWindowSufficient(book, window.startLine, window.endLine)) {
       return;
@@ -2969,9 +2874,9 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     _activeLinksTargetBookTitlesSignature =
         event.targetBookTitlesSignature ?? _allTargetBookTitlesSignature;
 
-    // טעינת דורות הספרים מראש למטמון, כדי שתפריט ההקשר יוכל למיין
-    // את הקישורים לפי סדר הדורות באופן סינכרוני.
-    _preloadLinkEras(processedLinks.links);
+    // טעינת דורות הספרים מראש למטמון, כדי שתפריט ההקשר יוכל למיין סינכרונית.
+    // רק החלון החדש: הקישורים שנצברו נטענו באירועים קודמים.
+    _preloadLinkEras(event.links.cast<Link>());
   }
 
   /// טוען מראש את דורות ספרי היעד של הקישורים הרגילים (לא מפרשים)
@@ -3129,14 +3034,10 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
         book,
       );
 
-      final eras = await utils.splitByEra(
+      final groups = await groupCommentatorsByEra(
         availableCommentators,
         source: book.source,
         sourceByTitle: await repository.getExternalCommentatorSources(book),
-      );
-      final groups = buildCommentatorGroups(
-        eras,
-        availableCommentators,
         baseCommentators: baseCommentators,
       );
 

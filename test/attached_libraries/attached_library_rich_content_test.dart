@@ -19,11 +19,12 @@ import 'package:otzaria/migration/database/untrusted_database.dart';
 import 'package:otzaria/personal_notes/personal_notes_system.dart';
 import 'package:otzaria/plugins/services/plugin_ref_line_resolver.dart';
 import 'package:otzaria/models/books.dart';
+import 'package:otzaria/models/links.dart';
 import 'package:otzaria/services/commentary_service.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/text_book/utils/dibburim_structure.dart';
-import 'package:otzaria/text_book/view/page_shape/utils/default_commentators.dart';
+import 'package:otzaria/book_common/utils/default_commentators.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart' as sqlite3;
@@ -184,6 +185,36 @@ void main() {
         summary!.targets.map((t) => t.targetTitle),
         contains(SeforimFixtureIds.rashiTitle),
       );
+    });
+
+    test('תוכן קישור שומר כותרת מצורפת שמסתיימת בסיומת', () async {
+      final dbPath = fullAttached('כותרות');
+      final db = sqlite3.sqlite3.open(dbPath);
+      const title = '${SeforimFixtureIds.rashiTitle}.txt';
+      db.execute('UPDATE book SET title = ? WHERE id = ?', [
+        title,
+        SeforimFixtureIds.rashiId,
+      ]);
+      db.close();
+      final library = await attach(dbPath);
+      await buildCatalog();
+      final manager = LibraryProviderManager.instance;
+      manager.seedMappingsForTesting(mapping: {}, providers: [provider]);
+      for (final target in [title, '$title.txt', '/תיקייה/$title.text']) {
+        expect(
+          await manager.getLinkContent(
+            Link(
+              heRef: title,
+              index1: 1,
+              path2: target,
+              index2: 1,
+              connectionType: 'commentary',
+              targetSource: library.source!,
+            ),
+          ),
+          startsWith('כותרות: '),
+        );
+      }
     });
 
     test('רשימת המפרשים ומפרשים בטווח שורות', () async {
@@ -441,6 +472,37 @@ void main() {
     expect((await add(key)).displayTitle, contains('notes'));
     expect((await add(book.title)).displayTitle, isNot(contains('notes')));
     expect(await repository.loadNotes(key), hasLength(1));
+  });
+
+  test('עריכת טקסט מצורף אחרי טעינת הערות אינה משאירה עוגן ישן', () async {
+    addTearDown(PersonalNotesDatabase.instance.close);
+    final path = fullAttached('notes-updated');
+    final library = await attach(path);
+    final book = await attachedBook(library, SeforimFixtureIds.bereshitTitle);
+    final key = personalNotesBookKey(book);
+    final repository = PersonalNotesRepository();
+    await repository.loadNotes(key, categoryId: book.categoryId);
+    final writer = sqlite3.sqlite3.open(path);
+    try {
+      writer.execute(
+        "UPDATE line SET content = 'טקסט חדש לעיגון' WHERE bookId = 1 AND lineIndex = 1",
+      );
+    } finally {
+      writer.close();
+    }
+    final notes = await repository.addNote(
+      bookId: key,
+      lineNumber: 2,
+      content: 'הערה',
+      contentPlain: 'הערה',
+      contentFormat: PersonalNoteContentFormat.plain,
+      selectedText: 'חדש',
+      categoryId: book.categoryId,
+    );
+
+    expect(notes.single.anchorText, 'חדש');
+    expect(notes.single.anchorPrefix, contains('טקסט'));
+    expect(notes.single.anchorSuffix, contains('לעיגון'));
   });
 
   test('plugin ref resolver reads line_ref from the attached DB', () async {

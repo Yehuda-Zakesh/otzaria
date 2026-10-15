@@ -10,10 +10,6 @@ abstract class AppInputTokens {
   static const double regularHeight = 48.0;
   static const double compactHeight = 36.0;
 
-  // ── רדיוסים ────────────────────────────────────────────────────────────────
-  static const double regularRadius = 28.0;
-  static const double compactRadius = 20.0;
-
   // ── גדלי פונט ──────────────────────────────────────────────────────────────
   static const double regularFontSize = AppTokens.fontLG; // 16
   static const double compactFontSize = 13.0;
@@ -27,9 +23,6 @@ abstract class AppInputTokens {
 
   static double height(bool isCompact) =>
       isCompact ? compactHeight : regularHeight;
-
-  static double radius(bool isCompact) =>
-      isCompact ? compactRadius : regularRadius;
 
   static double fontSize(bool isCompact) =>
       isCompact ? compactFontSize : regularFontSize;

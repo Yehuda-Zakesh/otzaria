@@ -28,9 +28,14 @@ Future<void> _pump(
   void Function(double)? onZoomChanged,
   double width = 1200,
   int lineCount = 6,
+  TextScaler systemTextScaler = TextScaler.noScaling,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: systemTextScaler),
+        child: child!,
+      ),
       home: Directionality(
         textDirection: TextDirection.rtl,
         child: Scaffold(
@@ -100,14 +105,19 @@ void main() {
   });
 
   testWidgets('עמוד רחב מהחלון נגלל לרוחב', (tester) async {
+    ScrollController horizontal() => tester
+        .widget<SingleChildScrollView>(find.byType(SingleChildScrollView))
+        .controller!;
+
     await _pump(tester, const TikkunSettings(), width: 1200);
-    expect(find.byType(Scrollbar), findsNothing);
+    expect(horizontal().position.maxScrollExtent, 0);
 
     await _pump(tester, const TikkunSettings(zoom: 2), width: 1200);
     final scroll = tester.widget<SingleChildScrollView>(
       find.byType(SingleChildScrollView),
     );
     expect(scroll.scrollDirection, Axis.horizontal);
+    expect(horizontal().position.maxScrollExtent, greaterThan(0));
   });
 
   testWidgets('גרירה בעכבר גוללת את העמוד בשני הצירים', (tester) async {
@@ -207,5 +217,21 @@ void main() {
 
     expect(changes, isEmpty);
     expect(vertical.pixels, greaterThan(before), reason: 'אצבע אחת גוללת');
+  });
+
+  testWidgets('גודל הטקסט של המערכת אינו מגדיל את השורות מעבר למדוד', (
+    tester,
+  ) async {
+    // #1921: המילים נמדדות בלי גודל הטקסט של המערכת; ציור מוגדל גולש מהטור.
+    await _pump(
+      tester,
+      const TikkunSettings(),
+      systemTextScaler: const TextScaler.linear(1.5),
+    );
+    final texts = tester.widgetList<RichText>(find.byType(RichText)).toList();
+    expect(texts, isNotEmpty);
+    for (final text in texts) {
+      expect(text.textScaler.scale(10), 10);
+    }
   });
 }

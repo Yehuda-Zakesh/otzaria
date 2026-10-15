@@ -21,10 +21,27 @@ const int kDibburMaxWords = 4;
 
 /// מקצר [text] ל-[maxWords] מילים ראשונות, עם "…" כשנחתך.
 String truncateDibbur(String text, {int maxWords = kDibburMaxWords}) {
-  final words = text.trim().split(RegExp(r'\s+'));
-  if (words.length <= maxWords) return text.trim();
-  return '${words.take(maxWords).join(' ')}…';
+  // כמו take() הקודם: 0 מילים → "…", שלילי → RangeError.
+  if (RangeError.checkNotNegative(maxWords) == 0) return '…';
+  final trimmed = text.trim();
+  final words = <String>[];
+  var start = 0;
+  for (var i = 0; i < trimmed.length; i++) {
+    if (!_isRegExpSpace(trimmed.codeUnitAt(i))) continue;
+    if (start < i) words.add(trimmed.substring(start, i));
+    start = i + 1;
+    // אחרי רווח בטקסט שעבר trim יש עוד מילה.
+    if (words.length == maxWords) return '${words.join(' ')}…';
+  }
+  return trimmed;
 }
+
+/// `\s` של RegExp — בלי U+0085, ש-trim() כן מסיר.
+bool _isRegExpSpace(int c) => switch (c) {
+  0x09 || 0x0A || 0x0B || 0x0C || 0x0D || 0x20 || 0xA0 || 0x1680 => true,
+  0x2028 || 0x2029 || 0x202F || 0x205F || 0x3000 || 0xFEFF => true,
+  _ => c >= 0x2000 && c <= 0x200A,
+};
 
 /// דיבורי-המתחיל של [book] (`lineIndex` → הצורה המודפסת), או מפה ריקה כשאין.
 Future<Map<int, String>> loadDibburimForBook(TextBook book) async {

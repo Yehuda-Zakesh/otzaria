@@ -1,4 +1,7 @@
 import 'dart:io';
+import 'package:otzaria/bookmarks/view/book_bookmarks_action.dart';
+import 'package:otzaria/book_common/view/parallel_editions_action.dart';
+import 'package:otzaria/plugins/utils/reader_plugin_toolbar_actions.dart';
 import 'dart:math';
 import 'dart:async';
 import 'dart:convert';
@@ -17,10 +20,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/tour/bloc/tour_cubit.dart';
 import 'package:otzaria/tour/models/live_tip.dart';
+import 'package:otzaria/tour/tour_target_keys.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:otzaria/bookmarks/utils/section_bookmark.dart';
-import 'package:otzaria/bookmarks/view/bookmark_screen.dart';
 import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/settings/settings_exports.dart' hide UpdateFontSize;
 import 'package:otzaria/tabs/models/text_tab.dart';
@@ -35,11 +38,10 @@ import 'package:otzaria/text_book/utils/per_book_display_settings.dart';
 import 'package:otzaria/text_display/view/text_display_bar_button.dart';
 import 'package:otzaria/text_book/utils/reader_build_policy.dart';
 import 'package:otzaria/text_book/utils/text_book_export_utils.dart';
-import 'package:otzaria/text_book/utils/visible_index.dart';
 import 'package:otzaria/text_display/text_display_exports.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/library/bloc/library_bloc.dart';
@@ -67,9 +69,8 @@ import 'package:otzaria/data/book_locator.dart';
 import 'package:otzaria/utils/file/page_converter.dart';
 import 'package:otzaria/utils/file/save_file_with_extension.dart';
 import 'package:otzaria/utils/text/ref_helper.dart';
-import 'package:otzaria/utils/text/text_manipulation.dart' show HolyNameStyle;
 // [EDITING DISABLED] import 'package:otzaria/text_book/editing/widgets/text_section_editor_dialog.dart';
-import 'package:otzaria/text_book/view/book_source_dialog.dart';
+import 'package:otzaria/book_common/view/book_source_dialog.dart';
 import 'package:otzaria/text_book/view/page_shape/simple_text_viewer.dart';
 // [EDITING DISABLED] import 'package:otzaria/text_book/editing/helpers/editor_settings_helper.dart';
 import 'package:otzaria/personal_notes/personal_notes_system.dart';
@@ -82,12 +83,11 @@ import 'package:otzaria/utils/ui/image_decode_size.dart';
 import 'package:otzaria/widgets/navigation/responsive_action_bar.dart';
 import 'package:otzaria/widgets/navigation/book_view_actions.dart';
 import 'package:otzaria/plugins/services/plugin_toolbar_registry.dart';
-import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
+import 'package:otzaria/plugins/services/plugin_text_reader_registry.dart';
 import 'package:otzaria/plugins/utils/plugin_toolbar_actions.dart';
 import 'package:otzaria/plugins/services/context_menu_registry.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 import 'package:otzaria/plugins/utils/plugin_context_menu_entries.dart';
-import 'package:otzaria/plugins/utils/reader_location_resolver.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/text_book/view/selection/plugin_selection_payload.dart';
 import 'package:otzaria/widgets/smart_text/render_settings.dart';
@@ -98,6 +98,7 @@ import 'package:otzaria/tools/shamor_zachor/models/book_model.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 import 'package:otzaria/widgets/misc/app_selection_area.dart';
+import 'package:otzaria/widgets/misc/rtl_icon.dart';
 import 'package:otzaria/settings/services/nikud_display_service.dart';
 import 'package:otzaria/utils/link_helpers.dart';
 import 'package:otzaria/text_book/utils/link_processing.dart'
@@ -127,20 +128,14 @@ enum _TextBookExportFormat {
 class _WordExportRequest {
   final String title;
   final String rawContent;
-  final bool removeNikud;
-  final bool removeTaamim;
-  final bool shouldReplaceHolyNames;
-  final HolyNameStyle holyNameStyle;
+  final TextDisplayProfile profile;
   final String? fontFamily;
   final double fontSize;
 
   const _WordExportRequest({
     required this.title,
     required this.rawContent,
-    required this.removeNikud,
-    required this.removeTaamim,
-    required this.shouldReplaceHolyNames,
-    required this.holyNameStyle,
+    required this.profile,
     required this.fontFamily,
     required this.fontSize,
   });
@@ -148,18 +143,9 @@ class _WordExportRequest {
 
 class _TextExportRequest {
   final String rawContent;
-  final bool removeNikud;
-  final bool removeTaamim;
-  final bool shouldReplaceHolyNames;
-  final HolyNameStyle holyNameStyle;
+  final TextDisplayProfile profile;
 
-  const _TextExportRequest({
-    required this.rawContent,
-    required this.removeNikud,
-    required this.removeTaamim,
-    required this.shouldReplaceHolyNames,
-    required this.holyNameStyle,
-  });
+  const _TextExportRequest({required this.rawContent, required this.profile});
 }
 
 Uint8List _createTextBookWordExport(_WordExportRequest request) {
@@ -168,12 +154,9 @@ Uint8List _createTextBookWordExport(_WordExportRequest request) {
       .map(
         (line) => PrintBlock(
           kind: PrintBlockKind.text,
-          text: applyTextBookExportTextTransforms(
+          text: applyTextBookExportProfile(
             line,
-            removeNikud: request.removeNikud,
-            removeTaamim: request.removeTaamim,
-            shouldReplaceHolyNames: request.shouldReplaceHolyNames,
-            holyNameStyle: request.holyNameStyle,
+            profile: request.profile,
             stripHtml: false,
           ),
         ),
@@ -199,12 +182,9 @@ String _createTextBookTextExport(_TextExportRequest request) {
   return request.rawContent
       .split('\n')
       .map(
-        (line) => applyTextBookExportTextTransforms(
+        (line) => applyTextBookExportProfile(
           line,
-          removeNikud: request.removeNikud,
-          removeTaamim: request.removeTaamim,
-          shouldReplaceHolyNames: request.shouldReplaceHolyNames,
-          holyNameStyle: request.holyNameStyle,
+          profile: request.profile,
           stripHtml: true,
         ),
       )
@@ -250,14 +230,12 @@ class TextBookViewerBloc extends StatefulWidget {
   final void Function(OpenedTab) openBookCallback;
   final TextBookTab tab;
   final bool isInCombinedView;
-  final bool enableTourTargets;
 
   const TextBookViewerBloc({
     super.key,
     required this.openBookCallback,
     required this.tab,
     this.isInCombinedView = false,
-    this.enableTourTargets = false,
   });
 
   @override
@@ -278,7 +256,12 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
   final NavPanelSearchHost _searchHost = NavPanelSearchHost();
   late final ValueNotifier<double> _sidebarWidth;
   late final StreamSubscription<SettingsState> _settingsSub;
+  late final StreamSubscription<TextBookState> _textBookSub;
   StreamSubscription<LibraryState>? _libraryReloadSub;
+  bool _pendingTextDisplayPolicyReload = false;
+  bool _pendingFontFamilyReload = false;
+  bool _pendingNikudSettingsReload = false;
+  bool _pendingPunctuationSettingsReload = false;
   int? _sidebarTabIndex; // אינדקס הכרטיסייה בסרגל הצדי
   // עוקב אחרי מצב הפאנל הצדדי כדי לבקש פוקוס לשדה החיפוש רק ברגע שהפאנל
   // נפתח (false→true) ולא בכל rebuild - אחרת היה גונב פוקוס מתוכן הספר.
@@ -341,8 +324,6 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
 
   // Cache לרשימת אינדקסי TOC ממוינת - למניעת חישוב מחדש בכל לחיצה
   List<int>? _cachedTocIndices;
-  int? _pendingSegmentTarget;
-  int? _pendingTocLine;
   String? _cachedTocBookTitle;
   List<TocEntry>? _cachedToc;
 
@@ -413,7 +394,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
       debugPrint('Book found: $bookName (ID: $bookId)');
 
       // קבלת הפרק הנוכחי — שורת מקור (לא segmentIndex של מצב רצף).
-      final currentIndex = _topmostVisibleSourceLine(state);
+      final currentIndex = widget.tab.index;
 
       // קבלת הכותרת הנוכחית
       String currentRef = await refFromIndex(
@@ -613,7 +594,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
     context.read<TourCubit>().recordInteraction(
       TourInteraction(type: TourInteractionType.bookSourceViewed),
     );
-    showBookSourceDialog(context, state);
+    showBookDetailsDialog(context, state.book);
   }
 
   Future<void> _handlePrintPress(TextBookLoaded state) async {
@@ -669,8 +650,12 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
         book: state.book,
         links: state.links,
         activeCommentators: state.activeCommentators,
-        startLine: _topmostVisibleSourceLine(state),
+        startLine: widget.tab.index,
         displayProfile: _exportProfile(state),
+        commentaryDisplayProfile: state.displayProfile(
+          target: TextTarget.commentary,
+          channel: TextChannel.export,
+        ),
         tableOfContents: state.tableOfContents,
       ),
     );
@@ -710,10 +695,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
           _WordExportRequest(
             title: state.book.title,
             rawContent: fullContent,
-            removeNikud: profile.removeNikud,
-            removeTaamim: profile.removeTeamim,
-            shouldReplaceHolyNames: profile.replaceHolyNames,
-            holyNameStyle: profile.holyNameStyle,
+            profile: profile,
             fontFamily: settingsState.fontFamily,
             fontSize: state.fontSize,
           ),
@@ -724,10 +706,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
           _createTextBookTextExport,
           _TextExportRequest(
             rawContent: fullContent,
-            removeNikud: profile.removeNikud,
-            removeTaamim: profile.removeTeamim,
-            shouldReplaceHolyNames: profile.replaceHolyNames,
-            holyNameStyle: profile.holyNameStyle,
+            profile: profile,
           ),
         );
         bytes = Uint8List.fromList(utf8.encode(text));
@@ -874,11 +853,13 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
     );
 
     // שמירת הגדרות נוכחיות כדי לזהות שינויים
-    double previousFontSize = context.read<SettingsBloc>().state.fontSize;
-    String previousFontFamily = context.read<SettingsBloc>().state.fontFamily;
-    SettingsState previousSettingsState = context.read<SettingsBloc>().state;
+    final settingsBloc = context.read<SettingsBloc>();
+    final textBookBloc = context.read<TextBookBloc>();
+    double previousFontSize = settingsBloc.state.fontSize;
+    String previousFontFamily = settingsBloc.state.fontFamily;
+    SettingsState previousSettingsState = settingsBloc.state;
 
-    _settingsSub = context.read<SettingsBloc>().stream.listen((state) {
+    _settingsSub = settingsBloc.stream.listen((state) {
       _sidebarWidth.value = state.sidebarWidth;
 
       // אם גודל הגופן השתנה, עדכן אותו מיידית
@@ -893,7 +874,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
         context.read<TextBookBloc>().add(UpdateFontSize(state.fontSize));
       }
 
-      // אם משפחת הגופן או הסרת ניקוד השתנו, טען מחדש את התוכן
+      // משפחת הגופן או כל חריץ בתצוגת הטקסט (גם העתקה וייצוא) — טעינה מחדש
       final isNikudSettingsChange = shouldReloadForNikudSettingsChange(
         previous: previousSettingsState,
         current: state,
@@ -903,38 +884,86 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
             previous: previousSettingsState,
             current: state,
           );
-      if (state.fontFamily != previousFontFamily ||
-          isNikudSettingsChange ||
-          isPunctuationSettingsChange) {
+      final isFontFamilyChange = state.fontFamily != previousFontFamily;
+      final isTextDisplayPolicyChange =
+          state.textDisplayPolicy != previousSettingsState.textDisplayPolicy;
+      if (isFontFamilyChange || isTextDisplayPolicyChange) {
         previousFontFamily = state.fontFamily;
         previousSettingsState = state;
 
         if (!mounted) return;
 
-        final currentState = context.read<TextBookBloc>().state;
+        final currentState = textBookBloc.state;
         if (currentState is TextBookLoaded) {
-          context.read<TextBookBloc>().add(
-            LoadContent(
-              fontSize: state.fontSize,
-              showSplitView: currentState.showSplitView,
-              removeNikud: state.defaultRemoveNikud,
-              forceCloseLeftPane: widget.isInCombinedView,
-              preserveState: true,
-              // שמירת מצב הניקוד הנוכחי של המשתמש רק כשרק הגופן
-              // השתנה - אם הגדרות הניקוד עצמן השתנו, יש להחיל את
-              // הערך החדש
-              preserveRemoveNikud: !isNikudSettingsChange,
-              preserveRemovePunctuation: !isPunctuationSettingsChange,
-              // שינוי הגדרות גלובליות (גופן/ניקוד) לעולם לא יכבה
-              // את מצב הרצף שהמשתמש בחר עבור הספר.
-              preserveContinuousReadingMode: true,
-            ),
+          _reloadTextBookForSettings(
+            textBookBloc: textBookBloc,
+            currentState: currentState,
+            settings: state,
+            nikudSettingsChanged: isNikudSettingsChange,
+            punctuationSettingsChanged: isPunctuationSettingsChange,
           );
+        } else {
+          _pendingFontFamilyReload |= isFontFamilyChange;
+          _pendingTextDisplayPolicyReload |= isTextDisplayPolicyChange;
+          _pendingNikudSettingsReload |= isNikudSettingsChange;
+          _pendingPunctuationSettingsReload |= isPunctuationSettingsChange;
         }
       } else {
         previousSettingsState = state;
       }
     });
+
+    _textBookSub = textBookBloc.stream.listen((state) {
+      if (!mounted || state is! TextBookLoaded) return;
+
+      final latestSettings = settingsBloc.state;
+      final policyIsStale =
+          _pendingTextDisplayPolicyReload &&
+          state.displayPolicy != latestSettings.textDisplayPolicy;
+      if (!_pendingFontFamilyReload && !policyIsStale) {
+        _clearPendingTextSettingsReload();
+        return;
+      }
+
+      final nikudSettingsChanged = _pendingNikudSettingsReload;
+      final punctuationSettingsChanged = _pendingPunctuationSettingsReload;
+      _clearPendingTextSettingsReload();
+      _reloadTextBookForSettings(
+        textBookBloc: textBookBloc,
+        currentState: state,
+        settings: latestSettings,
+        nikudSettingsChanged: nikudSettingsChanged,
+        punctuationSettingsChanged: punctuationSettingsChanged,
+      );
+    });
+  }
+
+  void _clearPendingTextSettingsReload() {
+    _pendingTextDisplayPolicyReload = false;
+    _pendingFontFamilyReload = false;
+    _pendingNikudSettingsReload = false;
+    _pendingPunctuationSettingsReload = false;
+  }
+
+  void _reloadTextBookForSettings({
+    required TextBookBloc textBookBloc,
+    required TextBookLoaded currentState,
+    required SettingsState settings,
+    required bool nikudSettingsChanged,
+    required bool punctuationSettingsChanged,
+  }) {
+    textBookBloc.add(
+      LoadContent(
+        fontSize: settings.fontSize,
+        showSplitView: currentState.showSplitView,
+        removeNikud: settings.defaultRemoveNikud,
+        forceCloseLeftPane: widget.isInCombinedView,
+        preserveState: true,
+        preserveRemoveNikud: !nikudSettingsChanged,
+        preserveRemovePunctuation: !punctuationSettingsChanged,
+        preserveContinuousReadingMode: true,
+      ),
+    );
   }
 
   @override
@@ -959,12 +988,8 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
   Future<void> _checkAltTitles() async {
     try {
       final textBookBloc = context.read<TextBookBloc>();
-      final structures = await DatabaseLibraryProvider.instance
-          .getAlternativeStructuresForBook(widget.tab.book);
-      final dibburim = await loadDibburimForBook(widget.tab.book);
-
-      if (!mounted) return;
-
+      // טאב משוחזר נבנה לפני שהמסד ומיפוי הספר לספק מוכנים —
+      // טעינת התוכן מכינה אותם, ולכן השאילתות רק אחריה.
       final currentState = textBookBloc.state;
       final TextBookLoaded state;
       if (currentState is TextBookLoaded) {
@@ -976,6 +1001,11 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
             .first;
         if (!mounted) return;
       }
+      final structures = await DatabaseLibraryProvider.instance
+          .getAlternativeStructuresForBook(widget.tab.book);
+      final dibburim = await loadDibburimForBook(widget.tab.book);
+      if (!mounted) return;
+
       final usableDibburim =
           hasDibburimEntries(
             state.tableOfContents,
@@ -1106,12 +1136,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
         if (settings.commentatorsBelow != null) {
           textBookBloc.add(ToggleSplitView(!settings.commentatorsBelow!));
         }
-        // ניקוד/פיסוק/טעמים נטענים כשכבת ספר בתוך LoadContent, לא כאן.
-        if (settings.continuousReadingMode != null) {
-          textBookBloc.add(
-            ToggleContinuousReadingMode(settings.continuousReadingMode!),
-          );
-        }
+        // ניקוד/פיסוק/טעמים ומצב רציף נטענים בתוך LoadContent, לפני הבנייה.
         break;
       }
     }
@@ -1165,6 +1190,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
     _pageShapeSidebarTabNotifier.dispose();
     _pageShapeOpenSettingsNotifier.dispose();
     _settingsSub.cancel();
+    _textBookSub.cancel();
     _libraryReloadSub?.cancel();
     super.dispose();
   }
@@ -1276,6 +1302,13 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    return LineScrollScope(
+      controller: widget.tab.lines,
+      child: _buildReader(context),
+    );
+  }
+
+  Widget _buildReader(BuildContext context) {
     return BlocBuilder<SettingsBloc, SettingsState>(
       builder: (context, settingsState) {
         return BlocConsumer<TextBookBloc, TextBookState>(
@@ -1300,7 +1333,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
                 _lastShowLeftPaneForReanchor = state.showLeftPane;
                 if (_paneUsesPushLayout) {
                   reanchorOnPaneToggleCount++;
-                  _reanchorMainContentToTopmostVisible();
+                  widget.tab.lines.keepViewAcrossRelayout();
                 }
               }
               // שינוי גודל גופן משנה את גובה כל הפריטים; בלי עיגון-מחדש
@@ -1310,7 +1343,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
                 _lastFontSizeForReanchor = state.fontSize;
                 if (!isFirstLoadedState) {
                   reanchorOnFontSizeCount++;
-                  _reanchorMainContentToTopmostVisible();
+                  widget.tab.lines.keepViewAcrossRelayout();
                 }
               }
               final pendingSidebarTab = Settings.getValue<int>(
@@ -1352,6 +1385,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
 
               context.read<TextBookBloc>().add(
                 LoadContent(
+                  startIndex: widget.tab.index,
                   fontSize: settingsState.fontSize,
                   showSplitView: state.splitedView,
                   removeNikud: settingsState.defaultRemoveNikud,
@@ -1486,6 +1520,14 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
   Widget _buildAppBar(
     BuildContext context,
     TextBookLoaded state,
+  ) => ListenableBuilder(
+    listenable: PluginTextReaderRegistry.instance,
+    builder: (context, _) => _buildReaderAppBar(context, state),
+  );
+
+  Widget _buildReaderAppBar(
+    BuildContext context,
+    TextBookLoaded state,
   ) {
     return AppTopBar(
       minCenterWidth: ReaderNavCenter.minTitleWidth,
@@ -1512,8 +1554,8 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
               nextMinorTooltip: 'הקטע הבא',
               nextMajorTooltip: 'הדף/פרק הבא',
               onPrevMajor: () => _navigateToPreviousToc(state),
-              onPrevMinor: () => _scrollToPreviousSegment(state),
-              onNextMinor: () => _scrollToNextSegment(state),
+              onPrevMinor: () => _scrollToPreviousLine(state),
+              onNextMinor: () => _scrollToNextLine(state),
               onNextMajor: () => _navigateToNextToc(state),
             ),
       trailingItems: [
@@ -1655,11 +1697,17 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
   }
 
   Widget _buildMenuButton(BuildContext context, TextBookLoaded state) {
-    return NavPanelToggleButton(
-      key: widget.enableTourTargets ? textBookNavigationTourTargetKey : null,
-      isOpen: state.showLeftPane,
-      onToggle: () =>
-          context.read<TextBookBloc>().add(ToggleLeftPane(!state.showLeftPane)),
+    // Builder: רק הכפתור תלוי ביעד הסיור, לא כל הסרגל העליון.
+    return Builder(
+      builder: (context) => NavPanelToggleButton(
+        key: TourTargetsScope.enabledOf(context)
+            ? textBookNavigationTourTargetKey
+            : null,
+        isOpen: state.showLeftPane,
+        onToggle: () => context.read<TextBookBloc>().add(
+          ToggleLeftPane(!state.showLeftPane),
+        ),
+      ),
     );
   }
 
@@ -1673,10 +1721,10 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
         builder: (context, _, _) => ResponsiveActionBar(
           key: const ValueKey('responsive_actions'),
           overflowMenuOffset: const Offset(0, 8),
-          overflowButtonKey: widget.enableTourTargets
+          overflowButtonKey: TourTargetsScope.enabledOf(context)
               ? textBookOverflowTourTargetKey
               : null,
-          menuItemKeysByTooltip: widget.enableTourTargets
+          menuItemKeysByTooltip: TourTargetsScope.enabledOf(context)
               ? {
                   _getViewModeTooltip(state):
                       textBookOverflowCommentatorsTourTargetKey,
@@ -1687,51 +1735,25 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
               : null,
           actions: [
             ..._buildDisplayOrderActions(context, state),
-            ..._buildPluginActions(context),
+            ...buildReaderPluginActions(
+              context,
+              tab: widget.tab,
+              pluginContext: 'reader-text',
+            ),
           ],
           alwaysInMenu: mergeOrderedMenuActions(
             _buildAlwaysInMenuActions(context, state),
-            _buildOrderedPluginOverflowActions(context),
+            buildReaderPluginOverflowActions(
+              context,
+              tab: widget.tab,
+              pluginContext: 'reader-text',
+            ),
           ),
           menuHeaderActions: widget.isInCombinedView
               ? _buildNavigationActions()
               : null,
         ),
       ),
-    );
-  }
-
-  List<ActionButtonData> _buildPluginActions(BuildContext context) {
-    final records = PluginToolbarRegistry.instance.getAll();
-    if (records.isEmpty) return const [];
-    return buildPluginToolbarActions(
-      records: records,
-      context: 'reader-text',
-      compact: context.read<SettingsBloc>().state.compactMenuMode,
-      locationPayload: () async =>
-          (await resolveReaderLocation(widget.tab))?.toJson() ?? const {},
-      hostActionDispatcher: context
-          .read<PluginSystemBloc>()
-          .declarativeHost
-          ?.dispatchAction,
-    );
-  }
-
-  List<(int, ActionButtonData)> _buildOrderedPluginOverflowActions(
-    BuildContext context,
-  ) {
-    final records = PluginToolbarRegistry.instance.getAll();
-    if (records.isEmpty) return const [];
-    return buildOrderedPluginOverflowActions(
-      records: records,
-      context: 'reader-text',
-      compact: context.read<SettingsBloc>().state.compactMenuMode,
-      locationPayload: () async =>
-          (await resolveReaderLocation(widget.tab))?.toJson() ?? const {},
-      hostActionDispatcher: context
-          .read<PluginSystemBloc>()
-          .declarativeHost
-          ?.dispatchAction,
     );
   }
 
@@ -1750,7 +1772,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
       // 2) View Mode Dropdown (מאחד את Split View ו-Page Shape View)
       ActionButtonData(
         widget: KeyedSubtree(
-          key: widget.enableTourTargets
+          key: TourTargetsScope.enabledOf(context)
               ? textBookCommentatorsTourTargetKey
               : null,
           child: _buildViewModeDropdown(context, state),
@@ -1824,7 +1846,9 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
         widget: _buildSearchButton(
           context,
           state,
-          key: widget.enableTourTargets ? textBookSearchTourTargetKey : null,
+          key: TourTargetsScope.enabledOf(context)
+              ? textBookSearchTourTargetKey
+              : null,
         ),
         icon: FluentIcons.search_24_regular,
         tooltip: 'חיפוש',
@@ -1838,11 +1862,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
         icon: FluentIcons.zoom_in_24_regular,
         tooltip: 'הגדל את גודל הטקסט',
         actionId: ToolbarActionId.zoomIn,
-        onPressed: () async {
-          final newSize = min(50.0, state.fontSize + 3);
-          context.read<TextBookBloc>().add(UpdateFontSize(newSize));
-          await savePerBookDisplaySettings(context, state, fontSize: newSize);
-        },
+        onPressed: () => _stepFontSize(context, state, larger: true),
       ),
 
       // 6) Zoom Out Button
@@ -1851,11 +1871,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
         icon: FluentIcons.zoom_out_24_regular,
         tooltip: 'הקטן את גודל הטקסט',
         actionId: ToolbarActionId.zoomOut,
-        onPressed: () async {
-          final newSize = max(15.0, state.fontSize - 3);
-          context.read<TextBookBloc>().add(UpdateFontSize(newSize));
-          await savePerBookDisplaySettings(context, state, fontSize: newSize);
-        },
+        onPressed: () => _stepFontSize(context, state, larger: false),
       ),
     ];
   }
@@ -1868,25 +1884,40 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
     TextBookLoaded state,
   ) {
     return [
+      if (PluginTextReaderRegistry.instance.usesPlugin(widget.tab)) ...[
+        (
+          5,
+          ActionButtonData(
+            widget: const SizedBox.shrink(),
+            icon: FluentIcons.settings_24_regular,
+            tooltip: PluginMessages.textReaderSettings,
+            onPressed: () => PluginTextReaderRegistry.instance.command(
+              widget.tab,
+              'settings',
+            ),
+          ),
+        ),
+        (
+          6,
+          ActionButtonData(
+            widget: const SizedBox.shrink(),
+            icon: OtzariaIcons.otzaria_icon_2_page_24_regular,
+            tooltip: PluginMessages.nativeTextReader,
+            onPressed: () =>
+                PluginTextReaderRegistry.instance.useNative(widget.tab),
+          ),
+        ),
+      ],
       // הצגת סימניות הספר הנוכחי (הוספת סימניה עברה לתפריט ההקשר בטקסט)
       (
         10,
-        ActionButtonData(
-          widget: KeyedSubtree(
-            key: widget.enableTourTargets
-                ? textBookBookmarkTourTargetKey
-                : null,
-            child: BarButton.icon(
-              tooltip: 'סימניות בספר זה',
-              icon: FluentIcons.bookmark_multiple_24_regular,
-              compact: context.read<SettingsBloc>().state.compactMenuMode,
-              onPressed: () =>
-                  _showBookmarksForCurrentBook(context, state.book),
-            ),
-          ),
-          icon: FluentIcons.bookmark_multiple_24_regular,
-          tooltip: 'סימניות בספר זה',
-          onPressed: () => _showBookmarksForCurrentBook(context, state.book),
+        buildBookBookmarksAction(
+          context,
+          book: state.book,
+          compact: context.read<SettingsBloc>().state.compactMenuMode,
+          tourKey: TourTargetsScope.enabledOf(context)
+              ? textBookBookmarkTourTargetKey
+              : null,
         ),
       ),
 
@@ -2004,7 +2035,9 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
             widget: _buildPrintButton(
               context,
               state,
-              key: widget.enableTourTargets ? textBookPrintTourTargetKey : null,
+              key: TourTargetsScope.enabledOf(context)
+                  ? textBookPrintTourTargetKey
+                  : null,
             ),
             icon: FluentIcons.print_24_regular,
             tooltip: 'הדפסה',
@@ -2149,6 +2182,10 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
 
     // עדכון תצוגת צורת הדף במידת הצורך
     if (isPageSelected != state.showPageShapeView) {
+      final selected = state.selectedIndex;
+      if (!isPageSelected && selected != null) {
+        widget.tab.lines.scrollToLineOnNextAttach(selected);
+      }
       bloc.add(TogglePageShapeView(isPageSelected));
     }
 
@@ -2174,7 +2211,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
 
   /// בניית תפריט נפתח לבחירת מצב תצוגה
   Widget _buildViewModeDropdown(BuildContext context, TextBookLoaded state) {
-    final iconWidget = Icon(_getViewModeIcon(state));
+    final iconWidget = RtlIcon(_getViewModeIcon(state));
 
     final isSplit = !state.showPageShapeView && state.showSplitView;
     final isBelow = !state.showPageShapeView && !state.showSplitView;
@@ -2249,13 +2286,6 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
     );
   }
 
-  void _showBookmarksForCurrentBook(BuildContext context, Book book) {
-    showDialog(
-      context: context,
-      builder: (_) => BookmarksDialog(bookFilter: book),
-    );
-  }
-
   Widget _buildSearchButton(
     BuildContext context,
     TextBookLoaded state, {
@@ -2281,30 +2311,26 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
   Widget _buildZoomInButton(BuildContext context, TextBookLoaded state) {
     final isCompact = context.read<SettingsBloc>().state.compactMenuMode;
     return BarButton.icon(
-      tooltip:
-          'הגדל את גודל הטקסט (${ShortcutHelper.formatShortcutForDisplay('ctrl++')})',
+      tooltip: _withShortcut(
+        'הגדל את גודל הטקסט',
+        ShortcutValidator.zoomInKey,
+      ),
       icon: FluentIcons.zoom_in_24_regular,
       compact: isCompact,
-      onPressed: () async {
-        final newSize = min(50.0, state.fontSize + 3);
-        context.read<TextBookBloc>().add(UpdateFontSize(newSize));
-        await savePerBookDisplaySettings(context, state, fontSize: newSize);
-      },
+      onPressed: () => _stepFontSize(context, state, larger: true),
     );
   }
 
   Widget _buildZoomOutButton(BuildContext context, TextBookLoaded state) {
     final isCompact = context.read<SettingsBloc>().state.compactMenuMode;
     return BarButton.icon(
-      tooltip:
-          'הקטן את גודל הטקסט (${ShortcutHelper.formatShortcutForDisplay('ctrl+-')})',
+      tooltip: _withShortcut(
+        'הקטן את גודל הטקסט',
+        ShortcutValidator.zoomOutKey,
+      ),
       icon: FluentIcons.zoom_out_24_regular,
       compact: isCompact,
-      onPressed: () async {
-        final newSize = max(15.0, state.fontSize - 3);
-        context.read<TextBookBloc>().add(UpdateFontSize(newSize));
-        await savePerBookDisplaySettings(context, state, fontSize: newSize);
-      },
+      onPressed: () => _stepFontSize(context, state, larger: false),
     );
   }
 
@@ -2315,37 +2341,37 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
     if (state is TextBookLoaded) action(state);
   }
 
-  void _onNavPreviousSegment() => _runNavigation(_scrollToPreviousSegment);
-  void _onNavNextSegment() => _runNavigation(_scrollToNextSegment);
+  void _onNavPreviousSegment() => _runNavigation(_scrollToPreviousLine);
+  void _onNavNextSegment() => _runNavigation(_scrollToNextLine);
   void _onNavPreviousToc() => _runNavigation(_navigateToPreviousToc);
   void _onNavNextToc() => _runNavigation(_navigateToNextToc);
 
-  void _scrollToPreviousSegment(TextBookLoaded state) =>
-      _scrollBySegments(state, -1);
+  void _scrollToPreviousLine(TextBookLoaded state) => _scrollByLines(state, -1);
 
-  void _scrollToNextSegment(TextBookLoaded state) =>
-      _scrollBySegments(state, 1);
+  void _scrollToNextLine(TextBookLoaded state) => _scrollByLines(state, 1);
 
-  /// לחיצה תוך כדי גלילה ממשיכה מהיעד הקודם: הקטע העליון מתעדכן כלפי מטה רק
-  /// בסוף האנימציה, ובלי זה לחיצות רצופות קדימה חוזרות על אותו יעד.
-  void _scrollBySegments(TextBookLoaded state, int delta) {
-    if (state.positionsListener.itemPositions.value.isEmpty) return;
-    final lastIndex = state.readingSegments.isNotEmpty
-        ? state.readingSegments.length - 1
-        : state.content.length - 1;
-    final int target =
-        ((_pendingSegmentTarget ?? _topmostVisibleIndex(state)) + delta).clamp(
-          0,
-          max(0, lastIndex),
-        );
-    final scroll = state.scrollController.scrollTo(
-      duration: const Duration(milliseconds: 300),
-      index: target,
+  /// שורת מקור אחת בכל לחיצה, בשני המצבים. המיקום מתעדכן ליעד מיד, ולכן
+  /// לחיצות רצופות ממשיכות ממנו גם לפני שהגלילה נחתה.
+  void _scrollByLines(TextBookLoaded state, int delta) {
+    if (PluginTextReaderRegistry.instance.usesPlugin(widget.tab)) {
+      PluginTextReaderRegistry.instance.command(
+        widget.tab,
+        'advance',
+        direction: delta,
+      );
+      return;
+    }
+    if (state.content.isEmpty) return;
+    final current = widget.tab.index;
+    final target = (current + delta).clamp(0, state.content.length - 1);
+    if (target == current) return;
+    unawaited(
+      widget.tab.lines.scrollToLine(
+        target,
+        alignment: 0,
+        duration: const Duration(milliseconds: 300),
+      ),
     );
-    _pendingSegmentTarget = target;
-    scroll.whenComplete(() {
-      if (_pendingSegmentTarget == target) _pendingSegmentTarget = null;
-    });
   }
 
   /// מחזיר רשימה ממוינת של כל אינדקסי ה-TOC (עם cache)
@@ -2430,9 +2456,8 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
 
   /// ניווט לכותרת הקודמת ב-TOC
   void _navigateToPreviousToc(TextBookLoaded state) {
-    final currentIndex = _pendingTocLine ?? _topmostVisibleSourceLine(state);
+    final currentIndex = widget.tab.index;
     _scrollToTocLine(
-      state,
       _findPreviousTocIndex(
         state.tableOfContents,
         currentIndex,
@@ -2443,25 +2468,20 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
 
   /// ניווט לכותרת הבאה ב-TOC
   void _navigateToNextToc(TextBookLoaded state) {
-    final currentIndex = _pendingTocLine ?? _topmostVisibleSourceLine(state);
+    final currentIndex = widget.tab.index;
     _scrollToTocLine(
-      state,
       _findNextTocIndex(state.tableOfContents, currentIndex, state.book.title),
     );
   }
 
-  void _scrollToTocLine(TextBookLoaded state, int? line) {
+  void _scrollToTocLine(int? line) {
     if (line == null) return;
-    final scroll = state.scrollController.scrollTo(
-      // ה-TOC עובד בשורות מקור; ה-ListView לפי itemIndex (=segmentIndex
-      // במצב רצף).
-      index: _itemIndexForSourceLine(state, line),
-      duration: const Duration(milliseconds: 300),
+    unawaited(
+      widget.tab.lines.scrollToLine(
+        line,
+        duration: const Duration(milliseconds: 300),
+      ),
     );
-    _pendingTocLine = line;
-    scroll.whenComplete(() {
-      if (_pendingTocLine == line) _pendingTocLine = null;
-    });
   }
 
   Widget _buildPrintButton(
@@ -2470,7 +2490,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
     Key? key,
   }) {
     final shortcut =
-        Settings.getValue<String>('key-shortcut-print') ?? 'ctrl+p';
+        ShortcutValidator.getShortcutValue(ShortcutValidator.printKey) ?? '';
     return IconButton(
       key: key,
       icon: const Icon(FluentIcons.print_24_regular),
@@ -2494,8 +2514,12 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
             book: state.book,
             links: state.links,
             activeCommentators: state.activeCommentators,
-            startLine: _topmostVisibleSourceLine(state),
+            startLine: widget.tab.index,
             displayProfile: _exportProfile(state),
+            commentaryDisplayProfile: state.displayProfile(
+              target: TextTarget.commentary,
+              channel: TextChannel.export,
+            ),
             tableOfContents: state.tableOfContents,
           ),
         );
@@ -2636,47 +2660,14 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
   ActionButtonData _buildParallelEditionsAction(
     BuildContext context,
     TextBookLoaded state,
-  ) {
-    final compact = context.read<SettingsBloc>().state.compactMenuMode;
-    final primary = _parallelEditions.first;
-    final tooltip = primary.isCompanion
-        ? 'פתח בתצוגת PDF'
-        : 'פתח מהדורה מקבילה';
-    if (_parallelEditions.length == 1) {
-      return ActionButtonData(
-        widget: BarButton.icon(
-          tooltip: tooltip,
-          icon: FluentIcons.document_pdf_24_regular,
-          compact: compact,
-          onPressed: () => _openParallelEdition(context, state, primary),
-        ),
-        icon: FluentIcons.document_pdf_24_regular,
-        tooltip: tooltip,
-        actionId: ToolbarActionId.parallelEdition,
-        onPressed: () => _openParallelEdition(context, state, primary),
-      );
-    }
-    return ActionButtonData.split(
-      icon: FluentIcons.document_pdf_24_regular,
-      tooltip: tooltip,
-      compact: compact,
-      actionId: ToolbarActionId.parallelEdition,
-      onPressed: () => _openParallelEdition(context, state, primary),
-      menuItems: [
-        for (final edition in _parallelEditions)
-          ActionButtonData(
-            widget: const SizedBox.shrink(),
-            icon: edition.isCompanion
-                ? FluentIcons.document_pdf_24_regular
-                : OtzariaIcons.book_24_regular,
-            tooltip: edition.isCompanion
-                ? '${edition.book.title} — מהדורה מודפסת (אוצריא)'
-                : edition.label ?? edition.book.title,
-            onPressed: () => _openParallelEdition(context, state, edition),
-          ),
-      ],
-    );
-  }
+  ) => buildParallelEditionsAction(
+    editions: _parallelEditions,
+    compact: context.read<SettingsBloc>().state.compactMenuMode,
+    companionIcon: FluentIcons.document_pdf_24_regular,
+    companionTooltip: 'פתח בתצוגת PDF',
+    companionMenuSuffix: 'מהדורה מודפסת (אוצריא)',
+    onOpen: (edition) => _openParallelEdition(context, state, edition),
+  );
 
   void _openParallelEdition(
     BuildContext context,
@@ -2692,7 +2683,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
     openBook(
       context,
       edition.book,
-      1,
+      edition.book is PdfBook ? 1 : 0,
       '',
       ignoreHistory: true,
       requiresStableLayout: true,
@@ -2707,9 +2698,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
       return;
     }
 
-    // PDF נמדד מול שורות מקור; ל-tab.index גם רוצים שורת מקור (לשמירה).
-    final currentIndex = _topmostVisibleSourceLine(state);
-    widget.tab.index = currentIndex;
+    final currentIndex = widget.tab.index;
 
     final index = await textToPdfPage(
       state.book,
@@ -2747,7 +2736,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
       );
       return;
     }
-    final lineIndex = _topmostVisibleSourceLine(state);
+    final lineIndex = widget.tab.index;
     showBookVersionsDialog(
       context,
       state.book,
@@ -2769,30 +2758,6 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
     );
   }
 
-  /// עיגון מחדש לפריט העליון הנראה לפני שינוי רוחב התוכן: SPL שומר היסט בפיקסלים
-  /// מול שורת הפתיחה, כך שבלעדי זה זרימה-מחדש ברוחב אחר מקפיצה את התצוגה.
-  void _reanchorMainContentToTopmostVisible() {
-    final controller = widget.tab.scrollController;
-    if (!controller.isAttached) return;
-
-    final visible = widget.tab.positionsListener.itemPositions.value.where(
-      (p) => p.itemLeadingEdge < 1 && p.itemTrailingEdge > 0,
-    );
-    if (visible.isEmpty) return;
-
-    ItemPosition pickByMinLeadingEdge(Iterable<ItemPosition> items) =>
-        items.reduce((a, b) => a.itemLeadingEdge <= b.itemLeadingEdge ? a : b);
-
-    final atOrBelowFold = visible.where((p) => p.itemLeadingEdge >= 0);
-    final anchor = atOrBelowFold.isNotEmpty
-        ? pickByMinLeadingEdge(atOrBelowFold)
-        : pickByMinLeadingEdge(visible);
-
-    // itemLeadingEdge יכול להיות שלילי כשקטע ארוך מתחיל מעל התצוגה (גלילה
-    // לעומק הקטע). clamp ל-0 היה מיישר את תחילת הקטע לראש התצוגה = קפיצה.
-    controller.jumpTo(index: anchor.index, alignment: anchor.itemLeadingEdge);
-  }
-
   Widget _buildBody(BuildContext context, TextBookLoaded state) {
     return NavSidePanel(
       isOpen: state.showLeftPane,
@@ -2804,8 +2769,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
           context.read<TextBookBloc>().add(const ToggleLeftPane(false)),
       paneContent: NavPanelSearchScope(
         host: _searchHost,
-        child: TextBookNavPanelTourTarget(
-          isActiveTab: widget.enableTourTargets,
+        child: _NavPanelTourTargetBuilder(
           child: _buildLeftPaneContent(state),
         ),
       ),
@@ -2817,7 +2781,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
         _sidebarWidth.value = nextWidth;
       },
       onPaneResizeEnd: () {
-        _reanchorMainContentToTopmostVisible();
+        widget.tab.lines.keepViewAcrossRelayout();
         context.read<SettingsBloc>().add(
           UpdateSidebarWidth(_sidebarWidth.value),
         );
@@ -2962,7 +2926,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
                     closeLeftPaneCallback: () => context
                         .read<TextBookBloc>()
                         .add(const ToggleLeftPane(false)),
-                    scrollController: state.scrollController,
+                    lines: widget.tab.lines,
                   ),
                 ),
               Builder(
@@ -3008,7 +2972,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
       focusNode: textSearchFocusNode,
       contentLoader: () async =>
           splitContentLines(await repository.getBookContent(state.book)),
-      scrollControler: state.scrollController,
+      lines: widget.tab.lines,
       // הוא מעביר את טקסט החיפוש מה-state הנוכחי אל תוך רכיב החיפוש
       initialQuery: state.searchText,
       initialSearchOptions: state.searchOptions,
@@ -3024,7 +2988,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
 
   Widget _buildTocViewer(BuildContext context, TextBookLoaded state) {
     return TocViewer(
-      scrollController: state.scrollController,
+      lines: widget.tab.lines,
       focusNode: navigationSearchFocusNode,
       closeLeftPaneCallback: () =>
           context.read<TextBookBloc>().add(const ToggleLeftPane(false)),
@@ -3049,13 +3013,6 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
   return (shouldFocus: true, wasShownNext: true);
 }
 
-int _topmostVisibleIndex(TextBookLoaded state) =>
-    topmostVisibleIndex(state.positionsListener.itemPositions.value);
-
-// ה-helpers הבאים הם wrapper-ים דקים לפונקציות הטהורות ב-visible_index.dart
-// (`resolveTopmostSourceLine`/`resolveItemIndexForSourceLine`).
-// הלוגיקה נבדקת ב-test/text_book/utils/visible_index_test.dart.
-
 /// אזורי הבחירה בולעים את Alt+חיצים כפעולת בחירה ריקה, ואז קיצור הניווט לא
 /// מגיע ל-late handler הגלובלי. בשדה טקסט המקשים נשארים להזזת הסמן.
 @visibleForTesting
@@ -3077,42 +3034,33 @@ KeyEventResult passSegmentArrowsToGlobalShortcuts(FocusNode _, KeyEvent event) {
   return KeyEventResult.skipRemainingHandlers;
 }
 
-int _topmostVisibleSourceLine(TextBookLoaded state) => resolveTopmostSourceLine(
-  positions: state.positionsListener.itemPositions.value,
-  continuousReadingMode: state.continuousReadingMode,
-  readingSegments: state.readingSegments,
+/// [label] followed by the shortcut the user set for [settingKey], or the
+/// label alone when the shortcut is cleared.
+String _withShortcut(String label, String settingKey) {
+  final shortcut = ShortcutValidator.getShortcutValue(settingKey);
+  if (shortcut == null || shortcut.isEmpty) return label;
+  return '$label (${ShortcutHelper.formatShortcutForDisplay(shortcut)})';
+}
+
+/// Steps the text size by 3 within 15 to 50 and saves it for the book.
+Future<void> _stepFontSize(
+  BuildContext context,
+  TextBookLoaded state, {
+  required bool larger,
+}) => _setFontSize(
+  context,
+  state,
+  larger ? min(50.0, state.fontSize + 3) : max(15.0, state.fontSize - 3),
 );
 
-int _itemIndexForSourceLine(TextBookLoaded state, int lineIndex) =>
-    resolveItemIndexForSourceLine(
-      lineIndex: lineIndex,
-      readingSegments: state.readingSegments,
-    );
-
-// [EDITING DISABLED]
-// // החלף את כל המחלקה הזו בקובץ text_book_screen.TXT
-//
-// Widget _buildFullFileEditorButton(BuildContext context, TextBookLoaded state) {
-//   final shortcut =
-//       Settings.getValue<String>('key-shortcut-edit-section') ?? 'ctrl+e';
-//   return IconButton(
-//     onPressed: () => _handleFullFileEditorPress(context, state),
-//     icon: const Icon(FluentIcons.document_edit_24_regular),
-//     tooltip: 'ערוך את הספר (${shortcut.toUpperCase()})',
-//   );
-// }
-//
-// void _handleTextEditorPress(BuildContext context, TextBookLoaded state) {
-//   final positions = state.positionsListener.itemPositions.value;
-//   if (positions.isEmpty) return;
-//
-//   final currentIndex = positions.first.index;
-//   context.read<TextBookBloc>().add(OpenEditor(index: currentIndex));
-// }
-//
-// void _handleFullFileEditorPress(BuildContext context, TextBookLoaded state) {
-//   context.read<TextBookBloc>().add(OpenFullFileEditor());
-// }
+Future<void> _setFontSize(
+  BuildContext context,
+  TextBookLoaded state,
+  double size,
+) {
+  context.read<TextBookBloc>().add(UpdateFontSize(size));
+  return savePerBookDisplaySettings(context, state, fontSize: size);
+}
 
 bool _handleGlobalKeyEvent(
   KeyEvent event,
@@ -3135,18 +3083,18 @@ bool _handleGlobalKeyEvent(
       ) ??
       '';
   final printShortcut =
-      Settings.getValue<String>('key-shortcut-print') ?? 'ctrl+p';
+      ShortcutValidator.getShortcutValue(ShortcutValidator.printKey) ?? '';
   final addBookmarkShortcut =
-      Settings.getValue<String>('key-shortcut-add-bookmark') ?? 'ctrl+b';
+      ShortcutValidator.getShortcutValue(ShortcutValidator.addBookmarkKey) ??
+      '';
   final addNoteShortcut =
-      Settings.getValue<String>('key-shortcut-add-note') ?? 'ctrl+n';
+      ShortcutValidator.getShortcutValue(ShortcutValidator.addNoteKey) ?? '';
   final reportErrorShortcut =
       ShortcutValidator.getShortcutValue(ShortcutValidator.reportErrorKey) ??
       '';
   final togglePdfShortcut =
-      Settings.getValue<String>('key-shortcut-toggle-pdf-view') ??
-      ShortcutValidator.defaultShortcuts['key-shortcut-toggle-pdf-view'] ??
-      'ctrl+shift+p';
+      ShortcutValidator.getShortcutValue(ShortcutValidator.togglePdfViewKey) ??
+      '';
   final copyBookLinkShortcut =
       ShortcutValidator.getShortcutValue(ShortcutValidator.copyBookLinkKey) ??
       '';
@@ -3204,8 +3152,12 @@ bool _handleGlobalKeyEvent(
         book: state.book,
         links: state.links,
         activeCommentators: state.activeCommentators,
-        startLine: _topmostVisibleSourceLine(state),
+        startLine: tab.index,
         displayProfile: _exportProfile(state),
+        commentaryDisplayProfile: state.displayProfile(
+          target: TextTarget.commentary,
+          channel: TextChannel.export,
+        ),
         tableOfContents: state.tableOfContents,
       ),
     );
@@ -3214,7 +3166,7 @@ bool _handleGlobalKeyEvent(
 
   // הוספת סימניה
   if (ShortcutHelper.matchesShortcut(event, addBookmarkShortcut)) {
-    _addBookmarkFromKeyboard(context, state);
+    _addBookmarkFromKeyboard(context, state, tab.index);
     return true;
   }
 
@@ -3228,6 +3180,7 @@ bool _handleGlobalKeyEvent(
     _addNoteFromKeyboard(
       context,
       state,
+      currentLine: tab.index,
       openNotesForCurrentView: openNotesForCurrentView,
       selectedText: selectedTextForNote,
       selectedLineIndex: selectedLineForNote,
@@ -3275,7 +3228,7 @@ bool _handleGlobalKeyEvent(
       copySectionMarkLinkShortcut.isNotEmpty ||
       copyTextMarkLinkShortcut.isNotEmpty) {
     final bookId = state.book.id;
-    final index = selectedLineForNote ?? _topmostVisibleSourceLine(state);
+    final index = selectedLineForNote ?? tab.index;
 
     if (ShortcutHelper.matchesShortcut(event, copyBookLinkShortcut)) {
       if (bookId == null) {
@@ -3363,9 +3316,7 @@ bool _handleGlobalKeyEvent(
   );
   if (zoomInShortcut != null &&
       ShortcutHelper.matchesShortcut(event, zoomInShortcut)) {
-    final newSize = min(50.0, state.fontSize + 3);
-    context.read<TextBookBloc>().add(UpdateFontSize(newSize));
-    savePerBookDisplaySettings(context, state, fontSize: newSize);
+    _stepFontSize(context, state, larger: true);
     return true;
   }
 
@@ -3374,9 +3325,7 @@ bool _handleGlobalKeyEvent(
   );
   if (zoomOutShortcut != null &&
       ShortcutHelper.matchesShortcut(event, zoomOutShortcut)) {
-    final newSize = max(15.0, state.fontSize - 3);
-    context.read<TextBookBloc>().add(UpdateFontSize(newSize));
-    savePerBookDisplaySettings(context, state, fontSize: newSize);
+    _stepFontSize(context, state, larger: false);
     return true;
   }
 
@@ -3385,8 +3334,7 @@ bool _handleGlobalKeyEvent(
   );
   if (zoomResetShortcut != null &&
       ShortcutHelper.matchesShortcut(event, zoomResetShortcut)) {
-    context.read<TextBookBloc>().add(const UpdateFontSize(25.0));
-    savePerBookDisplaySettings(context, state, fontSize: 25.0);
+    _setFontSize(context, state, 25.0);
     return true;
   }
 
@@ -3394,23 +3342,40 @@ bool _handleGlobalKeyEvent(
   // ב-Mac מקבלים גם את Cmd (Meta) כי זו המוסכמה בפלטפורמה.
   final isCtrlOrCmd = ShortcutHelper.isPlainCtrlOrCmdPressed;
 
-  // ניווט עם Ctrl+Home ו-Ctrl+End
-  if (event is KeyDownEvent && isCtrlOrCmd) {
+  // Home/End, לבד או עם Ctrl - קצות הספר. ה-listener עוטף גם את שדות הקלט
+  // של החלונית, ושם המקשים מזיזים את הסמן בלבד.
+  final keyboard = HardwareKeyboard.instance;
+  final isBareKey =
+      !keyboard.isShiftPressed &&
+      !keyboard.isControlPressed &&
+      !keyboard.isMetaPressed &&
+      !ShortcutHelper.isAltModifierPressed;
+  if (event is KeyDownEvent &&
+      (isCtrlOrCmd || isBareKey) &&
+      !isTextInputFocusNode(FocusManager.instance.primaryFocus)) {
     switch (event.logicalKey) {
-      // Ctrl+Home - תחילת הספר
+      // Home - תחילת הספר
       case LogicalKeyboardKey.home:
-        state.scrollController.scrollTo(
-          index: 0,
-          duration: const Duration(milliseconds: 300),
+        unawaited(
+          tab.lines.scrollToLine(
+            0,
+            alignment: 0,
+            duration: const Duration(milliseconds: 300),
+          ),
         );
         return true;
 
-      // Ctrl+End - סוף הספר
+      // End - סוף הספר
       case LogicalKeyboardKey.end:
-        state.scrollController.scrollTo(
-          index: state.content.length - 1,
-          duration: const Duration(milliseconds: 300),
-        );
+        if (state.content.isNotEmpty) {
+          unawaited(
+            tab.lines.scrollToLine(
+              state.content.length - 1,
+              alignment: 0,
+              duration: const Duration(milliseconds: 300),
+            ),
+          );
+        }
         return true;
     }
   }
@@ -3428,10 +3393,14 @@ bool _handleGlobalKeyEvent(
         }
         break;
 
-      // ESC - ניקוי הדגשת החיפוש, ואם אין הדגשה — יציאה ממסך מלא
+      // ESC - ניקוי הדגשת החיפוש או ה-?mark, ואם אין הדגשה — יציאה ממסך מלא
       case LogicalKeyboardKey.escape:
         if (state.searchText.isNotEmpty) {
           context.read<TextBookBloc>().add(const UpdateSearchText(''));
+          return true;
+        }
+        if (state.permanentHighlightLine != null) {
+          context.read<TextBookBloc>().add(const ApplyMarkHighlight());
           return true;
         }
         if (!Platform.isAndroid && !Platform.isIOS) {
@@ -3610,8 +3579,8 @@ Future<void> _dispatchContextMenuShortcut({
 void _addBookmarkFromKeyboard(
   BuildContext context,
   TextBookLoaded state,
+  int index,
 ) async {
-  final index = _topmostVisibleSourceLine(state);
   await addTextSectionBookmark(context, state, index);
 }
 
@@ -3619,6 +3588,7 @@ void _addBookmarkFromKeyboard(
 Future<void> _addNoteFromKeyboard(
   BuildContext context,
   TextBookLoaded state, {
+  required int currentLine,
   required VoidCallback openNotesForCurrentView,
   String? selectedText,
   int? selectedLineIndex,
@@ -3633,7 +3603,7 @@ Future<void> _addNoteFromKeyboard(
   final currentIndex =
       (hasSelection ? selectedLineIndex : null) ??
       state.selectedIndex ??
-      _topmostVisibleSourceLine(state);
+      currentLine;
 
   // קבלת הטקסט המזהה של השורה (כמו שיוצג ככותרת ההערה), או הטקסט המסומן
   final referenceText = hasSelection
@@ -3648,6 +3618,7 @@ Future<void> _addNoteFromKeyboard(
   final draftService = PersonalNoteDraftService();
   final draft = await draftService.loadDraft(
     bookId: personalNotesBookKey(state.book),
+    categoryId: state.book.categoryId,
     lineNumber: currentIndex + 1,
   );
 
@@ -3726,8 +3697,7 @@ void _togglePdfView(
   TextBookLoaded state,
   TextBookTab tab,
 ) async {
-  final currentIndex = _topmostVisibleSourceLine(state);
-  tab.index = currentIndex;
+  final currentIndex = tab.index;
 
   final library = await DataRepository.instance.library;
   if (!context.mounted) return;
@@ -3759,5 +3729,18 @@ void _togglePdfView(
     ignoreHistory: true,
     requiresStableLayout: true,
     insertAdjacent: true,
+  );
+}
+
+/// קורא את [TourTargetsScope] בהקשר משלו, כדי שמעבר טאב יבנה רק את העטיפה.
+class _NavPanelTourTargetBuilder extends StatelessWidget {
+  final Widget child;
+
+  const _NavPanelTourTargetBuilder({required this.child});
+
+  @override
+  Widget build(BuildContext context) => TextBookNavPanelTourTarget(
+    isActiveTab: TourTargetsScope.enabledOf(context),
+    child: child,
   );
 }

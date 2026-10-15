@@ -18,6 +18,7 @@ import 'package:otzaria/widgets/lists/nav_tree_tile.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../support/search_engine_test_init.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 
 /// Bloc בדיקה שמאפשר emit ידני של states ל-TocViewer.
 /// מאפשר לאמת ש-buildWhen מסנן emits לא רלוונטיים — ההגנה המרכזית של
@@ -102,8 +103,6 @@ TextBookLoaded _loadedState({
     selectedIndex: selectedIndex,
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }
 
@@ -161,7 +160,7 @@ Future<void> main() async {
                 // עוטף את ה-TocViewer ב-Builder שסופר rebuilds דרך InheritedWidget
                 // לא רלוונטי — נכליל ספירה דרך paneContent של TocViewer בעקיפין.
                 return TocViewer(
-                  scrollController: ItemScrollController(),
+                  lines: LineScrollController(),
                   closeLeftPaneCallback: () {},
                   focusNode: focusNode,
                 );
@@ -228,7 +227,7 @@ Future<void> main() async {
     await tester.pumpWidget(
       _wrap(
         TocViewer(
-          scrollController: ItemScrollController(),
+          lines: LineScrollController(),
           closeLeftPaneCallback: () {},
           focusNode: focusNode,
         ),
@@ -257,6 +256,52 @@ Future<void> main() async {
     );
   });
 
+  // issue #1725 — ברשימה הוירטואלית הכותרת עם אייקון החיפוש נפרקת בגלילה.
+  testWidgets('גלילה בעץ גדול מציגה אייקון חיפוש צף שפותח את השדה', (
+    tester,
+  ) async {
+    final bloc = _TestTextBookBloc(
+      _loadedState(
+        toc: _buildLargeToc(simanim: 100, seifim: 60),
+        visibleIndices: const [0],
+      ),
+    );
+    addTearDown(bloc.close);
+    final focusNode = FocusNode();
+    addTearDown(focusNode.dispose);
+
+    await tester.pumpWidget(
+      _wrap(
+        TocViewer(
+          lines: LineScrollController(),
+          closeLeftPaneCallback: () {},
+          focusNode: focusNode,
+        ),
+        bloc,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final searchIcon = find.byIcon(FluentIcons.search_24_regular);
+    expect(
+      find.descendant(of: find.byType(NavTreeHeader), matching: searchIcon),
+      findsOneWidget,
+    );
+
+    await tester.drag(
+      find.byType(ScrollablePositionedList),
+      const Offset(0, -3000),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(NavTreeHeader), findsNothing);
+    expect(searchIcon.hitTestable(), findsOneWidget);
+
+    await tester.tap(searchIcon);
+    await tester.pumpAndSettle();
+    expect(focusNode.hasFocus, isTrue);
+    expect(searchIcon, findsNothing);
+  });
+
   testWidgets('ספר עם TOC < סף → משתמש ב-SingleChildScrollView (לא וירטואלי)', (
     tester,
   ) async {
@@ -280,7 +325,7 @@ Future<void> main() async {
     await tester.pumpWidget(
       _wrap(
         TocViewer(
-          scrollController: ItemScrollController(),
+          lines: LineScrollController(),
           closeLeftPaneCallback: () {},
           focusNode: focusNode,
         ),
@@ -311,7 +356,7 @@ Future<void> main() async {
     await tester.pumpWidget(
       _wrap(
         TocViewer(
-          scrollController: ItemScrollController(),
+          lines: LineScrollController(),
           closeLeftPaneCallback: () {},
           focusNode: focusNode,
         ),
@@ -346,7 +391,7 @@ Future<void> main() async {
     await tester.pumpWidget(
       _wrap(
         TocViewer(
-          scrollController: ItemScrollController(),
+          lines: LineScrollController(),
           closeLeftPaneCallback: () {},
           focusNode: focusNode,
         ),
@@ -380,7 +425,7 @@ Future<void> main() async {
     await tester.pumpWidget(
       _wrap(
         TocViewer(
-          scrollController: ItemScrollController(),
+          lines: LineScrollController(),
           closeLeftPaneCallback: () {},
           focusNode: focusNode,
         ),
@@ -421,7 +466,7 @@ Future<void> main() async {
       await tester.pumpWidget(
         _wrap(
           TocViewer(
-            scrollController: ItemScrollController(),
+            lines: LineScrollController(),
             closeLeftPaneCallback: () {},
             focusNode: focusNode,
           ),
@@ -475,7 +520,7 @@ Future<void> main() async {
       await tester.pumpWidget(
         _wrap(
           TocViewer(
-            scrollController: ItemScrollController(),
+            lines: LineScrollController(),
             closeLeftPaneCallback: () {},
             focusNode: focusNode,
           ),
@@ -525,7 +570,7 @@ Future<void> main() async {
       await tester.pumpWidget(
         _wrap(
           TocViewer(
-            scrollController: ItemScrollController(),
+            lines: LineScrollController(),
             closeLeftPaneCallback: () {},
             focusNode: focusNode,
           ),
@@ -600,7 +645,7 @@ Future<void> main() async {
     await tester.pumpWidget(
       _wrap(
         TocViewer(
-          scrollController: ItemScrollController(),
+          lines: LineScrollController(),
           closeLeftPaneCallback: () {},
           focusNode: focusNode,
         ),
@@ -652,7 +697,7 @@ Future<void> main() async {
     await tester.pumpWidget(
       _wrap(
         TocViewer(
-          scrollController: ItemScrollController(),
+          lines: LineScrollController(),
           closeLeftPaneCallback: () {},
           focusNode: focusNode,
         ),
@@ -669,18 +714,148 @@ Future<void> main() async {
     // פאנל סגור → אין גלילה.
     expect(tocOffset(), 0);
 
-    // פתיחת הפאנל → גלילה למיקום הפעיל. הגלילה משתמשת בשני
-    // addPostFrameCallback מקוננים שלא מבקשים frame בעצמם, ולכן יש
-    // לאלץ frames כדי שהשני ירוץ ושהאנימציה תושלם.
+    // פתיחת הפאנל → גלילה למיקום הפעיל, בלי לאלץ frames.
     bloc.emitState(closed.copyWith(showLeftPane: true));
-    await tester.pump();
     for (var i = 0; i < 4; i++) {
-      tester.binding.scheduleFrame();
       await tester.pump(const Duration(milliseconds: 150));
     }
 
     expect(tocOffset(), greaterThan(0));
   });
+
+  testWidgets(
+    'גלילת הספר שנעצרה גוללת את העץ לערך הפעיל בלי frames נוספים (issue #1913)',
+    (tester) async {
+      final toc = List.generate(
+        50,
+        (i) => TocEntry(text: 'פרק $i', index: i * 10, level: 1),
+      );
+      final initial = _loadedState(toc: toc, visibleIndices: const [0]);
+      final bloc = _TestTextBookBloc(initial);
+      addTearDown(bloc.close);
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+
+      await tester.pumpWidget(
+        _wrap(
+          TocViewer(
+            lines: LineScrollController(),
+            closeLeftPaneCallback: () {},
+            focusNode: focusNode,
+          ),
+          bloc,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // העדכון האחרון של השורה הגלויה מגיע אחרי שהגלילה בספר נעצרה, וכלום
+      // אחר אינו מבקש frame — pump רץ רק על frames שהתבקשו בפועל.
+      bloc.emitState(initial.copyWith(visibleIndices: [455]));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      final offset = tester
+          .widget<SingleChildScrollView>(find.byType(SingleChildScrollView))
+          .controller!
+          .offset;
+      expect(offset, greaterThan(0));
+    },
+  );
+
+  testWidgets(
+    'פתיחת הפאנל בערך עמוק שענפיו סגורים פותחת אותם וגוללת אליו (issue #1913)',
+    (tester) async {
+      // ענפי רמה 2 שאינם ראשונים סגורים כברירת מחדל, כך שהערך הפעיל נבנה
+      // רק אחרי שהענף נפתח.
+      final toc = List.generate(20, (c) {
+        final chapter = TocEntry(text: 'פרק $c', index: c * 100, level: 1);
+        for (var s = 0; s < 4; s++) {
+          final section = TocEntry(
+            text: 'סימן $c.$s',
+            index: c * 100 + 1 + s * 10,
+            level: 2,
+            parent: chapter,
+          );
+          for (var l = 0; l < 4; l++) {
+            section.children.add(
+              TocEntry(
+                text: 'סעיף $c.$s.$l',
+                index: c * 100 + 2 + s * 10 + l,
+                level: 3,
+                parent: section,
+              ),
+            );
+          }
+          chapter.children.add(section);
+        }
+        return chapter;
+      });
+      final bloc = _TestTextBookBloc(
+        _loadedState(toc: toc, visibleIndices: const [0], selectedIndex: 1534),
+      );
+      addTearDown(bloc.close);
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+
+      // הפאנל בונה את TocViewer רק כשהוא נפתח.
+      await tester.pumpWidget(
+        _wrap(
+          TocViewer(
+            lines: LineScrollController(),
+            closeLeftPaneCallback: () {},
+            focusNode: focusNode,
+          ),
+          bloc,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final viewport = tester.getRect(find.byType(SingleChildScrollView));
+      final row = tester.getRect(find.text('סעיף 15.3.2'));
+      expect(row.top, greaterThanOrEqualTo(viewport.top));
+      expect(row.bottom, lessThanOrEqualTo(viewport.bottom));
+    },
+  );
+
+  testWidgets(
+    'פסקה נבחרת באמצע פרק מסמנת את הפרק וגוללת אליו (issue #2228)',
+    (tester) async {
+      final toc = List.generate(
+        50,
+        (i) => TocEntry(text: 'פרק $i', index: i * 10, level: 1),
+      );
+      // שורה 455 היא פסקה בתוך "פרק 45", למשל תוצאת חיפוש שנפתחה.
+      final bloc = _TestTextBookBloc(
+        _loadedState(toc: toc, visibleIndices: const [0], selectedIndex: 455),
+      );
+      addTearDown(bloc.close);
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+
+      await tester.pumpWidget(
+        _wrap(
+          TocViewer(
+            lines: LineScrollController(),
+            closeLeftPaneCallback: () {},
+            focusNode: focusNode,
+          ),
+          bloc,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final selected = tester
+          .widgetList<NavTreeTile>(find.byType(NavTreeTile))
+          .where((tile) => tile.isSelected)
+          .map((tile) => tile.title);
+      expect(selected, ['פרק 45']);
+      final viewport = tester.getRect(find.byType(SingleChildScrollView));
+      final row = tester.getRect(find.text('פרק 45'));
+      expect(row.top, greaterThanOrEqualTo(viewport.top));
+      expect(row.bottom, lessThanOrEqualTo(viewport.bottom));
+    },
+  );
 
   testWidgets(
     'ניקוי חיפוש בין תזמון הגלילה לביצועה אינו זורק (מסלול שהוחלף)',
@@ -704,7 +879,7 @@ Future<void> main() async {
       await tester.pumpWidget(
         _wrap(
           TocViewer(
-            scrollController: ItemScrollController(),
+            lines: LineScrollController(),
             closeLeftPaneCallback: () {},
             focusNode: focusNode,
           ),
@@ -719,15 +894,12 @@ Future<void> main() async {
 
       // שינוי הפריט הפעיל מתזמן גלילה במסלול הרקורסיבי.
       bloc.emitState(initial.copyWith(selectedIndex: 5));
-      await tester.pump();
 
-      // ניקוי מיידי — לפני שה-callback השני רץ.
+      // ניקוי מיידי — לפני ה-frame שבו הגלילה רצה.
       // הקלט הגולמי — WidgetTester.enterText מריץ frame ביניים משלו,
-      // וה-callback השני היה רץ בו לפני שהניקוי מוחל.
+      // והגלילה הייתה רצה בו לפני שהניקוי מוחל.
       tester.testTextInput.enterText('');
-      await tester.pump();
       for (var i = 0; i < 4; i++) {
-        tester.binding.scheduleFrame();
         await tester.pump(const Duration(milliseconds: 150));
       }
 
@@ -761,7 +933,7 @@ Future<void> main() async {
     await tester.pumpWidget(
       _wrap(
         TocViewer(
-          scrollController: ItemScrollController(),
+          lines: LineScrollController(),
           closeLeftPaneCallback: () {},
           focusNode: focusNode,
         ),
@@ -797,7 +969,7 @@ Future<void> main() async {
     await tester.pumpWidget(
       _wrap(
         TocViewer(
-          scrollController: ItemScrollController(),
+          lines: LineScrollController(),
           closeLeftPaneCallback: () {},
           focusNode: focusNode,
         ),
@@ -833,7 +1005,7 @@ Future<void> main() async {
     await tester.pumpWidget(
       _wrap(
         TocViewer(
-          scrollController: ItemScrollController(),
+          lines: LineScrollController(),
           closeLeftPaneCallback: () {},
           focusNode: focusNode,
         ),
@@ -868,7 +1040,7 @@ Future<void> main() async {
     await tester.pumpWidget(
       _wrap(
         TocViewer(
-          scrollController: ItemScrollController(),
+          lines: LineScrollController(),
           closeLeftPaneCallback: () {},
           focusNode: focusNode,
         ),
@@ -922,7 +1094,7 @@ Future<void> main() async {
       await tester.pumpWidget(
         _wrap(
           TocViewer(
-            scrollController: ItemScrollController(),
+            lines: LineScrollController(),
             closeLeftPaneCallback: () {},
             focusNode: focusNode,
           ),

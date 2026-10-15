@@ -40,19 +40,6 @@ void main() {
     });
   });
 
-  group('LinkTypes.isReferenceLikeLink', () {
-    test('מזהה קשרי עיון/הפניה אך לא מפרשים או SOURCE', () {
-      expect(LinkTypes.isReferenceLikeLink('REFERENCE'), isTrue);
-      expect(LinkTypes.isReferenceLikeLink('QUOTATION'), isTrue);
-      expect(LinkTypes.isReferenceLikeLink('EIN_MISHPAT'), isTrue);
-      expect(LinkTypes.isReferenceLikeLink('OTHER'), isTrue);
-      expect(LinkTypes.isReferenceLikeLink('COMMENTARY'), isFalse);
-      expect(LinkTypes.isReferenceLikeLink('EXPLICATION'), isFalse);
-      expect(LinkTypes.isReferenceLikeLink('SOURCE'), isFalse);
-      expect(LinkTypes.isReferenceLikeLink(null), isFalse);
-    });
-  });
-
   group('LinkTypes.normalize', () {
     test('ממיר לאותיות גדולות ומקצץ רווחים', () {
       expect(LinkTypes.normalize('reference'), 'REFERENCE');
@@ -351,6 +338,73 @@ void main() {
         LinkTypes.dependentTextTypes.union(LinkTypes.referenceTypes),
       );
       expect(types.length, types.toSet().length, reason: 'בלי כפילויות');
+    });
+  });
+
+  group('LinkTypes.normalize', () {
+    String legacyNormalize(String? connectionType) {
+      final trimmed = connectionType?.trim() ?? '';
+      if (trimmed.isEmpty) return '';
+      return trimmed.toUpperCase().replaceAll(RegExp(r'[\s-]+'), '_');
+    }
+
+    test('תוצאה זהה למימוש המקורי על כל צורות הקלט', () {
+      for (final value in const [
+        null,
+        '',
+        '   ',
+        'COMMENTARY',
+        'SUPER_COMMENTARY',
+        'commentary',
+        'Super Commentary',
+        ' TARGUM ',
+        'EIN_MISHPAT_/_NER_MITSVAH',
+        'SUPER-COMMENTARY',
+        'SUPER COMMENTARY',
+        'A\tB',
+        '__',
+        '_A_',
+        '123',
+        'super-commentary',
+        'a - b',
+        'MISHNAH_IN_TALMUD2',
+        '_',
+        'פירוש',
+      ]) {
+        expect(
+          LinkTypes.normalize(value),
+          legacyNormalize(value),
+          reason: '$value',
+        );
+      }
+    });
+
+    test('ערך קנוני מה-DB מנורמל מהר בהרבה מהמימוש המקורי', () {
+      const dbValues = [
+        'COMMENTARY',
+        'SUPER_COMMENTARY',
+        'REFERENCE',
+        'TARGUM',
+        'MESORAT_HASHAS',
+        'EIN_MISHPAT',
+      ];
+      final links = [for (var i = 0; i < 50000; i++) dbValues[i % 6]];
+      int bestMicros(String Function(String) normalize) {
+        var best = 1 << 62;
+        for (var run = 0; run < 5; run++) {
+          final sw = Stopwatch()..start();
+          for (final type in links) {
+            normalize(type);
+          }
+          if (sw.elapsedMicroseconds < best) best = sw.elapsedMicroseconds;
+        }
+        return best;
+      }
+
+      final legacy = bestMicros(legacyNormalize);
+      final current = bestMicros(LinkTypes.normalize);
+      // הסף רחב כדי שלא יהבהב במכונה עמוסה.
+      expect(current * 5, lessThan(legacy), reason: '$current/$legacy µs');
     });
   });
 }

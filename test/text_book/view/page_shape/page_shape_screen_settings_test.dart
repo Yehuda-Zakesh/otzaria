@@ -22,14 +22,13 @@ import 'package:otzaria/settings/engine/settings_state.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/models/commentator_group.dart';
+import 'package:otzaria/book_common/models/commentator_group.dart';
 import 'package:otzaria/text_book/view/page_shape/page_shape_screen.dart';
 import 'package:otzaria/text_book/view/page_shape/page_shape_settings_panel.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_settings_manager.dart';
 import 'package:otzaria/widgets/layout/context_overlay_panel.dart';
 import 'package:otzaria/widgets/layout/floating_panel.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../test_helpers/memory_cache_provider.dart';
 
@@ -730,8 +729,6 @@ TextBookLoaded _loadedState({
     selectedIndex: 0,
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }
 

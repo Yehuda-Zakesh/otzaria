@@ -30,9 +30,10 @@ import 'package:provider/provider.dart';
 import '../helpers/memory_settings_cache.dart';
 
 class _FakeRepository implements FindRefRepository {
-  _FakeRepository(this.results);
+  _FakeRepository(this.results, {this.commentators = const []});
 
   final List<DbReferenceResult> results;
+  final List<DbCommentatorEntry> commentators;
 
   @override
   bool get respectHiddenLibrary => false;
@@ -49,7 +50,7 @@ class _FakeRepository implements FindRefRepository {
   @override
   Future<List<DbCommentatorEntry>> getCommentatorsForResult(
     DbReferenceResult ref,
-  ) async => const [];
+  ) async => commentators;
 
   @override
   Future<void> prewarmGlobalAltToc() async {}
@@ -129,12 +130,14 @@ Library _libraryWith(List<Book> books) {
   return library;
 }
 
-/// פותח את הדיאלוג, מקליד ולוחץ על [reference]; מחזיר את הטאב שנפתח.
+/// פותח את הדיאלוג, מקליד ולוחץ על [reference] (או על [commentator] מתפריט
+/// המפרשים שלו); מחזיר את הטאב שנפתח.
 Future<OpenedTab> _openResult(
   WidgetTester tester, {
   required DbReferenceResult result,
   required Library library,
   List<Bookmark> history = const [],
+  DbCommentatorEntry? commentator,
 }) async {
   final previousLibrary = DataRepository.instance.cachedLibraryFutureForTesting;
   DataRepository.instance.library = Future.value(library);
@@ -146,7 +149,9 @@ Future<OpenedTab> _openResult(
     }
   });
   FocusRepository().findRefSearchController.clear();
-  final bloc = FindRefBloc(findRefRepository: _FakeRepository([result]));
+  final bloc = FindRefBloc(
+    findRefRepository: _FakeRepository([result], commentators: [?commentator]),
+  );
   final tabsBloc = _CapturingTabsBloc();
   final navigationBloc = _FakeNavigationBloc();
   late HistoryBloc historyBloc;
@@ -189,7 +194,14 @@ Future<OpenedTab> _openResult(
   await tester.enterText(find.byType(TextField), 'שאילתה');
   await tester.pump(const Duration(milliseconds: 400));
   await tester.pump();
-  await tester.tap(find.text(result.reference));
+  if (commentator != null) {
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('הצג מפרשים זמינים'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(commentator.title));
+  } else {
+    await tester.tap(find.text(result.reference));
+  }
   await tester.pumpAndSettle();
   return tabsBloc.openedTab;
 }
@@ -214,6 +226,56 @@ void main() {
         reference: 'בראשית פרק א',
         segment: 0,
         bookId: 1,
+      ),
+    );
+
+    expect((tab as TextBookTab).index, 0);
+  });
+
+  testWidgets('מפרש שהיעד שלו בשורה 0 נפתח בה ולא במיקום מההיסטוריה', (
+    tester,
+  ) async {
+    final source = TextBook(id: 1, title: 'בראשית');
+    final rashi = TextBook(id: 81, title: 'רש"י על בראשית');
+    final tab = await _openResult(
+      tester,
+      library: _libraryWith([source, rashi]),
+      history: [Bookmark(ref: 'רש"י על בראשית', book: rashi, index: 40)],
+      result: const DbReferenceResult(
+        title: 'בראשית',
+        reference: 'בראשית פרק א',
+        segment: 0,
+        bookId: 1,
+      ),
+      commentator: const DbCommentatorEntry(
+        title: 'רש"י על בראשית',
+        bookId: 81,
+        targetSegment: 0,
+      ),
+    );
+
+    expect((tab as TextBookTab).index, 0);
+  });
+
+  testWidgets('מפרש ללא יעד מוגדר נפתח בתחילת הספר ולא במיקום מההיסטוריה', (
+    tester,
+  ) async {
+    final source = TextBook(id: 1, title: 'בראשית');
+    final rashi = TextBook(id: 81, title: 'רש"י על בראשית');
+    final tab = await _openResult(
+      tester,
+      library: _libraryWith([source, rashi]),
+      history: [Bookmark(ref: 'רש"י על בראשית', book: rashi, index: 40)],
+      result: const DbReferenceResult(
+        title: 'בראשית',
+        reference: 'בראשית פרק א',
+        segment: 0,
+        bookId: 1,
+      ),
+      commentator: const DbCommentatorEntry(
+        title: 'רש"י על בראשית',
+        bookId: 81,
+        targetSegment: null,
       ),
     );
 

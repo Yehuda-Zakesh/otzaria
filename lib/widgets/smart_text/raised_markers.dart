@@ -28,8 +28,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:html/parser.dart' as html_parser;
-import 'package:otzaria/text_book/utils/link_anchor_variants.dart';
-import 'package:otzaria/theme/app_fonts.dart';
+import 'package:otzaria/book_common/utils/link_anchor_variants.dart';
+import 'package:otzaria/utils/text/text_manipulation.dart';
 import 'package:otzaria/widgets/smart_text/selection_fill_text.dart';
 import 'package:otzaria/widgets/smart_text/simple_inline_html.dart';
 
@@ -43,8 +43,8 @@ const String kRaisedSupClass = 'raised-sup';
 /// יחס גודל של מרקר הערה לגופן הטקסט.
 const double kFootnoteMarkerScale = 0.75;
 
-/// גובה ההרמה כיחס מגודל גופן *הסימון* — תואם לכוונת `top: -0.55em` המקורית.
-const double kRaisedMarkerRaiseFactor = 0.55;
+/// הרמת קו הבסיס של הסימון מעל קו הבסיס של הטקסט, כיחס מגודל גופן *הסימון*.
+const double kRaisedMarkerRaiseFactor = 0.40;
 
 /// סימון מורם אחד: הטקסט הגלוי שלו (כולל תווי בידוד הכיווניות), המופע שלו
 /// בטקסט הקטע (בספירת indexOf לא-חופפת — אותה ספירה שמבצעת שכבת הציור),
@@ -117,27 +117,16 @@ class RaisedMarker {
 class RaisedMarkers {
   RaisedMarkers._();
 
-  // אם הדגשת-חיפוש מזריקה span בתוך הסימון, ההתאמה העצלה נעצרת ב-close
-  // הפנימי; הטקסט שיחולץ עדיין מכיל את אות הסימון, ולכן האיתור בציור מצליח.
-  //
-  // ארבע משפחות, כולן בסריקה אחת בסדר המסמך (ספירת המופעים תלויה בסדר):
-  //  1+2. שני תגי הסימון של processText.
-  //  3.   סימון הערה מוטמעת לחיץ — addInlineNotePreviewLinks פולט בדיוק
-  //       `<a class="book-note-marker" href=...>`.
-  //  4-6. אות מפרש — injectLinkAnchorMarkers פולט
-  //       `class="link-anchor link-anchor-N..."`; הצורה החשופה
-  //       `class="link-anchor"` נתפסת גם היא, כי customStylesBuilder צובע
-  //       אותה שקוף — אחרת הטקסט היה נעלם. טווח-ציטוט
-  //       (`class="link-anchor-range"`) לעולם אינו נתפס ("-" ולא רווח/גרש).
-  //  7.   סמן-אות של הערה בספר אחר — `<sup>` שעטוף בעוגן ריחוף. הוא נשאר
-  //       בגודלו ובמקומו, ורק ה-hit-test של הציור המורם מופנה לעוגן. סמן-מספר
-  //       (`(9)` בלי `<sup>`) אינו נתפס כאן — הוא טקסט מודפס רגיל בשורה.
+  // בסימוני processText תווי הבידוד תוחמים את כל התוכן, גם כשהחיפוש מוסיף span.
+  // תגי טווח-ציטוט נסרקים בנפרד, כדי שטקסט הגוף לא ייבלע בין שני סימונים.
   static final RegExp _markerSpanRegex = RegExp(
-    '<span class="($kFootnoteMarkerClass|$kRaisedSupClass)">(.*?)</span>'
+    '<span class="($kFootnoteMarkerClass|$kRaisedSupClass)">'
+    '([\u2066-\u2068].*?\u2069|.*?)</span>'
     '|<a class="book-note-marker"[^>]*>(.*?)</a>'
     '|<(a|span) class="link-anchor( [^"]*)?"[^>]*>(.*?)</\\4>'
     '|<a class="numbered-note-marker"[^>]*>'
-    '<span class="$kRaisedSupClass">(.*?)</span></a>',
+    '<span class="$kRaisedSupClass">(.*?)</span></a>'
+    '|(<a class="link-anchor-range"[^>]*>)|</a>',
     caseSensitive: false,
     dotAll: true,
   );
@@ -154,7 +143,6 @@ class RaisedMarkers {
     caseSensitive: false,
   );
   static final RegExp _htmlTagRegex = RegExp(r'<[^>]+>');
-  static final RegExp _whitespaceRegex = RegExp(r'\s+');
 
   /// מחלץ את רשימת הסימונים המורמים מ-HTML מעובד של קטע.
   ///
@@ -197,6 +185,7 @@ class RaisedMarkers {
     var index = 0;
     var outerSmalls = 0;
     var outerBigs = 0;
+    var inRangeAnchor = false;
 
     for (final match in _markerSpanRegex.allMatches(html)) {
       final before = html.substring(index, match.start);
@@ -210,6 +199,11 @@ class RaisedMarkers {
         }
       }
       index = match.end;
+
+      if (match[8] != null || match[0]!.toLowerCase() == '</a>') {
+        inRangeAnchor = match[8] != null;
+        continue;
+      }
 
       final String rawContent;
       double scale;
@@ -225,6 +219,8 @@ class RaisedMarkers {
         rawContent = match[2] ?? '';
         scale = isFootnote ? kFootnoteMarkerScale : kHtmlSmallerFontScale;
         italic = isFootnote;
+        clickable = inRangeAnchor;
+        useLinkColor = inRangeAnchor;
       } else if (match[3] != null) {
         // סימון הערה מוטמעת לחיץ — אותן מטריקות של מרקר הערה, עם הפניית
         // לחיצה/ריחוף לציור המורם.
@@ -297,7 +293,7 @@ class RaisedMarkers {
     final decoded = withoutTags.contains('&')
         ? html_parser.parseFragment(withoutTags).text ?? withoutTags
         : withoutTags;
-    return decoded.replaceAll(_whitespaceRegex, ' ');
+    return collapseWhitespace(decoded);
   }
 
   /// ספירת מופעים לא-חופפת — חייבת להישאר זהה ללולאת האיתור שבשכבת הציור.
@@ -548,17 +544,11 @@ class RenderRaisedMarkerOverlay extends RenderProxyBox {
       if (marker.useLinkColor && _linkColor != null) {
         style = style.copyWith(color: _linkColor);
       }
+      // רק רקע, בלי הדגשה: אות רחבה יותר הייתה פורסת מחדש את השורה.
       if (marker.active && _activeBackground != null) {
         style = style.copyWith(
-          fontWeight: FontWeight.bold,
-          fontVariations: AppFonts.boldFontVariations(style.fontFamily),
           backgroundColor: _activeBackground,
           color: _activeForeground ?? style.color,
-        );
-      } else if (marker.active) {
-        style = style.copyWith(
-          fontWeight: FontWeight.bold,
-          fontVariations: AppFonts.boldFontVariations(style.fontFamily),
         );
       }
       final painter = TextPainter(
@@ -711,10 +701,13 @@ class RenderRaisedMarkerOverlay extends RenderProxyBox {
 
       final painter = _painterFor(marker);
       final raise = _fontSizeOf(marker) * kRaisedMarkerRaiseFactor;
-      // ממורכז אופקית על העוגן; אנכית — מורם, עם הצמדה לגבול העליון של
-      // השכבה כדי לא להיחתך בשורה הראשונה.
+      // אותו גופן ואותו גודל: תחתית התיבה ההדוקה מגדירה את קו הבסיס בשניהם, בלי
+      // תלות במטריקות ה-ascent של הגופן. הצמדה לראש השכבה מונעת חיתוך.
       final dx = anchorRect.center.dx - painter.width / 2;
-      final dy = math.max(0.0, anchorRect.top - raise);
+      final dy = math.max(
+        0.0,
+        anchorRect.bottom - _glyphBottomOf(painter, marker) - raise,
+      );
 
       placements.add(
         RaisedMarkerPlacement(
@@ -725,6 +718,13 @@ class RenderRaisedMarkerOverlay extends RenderProxyBox {
       );
     }
     return placements;
+  }
+
+  double _glyphBottomOf(TextPainter painter, RaisedMarker marker) {
+    final boxes = painter.getBoxesForSelection(
+      TextSelection(baseOffset: 0, extentOffset: marker.text.length),
+    );
+    return boxes.isEmpty ? painter.height : sameLineAnchorRect(boxes)!.bottom;
   }
 
   static int _nthOccurrence(String text, String pattern, int n) {

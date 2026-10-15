@@ -1,8 +1,13 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/models/plugin_manifest.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/plugins/storage/plugin_system_database.dart';
+import 'package:otzaria/plugins/utils/plugin_safe_mode.dart';
+import 'package:otzaria/plugins/services/plugin_new_tab_page_registry.dart';
+import 'package:otzaria/plugins/services/plugin_new_tab_page_service.dart';
+import 'package:otzaria/plugins/services/plugin_page_launcher.dart';
 
 PluginManifest _manifest({String id = 'p', int? toolTabOrder}) {
   return PluginManifest.fromJson({
@@ -51,8 +56,22 @@ class _FakeDb implements PluginSystemDatabase {
   _FakeDb(this.plugins);
 
   @override
+  Future<String?> getNewTabPageOwner() async => plugins.firstOrNull?.pluginId;
+
+  @override
   Future<List<InstalledPlugin>> getAllInstalledPlugins() async =>
       List.of(plugins);
+
+  @override
+  Future<InstalledPlugin?> getInstalledPlugin(String pluginId) async =>
+      plugins.where((p) => p.pluginId == pluginId).firstOrNull;
+
+  @override
+  Future<void> insertOrUpdatePlugin(InstalledPlugin plugin) async {
+    plugins
+      ..removeWhere((p) => p.pluginId == plugin.pluginId)
+      ..add(plugin);
+  }
 
   @override
   Future<void> updatePluginsUserOrder(Map<String, int> ordering) async {
@@ -72,6 +91,122 @@ class _FakeDb implements PluginSystemDatabase {
 }
 
 void main() {
+  group('PluginRegistryRepository in safe mode', () {
+    setUp(() => PluginSafeMode.active.value = true);
+    tearDown(PluginSafeMode.resetForTesting);
+
+    test('all runtime reads wait for the safe-mode decision', () async {
+      PluginSafeMode.active.value = false;
+      final decision = Completer<void>();
+      PluginSafeMode.ready = decision.future;
+      final repo = PluginRegistryRepository(
+        database: _FakeDb([_plugin(id: 'a')]),
+      );
+      var completed = 0;
+      final all = repo.getAllPlugins().then((v) {
+        completed++;
+        return v;
+      });
+      final one = repo.getPlugin('a').then((v) {
+        completed++;
+        return v;
+      });
+      final enabled = repo.getIsEnabled('a').then((v) {
+        completed++;
+        return v;
+      });
+      final owner = repo.getNewTabPageOwner().then((v) {
+        completed++;
+        return v;
+      });
+      await pumpEventQueue();
+      expect(completed, 0);
+      PluginSafeMode.active.value = true;
+      decision.complete();
+      expect((await all).single.enabled, isFalse);
+      expect((await one)!.enabled, isFalse);
+      expect(await enabled, isFalse);
+      expect(await owner, isNull);
+    });
+
+    test(
+      'safe mode suppresses ownership sync and opening without writes',
+      () async {
+        final fake = _FakeDb([_plugin(id: 'a')]);
+        final repo = PluginRegistryRepository(database: fake);
+        final registry = PluginNewTabPageRegistry.forTesting(repo);
+        final service = PluginNewTabPageService(registry: registry);
+        final launcher = PluginPageLauncher.instance;
+        final previousNavigator = launcher.navigator;
+        final opened = <String>[];
+        launcher.navigator = opened.add;
+        addTearDown(() {
+          launcher.navigator = previousNavigator;
+          registry.dispose();
+        });
+        registry.selectOwner('a');
+        await registry.open();
+        expect(opened, isEmpty);
+        expect(registry.activePluginId, isNull);
+        registry.selectOwner('a');
+        await service.syncOwner(repo);
+        expect(registry.activePluginId, isNull);
+        expect(await fake.getNewTabPageOwner(), 'a');
+        PluginSafeMode.active.value = false;
+        await service.syncOwner(repo);
+        await registry.open();
+        expect(opened, ['a']);
+      },
+    );
+
+    test('every plugin reads as disabled', () async {
+      final repo = PluginRegistryRepository(
+        database: _FakeDb([_plugin(id: 'a'), _plugin(id: 'b')]),
+      );
+
+      expect((await repo.getAllPlugins()).map((p) => p.enabled), [
+        false,
+        false,
+      ]);
+      expect((await repo.getPlugin('a'))!.enabled, isFalse);
+      expect(await repo.getIsEnabled('a'), isFalse);
+    });
+
+    test('saving keeps the stored enabled flag', () async {
+      final fake = _FakeDb([_plugin(id: 'a')]);
+      final repo = PluginRegistryRepository(database: fake);
+
+      final plugin = await repo.getPlugin('a');
+      await repo.savePlugin(plugin!.copyWith(userOrder: 3));
+
+      final stored = fake.plugins.single;
+      expect(stored.enabled, isTrue);
+      expect(stored.userOrder, 3);
+    });
+
+    test('the stored choice is shown and can be changed', () async {
+      final fake = _FakeDb([_plugin(id: 'a')]);
+      final repo = PluginRegistryRepository(database: fake);
+
+      final plugin = (await repo.getPlugin('a'))!;
+      expect(plugin.enabled, isFalse);
+      expect(plugin.savedEnabled, isTrue);
+
+      await repo.saveEnabledChoice('a', false);
+      expect(fake.plugins.single.enabled, isFalse);
+      expect((await repo.getPlugin('a'))!.savedEnabled, isFalse);
+    });
+
+    test('turning safe mode off restores the stored state', () async {
+      final repo = PluginRegistryRepository(
+        database: _FakeDb([_plugin(id: 'a')]),
+      );
+      PluginSafeMode.active.value = false;
+
+      expect(await repo.getIsEnabled('a'), isTrue);
+    });
+  });
+
   group('PluginRegistryRepository.reorderPlugins', () {
     test('maps an ordered list of ids to {id: 0, id: 1, ...}', () async {
       final fake = _FakeDb([]);

@@ -57,7 +57,7 @@ jobs:
           # תלות git על מונורפו נכשלת ב-checkout ("Filename too long") ומשאירה
           # עץ חלקי, ואז הבנייה נופלת על קובץ חסר במקום על ה-clone.
           git config --global core.longpaths true
-          flutter pub get
+          flutter pub get --enforce-lockfile
 
       - name: Run live WebView2 smoke test
         run: >-

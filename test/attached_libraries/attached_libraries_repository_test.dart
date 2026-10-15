@@ -86,7 +86,7 @@ void main() {
       expect(library.bookCount, 2);
       expect(library.isImported, isTrue);
       expect(registry.libraries, [library]);
-      expect(const AttachedLibraryStore().loadLibraries(), [library]);
+      expect(const AttachedLibraryStore().loadLibrariesOrNull(), [library]);
       await pumpEventQueue();
       expect(changes, 1);
     });
@@ -295,7 +295,7 @@ void main() {
       AttachedLibraryPlacement.mergeIntoLibrary,
     );
 
-    final stored = const AttachedLibraryStore().loadLibraries()
+    final stored = const AttachedLibraryStore().loadLibrariesOrNull()!
       ..sort((x, y) => x.priority.compareTo(y.priority));
     expect([for (final l in stored) l.slug], ['b', 'a']);
     expect(stored.first.placement, AttachedLibraryPlacement.mergeIntoLibrary);

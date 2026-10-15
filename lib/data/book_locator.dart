@@ -378,25 +378,6 @@ class BookLocator {
     }
   }
 
-  /// בדיקה אם ספר קיים
-  ///
-  /// [bookTitle] - שם הספר
-  /// [category] - הקטגוריה שבה נמצא הספר (אופציונלי)
-  ///
-  /// מחזיר true אם הספר קיים, false אחרת
-  static Future<bool> bookExists(
-    String bookTitle, {
-    Category? category,
-    int? categoryId,
-  }) async {
-    final location = await locateBook(
-      bookTitle,
-      category: category,
-      categoryId: categoryId,
-    );
-    return location != null;
-  }
-
   /// קבלת ספר מ-DB (אם קיים)
   ///
   /// [bookTitle] - שם הספר

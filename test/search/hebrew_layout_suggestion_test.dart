@@ -46,8 +46,7 @@ void main() {
       expect(suggestHebrewKeyboardFix('123 456'), isNull);
     });
 
-    test('אותיות שממופות לפיסוק בלבד (q, w) — אין עברית בתוצאה, אין הצעה',
-        () {
+    test('אותיות שממופות לפיסוק בלבד (q, w) — אין עברית בתוצאה, אין הצעה', () {
       expect(suggestHebrewKeyboardFix('qw'), isNull);
     });
 

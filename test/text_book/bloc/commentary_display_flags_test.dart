@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/settings/services/nikud_display_service.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 /// טבלת האמת של הניקוד והפיסוק: מה חל על הספר עצמו ומה על מפרשיו. מגן על
 /// הרגרסיה שבה "הצג ניקוד בתנ״ך" הותירה ניקוד גם במפרשים, שאינם תנ״ך.
@@ -178,23 +177,15 @@ TextBookLoaded _load({
       removeNikudFromTanach: removeNikudFromTanach,
       isTanach: isTanach,
     ),
-    nikudExemptByTanach: isNikudExemptByTanach(
-      defaultRemoveNikud: defaultRemoveNikud,
-      removeNikudFromTanach: removeNikudFromTanach,
-      isTanach: isTanach,
-    ),
+    nikudExemptByTanach:
+        defaultRemoveNikud && !removeNikudFromTanach && isTanach,
     removePunctuation: shouldRemovePunctuationForBook(
       defaultRemovePunctuation: removePunctuation,
       isTanach: isTanach,
     ),
-    punctuationExemptByTanach: isPunctuationExemptByTanach(
-      defaultRemovePunctuation: removePunctuation,
-      isTanach: isTanach,
-    ),
+    punctuationExemptByTanach: removePunctuation && isTanach,
     visibleIndices: const [0],
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }

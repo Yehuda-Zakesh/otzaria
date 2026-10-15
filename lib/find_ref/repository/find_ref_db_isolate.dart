@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:isolate';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/error_log_file.dart';
@@ -10,10 +9,11 @@ import 'package:otzaria/find_ref/repository/alt_toc_flat_entry.dart';
 import 'package:otzaria/find_ref/repository/find_ref_ranking.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
+import 'package:otzaria/migration/models/toc_entry.dart';
 import 'package:otzaria/migration/database/query_loader.dart';
 import 'package:otzaria/services/commentary_service.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart'
-    show parseDafCitationFromDafToken;
+    show hebrewTokenAlternatives, parseDafCitationFromDafToken;
 
 /// נזרק כשבקשה נזרקה מתור ה-worker בגלל הקלדה חדשה. אינו שגיאה — הקורא
 /// אמור לנטוש בשקט את השאילתה שהתיישנה.
@@ -473,14 +473,15 @@ class FindRefDbIsolate {
           .cast<int, List<String>>(),
       bookIdsByBigram: (raw['bookIdsByBigram'] as Map).cast<int, Int32List>(),
       rowCount: raw['rowCount'] as int,
+      quotedWordsByBookId: (raw['quotedWordsByBookId'] as Map)
+          .cast<int, Set<String>>(),
     );
   }
 
-  /// שורות ה-TOC של ספר מ-`seforim.db`. המיפוי ל-`TocEntry` נעשה בצד הקורא
-  /// דרך `TocEntry.fromMap`, כך שאין כפילות בלוגיקת ההמרה.
-  Future<List<Map<String, dynamic>>> getBookTocRows(int bookId) async {
-    final res = await _request('bookToc', {'bookId': bookId});
-    return _castRows(res);
+  /// ערכי ה-TOC של ספר מ-`seforim.db`. נשלחים כאובייקטים ולא כ-Map: העתקת
+  /// אלפי Map ל-isolate הראשי חוסמת אותו פי 10 יותר (בית יוסף, 20 אלף ערכים).
+  Future<List<TocEntry>> getBookTocEntries(int bookId) async {
+    return await _request('bookToc', {'bookId': bookId}) as List<TocEntry>;
   }
 
   // ── Reset / lifecycle ───────────────────────────────────────────────────────
@@ -537,7 +538,7 @@ class FindRefDbIsolate {
       );
       return false;
     } catch (e) {
-      // ‏kill של isolate אינו מריץ finalizers, ולכן ה-handle הנייטיבי עשוי
+      // kill של isolate אינו מריץ finalizers, ולכן ה-handle הנייטיבי עשוי
       // לשרוד את נפילת ה-worker עד סוף התהליך.
       debugPrint(
         '[FindRef isolate] suspend failed ($e) — DB handle may still be open',
@@ -708,57 +709,117 @@ class FindRefDbIsolate {
 
 const String _backgroundLane = 'background';
 
-/// גודל מקטע הנרמול. גם שלבי השאילתה והנתיבים מחולקים (ראו
-/// [SeforimRepository.beginAltTocFlatBuild]), כך שבקשה ממתינה למקטע אחד בלבד.
-const int _altTocNormalizeChunkSize = 5000;
-
-/// בניית קאש ה-AltToc השטוח: שלבי המסד במקטעים, ואחריהם נרמול הנתיבים
-/// במקטעים. הקאש נחשף רק כשהבנייה הושלמה.
-class _AltTocFlatBuild {
-  _AltTocFlatBuild(this.repository, this._source, this._normalizeChunk);
-
-  final SeforimRepository repository;
-  final AltTocFlatBuild _source;
-  final int _normalizeChunk;
-  int _normalized = 0;
-
-  List<AltTocIndexEntry> get entries => _source.entries;
-
-  bool get isNormalizing => _source.isDone;
-
-  bool get isDone => _source.isDone && _normalized >= entries.length;
-
-  Future<void> step() async {
-    if (!_source.isDone) {
-      await _source.step();
-      return;
-    }
-    final end = math.min(_normalized + _normalizeChunk, entries.length);
-    for (; _normalized < end; _normalized++) {
-      final entry = entries[_normalized];
-      final refTokens = entry.refTokens = _source.refTokensOf(entry);
-      entry.refTokenMask = altTocTokenMask(refTokens);
-    }
+/// ההתאמות ל-[queryTokens] ב-[index], בסדר הקאש — בדיוק [altTocFlatMatches]
+/// על טוקני כל ערך. הסינונים המוקדמים (מסכה, טוקנים לפי טקסט, מספר הדף)
+/// הם תנאים הכרחיים שלו, כך שהטוקנים נבנים רק לערכים שעשויים להתאים.
+List<int> matchAltTocFlatIndex(
+  AltTocFlatIndex index,
+  List<String> queryTokens, {
+  int? maxRefTokens,
+}) {
+  final dafCitation = parseDafCitationFromDafToken(queryTokens);
+  // אחרי "דף" הכתיבים נבדקים מיקומית; "דף" עצמו חייב להופיע בנתיב.
+  final required = dafCitation == null
+      ? queryTokens.toSet().toList()
+      : {...queryTokens.takeWhile((t) => t != 'דף'), 'דף'}.toList();
+  final queryMask = altTocTokenMask(required);
+  final dafNumber = dafCitation == null
+      ? null
+      : hebrewTokenAlternatives(dafCitation.number);
+  final dafSlots = dafNumber == null
+      ? null
+      : Uint8List.fromList([
+          for (final token in index.dafTokens)
+            dafNumber.contains(token) ? 1 : 0,
+        ]);
+  bool dafMatches(int i) {
+    final slot = index.dafNumberSlotOf(i);
+    return slot >= 0 && dafSlots![slot] == 1;
   }
+
+  // לכל טקסט (בעצלתיים): אילו מהטוקנים הנדרשים מופיעים בו. ערך מתאים רק
+  // כשהשרשרת שלו מכסה את כולם.
+  final textBits = required.length > 30
+      ? null
+      : (Int32List(index.textCount)..fillRange(0, index.textCount, -1));
+  final allBits = (1 << required.length) - 1;
+  int bitsOf(int slot) {
+    final known = textBits![slot];
+    if (known >= 0) return known;
+    final tokens = index.textTokensAt(slot);
+    var bits = 0;
+    for (var k = 0; k < required.length; k++) {
+      if (tokens.contains(required[k])) bits |= 1 << k;
+    }
+    return textBits[slot] = bits;
+  }
+
+  bool coversRequired(int i) {
+    var bits = 0;
+    for (var j = i; j >= 0; j = index.parentOf(j)) {
+      bits |= bitsOf(index.textSlotOf(j));
+    }
+    return bits == allBits;
+  }
+
+  final masks = index.refMasks;
+  return [
+    for (var i = 0; i < masks.length; i++)
+      if (masks[i] & queryMask == queryMask &&
+          (maxRefTokens == null || index.refTokenCountOf(i) <= maxRefTokens) &&
+          (dafSlots == null || dafMatches(i)) &&
+          (textBits == null || coversRequired(i)) &&
+          // בלי ציון דף הכיסוי הוא בדיוק בדיקת הטוקנים של altTocFlatMatches.
+          (textBits != null && dafCitation == null ||
+              altTocFlatMatches(
+                index.refTokensOf(i),
+                queryTokens,
+                maxRefTokens: maxRefTokens,
+                dafCitation: dafCitation,
+              )))
+        i,
+  ];
 }
 
-/// [qualifyAltTocReference] של [AltTocIndexEntry.reference] בשרשור אחד לערך:
-/// נתיבי האבות נשמרים, גם עם שם הספר.
+/// [qualifyAltTocReference] של [AltTocFlatIndex.referenceOf] בשרשור אחד
+/// לערך: נתיבי האבות נשמרים, גם עם שם הספר.
 class AltTocQualifiedReferences {
-  final Map<AltTocIndexEntry, String> _paths = {};
-  final Map<AltTocIndexEntry, String> _qualifiedPaths = {};
+  AltTocQualifiedReferences(this.index);
 
-  String of(AltTocIndexEntry entry) {
-    final title = entry.book.title;
-    final parent = entry.parent;
-    final text = entry.text;
-    if (parent == null || text.isEmpty || title.isEmpty) {
-      return qualifyAltTocReference(title, entry.referenceUsing(_paths));
+  final AltTocFlatIndex index;
+  final Map<int, String> _paths = {};
+  final Map<int, String> _prefixes = {};
+
+  String _pathOf(int i) {
+    final cached = _paths[i];
+    if (cached != null) return cached;
+    final parent = index.parentOf(i);
+    final parentPath = parent < 0 ? '' : _pathOf(parent);
+    final text = index.textOf(i);
+    return _paths[i] = parentPath.isEmpty ? text : '$parentPath $text';
+  }
+
+  String of(int i) {
+    final title = index.bookOf(i).title;
+    final parent = index.parentOf(i);
+    final text = index.textOf(i);
+    if (parent < 0 || text.isEmpty || title.isEmpty) {
+      final parentPath = parent < 0 ? '' : _pathOf(parent);
+      final reference = text.isEmpty
+          ? parentPath
+          : parentPath.isEmpty
+          ? text
+          : '$parentPath $text';
+      return qualifyAltTocReference(title, reference);
     }
-    final parentPath = parent.pathUsing(_paths);
+    final prefix = _prefixes[parent];
+    if (prefix != null) return '$prefix $text';
+    final parentPath = _pathOf(parent);
     if (parentPath.isEmpty) return qualifyAltTocReference(title, text);
-    if (_startsWithTitle(parentPath, text, title)) return '$parentPath $text';
-    final qualified = _qualifiedPaths[parent] ??= '$title $parentPath';
+    final startsWithTitle = _startsWithTitle(parentPath, text, title);
+    final qualified = startsWithTitle ? parentPath : '$title $parentPath';
+    // כשנתיב ההורה אינו קצר משם הספר, ההכרעה אינה תלויה בטקסט של הילד.
+    if (parentPath.length >= title.length) _prefixes[parent] = qualified;
     return '$qualified $text';
   }
 
@@ -838,10 +899,10 @@ void _workerMain(_Bootstrap bootstrap) {
   SeforimRepository? repository;
   var suspended = false;
 
-  // קאש AltToc שטוח עם טוקנים מנורמלים מראש — נבנה פעם אחת ב-worker ומשרת
-  // את פקודת searchAltTocFlat. חי עד reset (רענון/החלפת ספרייה).
-  List<AltTocIndexEntry>? altTocFlatCache;
-  _AltTocFlatBuild? altTocBuild;
+  // קאש AltToc שטוח — נבנה פעם אחת ב-worker ומשרת את searchAltTocFlat.
+  // חי עד reset (רענון/החלפת ספרייה).
+  AltTocFlatIndex? altTocFlatCache;
+  AltTocFlatIndexBuild? altTocBuild;
 
   // דירוג הספרים מ-main (ראו GlobalAltTocRequest.bookRanks); אינו נגזר מהמסד
   // ולכן שורד reset — ספרייה חדשה מביאה טבלה חדשה.
@@ -865,60 +926,37 @@ void _workerMain(_Bootstrap bootstrap) {
     }
   }
 
-  Future<_AltTocFlatBuild?> startAltTocBuild() async {
-    final pending = altTocBuild;
-    if (pending != null) return pending;
-    final repo = await ensureRepo();
-    if (repo == null) return null;
-    final chunk = bootstrap.altTocTuning?.chunkSize;
-    return altTocBuild = _AltTocFlatBuild(
-      repo,
-      chunk == null
-          ? repo.beginAltTocFlatBuild()
-          : repo.beginAltTocFlatBuild(
-              entriesPerStep: chunk,
-              linesPerStep: chunk,
-              rowsPerStep: chunk,
-            ),
-      chunk ?? _altTocNormalizeChunkSize,
-    );
-  }
-
-  List<AltTocIndexEntry> completeAltTocBuild(_AltTocFlatBuild build) {
-    altTocBuild = null;
-    final entries = build.entries;
-    if (identical(build.repository, repository)) {
-      build.repository.attachAltTocIndex(entries);
-    }
-    return altTocFlatCache = entries;
-  }
-
-  // בקשה אינטראקטיבית משלימה בנייה חלקית של החימום במקום להתחיל מחדש.
-  Future<List<AltTocIndexEntry>> ensureAltTocFlatCache() async {
+  /// מקטע אחד של בניית הקאש, משותף לחימום ולחיפוש שממתין לו. מחזיר את
+  /// הקאש כשהוא מוכן, ריק כשאין מסד, ו-null כשנותרו מקטעים.
+  Future<AltTocFlatIndex?> advanceAltTocBuild() async {
     final cached = altTocFlatCache;
     if (cached != null) return cached;
-    final build = await startAltTocBuild();
-    if (build == null) return const [];
-    while (!build.isDone) {
-      await build.step();
+    var build = altTocBuild;
+    if (build == null) {
+      final repo = await ensureRepo();
+      if (repo == null) return AltTocFlatIndex.empty;
+      final chunk = bootstrap.altTocTuning?.chunkSize;
+      build = altTocBuild = chunk == null
+          ? repo.beginAltTocFlatIndex()
+          : repo.beginAltTocFlatIndex(
+              rowsPerStep: chunk,
+              textsPerStep: chunk,
+              linesPerStep: chunk,
+            );
     }
-    return completeAltTocBuild(build);
-  }
-
-  /// מקטע אחד של החימום. מחזיר true כשאין עוד מה לבנות.
-  Future<bool> prewarmAltTocStep() async {
-    if (altTocFlatCache != null) return true;
-    final build = await startAltTocBuild();
-    if (build == null) return true;
+    final repo = repository;
     final tuning = bootstrap.altTocTuning;
     final delay = build.isNormalizing
         ? tuning?.normalizeDelay
         : tuning?.phaseDelay;
-    await build.step();
+    final done = await build.step();
     if (delay != null && delay > Duration.zero) await Future.delayed(delay);
-    if (!build.isDone) return false;
-    completeAltTocBuild(build);
-    return true;
+    // reset באמצע ההשהיה: הבנייה הזו כבר נזרקה.
+    if (!identical(altTocBuild, build) || !done) return null;
+    altTocBuild = null;
+    final index = build.index;
+    repo?.attachAltTocIndex(index);
+    return altTocFlatCache = index;
   }
 
   // עיבוד סדרתי: בקשות מקבילות היו פותחות כמה חיבורים, ו-reset היה סוגר חיבור
@@ -1029,19 +1067,21 @@ void _workerMain(_Bootstrap bootstrap) {
           'acronymsByBookId': data.acronymsByBookId,
           'bookIdsByBigram': data.bookIdsByBigram,
           'rowCount': data.rowCount,
+          'quotedWordsByBookId': data.quotedWordsByBookId,
         };
       case 'bookToc':
         final repo = await ensureRepo();
         if (repo == null) {
           throw StateError('seforim.db unavailable for bookToc');
         }
-        return repo.database.tocDao.selectRowsByBookId(args['bookId'] as int);
+        return repo.database.tocDao.selectByBookId(args['bookId'] as int);
       case 'allAltTocFlat':
         final repo = await ensureRepo();
         if (repo == null) return const <Map<String, dynamic>>[];
         return repo.getAllAltTocFlatEntries();
       case 'searchAltTocFlat':
-        final cache = await ensureAltTocFlatCache();
+        // ה-drain מריץ את הבקשה רק אחרי שהקאש מוכן (ראו advanceAltTocBuild).
+        final index = altTocFlatCache ?? AltTocFlatIndex.empty;
         final ranksVersion = args['bookRanksVersion'] as int;
         final ranksSent = args.containsKey('rankIds');
         final ranksMissing = !ranksSent && ranksVersion != bookRanksVersion;
@@ -1053,36 +1093,22 @@ void _workerMain(_Bootstrap bootstrap) {
           bookRanks = request.bookRanks;
           bookRanksVersion = ranksVersion;
         }
-        final dafCitation = parseDafCitationFromDafToken(request.queryTokens);
-        // אחרי "דף" הכתיבים נבדקים מיקומית, ולכן אינם נדרשים כטוקנים במסכה.
-        final queryMask = altTocTokenMask(
-          dafCitation == null
-              ? request.queryTokens
-              : request.queryTokens.takeWhile((t) => t != 'דף'),
-        );
-        final matches = [
-          for (final e in cache)
-            if (e.refTokenMask & queryMask == queryMask &&
-                altTocFlatMatches(
-                  e.refTokens,
-                  request.queryTokens,
-                  maxRefTokens: request.maxRefTokens,
-                  dafCitation: dafCitation,
-                ))
-              e,
-        ];
-        final references = AltTocQualifiedReferences();
+        final references = AltTocQualifiedReferences(index);
         final rows = [
-          for (final e in selectGlobalAltTocMatches(
-            matches,
+          for (final i in selectGlobalAltTocMatches(
+            matchAltTocFlatIndex(
+              index,
+              request.queryTokens,
+              maxRefTokens: request.maxRefTokens,
+            ),
             request: request,
-            bookIdOf: (e) => e.book.id,
-            bookTitleOf: (e) => e.book.title,
-            orderIndexOf: (e) => e.book.orderIndex,
-            segmentOf: (e) => e.segment,
+            bookIdOf: (i) => index.bookOf(i).id,
+            bookTitleOf: (i) => index.bookOf(i).title,
+            orderIndexOf: (i) => index.bookOf(i).orderIndex,
+            segmentOf: index.segmentOf,
             referenceOf: references.of,
           ))
-            e.toFlatRow(),
+            index.flatRowOf(i),
         ];
         return {'rows': rows, if (ranksMissing) 'bookRanksMissing': true};
       case 'altBookIds':
@@ -1230,7 +1256,7 @@ void _workerMain(_Bootstrap bootstrap) {
     bool done;
     String? error;
     try {
-      done = await prewarmAltTocStep();
+      done = await advanceAltTocBuild() != null;
     } catch (e) {
       done = true;
       error = e.toString();
@@ -1261,7 +1287,15 @@ void _workerMain(_Bootstrap bootstrap) {
         }
         running = job;
         try {
-          if (job.method != 'tocBatch') {
+          if (job.method == 'searchAltTocFlat' &&
+              await advanceAltTocBuild() == null) {
+            // הקאש נבנה במקטעים בתור הראשי: בקשות אחרות וביטולים נענים ביניהם.
+            if (isStale(job)) {
+              reply(job.id, cancelled: true);
+            } else {
+              queue.add(job);
+            }
+          } else if (job.method != 'tocBatch') {
             reply(job.id, result: await dispatch(job.method, job.args));
           } else if (await tocBatchStep(job)) {
             reply(job.id, result: job.tocBatch!.out);

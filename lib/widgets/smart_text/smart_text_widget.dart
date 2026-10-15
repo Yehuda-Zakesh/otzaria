@@ -6,7 +6,7 @@ import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart
 import 'package:html/dom.dart' as dom;
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/text_book/utils/inline_section_markers.dart';
-import 'package:otzaria/text_book/utils/link_anchor_variants.dart';
+import 'package:otzaria/book_common/utils/link_anchor_variants.dart';
 import 'package:otzaria/text_book/utils/link_preview_utils.dart';
 import 'package:otzaria/theme/app_fonts.dart';
 import 'package:otzaria/utils/file/markdown_to_otzaria.dart';
@@ -147,44 +147,17 @@ class SmartTextWidget extends StatelessWidget {
     final bookId = highlightBookId;
     final sectionIndex = highlightSectionIndex;
     if (bookId != null && sectionIndex != null) {
-      final rawSourceHtml = highlightSourceText ?? text;
-      final renderingSignature = settings.sectionContentRenderingSignature;
-      // ניקוי-HTML וגיבוב הם העלות הכבדה בפריים; מדלגים עליהם כשהקלט זהה
-      // לפריים הקודם, וזה המצב בכמעט כל פריים גלילה.
-      if (ReaderSectionSyncGate.instance.claimSync(
+      syncReaderSectionForPlugins(
         bookId: bookId,
+        bookUid: highlightBookUid,
         bookDbId: highlightBookDbId,
         bookType: highlightBookType,
         bookSource: highlightBookSource,
         sectionIndex: sectionIndex,
-        rawSourceHtml: rawSourceHtml,
+        rawSourceHtml: highlightSourceText ?? text,
         processedHtml: processedHtml,
-        renderingSignature: renderingSignature,
-        highlightsRevision: PluginHighlightRegistry.instance.revision,
-      )) {
-        final sourceText = TextRendererService.stripHtml(rawSourceHtml);
-        final renderedText = TextRendererService.stripHtml(processedHtml);
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          PluginHighlightRegistry.instance.reanchorSection(
-            bookId: bookId,
-            sectionIndex: sectionIndex,
-            sourceText: sourceText,
-            bookUid: highlightBookUid,
-          );
-          unawaited(
-            _recordSectionContentSnapshot(
-              bookId: bookId,
-              bookDbId: highlightBookDbId,
-              bookType: highlightBookType,
-              bookSource: highlightBookSource,
-              sectionIndex: sectionIndex,
-              sourceText: sourceText,
-              renderedText: renderedText,
-              renderingSignature: renderingSignature,
-            ),
-          );
-        });
-      }
+        renderingSignature: settings.sectionContentRenderingSignature,
+      );
     }
     var frameRanges = const <PluginHighlightRenderedRange>[];
     if (highlights.isNotEmpty) {
@@ -210,7 +183,7 @@ class SmartTextWidget extends StatelessWidget {
     );
     final textStyle = TextStyle(
       fontSize: settings.fontSize,
-      fontFamily: fontFamily,
+      fontFamily: AppFonts.renderFontFamily(fontFamily),
       fontWeight: settings.fontWeight,
       fontVariations: AppFonts.boldFontVariations(
         fontFamily,
@@ -218,6 +191,10 @@ class SmartTextWidget extends StatelessWidget {
       ),
       height: settings.lineHeight,
     );
+
+    // הציור המורם נמדד בסגנון השורה — בכותרת זה סגנון הכותרת, כמו הגליף שבה.
+    final lineStyle =
+        SimpleInlineHtml.headingStyle(processedHtml, textStyle) ?? textStyle;
 
     // מסלול מהיר: רוב השורות הן טקסט פשוט (או עם תגי עיצוב בסיסיים) —
     // רינדור ישיר ב-Text.rich חוסך את מלוא עלות הפרסור של HtmlWidget.
@@ -228,7 +205,6 @@ class SmartTextWidget extends StatelessWidget {
         processedHtml,
         textStyle,
       );
-      final lineStyle = heading?.style ?? textStyle;
       final simpleSpan =
           heading?.span ?? SimpleInlineHtml.tryParse(processedHtml, textStyle);
       if (simpleSpan != null) {
@@ -242,7 +218,7 @@ class SmartTextWidget extends StatelessWidget {
           _withRaisedMarkers(
             context,
             raisedMarkers,
-            textStyle,
+            lineStyle,
             SizedBox(
               key: widgetKey,
               width: double.infinity,
@@ -275,7 +251,7 @@ class SmartTextWidget extends StatelessWidget {
       _withRaisedMarkers(
         context,
         raisedMarkers,
-        textStyle,
+        lineStyle,
         _SmartTextCallbacks(
           onAnchorHover: onAnchorHover,
           onAnchorHoverExit: onAnchorHoverExit,
@@ -357,10 +333,10 @@ class SmartTextWidget extends StatelessWidget {
               }
               // סמן-אות של מפרש (עוגן-נקודה): הגליף שקוף — הווריאנט הטיפוגרפי
               // נשאר עליו כדי שרוחב המקום בשורה יתאים לציור המורם, שנושא את
-              // הצבע, הרקע הפעיל וההדגשה (ראו RaisedMarkerOverlay).
+              // הצבע והרקע הפעיל (ראו RaisedMarkerOverlay).
               if ((element.localName == 'span' || element.localName == 'a') &&
                   element.classes.contains('link-anchor')) {
-                final style = <String, String>{
+                return {
                   'font-size': '${kLinkAnchorMarkerScale}em',
                   'white-space': 'nowrap',
                   'color': 'transparent',
@@ -369,12 +345,6 @@ class SmartTextWidget extends StatelessWidget {
                     linkAnchorVariantFromClasses(element.classes),
                   ),
                 };
-                // אות פעילה מצוירת מודגשת — ההדגשה נשארת גם על הגליף השקוף כדי
-                // שרוחבו יתאים; הרקע עבר לציור המורם.
-                if (element.classes.contains('link-anchor-active')) {
-                  style['font-weight'] = 'bold';
-                }
-                return style;
               }
               // טווח-ציטוט (לינקר): צבע ה-primary בגופן הטקסט הסובב, בלי קו תחתון.
               // בלי וריאנט טיפוגרפי — הוא שייך לסמני-האות של המפרשים בלבד.
@@ -390,16 +360,9 @@ class SmartTextWidget extends StatelessWidget {
                 return {
                   ...headingCss,
                   'color': toCssHex(colorScheme.onSurfaceVariant),
-                  // הכותרת צמודה לתוכן שהיא פותחת — באותה שורה.
+                  // הכותרת צמודה לשורה שהיא פותחת, שמוצגת מיד מתחתיה.
                   'margin-bottom': '0',
                 };
-              }
-              // כותרת הסימן שמתחת לכותרת נושא — צמודה אליה, בלי השוליים העליונים.
-              if (element.previousElementSibling?.classes.contains(
-                    kSectionHeadingClass,
-                  ) ??
-                  false) {
-                return {...headingCss, 'margin-top': '0'};
               }
               if (!hasMarkdownBlock) {
                 return headingCss.isEmpty ? null : headingCss;
@@ -726,8 +689,58 @@ class _SmartTextCallbacks extends InheritedWidget {
   bool updateShouldNotify(_SmartTextCallbacks oldWidget) => false;
 }
 
-/// גרסה פשוטה יותר של SmartTextWidget שמקבלת פרמטרים בודדים
-/// במקום RenderSettings - נוחה למקרים פשוטים
+/// עיגון מחדש של הדגשות התוספים ותיעוד תוכן הקטע (#828) לשורה מוצגת.
+/// [processedHtml] הוא התוצר של `processText`, לפני ציור ההדגשות.
+void syncReaderSectionForPlugins({
+  required String bookId,
+  String? bookUid,
+  int? bookDbId,
+  String? bookType,
+  String? bookSource,
+  required int sectionIndex,
+  required String rawSourceHtml,
+  required String processedHtml,
+  required Object renderingSignature,
+}) {
+  // ניקוי-HTML וגיבוב הם העלות הכבדה בפריים; מדלגים עליהם כשהקלט זהה
+  // לפריים הקודם, וזה המצב בכמעט כל פריים גלילה.
+  if (!ReaderSectionSyncGate.instance.claimSync(
+    bookId: bookId,
+    bookDbId: bookDbId,
+    bookType: bookType,
+    bookSource: bookSource,
+    sectionIndex: sectionIndex,
+    rawSourceHtml: rawSourceHtml,
+    processedHtml: processedHtml,
+    renderingSignature: renderingSignature,
+    highlightsRevision: PluginHighlightRegistry.instance.revision,
+  )) {
+    return;
+  }
+  final sourceText = TextRendererService.stripHtml(rawSourceHtml);
+  final renderedText = TextRendererService.stripHtml(processedHtml);
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    PluginHighlightRegistry.instance.reanchorSection(
+      bookId: bookId,
+      sectionIndex: sectionIndex,
+      sourceText: sourceText,
+      bookUid: bookUid,
+    );
+    unawaited(
+      _recordSectionContentSnapshot(
+        bookId: bookId,
+        bookDbId: bookDbId,
+        bookType: bookType,
+        bookSource: bookSource,
+        sectionIndex: sectionIndex,
+        sourceText: sourceText,
+        renderedText: renderedText,
+        renderingSignature: renderingSignature,
+      ),
+    );
+  });
+}
+
 Future<void> _recordSectionContentSnapshot({
   required String bookId,
   int? bookDbId,
@@ -757,50 +770,5 @@ Future<void> _recordSectionContentSnapshot({
     );
     debugPrint('Failed to track reader section content: $error');
     debugPrintStack(stackTrace: stackTrace);
-  }
-}
-
-class SimpleSmartText extends StatelessWidget {
-  final String text;
-  final double fontSize;
-  final String? fontFamily;
-  final bool removeNikud;
-  final bool removeTeamim;
-  final bool replaceHolyNames;
-  final utils.HolyNameStyle holyNameStyle;
-  final String searchText;
-  final Function(OpenedTab)? onOpenBook;
-  final Key? widgetKey;
-
-  const SimpleSmartText({
-    super.key,
-    required this.text,
-    required this.fontSize,
-    this.fontFamily,
-    this.removeNikud = false,
-    this.removeTeamim = true,
-    this.replaceHolyNames = false,
-    this.holyNameStyle = utils.HolyNameStyle.kufKuf,
-    this.searchText = '',
-    this.onOpenBook,
-    this.widgetKey,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SmartTextWidget(
-      text: text,
-      settings: RenderSettings(
-        fontSize: fontSize,
-        fontFamily: fontFamily,
-        removeNikud: removeNikud,
-        removeTeamim: removeTeamim,
-        replaceHolyNames: replaceHolyNames,
-        holyNameStyle: holyNameStyle,
-        searchText: searchText,
-      ),
-      onOpenBook: onOpenBook,
-      widgetKey: widgetKey,
-    );
   }
 }

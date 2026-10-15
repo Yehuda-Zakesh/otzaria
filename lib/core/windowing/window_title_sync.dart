@@ -63,7 +63,4 @@ class WindowTitleSync {
       debugPrint('setTitle failed: $e');
     }
   }
-
-  @visibleForTesting
-  static void resetForTest() => _lastSent = null;
 }

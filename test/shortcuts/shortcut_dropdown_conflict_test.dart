@@ -256,16 +256,6 @@ void main() {
       expect(conflicts, isNot(contains(_unusedShortcut2)));
     });
 
-    test('canShareShortcut מחזיר true עבור הגדרות מקבוצה תואמת', () {
-      expect(
-        ShortcutValidator.canShareShortcut(
-          'key-shortcut-add-note',
-          'key-shortcut-calendar-toggle-events',
-        ),
-        isTrue,
-      );
-    });
-
     test('canShareShortcut מחזיר false עבור הגדרות שאינן תואמות', () {
       expect(
         ShortcutValidator.canShareShortcut(

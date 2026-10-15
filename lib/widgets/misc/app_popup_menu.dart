@@ -6,7 +6,7 @@ import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:otzaria/theme/theme_exports.dart';
-import 'package:otzaria/widgets/misc/rtl_icon.dart';
+import 'package:otzaria/widgets/misc/app_menu_icon.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
@@ -130,6 +130,10 @@ class AppContextMenuEntry {
   final bool isSelected;
   final bool isHighlighted;
   final VoidCallback? onTap;
+
+  /// בתוך תת-תפריט: הלחיצה לא סוגרת את התפריט, והתת-תפריט נבנה מחדש
+  /// מ-[childrenBuilder] של ההורה כדי ש-[isSelected] יתעדכן מיד.
+  final bool keepOpen;
   final Widget? trailing;
   // תת-פריטים לתפריט משנה
   final List<AppContextMenuEntry>? children;
@@ -155,6 +159,7 @@ class AppContextMenuEntry {
     this.isSelected = false,
     this.isHighlighted = false,
     this.onTap,
+    this.keepOpen = false,
     this.trailing,
     this.children,
     this.childrenBuilder,
@@ -179,6 +184,7 @@ class AppContextMenuEntry {
       isSelected = false,
       isHighlighted = false,
       onTap = null,
+      keepOpen = false,
       trailing = null,
       children = null,
       childrenBuilder = null,
@@ -199,6 +205,7 @@ class AppContextMenuEntry {
       isSelected = false,
       isHighlighted = false,
       onTap = null,
+      keepOpen = false,
       trailing = null,
       children = null,
       childrenBuilder = null,
@@ -216,6 +223,7 @@ class AppContextMenuEntry {
       isSelected = false,
       isHighlighted = false,
       onTap = null,
+      keepOpen = false,
       trailing = null,
       children = null,
       childrenBuilder = null,
@@ -1046,7 +1054,7 @@ Widget buildAppMenuRowContent(
         : MainAxisSize.min,
     children: [
       if (icon != null) ...[
-        RtlIcon(icon, size: metrics.iconSize, color: foregroundColor),
+        AppMenuIcon(icon, size: metrics.iconSize, color: foregroundColor),
         const SizedBox(width: 8),
       ],
       DefaultTextStyle.merge(
@@ -1636,27 +1644,4 @@ class _SubmenuLayoutDelegate extends SingleChildLayoutDelegate {
   bool shouldRelayout(covariant _SubmenuLayoutDelegate oldDelegate) =>
       oldDelegate.itemRect != itemRect ||
       oldDelegate.openToRight != openToRight;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// showAppMenu — הצגת תפריט במיקום מוחלט
-// ═══════════════════════════════════════════════════════════════════════════
-
-Future<T?> showAppMenu<T>({
-  required BuildContext context,
-  required RelativeRect position,
-  required List<AppMenuEntry<T>> entries,
-}) {
-  final metrics =
-      Theme.of(context).extension<AppMenuMetrics>() ??
-      AppMenuMetrics.create(compactMenus: false);
-  return showMenu<T>(
-    context: context,
-    position: position,
-    items: entries
-        .map<PopupMenuEntry<T>>(
-          (entry) => buildAppPopupMenuItem<T>(context, entry, metrics, null),
-        )
-        .toList(),
-  );
 }

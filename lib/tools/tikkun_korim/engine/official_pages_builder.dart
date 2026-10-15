@@ -35,7 +35,7 @@ class LineIndexLookup {
           if (_lines[i].startTokenIdx >= 0) i,
       ];
 
-  /// אינדקס השורה האחרונה שה-startTokenIdx שלה ‎<= [tokenIdx]; ‎-1 כשאין.
+  /// אינדקס השורה האחרונה שה-startTokenIdx שלה <= [tokenIdx]; -1 כשאין.
   int find(int tokenIdx) {
     var lo = 0;
     var hi = _validLines.length - 1;
@@ -49,28 +49,6 @@ class LineIndexLookup {
     }
     return hi >= 0 ? _validLines[hi] : -1;
   }
-}
-
-/// מספר העמודים שמילתם האחרונה אינה `lastWord` שבטבלת השיטה — מדד הכיסוי
-/// של גבולות העמודים, שרובם נקבעים בהתאמת `firstWord` או באינטרפולציה.
-int countUnmatchedOfficialPages(
-  List<TikkunPage> pages,
-  List<PageDefinition> pageDefs,
-) {
-  var unmatched = 0;
-  for (var pi = 0; pi < pages.length && pi < pageDefs.length; pi++) {
-    final expected = pageDefs[pi].lastWord;
-    if (expected == null) continue;
-    String? actual;
-    for (final line in pages[pi].lines) {
-      for (final word in line.words) {
-        if (word.isGap || word.isBigGap || word.stam.isEmpty) continue;
-        actual = word.stam;
-      }
-    }
-    if (actual != expected) unmatched++;
-  }
-  return unmatched;
 }
 
 /// מפעיל את [visit] על כל מילה בתורה עם הפניתה. החומש מתקדם בכל `bookBreak`;

@@ -172,6 +172,35 @@ void main() {
     expect(results.map((result) => result.bookId), contains(100));
   });
 
+  test(
+    'issue #2136: שם בשגיאת כתיב מקדים את הספר ששמו זהה, כמו בכתיב הנכון',
+    () async {
+      final repo = FindRefRepository(
+        dataRepository: MockDataRepository(),
+        isReferenceBooksCacheLoaded: () => true,
+        warmUpReferenceBooksCache: () async {},
+        searchReferenceBooks: (query, {int limit = 50}) => [
+          _hit(
+            bookId: 1,
+            title: 'משנה עירובין',
+            matchRank: ReferenceBooksCache.fuzzyMatchRank,
+          ),
+          _hit(
+            bookId: 2,
+            title: 'עירובין',
+            matchRank: ReferenceBooksCache.fuzzyMatchRank,
+          ),
+        ],
+        getTocEntriesForReference: (_, _, {queryTokens}) async => const [],
+        getCategoryPathSync: (bookId) =>
+            bookId == 1 ? 'משנה, סדר מועד' : 'תלמוד בבלי, סדר מועד',
+      );
+
+      final results = await repo.findRefs('עירובים');
+      expect(results.first.bookId, 2);
+    },
+  );
+
   test('ספרי PDF מהדיסק נשארים נפרדים בדירוג לפי נתיב הקובץ', () async {
     final repo = FindRefRepository(
       dataRepository: MockDataRepository(),
@@ -1131,8 +1160,8 @@ void main() {
     test(
       'כשטוקן הבא הוא ספר עצמאי מדויק — TOC לא נשלף עבור הספר החיצוני',
       () async {
-        // תרחיש: query "תורה אור" → "תורה" הוא ספר, "אור" גם ספר עצמאי (rank=0).
-        // הציפייה: TOC של "תורה" לא מסונן לפי "אור" כדי שלא ניצור פסוקים מזויפים.
+        // "תורה" תחילית של "תורה תמימה" ו"אור" ספר עצמאי — אין לסנן את התוכן
+        // של ספר שלא נקרא בשמו המדויק לפי "אור".
         var tocCalled = false;
 
         final repo = FindRefRepository(
@@ -1144,7 +1173,14 @@ void main() {
               return const <ReferenceBookHit>[]; // אין ספר בשם זה במלואו
             }
             if (query == 'תורה') {
-              return [_hit(bookId: 1, title: 'תורה', orderIndex: 1.0)];
+              return [
+                _hit(
+                  bookId: 1,
+                  title: 'תורה תמימה',
+                  matchRank: 1,
+                  orderIndex: 1.0,
+                ),
+              ];
             }
             if (query == 'אור') {
               // טוקן הבא מתאים בדיוק לספר אחר → matchRank=0

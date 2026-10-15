@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:kosher_dart/kosher_dart.dart';
 import 'package:otzaria/tools/calendar/bloc/calendar_cubit.dart';
 
+export 'package:otzaria/utils/calendar_days.dart';
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  קבועים
 // ═══════════════════════════════════════════════════════════════════════════
@@ -165,24 +167,6 @@ String formatHebrewYear(int year) {
     formattedRemainder = remainderStr;
   }
   return thousands == 5 ? 'ה׳$formattedRemainder' : formattedRemainder;
-}
-
-/// מחזיר כותרת חודש/שנה לפי מצב הלוח
-String getCurrentMonthYearText(CalendarState state) {
-  final DateTime gregorianDate;
-  final JewishDate jewishDate;
-  if (state.calendarView == CalendarView.month) {
-    gregorianDate = state.currentGregorianDate;
-    jewishDate = state.currentJewishDate;
-  } else {
-    gregorianDate = state.selectedGregorianDate;
-    jewishDate = state.selectedJewishDate;
-  }
-  final gregName = getGregorianMonthName(gregorianDate.month);
-  final gregNum = gregorianDate.month;
-  final hebName = getHebrewMonthNameFor(jewishDate);
-  final hebYear = formatHebrewYear(jewishDate.getJewishYear());
-  return '$hebName $hebYear • $gregName ($gregNum) ${gregorianDate.year}';
 }
 
 /// מחזיר תיאור מקוצר לתאריך אירוע (עברי + לועזי)
@@ -361,13 +345,18 @@ int hebrewNumberToInt(String hebrew) {
     'ט': 9,
     'י': 10,
     'כ': 20,
+    'ך': 20,
     'ל': 30,
     'מ': 40,
+    'ם': 40,
     'נ': 50,
+    'ן': 50,
     'ס': 60,
     'ע': 70,
     'פ': 80,
+    'ף': 80,
     'צ': 90,
+    'ץ': 90,
     'ק': 100,
     'ר': 200,
     'ש': 300,

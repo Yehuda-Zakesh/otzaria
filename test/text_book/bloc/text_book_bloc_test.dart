@@ -15,9 +15,10 @@ import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_display/text_display_exports.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_settings_manager.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:flutter/foundation.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 
 /// שורה שחורגת בוודאות מחלון הקישורים שנטען סביב תחילת הספר, ולכן מחייבת
 /// שאילתה חדשה. נגזר מהקבועים כדי שכוונון החלון לא ישבור את הבדיקות.
@@ -87,36 +88,50 @@ void main() {
       });
     });
 
+    test(
+      'קורא מובנה שנוצר אחרי קריאה בתוסף מתחיל במיקום הכרטיסייה המעודכן',
+      () async {
+        final bloc = _createBloc(
+          repository: _FakeTextBookRepository(),
+          showPageShapeView: false,
+          initialIndex: 0,
+        );
+        addTearDown(bloc.close);
+        bloc.add(
+          const LoadContent(
+            startIndex: 25,
+            fontSize: 20,
+            showSplitView: false,
+            removeNikud: false,
+            loadCommentators: false,
+          ),
+        );
+        await _waitFor(
+          () => bloc.state is TextBookLoaded,
+          description: 'TextBookLoaded',
+        );
+        expect((bloc.state as TextBookLoaded).visibleIndices.first, 25);
+        bloc.add(
+          const LoadContent(
+            startIndex: 2,
+            preserveState: true,
+            fontSize: 22,
+            showSplitView: false,
+            removeNikud: false,
+            loadCommentators: false,
+          ),
+        );
+        await _waitFor(
+          () =>
+              bloc.state is TextBookLoaded &&
+              (bloc.state as TextBookLoaded).fontSize == 22,
+          description: 'font reload',
+        );
+        expect((bloc.state as TextBookLoaded).visibleIndices.first, 25);
+      },
+    );
+
     test('במפרשים למטה טוען קישורים מיד עבור הטווח הגלוי', () async {
-      final repository = _FakeTextBookRepository();
-      final bloc = _createBloc(
-        repository: repository,
-        showPageShapeView: false,
-      );
-
-      bloc.add(
-        const LoadContent(
-          fontSize: 20,
-          showSplitView: false,
-          removeNikud: false,
-          loadCommentators: false,
-        ),
-      );
-
-      await _waitFor(
-        () => repository.getBookLinksInRangeCalls >= 1,
-        description: 'getBookLinksInRangeCalls >= 1',
-      );
-
-      expect(repository.getBookLinksInRangeCalls, 1);
-      expect(repository.lastStartIndex, 0);
-      expect(repository.lastEndIndex, 10 + TextBookBloc.linkLookAheadLines);
-      expect(repository.lastTargetBookTitles, isEmpty);
-
-      await bloc.close();
-    });
-
-    test('באתחול מפרשים למטה מבקש חלון קישורים עבור הטווח הנוכחי', () async {
       final repository = _FakeTextBookRepository();
       final bloc = _createBloc(
         repository: repository,
@@ -639,10 +654,13 @@ void main() {
         // מדולגת כי ה-controller לא מחובר), ואז חלוניות המפרשים נשארו על החלון
         // הקודם. הטעינה הישירה של קישורי היעד מבטיחה סנכרון נכון.
         final repository = _FakeTextBookRepository();
+        final lines = LineScrollController();
+        addTearDown(lines.dispose);
         final bloc = _createBloc(
           repository: repository,
           showPageShapeView: true,
           initialIndex: 10,
+          readingPosition: lines.position,
         );
 
         bloc.add(
@@ -659,12 +677,9 @@ void main() {
           description: 'getBookLinksInRangeCalls >= 1',
         );
 
-        bloc.add(
-          const ApplyMarkHighlight(
-            permanentHighlightLine: 1801,
-            scrollToIndex: 1801,
-          ),
-        );
+        bloc.add(const ApplyMarkHighlight(permanentHighlightLine: 1801));
+        // הקורא אינו מחובר: היעד ממתין, אבל המיקום מתעדכן מיד.
+        unawaited(lines.scrollToLine(1801));
 
         await _waitFor(
           () => repository.getBookLinksInRangeCalls >= 2,
@@ -1903,10 +1918,7 @@ void main() {
           }, description: 'עדכון שאילתת החיפוש הקודמת');
 
           bloc.add(
-            const ApplyMarkHighlight(
-              highlightText: 'בראשית',
-              scrollToIndex: 7,
-            ),
+            const ApplyMarkHighlight(highlightText: 'בראשית'),
           );
           await _waitFor(() {
             final state = bloc.state;
@@ -2203,10 +2215,12 @@ TextBookBloc _createBloc({
     BookSource preferSource,
   })?
   quickPreviewLoader,
+  ValueListenable<ReadingPosition?>? readingPosition,
 }) {
   return TextBookBloc(
     repository: repository,
     quickPreviewLoader: quickPreviewLoader,
+    readingPosition: readingPosition,
     initialState: TextBookInitial.named(
       book ?? TextBook(title: 'בראשית'),
       initialIndex,
@@ -2217,8 +2231,6 @@ TextBookBloc _createBloc({
       initialSearchResultLines: initialSearchResultLines,
       showPageShapeView: showPageShapeView,
     ),
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }
 

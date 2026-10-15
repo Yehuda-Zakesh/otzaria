@@ -139,8 +139,6 @@ TextBookLoaded _loadedState() {
     selectedIndex: 0,
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }
 

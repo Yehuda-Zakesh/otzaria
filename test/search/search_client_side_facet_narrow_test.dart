@@ -382,6 +382,8 @@ Future<void> main() async {
               filePath: 'id:999999',
               mergedCount: 1,
               merged: const [],
+              textStatus: TextStatus.ok,
+              continuesToNextLine: false,
             ),
           ],
         ),
@@ -459,6 +461,8 @@ SearchResult _result({
     filePath: IndexingRepository.buildIndexedBookFilePath(book),
     mergedCount: 1,
     merged: const [],
+    textStatus: TextStatus.ok,
+    continuesToNextLine: false,
   );
 }
 
@@ -477,34 +481,14 @@ class _RecordingSearchRepository extends SearchRepository {
     filePath: 'id:6234',
     mergedCount: 1,
     merged: const [],
+    textStatus: TextStatus.ok,
+    continuesToNextLine: false,
   );
 
   @override
   Stream<SearchStreamUpdate> searchTextsStreamWithCounts(
-    String query,
-    List<String> facets,
-    int limit, {
-    int offset = 0,
+    SearchEngineRequest request, {
     int chunkSize = 50,
-    ResultsOrder order = ResultsOrder.relevance,
-    bool fuzzy = false,
-    int distance = 0,
-    String negativeQuery = '',
-    int? negativeDistance,
-    SearchScope scope = SearchScope.wordDistance,
-    SearchScope? negativeScope,
-    SearchMode searchMode = SearchMode.exact,
-    Map<String, String>? customSpacing,
-    Map<String, String>? negativeCustomSpacing,
-    Map<int, List<String>>? alternativeWords,
-    Map<int, List<String>>? negativeAlternativeWords,
-    Map<String, Map<String, bool>>? searchOptions,
-    Map<String, Map<String, bool>>? negativeSearchOptions,
-    bool matchNikud = false,
-    bool matchTaamim = false,
-    ResultGrouping? grouping,
-    WordMatchMode wordMatchMode = WordMatchMode.all,
-    int? wordMatchCount,
   }) async* {
     streamCalls++;
     yield SearchStreamUpdate(

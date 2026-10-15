@@ -19,6 +19,7 @@ import 'package:otzaria/plugins/services/plugin_highlight_registry.dart';
 import 'package:otzaria/plugins/services/plugin_lazy_activation_service.dart';
 import 'package:otzaria/plugins/services/plugin_page_launcher.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
+import 'package:otzaria/plugins/utils/plugin_safe_mode.dart';
 import 'package:otzaria/plugins/services/plugin_toolbar_registry.dart';
 
 // ── fake repository לשליטה ב-enabled/permission בלי SQLite ────────────────
@@ -278,6 +279,38 @@ void main() {
     dispatcher.registerController('__test_reset__', _FakeController());
     dispatcher.unregisterController('__test_reset__');
   });
+
+  test(
+    'runtime events and reload wait for the decision and stay blocked in safe mode',
+    () async {
+      final decision = Completer<void>();
+      PluginSafeMode.ready = decision.future;
+      var reloads = 0;
+      dispatcher.registerController('safe-test', _FakeController());
+      dispatcher.registerReloadCallback('safe-test', () async => reloads++);
+      addTearDown(() {
+        dispatcher.unregisterController('safe-test');
+        dispatcher.unregisterReloadCallback('safe-test');
+        PluginSafeMode.resetForTesting();
+      });
+      var completed = false;
+      final operations = Future.wait([
+        dispatcher.reloadPlugin('safe-test'),
+        dispatcher.dispatchEvent('reader.changed', const {}),
+        dispatcher.dispatchEventToPlugin(
+          'safe-test',
+          'reader.changed',
+          const {},
+        ),
+      ]).then((_) => completed = true);
+      await pumpEventQueue();
+      expect(completed, isFalse);
+      PluginSafeMode.active.value = true;
+      decision.complete();
+      await operations;
+      expect(reloads, 0);
+    },
+  );
 
   test(
     'prepareForAppShutdown tears down controllers and blocks re-registering',

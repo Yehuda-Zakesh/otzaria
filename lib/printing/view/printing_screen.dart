@@ -32,6 +32,7 @@ import 'package:otzaria/printing/word_export_service.dart';
 import 'package:otzaria/utils/file/save_file_with_extension.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart';
 import 'package:otzaria/widgets/controls/action_buttons.dart';
+import 'package:otzaria/widgets/lists/filter_chips_widget.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 import 'package:otzaria/widgets/feedback/scrollable_positioned_list_scrollbar.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
@@ -42,7 +43,7 @@ import 'package:otzaria/models/books.dart';
 import 'package:otzaria/data/data_providers/database_library_provider.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/printing/view/widgets/printing_widgets.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/text_display/text_display_exports.dart';
 
 enum _AnchorKind { header, altHeader, line }
@@ -70,13 +71,23 @@ class PrintingScreen extends StatefulWidget {
   final TextBook? book;
   final List<Link> links;
   final List<String> activeCommentators;
+
+  /// כשמסופק, מאפשר בחירת מפרשים במסך בלי לשנות את בחירת הקורא.
+  final List<String>? availableCommentators;
   final bool removeNikud;
   final bool removeTaamim;
 
-  /// פרופיל ערוץ הייצוא של הספר. כשמסופק — קובע את ברירת המחדל של הניקוד
-  /// והטעמים ואת טיפול שם הוי"ה, במקום [removeNikud]/[removeTaamim] וההגדרות.
+  /// פרופיל גוף הספר בערוץ הייצוא. מתגי הניקוד והטעמים במסך גוברים עליו.
   final TextDisplayProfile? displayProfile;
+
+  /// פרופיל המפרשים בערוץ הייצוא, כולל עקיפות הספר והכרטיסייה.
+  final TextDisplayProfile? commentaryDisplayProfile;
   final int startLine;
+
+  /// סוף טווח ההדפסה ההתחלתי (בלעדי). כשמסופק — הטווח [startLine]..[endLine]
+  /// מסומן מראש (למשל מ-`reader.printRange` של תוסף), במקום הכותרת שסביב
+  /// השורה הנראית.
+  final int? endLine;
   final List<TocEntry> tableOfContents;
   final int? initialPage;
   final bool isBookView;
@@ -96,10 +107,13 @@ class PrintingScreen extends StatefulWidget {
     this.book,
     this.links = const [],
     this.activeCommentators = const [],
+    this.availableCommentators,
     this.startLine = 0,
+    this.endLine,
     this.removeNikud = false,
     this.removeTaamim = false,
     this.displayProfile,
+    this.commentaryDisplayProfile,
     this.tableOfContents = const [],
     this.initialPage,
     this.isBookView = false,
@@ -178,6 +192,7 @@ class _PrintingScreenState extends State<PrintingScreen> {
       labelForPdfPage(_pageLabels, pageNumber);
 
   bool _includeCommentaries = false;
+  late List<String> _selectedCommentators;
   bool _includePersonalNotes = false;
 
   final Map<String, String> _commentaryContentCache = {};
@@ -212,7 +227,7 @@ class _PrintingScreenState extends State<PrintingScreen> {
         documentTitle: widget.documentTitle ?? widget.bookId,
         commentariesIncluded:
             widget.prebuiltBlocks != null || _includeCommentaries,
-        commentators: widget.activeCommentators,
+        commentators: _selectedCommentators,
       );
 
   /// מחזיר את היעד ל-PDF כשייצוא Word חדל להיות זמין (למשל בהכללת מפרש מוגבל).
@@ -230,6 +245,7 @@ class _PrintingScreenState extends State<PrintingScreen> {
   @override
   void initState() {
     super.initState();
+    _selectedCommentators = List.of(widget.activeCommentators);
     _dataFuture = widget.data;
     startLine = widget.startLine;
     endLine = startLine;
@@ -250,7 +266,11 @@ class _PrintingScreenState extends State<PrintingScreen> {
     });
 
     // אתחול הגדרות ניקוד וטעמים לפי תצוגת הספר
-    final profile = widget.displayProfile;
+    final profile =
+        widget.displayProfile ??
+        (widget.prebuiltBlocks != null
+            ? widget.commentaryDisplayProfile
+            : null);
     _removeNikud = profile?.removeNikud ?? widget.removeNikud;
     _removeTaamim = profile?.removeTeamim ?? widget.removeTaamim;
 
@@ -280,7 +300,15 @@ class _PrintingScreenState extends State<PrintingScreen> {
 
     // ברירת המחדל היא הכותרת האחרונה שלפני השורה הנראית (ועד סוף אותה כותרת);
     // בלי כותרות — טווח שורות מסביב לשורה הראשונה הנראית.
-    if (_flatHeaders.isNotEmpty) {
+    if (widget.endLine != null) {
+      // טווח מפורש: עוגני שורות עד שידוע אורך הספר, ואז כותרות כשהן תואמות
+      // בדיוק (_resolveRequestedRange).
+      _startAnchor = _RangeAnchor(_AnchorKind.line, widget.startLine);
+      _endAnchor = _RangeAnchor(
+        _AnchorKind.line,
+        max(widget.startLine, widget.endLine! - 1),
+      );
+    } else if (_flatHeaders.isNotEmpty) {
       final lastHeader = findLastHeaderIndexAtOrBefore(
         _flatHeaders,
         widget.startLine,
@@ -299,6 +327,9 @@ class _PrintingScreenState extends State<PrintingScreen> {
   @override
   void didUpdateWidget(covariant PrintingScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.activeCommentators != widget.activeCommentators) {
+      _selectedCommentators = List.of(widget.activeCommentators);
+    }
     if (oldWidget.data != widget.data) {
       _dataFuture = widget.data;
       _cachedBasePdf = null;
@@ -308,7 +339,34 @@ class _PrintingScreenState extends State<PrintingScreen> {
     }
   }
 
+  /// ממיר את הטווח המפורש ([PrintingScreen.endLine]) לעוגני כותרות כשהוא
+  /// מתחיל ומסתיים בדיוק בגבולות כותרות — כך שבחירת הטווח במסך נראית כמו
+  /// בחירה ידנית. אחרת נשארים עוגני השורות.
+  bool _requestedRangeResolved = false;
+
+  Future<void> _resolveRequestedRange() async {
+    final endLine = widget.endLine;
+    if (endLine == null || _requestedRangeResolved || _flatHeaders.isEmpty) {
+      return;
+    }
+    _requestedRangeResolved = true;
+    final totalLines = await _totalLineCount();
+    final match = matchHeaderRange(
+      _flatHeaders,
+      widget.startLine,
+      endLine,
+      totalLines,
+    );
+    if (match.start != null) {
+      _startAnchor = _RangeAnchor(_AnchorKind.header, match.start!);
+    }
+    if (match.end != null) {
+      _endAnchor = _RangeAnchor(_AnchorKind.header, match.end!);
+    }
+  }
+
   Future<void> _initPreviewRange() async {
+    await _resolveRequestedRange();
     await _applyCurrentRange();
     if (mounted) {
       setState(() {});
@@ -316,7 +374,9 @@ class _PrintingScreenState extends State<PrintingScreen> {
     _renderPreview();
   }
 
-  Future<int> _totalLineCount() async => (await _dataFuture).split('\n').length;
+  final _lineCounts = LineCountCache();
+
+  Future<int> _totalLineCount() async => _lineCounts.of(await _dataFuture);
 
   Future<void> _applyCurrentRange() async {
     final totalLines = await _totalLineCount();
@@ -399,7 +459,7 @@ class _PrintingScreenState extends State<PrintingScreen> {
         _flatAltHeaders = altEntries;
         _anchorEntries = null; // נבנה מחדש עם כותרות המשנה
         // בלי ניווט רגיל — ברירת המחדל היא כותרות המשנה.
-        if (_flatHeaders.isEmpty) {
+        if (_flatHeaders.isEmpty && widget.endLine == null) {
           _startAnchor = _RangeAnchor(_AnchorKind.altHeader, lastAlt);
           _endAnchor = _RangeAnchor(_AnchorKind.altHeader, lastAlt);
           _updateRangeFromAnchors();
@@ -699,7 +759,7 @@ class _PrintingScreenState extends State<PrintingScreen> {
   String? _cachedBaseKey;
 
   /// חתימת כל הפרמטרים שמשפיעים על תוכן ה-base PDF. שדות שמשפיעים רק על
-  /// הרסטור (‎_pagesPerSheet, טווח עמודים ב-PDF חיצוני) בכוונה אינם נכללים.
+  /// הרסטור (_pagesPerSheet, טווח עמודים ב-PDF חיצוני) בכוונה אינם נכללים.
   String _baseCacheKey(PdfPageFormat format) {
     if (widget.createPdfOverride != null) {
       return 'override|${orientation.name}|${format.width}x${format.height}';
@@ -719,6 +779,7 @@ class _PrintingScreenState extends State<PrintingScreen> {
       startLine,
       endLine,
       _includeCommentaries,
+      (List.of(_selectedCommentators)..sort()).join("\u0000"),
       _includePersonalNotes,
     ].join('|');
   }
@@ -839,24 +900,23 @@ class _PrintingScreenState extends State<PrintingScreen> {
 
     final shouldReplaceHolyNames = _shouldReplaceHolyNames;
 
-    // חלוקה גולמית לשורות בלבד. הטרנספורמציות היקרות (הסרת ניקוד/טעמים/HTML
-    // והחלפת שמות קודש) מוחלות פר-שורה על הטווח הנבחר ב-_buildPrintBlocks —
-    // לא על כל הספר. חוסך עבודה כשמדפיסים קטע קצר מתוך ספר ארוך.
-    final allLines = dataString.split('\n');
+    // הטרנספורמציות היקרות מוחלות פר-שורה רק על הטווח הנבחר ב-_buildPrintBlocks.
+    final totalLines = _lineCounts.of(dataString);
     final pageMargin = this.pageMargin;
     final fontSize = this.fontSize;
 
-    String bookName = allLines.isNotEmpty ? stripHtmlIfNeeded(allLines[0]) : '';
-    bookName = _applyTextTransforms(bookName, shouldReplaceHolyNames);
-    final selectedStart = startLine.clamp(0, allLines.length);
-    final selectedEnd = endLine.clamp(selectedStart, allLines.length);
+    final bookName = stripHtmlIfNeeded(
+      _applyTextTransforms(linesInRange(dataString, 0, 1).first),
+    );
+    final selectedStart = startLine.clamp(0, totalLines);
+    final selectedEnd = endLine.clamp(selectedStart, totalLines);
 
     final personalNotes = _includePersonalNotes
         ? await _getPersonalNotesForBook(widget.bookId)
         : const <PersonalNote>[];
 
     final blocks = await _buildPrintBlocks(
-      allLines: allLines,
+      rangeLines: linesInRange(dataString, selectedStart, selectedEnd),
       selectedStart: selectedStart,
       selectedEnd: selectedEnd,
       shouldReplaceHolyNames: shouldReplaceHolyNames,
@@ -887,7 +947,7 @@ class _PrintingScreenState extends State<PrintingScreen> {
     );
   }
 
-  TextDisplayProfile get _exportProfile =>
+  late final TextDisplayProfile _exportProfile =
       widget.displayProfile ??
       SettingsRepository().loadTextDisplayPolicy().resolve(
         const TextDisplaySlot(
@@ -897,33 +957,28 @@ class _PrintingScreenState extends State<PrintingScreen> {
         ),
       );
 
+  late final TextDisplayProfile _commentaryExportProfile =
+      widget.commentaryDisplayProfile ??
+      SettingsRepository().loadTextDisplayPolicy().resolve(
+        TextDisplaySlot.commentaryDisplay.copyWith(channel: TextChannel.export),
+      );
+
   HolyNameStyle get _holyNameStyle => _exportProfile.holyNameStyle;
 
   bool get _shouldReplaceHolyNames => _exportProfile.replaceHolyNames;
 
-  /// מסיר ניקוד/טעמים ומחליף שמות קודש לפי בחירת המשתמש.
-  String _applyTextTransforms(String input, bool shouldReplaceHolyNames) {
-    var text = input;
-    if (_removeNikud && _removeTaamim) {
-      text = removeVolwels(text);
-    } else if (_removeNikud && !_removeTaamim) {
-      text = text
-          .replaceAll('־', ' ')
-          .replaceAll('׀', ' ')
-          .replaceAll('|', ' ')
-          .replaceAll(RegExp(r'[ְ-ׇ]'), '');
-    } else if (!_removeNikud && _removeTaamim) {
-      text = removeTeamim(text);
-    }
-    if (shouldReplaceHolyNames) {
-      text = replaceHolyNames(text, style: _holyNameStyle);
-    }
-    return text;
-  }
+  /// מחיל את פרופיל הייצוא; מתגי הניקוד והטעמים שבמסך גוברים עליו.
+  String _applyTextTransforms(String input, {bool commentary = false}) =>
+      applyTextDisplayProfile(
+        input,
+        (commentary ? _commentaryExportProfile : _exportProfile).copyWith(
+          nikud: _removeNikud ? MarkVisibility.hide : MarkVisibility.show,
+          teamim: _removeTaamim ? TeamimVisibility.hide : TeamimVisibility.show,
+        ),
+      );
 
   /// ממיר בלוקים מוכנים לייצוג הפנימי, תוך החלת הסרת ניקוד/טעמים ושמות קודש.
   List<Map<String, String>> _mapPrebuiltBlocks(List<PrintBlock> source) {
-    final shouldReplaceHolyNames = _shouldReplaceHolyNames;
     final result = <Map<String, String>>[];
     for (final block in source) {
       switch (block.kind) {
@@ -934,13 +989,15 @@ class _PrintingScreenState extends State<PrintingScreen> {
         case PrintBlockKind.commentary:
           result.add({
             'kind': 'commentary',
-            'text': _applyTextTransforms(block.text, shouldReplaceHolyNames),
+            'text': stripHtmlIfNeeded(
+              _applyTextTransforms(block.text, commentary: true),
+            ),
           });
         case PrintBlockKind.heading:
         case PrintBlockKind.text:
           result.add({
             'kind': 'text',
-            'text': _applyTextTransforms(block.text, shouldReplaceHolyNames),
+            'text': stripHtmlIfNeeded(_applyTextTransforms(block.text)),
           });
       }
     }
@@ -972,8 +1029,11 @@ class _PrintingScreenState extends State<PrintingScreen> {
     final fallbackShaper = ShaperFont.register(fallbackBytes);
     final primaryHandle = primaryShaper.handle;
     final fallbackHandle = fallbackShaper.handle;
+    // נתיב מפורש לספרייה (בטסטים) הוא סטטי ולכן לכל isolate בנפרד.
+    final shaperPath = ShaperLibrary.path;
 
     final result = await Isolate.run(() async {
+      ShaperLibrary.path = shaperPath;
       final pdfData = pw.Document(pageMode: PdfPageMode.outlines);
       final shapedFonts = [
         PdfShapedFont(
@@ -1143,13 +1203,13 @@ class _PrintingScreenState extends State<PrintingScreen> {
       book,
       startIndex: selectedStart,
       endIndex: selectedEnd,
-      targetBookTitles: widget.activeCommentators,
+      targetBookTitles: _selectedCommentators,
       fallback: widget.links,
     );
   }
 
   Future<List<Map<String, String>>> _buildPrintBlocks({
-    required List<String> allLines,
+    required List<String> rangeLines,
     required int selectedStart,
     required int selectedEnd,
     required bool shouldReplaceHolyNames,
@@ -1174,13 +1234,12 @@ class _PrintingScreenState extends State<PrintingScreen> {
         : <Link>[];
 
     for (var i = selectedStart; i < selectedEnd; i++) {
-      // הסרת HTML + ניקוד/טעמים + שמות קודש מוחלת כאן, על שורות הטווח הנבחר
-      // בלבד (הועברה לכאן מהטרנספורמציה על כל הספר ב-createPdf).
-      final lineText = _applyTextTransforms(
-        stripHtmlIfNeeded(allLines[i]),
-        shouldReplaceHolyNames,
-      );
-      blocks.add({'kind': 'text', 'text': lineText});
+      // הטרנספורמציות מוחלות רק על שורות הטווח; ב-Word ה-HTML נשמר לעיצוב.
+      final lineText = _applyTextTransforms(rangeLines[i - selectedStart]);
+      blocks.add({
+        'kind': 'text',
+        'text': keepHtml ? lineText : stripHtmlIfNeeded(lineText),
+      });
 
       final lineNumber1Based = i + 1;
 
@@ -1188,7 +1247,7 @@ class _PrintingScreenState extends State<PrintingScreen> {
         final linksForLine = await getLinksforIndexs(
           indexes: [i],
           links: rangeLinks,
-          commentatorsToShow: widget.activeCommentators,
+          commentatorsToShow: _selectedCommentators,
         );
 
         if (linksForLine.isNotEmpty) {
@@ -1208,7 +1267,6 @@ class _PrintingScreenState extends State<PrintingScreen> {
 
             final content = await _getCommentaryContent(
               link,
-              shouldReplaceHolyNames: shouldReplaceHolyNames,
               keepHtml: keepHtml,
             );
             if (content.trim().isEmpty) continue;
@@ -1242,7 +1300,6 @@ class _PrintingScreenState extends State<PrintingScreen> {
 
   Future<PreparedPrintDocument> _prepareWordDocument() async {
     if (widget.prebuiltBlocks != null) {
-      final shouldReplaceHolyNames = _shouldReplaceHolyNames;
       final blocks = widget.prebuiltBlocks!
           .map((block) {
             switch (block.kind) {
@@ -1253,7 +1310,7 @@ class _PrintingScreenState extends State<PrintingScreen> {
                   kind: block.kind,
                   text: _applyTextTransforms(
                     block.text,
-                    shouldReplaceHolyNames,
+                    commentary: block.kind == PrintBlockKind.commentary,
                   ),
                   headingLevel: block.headingLevel,
                   footnotes: block.footnotes,
@@ -1269,29 +1326,28 @@ class _PrintingScreenState extends State<PrintingScreen> {
         blocks: blocks,
       );
     }
-    String dataString = await _dataFuture;
+    final dataString = await _dataFuture;
 
     final shouldReplaceHolyNames = _shouldReplaceHolyNames;
-    dataString = _applyTextTransforms(dataString, shouldReplaceHolyNames);
 
     // שומרים את תגיות ה-HTML — WordExportService ממיר אותן לעיצוב במסמך
-    final allLines = dataString.split('\n').toList();
-    var bookName = allLines.isNotEmpty
-        ? stripHtmlIfNeeded(allLines.first)
-        : widget.bookId;
+    final totalLines = _lineCounts.of(dataString);
+    var bookName = stripHtmlIfNeeded(
+      _applyTextTransforms(linesInRange(dataString, 0, 1).first),
+    );
     if (bookName.trim().isEmpty) {
       bookName = widget.bookId;
     }
 
-    final selectedStart = startLine.clamp(0, allLines.length);
-    final selectedEnd = endLine.clamp(selectedStart, allLines.length);
+    final selectedStart = startLine.clamp(0, totalLines);
+    final selectedEnd = endLine.clamp(selectedStart, totalLines);
     final personalNotes = _includePersonalNotes
         ? await _getPersonalNotesForBook(widget.bookId)
         : const <PersonalNote>[];
 
     final legacyBlocks = _foldPersonalNoteBlocks(
       await _buildPrintBlocks(
-        allLines: allLines,
+        rangeLines: linesInRange(dataString, selectedStart, selectedEnd),
         selectedStart: selectedStart,
         selectedEnd: selectedEnd,
         shouldReplaceHolyNames: shouldReplaceHolyNames,
@@ -1488,22 +1544,24 @@ class _PrintingScreenState extends State<PrintingScreen> {
 
   Future<String> _getCommentaryContent(
     Link link, {
-    required bool shouldReplaceHolyNames,
     bool keepHtml = false,
   }) async {
     // המפתח כולל את דגלי הניקוד/טעמים/שמות-קודש: אחרת החלפת "הדפסה עם ניקוד"
     // הייתה מחזירה תוכן מפרש מוטרנספרם קודם (באג: הניקוד לא התעדכן).
-    final key =
-        '$_removeNikud|$_removeTaamim|$shouldReplaceHolyNames'
-        '::${link.path2}::${link.index2}::${link.heRef}::$keepHtml';
+    final key = printCommentaryContentCacheKey(
+      link,
+      removeNikud: _removeNikud,
+      removeTaamim: _removeTaamim,
+      replaceHolyNames: _commentaryExportProfile.replaceHolyNames,
+      keepHtml: keepHtml,
+    );
     final cached = _commentaryContentCache[key];
     if (cached != null) return cached;
 
-    var text = await link.content;
+    var text = _applyTextTransforms(await link.content, commentary: true);
     if (!keepHtml) {
       text = stripHtmlIfNeeded(text);
     }
-    text = _applyTextTransforms(text, shouldReplaceHolyNames);
 
     _commentaryContentCache[key] = text;
     return text;
@@ -1674,7 +1732,7 @@ class _PrintingScreenState extends State<PrintingScreen> {
     final isCustomPdfMode = widget.createPdfOverride != null;
     final isPrebuiltMode = widget.prebuiltBlocks != null;
 
-    return Dialog(
+    final dialog = Dialog(
       insetPadding: const EdgeInsets.fromLTRB(12, 40, 12, 12),
       clipBehavior: Clip.antiAlias,
       child: Scaffold(
@@ -1848,7 +1906,7 @@ class _PrintingScreenState extends State<PrintingScreen> {
                   }
 
                   if (snapshot.connectionState == ConnectionState.done) {
-                    final totalLines = snapshot.data!.split('\n').length;
+                    final totalLines = _lineCounts.of(snapshot.data!);
                     return Row(
                       children: [
                         // תצוגה מקדימה (תמונות מרוסטרות)
@@ -1913,6 +1971,25 @@ class _PrintingScreenState extends State<PrintingScreen> {
                                                 });
                                               },
                                             ),
+                                            if (_includeCommentaries &&
+                                                widget
+                                                        .availableCommentators
+                                                        ?.isNotEmpty ==
+                                                    true)
+                                              FilterChipsWidget<String>(
+                                                items: widget
+                                                    .availableCommentators!,
+                                                selectedItems:
+                                                    _selectedCommentators,
+                                                labelBuilder: (name) => name,
+                                                onSelectionChanged:
+                                                    (selected) => setState(() {
+                                                      _selectedCommentators =
+                                                          List.of(selected);
+                                                      _syncDestinationWithWordSupport();
+                                                      _refreshPreview();
+                                                    }),
+                                              ),
                                             PrintingSwitchRow(
                                               label: 'כלול הערות אישיות',
                                               value: _includePersonalNotes,
@@ -2108,6 +2185,16 @@ class _PrintingScreenState extends State<PrintingScreen> {
           ],
         ),
       ),
+    );
+    // הקוראים פותחים עם barrierDismissible: false — לחיצה בחוץ לא סוגרת, ESC כן.
+    // ה-Focus מחזיק פוקוס בדיאלוג כדי שה-DismissIntent הגלובלי יגיע לכאן.
+    return Actions(
+      actions: {
+        DismissIntent: CallbackAction<DismissIntent>(
+          onInvoke: (_) => Navigator.of(context).maybePop(),
+        ),
+      },
+      child: Focus(autofocus: true, skipTraversal: true, child: dialog),
     );
   }
 

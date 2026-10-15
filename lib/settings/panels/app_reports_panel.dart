@@ -1,30 +1,24 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:otzaria/app_report/models/app_report.dart';
-import 'package:otzaria/app_report/repository/app_report_redactor.dart';
 import 'package:otzaria/app_report/services/app_report_service.dart';
 import 'package:otzaria/app_report/services/crash_report_decision.dart';
 import 'package:otzaria/app_report/view/app_report_dialog.dart';
 import 'package:otzaria/app_report/view/app_report_result_snack.dart';
+import 'package:otzaria/app_report/view/widgets/app_report_images_section.dart';
 import 'package:otzaria/core/messages/report_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
-import 'package:otzaria/settings/services/offline_send_target.dart';
-import 'package:otzaria/settings/services/safer_mode_guard.dart';
+import 'package:otzaria/settings/panels/report_panel_widgets.dart';
 import 'package:otzaria/settings/widgets/settings_widgets_exports.dart';
 import 'package:otzaria/theme/theme_exports.dart';
-import 'package:otzaria/utils/file/save_file_with_extension.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// כרטיס "דיווחים על התוכנה" במסך ההגדרות: פתיחת הטופס, מצב הדיווח אחרי
+/// דיווחים על התוכנה בחלון ניהול הדיווחים: פתיחת הטופס, מצב הדיווח אחרי
 /// קריסה, וניהול התור וההיסטוריה — באותו מבנה כמו דיווחי הטעויות והתוספים.
 class AppReportsPanel extends StatefulWidget {
   const AppReportsPanel({
@@ -33,9 +27,11 @@ class AppReportsPanel extends StatefulWidget {
     required this.crashReportMode,
     required this.onCrashReportModeChanged,
     this.service,
+    this.onPendingReportsChanged,
   });
 
   final bool isOfflineMode;
+  final VoidCallback? onPendingReportsChanged;
   final AppCrashReportMode crashReportMode;
   final ValueChanged<AppCrashReportMode> onCrashReportModeChanged;
   final AppReportService? service;
@@ -57,12 +53,7 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return SettingsCard(
-      cardId: 'system.appReports',
-      title: context.settingsText('דיווחים על התוכנה'),
-      subtitle: context.settingsText(
-        'דיווח על תקלות בתוכנה עצמה. הדיווח נפתח כדיווח ציבורי ב-GitHub, וקובצי האבחון גלויים למפתחי אוצריא בלבד.',
-      ),
+    return AppCard.section(
       children: [
         SettingsActionTile.text(
           icon: FluentIcons.bug_24_regular,
@@ -77,7 +68,7 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
               onPressed: () => showAppReportDialog(
                 context,
                 dialogBuilder: settingsDialogBuilder,
-              ).then((_) => _refresh()),
+              ).then(_refresh),
             ),
           ],
         ),
@@ -154,7 +145,7 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
               icon: FluentIcons.checkmark_circle_24_regular,
               title: context.settingsText('דיווחים שנשלחו'),
               hasContent: sent.isNotEmpty,
-              subtitle: _sentSubtitle(
+              subtitle: sentReportsSubtitle(
                 context,
                 shown: sent.length,
                 total: snapshot.data?.$2 ?? 0,
@@ -171,7 +162,7 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
                   child: Row(
                     children: [
                       Expanded(
-                        child: _managed(
+                        child: buildManagedActionButton(
                           enabled: sent.isNotEmpty,
                           child: ActionButton.neutral(
                             text: context.settingsText('נקה את כל ההיסטוריה'),
@@ -199,7 +190,7 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isNarrow = constraints.maxWidth < LayoutBreakpoints.compact;
-          final send = _managed(
+          final send = buildManagedActionButton(
             enabled: !widget.isOfflineMode,
             child: ActionButton.recommended(
               text: context.settingsText('שלח עכשיו'),
@@ -208,7 +199,7 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
               isLoading: _isFlushing,
             ),
           );
-          final clear = _managed(
+          final clear = buildManagedActionButton(
             enabled: hasReports,
             child: ActionButton.neutral(
               text: context.settingsText('נקה דיווחים'),
@@ -217,7 +208,7 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
               isLoading: _isClearingPending,
             ),
           );
-          final export = _managed(
+          final export = buildManagedActionButton(
             enabled: hasReports,
             child: ActionButton.neutral(
               text: context.settingsText('הורד לשליחה במחשב מחובר'),
@@ -252,124 +243,66 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
     );
   }
 
-  Widget _buildPendingTile(BuildContext context, AppReport report) {
-    final isSending = _sendingReportId == report.reportId;
-    return Column(
-      children: [
-        ListTile(
-          leading: const Icon(FluentIcons.bug_24_regular),
-          title: Text(report.title, style: kSettingsTitleStyle),
-          subtitle: Text(
-            _summaryLine(context, report),
-            style: kSettingsSubtitleStyle,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-        _actions(
-          children: [
-            ActionButton.neutral(
-              text: context.settingsText('צפה'),
-              icon: FluentIcons.eye_24_regular,
-              onPressed: () => _showDetails(report, sent: false),
-            ),
-            ActionButton.neutral(
-              text: context.settingsText('ערוך'),
-              icon: FluentIcons.edit_24_regular,
-              onPressed: () => _editPending(report),
-            ),
-            ActionButton.neutral(
-              text: context.settingsText('מחק'),
-              icon: FluentIcons.delete_24_regular,
-              onPressed: () => _deletePending(report),
-            ),
-            _managed(
-              enabled: !widget.isOfflineMode,
-              child: ActionButton.recommended(
-                text: context.settingsText('שלח'),
-                icon: FluentIcons.send_24_regular,
-                isLoading: isSending,
-                onPressed: () => _sendPending(report),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
+  Widget _buildPendingTile(BuildContext context, AppReport report) =>
+      buildPendingReportTile(
+        context,
+        icon: FluentIcons.bug_24_regular,
+        title: report.title,
+        subtitle: _summaryLine(context, report),
+        canSend: !widget.isOfflineMode,
+        isSending: _sendingReportId == report.reportId,
+        onView: () => _showDetails(report, sent: false),
+        onEdit: () => _editPending(report),
+        onDelete: () => _deletePending(report),
+        onMarkSent: () => _markPendingAsSent(report),
+        onSend: () => _sendPending(report),
+      );
 
   Widget _buildSentTile(BuildContext context, AppReport report) {
     final issueUrl = report.issueUrl;
-    return Column(
-      children: [
-        ListTile(
-          leading: const Icon(FluentIcons.checkmark_24_regular),
-          title: Text(report.title, style: kSettingsTitleStyle),
-          subtitle: Text(
-            _summaryLine(context, report),
-            style: kSettingsSubtitleStyle,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-        _actions(
-          children: [
-            ActionButton.neutral(
-              text: context.settingsText('צפה'),
-              icon: FluentIcons.eye_24_regular,
-              onPressed: () => _showDetails(report, sent: true),
-            ),
-            if (issueUrl != null && issueUrl.isNotEmpty)
-              ActionButton.neutral(
-                key: ValueKey('app-report-open-issue-${report.reportId}'),
-                text: report.issueNumber == null
-                    ? context.settingsText('פתח ב-GitHub')
-                    : context.settingsText(
-                        'פתח דיווח #{number}',
-                        args: {'number': report.issueNumber},
-                      ),
-                icon: FluentIcons.open_24_regular,
-                onPressed: () => _openIssue(issueUrl),
+    return buildSentReportTile(
+      context,
+      icon: report.isCarriedByOfflineUpdate
+          ? carriedReportIcon
+          : FluentIcons.checkmark_24_regular,
+      title: report.title,
+      subtitle: report.isCarriedByOfflineUpdate
+          ? [
+              ?carriedReportStatus(
+                context,
+                carried: true,
+                carriedAt: report.carriedAt,
               ),
-            ActionButton.neutral(
-              text: context.settingsText('מחק'),
-              icon: FluentIcons.delete_24_regular,
-              onPressed: () => _deleteSent(report),
+              _summaryLine(context, report, withDate: false),
+            ].join(' · ')
+          : _summaryLine(context, report),
+      onView: () => _showDetails(report, sent: true),
+      onDelete: () => _deleteSent(report),
+      extraAction: issueUrl == null || issueUrl.isEmpty
+          ? null
+          : ActionButton.neutral(
+              key: ValueKey('app-report-open-issue-${report.reportId}'),
+              text: report.issueNumber == null
+                  ? context.settingsText('פתח ב-GitHub')
+                  : context.settingsText(
+                      'פתח דיווח #{number}',
+                      args: {'number': report.issueNumber},
+                    ),
+              icon: FluentIcons.open_24_regular,
+              onPressed: () => _openIssue(issueUrl),
             ),
-          ],
-        ),
-      ],
     );
   }
 
-  Widget _actions({required List<Widget> children}) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 56, left: 16, bottom: 12),
-      child: Align(
-        alignment: AlignmentDirectional.centerEnd,
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          alignment: WrapAlignment.end,
-          children: children,
-        ),
-      ),
-    );
-  }
-
-  Widget _managed({required bool enabled, required Widget child}) {
-    return IgnorePointer(
-      ignoring: !enabled,
-      child: Opacity(opacity: enabled ? 1 : 0.45, child: child),
-    );
-  }
-
-  String _summaryLine(BuildContext context, AppReport report) {
-    final date = report.sentAt ?? report.createdAt;
-    final local = date.toLocal();
+  String _summaryLine(
+    BuildContext context,
+    AppReport report, {
+    bool withDate = true,
+  }) {
+    final local = (report.sentAt ?? report.createdAt).toLocal();
     final parts = [
       _typeLabel(context, report.type),
-      '${local.day}.${local.month}.${local.year}',
+      if (withDate) '${local.day}.${local.month}.${local.year}',
       if (report.issueNumber != null) '#${report.issueNumber}',
       if (report.merged) context.settingsText('צורף לדיווח קיים'),
     ];
@@ -383,28 +316,10 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
     AppReportType.suggestion => context.settingsText('הצעה'),
   };
 
-  String _sentSubtitle(
-    BuildContext context, {
-    required int shown,
-    required int total,
-  }) {
-    if (shown == 0) {
-      return context.settingsText('עדיין אין דיווחים שנשלחו דרך המערכת');
-    }
-    if (total > shown) {
-      return context.settingsText(
-        'נשלחו {total} דיווחים, מוצגים {shown} האחרונים',
-        args: {'total': total, 'shown': shown},
-      );
-    }
-    return context.settingsText(
-      'נשמרו {count} דיווחים שנשלחו',
-      args: {'count': shown},
-    );
-  }
-
-  void _refresh() {
-    if (mounted) setState(() {});
+  void _refresh(AppReportDeliveryResult? result) {
+    if (!mounted) return;
+    setState(() {});
+    if (result != null) widget.onPendingReportsChanged?.call();
   }
 
   Future<void> _showDetails(AppReport report, {required bool sent}) async {
@@ -429,9 +344,12 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
     }
     await showSingleActionDialog(
       context: context,
-      title: context.settingsText(
-        sent ? 'פרטי דיווח שנשלח' : 'פרטי דיווח שמור',
-      ),
+      title: sent
+          ? sentReportDetailsTitle(
+              context,
+              carried: report.isCarriedByOfflineUpdate,
+            )
+          : context.settingsText('פרטי דיווח שמור'),
       content: buffer.toString().trimRight(),
       confirmText: context.settingsText('סגור'),
     );
@@ -444,21 +362,13 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
     }
   }
 
-  Future<void> _flush() async {
-    setState(() => _isFlushing = true);
-    final pendingBefore = await _service.getPendingReportsCount();
-    final sentCount = await _service.flushPendingReports();
-    final pendingAfter = await _service.getPendingReportsCount();
-    if (!mounted) return;
-    setState(() => _isFlushing = false);
-    if (sentCount > 0) {
-      UiSnack.showSuccess(ReportMessages.pendingFlushed(sentCount));
-    } else if (pendingBefore == 0) {
-      UiSnack.show(ReportMessages.noPendingToSend);
-    } else {
-      UiSnack.show(ReportMessages.pendingFlushFailed(pendingAfter));
-    }
-  }
+  Future<void> _flush() => flushReportQueue(
+    context,
+    pendingCount: _service.getPendingReportsCount,
+    flush: _service.flushPendingReports,
+    setBusy: (busy) => setState(() => _isFlushing = busy),
+    onPendingReportsChanged: widget.onPendingReportsChanged,
+  );
 
   Future<void> _sendPending(AppReport report) async {
     setState(() => _sendingReportId = report.reportId);
@@ -468,13 +378,17 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
     } catch (e) {
       if (mounted) UiSnack.showError(ReportMessages.sendError(e));
     } finally {
-      if (mounted) setState(() => _sendingReportId = null);
+      if (mounted) {
+        setState(() => _sendingReportId = null);
+        widget.onPendingReportsChanged?.call();
+      }
     }
     if (result != null) showAppReportResultSnack(result);
   }
 
   Future<void> _editPending(AppReport report) async {
     var edited = report;
+    final hasChanges = ValueNotifier(false);
     final confirmed = await showTwoActionsDialog(
       context: context,
       title: context.settingsText('עריכת דיווח שמור'),
@@ -487,10 +401,21 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
         child: AppReportEditFields(
           report: report,
           typeLabel: (type) => _typeLabel(context, type),
-          onChanged: (value) => edited = value,
+          onChanged: (value) {
+            edited = value;
+            hasChanges.value =
+                value.type != report.type ||
+                value.title != report.title ||
+                value.description != report.description ||
+                value.stepsToReproduce != report.stepsToReproduce ||
+                value.reporterEmail != report.reporterEmail ||
+                !listEquals(value.images, report.images);
+          },
         ),
       ),
+      hasUnsavedChanges: hasChanges,
     );
+    hasChanges.dispose();
     if (confirmed != true) return;
 
     // טקסט שהוקלד בעריכה עובר אותה הסתרה כמו בטופס המקורי.
@@ -516,7 +441,28 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
     await _service.deletePendingReport(report.reportId);
     if (!mounted) return;
     setState(() {});
+    widget.onPendingReportsChanged?.call();
     UiSnack.show(ReportMessages.removedFromQueue);
+  }
+
+  Future<void> _markPendingAsSent(AppReport report) async {
+    final confirmed = await showTwoActionsDialog(
+      context: context,
+      title: context.settingsText('לסמן כנשלח?'),
+      content: context.settingsText(
+        'הדיווח יעבור להיסטוריית הדיווחים שנשלחו ויוסר מהתור, ללא שליחה לשרת. '
+        'השתמשו בכך אם כבר שלחתם את הדיווח בדרך אחרת.',
+      ),
+      cancelText: context.settingsText('ביטול'),
+      confirmText: context.settingsText('סמן כנשלח'),
+    );
+    if (confirmed != true) return;
+
+    await _service.markPendingReportAsSent(report);
+    if (!mounted) return;
+    setState(() {});
+    widget.onPendingReportsChanged?.call();
+    UiSnack.show(ReportMessages.markedAsSent);
   }
 
   Future<void> _deleteSent(AppReport report) async {
@@ -526,87 +472,29 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
     UiSnack.show(ReportMessages.deletedFromHistory);
   }
 
-  Future<void> _clearPending() async {
-    final confirmed = await showWarningDialog(
-      context: context,
-      title: context.settingsText('למחוק דיווחים שמורים?'),
-      content: context.settingsText('כל הדיווחים השמורים בתור יימחקו מהמחשב.'),
-      subtitle: context.settingsText('לא ניתן לשחזר דיווחים שנמחקו.'),
-      cancelText: context.settingsText('ביטול'),
-      confirmText: context.settingsText('מחק'),
-    );
-    if (confirmed != true) return;
-    setState(() => _isClearingPending = true);
-    await _service.clearPendingReports();
-    if (!mounted) return;
-    setState(() => _isClearingPending = false);
-    UiSnack.show(ReportMessages.pendingCleared);
-  }
+  Future<void> _clearPending() => clearPendingReports(
+    context,
+    clear: _service.clearPendingReports,
+    setBusy: (busy) => setState(() => _isClearingPending = busy),
+    onPendingReportsChanged: widget.onPendingReportsChanged,
+  );
 
-  Future<void> _clearSent() async {
-    final confirmed = await showWarningDialog(
-      context: context,
-      title: context.settingsText('לנקות את היסטוריית הדיווחים?'),
-      content: context.settingsText(
-        'כל הדיווחים שנשלחו יימחקו מההיסטוריה המקומית.',
-      ),
-      subtitle: context.settingsText(
-        'הפעולה לא מוחקת דיווחים שכבר נשלחו לצוות אוצריא.',
-      ),
-      cancelText: context.settingsText('ביטול'),
-      confirmText: context.settingsText('נקה'),
-    );
-    if (confirmed != true) return;
-    setState(() => _isClearingSent = true);
-    await _service.clearSentReports();
-    if (!mounted) return;
-    setState(() => _isClearingSent = false);
-    UiSnack.show(ReportMessages.historyCleared);
-  }
+  Future<void> _clearSent() => clearSentReports(
+    context,
+    subtitle: context.settingsText(
+      'הפעולה לא מוחקת דיווחים שכבר נשלחו לצוות אוצריא.',
+    ),
+    clear: _service.clearSentReports,
+    setBusy: (busy) => setState(() => _isClearingSent = busy),
+  );
 
-  Future<void> _exportScript() async {
-    if (!await verifySaferModePassword(context)) return;
-    final reports = await _service.getPendingReports();
-    if (reports.isEmpty) {
-      if (mounted) UiSnack.show(ReportMessages.noPendingToExport);
-      return;
-    }
-    if (!mounted) return;
-    final target = await resolveOfflineSendTarget(context);
-    if (target == null || !mounted) return;
-
-    final script = _service.buildOfflineSendScript(reports, target: target);
-    final saveDialogTitle = context.settingsText(
-      'בחר מיקום לשמירת סקריפט השליחה',
-    );
-    final downloadsDirectory = await getDownloadsDirectory();
-    final path = await saveFileWithExtension(
-      dialogTitle: saveDialogTitle,
-      fileName: script.fileName,
-      initialDirectory: downloadsDirectory?.path,
-      extension: target == OfflineSendScriptTarget.windows ? 'bat' : 'sh',
-      bytes: Uint8List.fromList(utf8.encode(script.content)),
-    );
-    if (path == null || !mounted) return;
-
-    setState(() => _isExporting = true);
-    try {
-      if (target == OfflineSendScriptTarget.unix &&
-          (Platform.isLinux || Platform.isMacOS)) {
-        await Process.run('chmod', ['+x', path]);
-      }
-      if (!mounted) return;
-      UiSnack.showSuccess(
-        target == OfflineSendScriptTarget.unix
-            ? ReportMessages.scriptSavedUnix(script.fileName)
-            : ReportMessages.scriptSavedWindows,
-      );
-    } catch (e) {
-      if (mounted) UiSnack.showError(ReportMessages.scriptSaveError(e));
-    } finally {
-      if (mounted) setState(() => _isExporting = false);
-    }
-  }
+  Future<void> _exportScript() => exportOfflineSendScript(
+    context,
+    loadPending: _service.getPendingReports,
+    buildScript: (reports, target) =>
+        _service.buildOfflineSendScript(reports, target: target),
+    setBusy: (busy) => setState(() => _isExporting = busy),
+  );
 }
 
 /// שדות העריכה של דיווח תוכנה שמור בתור; מדווח על כל שינוי כדיווח מעודכן.
@@ -637,6 +525,7 @@ class _AppReportEditFieldsState extends State<AppReportEditFields> {
     text: widget.report.stepsToReproduce,
   );
   late final _email = TextEditingController(text: widget.report.reporterEmail);
+  late List<AppReportImage> _images = widget.report.images;
 
   @override
   void dispose() {
@@ -654,6 +543,7 @@ class _AppReportEditFieldsState extends State<AppReportEditFields> {
       description: _description.text,
       stepsToReproduce: _steps.text,
       reporterEmail: _email.text.trim(),
+      images: _images,
     ),
   );
 
@@ -665,7 +555,6 @@ class _AppReportEditFieldsState extends State<AppReportEditFields> {
       children: [
         AppSegmentedControl<AppReportType>(
           expandToFillWidth: true,
-          showSelectedIcon: false,
           options: [
             for (final type in AppReportType.values)
               SegmentOption(value: type, label: widget.typeLabel(type)),
@@ -731,6 +620,14 @@ class _AppReportEditFieldsState extends State<AppReportEditFields> {
               isDense: true,
             ),
           ),
+        ),
+        const SizedBox(height: 12),
+        AppReportImagesSection(
+          images: _images,
+          onChanged: (images) {
+            setState(() => _images = List.unmodifiable(images));
+            _notifyChanged();
+          },
         ),
       ],
     );

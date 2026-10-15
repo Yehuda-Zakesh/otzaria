@@ -90,14 +90,6 @@ class CalendarWidgetState extends State<CalendarWidget> {
 
   void requestKeyboardFocus() => _requestFocusIfNeeded();
 
-  void closeTransientPanels() {
-    if (!_isSettingsPanelOpen && !_isJumpToDateSearchOpen) return;
-    setState(() {
-      _isSettingsPanelOpen = false;
-      _isJumpToDateSearchOpen = false;
-    });
-  }
-
   @override
   void deactivate() {
     if (_isSettingsPanelOpen) {
@@ -229,17 +221,6 @@ class CalendarWidgetState extends State<CalendarWidget> {
     cubit.jumpToDate(
       DateTime(current.year + (forward ? 1 : -1), current.month, current.day),
     );
-  }
-
-  void _toggleSidebar(BuildContext context, bool isMobile) {
-    setState(() {
-      final nextVisible = !_isSidebarVisible;
-      _isSidebarVisible = nextVisible;
-      _isSidebarExplicitlyClosed = !nextVisible;
-      if (nextVisible) {
-        _isSidebarAutoHiddenForNarrow = false;
-      }
-    });
   }
 
   void _toggleTimesPanel() {
@@ -443,8 +424,6 @@ class CalendarWidgetState extends State<CalendarWidget> {
                           onToggleEventsPanel: _toggleEventsPanel,
                           onToggleSettingsPanel: _toggleSettingsPanel,
                           onPrint: () => _togglePrintCalendar(context, state),
-                          onToggleSidebar: () =>
-                              _toggleSidebar(context, isMobile),
                           isJumpToDateSearchOpen: _isJumpToDateSearchOpen,
                           onToggleJumpToDateSearch: _toggleJumpToDateSearch,
                           onCloseJumpToDateSearch: _closeJumpToDateSearch,
@@ -693,7 +672,6 @@ class CalendarWidgetState extends State<CalendarWidget> {
     return CalendarSidePanel(
       state: state,
       activeView: _sidePanelView,
-      onViewChanged: (v) => setState(() => _sidePanelView = v),
       timesPanel: CalendarTimesPanel(
         state: state,
         onOpenCalendarCalculationPage: _openCalendarCalculationPage,

@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
+import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/external_catalog/repository/external_catalog_repository.dart';
 import 'package:otzaria/search/magic_dictionary_downloader.dart';
@@ -73,6 +74,7 @@ class CompanionAssetsService {
   final VoidCallback _invalidateExternalBooksCache;
   final VoidCallback _invalidateLibraryCaches;
   final String _talmudReleaseApiUrl;
+  final void Function(String? libraryTag)? _scheduleSemanticVectorsUpdate;
 
   CompanionAssetsService({
     http.Client Function()? clientFactory,
@@ -85,10 +87,16 @@ class CompanionAssetsService {
     VoidCallback? invalidateExternalBooksCache,
     VoidCallback? invalidateLibraryCaches,
     String? talmudReleaseApiUrl,
+    this._scheduleSemanticVectorsUpdate,
   }) : _clientFactory = clientFactory ?? http.Client.new,
        _catalogRepository =
            catalogRepository ?? (() => ExternalCatalogRepository.instance),
-       _dictionaryFactory = dictionaryFactory ?? MagicDictionaryDownloader.new,
+       _dictionaryFactory =
+           dictionaryFactory ??
+           (() => MagicDictionaryDownloader(
+             aroundReplace:
+                 TantivyDataProvider.instance.replaceMagicDictionaryDetached,
+           )),
        _biographiesFactory = biographiesFactory ?? BiographiesDownloader.new,
        _extractTarArchive =
            extractTarArchive ??
@@ -111,6 +119,7 @@ class CompanionAssetsService {
     CompanionAssetStatusCallback? onStatus,
     void Function(int received, int? total)? onDownloadProgress,
     bool Function()? isCancelled,
+    String? libraryReleaseTag,
   }) async {
     bool cancelled() => isCancelled?.call() ?? false;
     var libraryChanged = false;
@@ -169,7 +178,51 @@ class CompanionAssetsService {
     } catch (e) {
       debugPrint('[CompanionAssets] biographies update failed: $e');
     }
+
+    // וקטורי החיפוש הסמנטי (~1.6GB) יורדים ברקע, מחוץ למד ההתקדמות של העדכון.
+    try {
+      _scheduleSemanticVectorsUpdate?.call(libraryReleaseTag);
+    } catch (e) {
+      debugPrint('[CompanionAssets] semantic vectors schedule failed: $e');
+    }
     return libraryChanged;
+  }
+
+  /// מוריד ל-[destPath] עם resume לפי [resumeIdentity], אימות SHA-256 וגודל,
+  /// התקדמות וביטול; זורק את חריגות `PatchDownloader` בכשל.
+  Future<void> downloadVerifiedFile({
+    required String url,
+    required String destPath,
+    required String resumeIdentity,
+    int? expectedSize,
+    String? expectedSha256,
+    void Function(int received, int? total)? onProgress,
+    bool Function()? isCancelled,
+  }) async {
+    final client = _clientFactory();
+    try {
+      await _downloadToFile(
+        client,
+        url,
+        destPath,
+        resumeIdentity,
+        expectedSize ?? 0,
+        expectedSha256,
+        onProgress,
+        isCancelled ?? () => false,
+      );
+    } finally {
+      client.close();
+    }
+  }
+
+  /// מוחק קובץ שהורד ב-[downloadVerifiedFile] יחד עם קובצי הצד של ה-resume.
+  static Future<void> discardDownload(String destPath) async {
+    final file = File(destPath);
+    await file.delete().catchError((_) => file);
+    await deleteDownloadSidecar(destPath);
+    final resume = File(PatchDownloader.resumeSidecarPath(destPath));
+    await resume.delete().catchError((_) => resume);
   }
 
   // ── תלמוד בבלי ────────────────────────────────────────────────────────

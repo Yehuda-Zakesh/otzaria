@@ -127,7 +127,7 @@ class AttachedUpdateHostPolicy {
       return false;
     }
     final prefix10 = b.sublist(0, 10).every((x) => x == 0);
-    // ::ffff:a.b.c.d; ‏::/96 (כולל :: ו-‎::1) אינו ציבורי.
+    // ::ffff:a.b.c.d; ::/96 (כולל :: ו-::1) אינו ציבורי.
     if (prefix10 && b[10] == 0xff && b[11] == 0xff) {
       return _isPublicIPv4(b.sublist(12));
     }

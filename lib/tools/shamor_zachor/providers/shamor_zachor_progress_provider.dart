@@ -50,18 +50,6 @@ class ShamorZachorProgressProvider with ChangeNotifier {
   /// מספר העמודות המרבי שניתן להגדיר לספר
   static const int maxColumns = 8;
 
-  // Column names for progress tracking
-  static const String learnColumn = 'learn';
-  static const String review1Column = 'review1';
-  static const String review2Column = 'review2';
-  static const String review3Column = 'review3';
-  static const List<String> allColumnNames = [
-    learnColumn,
-    review1Column,
-    review2Column,
-    review3Column,
-  ];
-
   /// העמודות המוגדרות לספר; אם אין הגדרה מותאמת - עמודות ברירת המחדל
   List<ProgressColumn> getColumnsForBook(int bookId) =>
       _columnsByBookId[bookId] ?? kDefaultProgressColumns;
@@ -603,22 +591,6 @@ class ShamorZachorProgressProvider with ChangeNotifier {
     return bookProgress.values.any((progress) => !progress.isEmpty);
   }
 
-  /// Get number of completed cycles (columns) by book ID
-  int getNumberOfCompletedCyclesById(int bookId, BookDetails bookDetails) {
-    final bookProgress = _progressById[bookId];
-    final totalTargetItems = bookDetails.totalLearnableItems;
-    if (totalTargetItems == 0 || bookProgress == null) return 0;
-
-    int cycles = 0;
-    for (final columnId in _columnIdsForBook(bookId)) {
-      if (ProgressService.getColumnCompletedCount(bookProgress, columnId) >=
-          totalTargetItems) {
-        cycles++;
-      }
-    }
-    return cycles;
-  }
-
   /// Get book progress summary by ID (synchronous)
   BookProgressSummary getBookProgressSummarySyncById(
     int bookId,
@@ -644,80 +616,6 @@ class ShamorZachorProgressProvider with ChangeNotifier {
     );
     _progressSummaryCache[bookId] = summary;
     return summary;
-  }
-
-  /// Export progress data
-  Future<String?> exportProgressData() async {
-    try {
-      return await _progressService.exportProgressData();
-    } catch (e, stackTrace) {
-      _error = ShamorZachorError.fromException(
-        e,
-        stackTrace: stackTrace,
-        customMessage: 'Failed to export progress data',
-      );
-      _logger.severe(
-        'Error exporting progress: ${_error!.message}',
-        e,
-        stackTrace,
-      );
-      notifyListeners();
-      return null;
-    }
-  }
-
-  /// Import progress data
-  Future<bool> importProgressData(String jsonData) async {
-    try {
-      final success = await _progressService.importProgressData(jsonData);
-      if (success) {
-        await _loadInitialProgress();
-      }
-      return success;
-    } catch (e, stackTrace) {
-      _error = ShamorZachorError.fromException(
-        e,
-        stackTrace: stackTrace,
-        customMessage: 'Failed to import progress data',
-      );
-      _logger.severe(
-        'Error importing progress: ${_error!.message}',
-        e,
-        stackTrace,
-      );
-      notifyListeners();
-      return false;
-    }
-  }
-
-  /// Clear all progress data
-  Future<void> clearAllProgress() async {
-    try {
-      await _progressService.clearAllProgress();
-      _progressById.clear();
-      _completionDatesById.clear();
-      _columnsByBookId.clear();
-      _clearSummaryCache();
-      notifyListeners();
-    } catch (e, stackTrace) {
-      _error = ShamorZachorError.fromException(
-        e,
-        stackTrace: stackTrace,
-        customMessage: 'Failed to clear progress data',
-      );
-      _logger.severe(
-        'Error clearing progress: ${_error!.message}',
-        e,
-        stackTrace,
-      );
-      notifyListeners();
-    }
-  }
-
-  /// Clear error state
-  void clearError() {
-    _error = null;
-    notifyListeners();
   }
 
   @override

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:otzaria/search/bloc/search_bloc.dart';
-import 'package:otzaria/search/bloc/search_event.dart';
 import 'package:otzaria/search/models/external_search_status.dart';
 import 'package:otzaria/search/models/external_search_summary.dart';
 import 'package:otzaria/search/models/search_preview_target.dart';
@@ -8,8 +7,6 @@ import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/search/search_defaults.dart';
 import 'package:otzaria/search/search_query_builder.dart';
 import 'package:otzaria/tabs/models/tab.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
-import 'package:otzaria/models/books.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 
 class SearchingTab extends OpenedTab {
@@ -38,9 +35,6 @@ class SearchingTab extends OpenedTab {
   /// התוצאה שמוצגת כרגע בתצוגה המקדימה (לחיצה אחת על תוצאה); null = סגורה.
   /// מצב זמני של המסך — לא נשמר ב-JSON של הטאב.
   final ValueNotifier<SearchPreviewTarget?> previewTarget = ValueNotifier(null);
-
-  final ItemScrollController scrollController = ItemScrollController();
-  List<Book> allBooks = [];
 
   // אפשרויות חיפוש לכל מילה (מילה_אינדקס -> אפשרויות)
   final Map<String, Map<String, bool>> searchOptions = {};
@@ -81,7 +75,6 @@ class SearchingTab extends OpenedTab {
   final ValueNotifier<int> negativeSpacingValuesChanged = ValueNotifier(0);
 
   // מטמון של בקשות ספירה פעילות כדי למנוע קריאות כפולות
-  final Map<String, Future<int>> _inflight = {};
 
   static String titleForQuery(String query) {
     final trimmedQuery = query.trim();
@@ -117,6 +110,33 @@ class SearchingTab extends OpenedTab {
       queryController.text = searchText;
       // החיפוש מופעל לעצמאי כשהטאב מוצג לראשונה (ראה TantivyFullTextSearch.initState)
     }
+  }
+
+  /// חיפוש חדש לפי ברירות המחדל של המשתמש — מצב, מרווח ואפשרויות המילה;
+  /// [mode] מפורש (מקיצור או מקישור) גובר על המצב השמור.
+  factory SearchingTab.newSearch(
+    String title,
+    String query, {
+    SearchMode? mode,
+    bool withResultPreferences = true,
+  }) {
+    final searchMode = mode ?? SearchDefaults.initialModeForNewSearch();
+    final config = SearchConfiguration(
+      searchMode: searchMode,
+      distance: searchMode == SearchMode.fuzzy
+          ? kMaxFuzzyDistance
+          : SearchDefaults.initialDistanceForNewSearch(),
+    );
+    return SearchingTab(
+        title,
+        query,
+        initialConfiguration: withResultPreferences
+            ? SearchDefaults.withResultPreferences(config)
+            : config,
+      )
+      ..globalSearchOptions.addAll(
+        SearchDefaults.initialOptionsForMode(searchMode),
+      );
   }
 
   /// האם להריץ אוטומטית שאילתה ממתינה בפתיחה הראשונה של הטאב.
@@ -188,42 +208,6 @@ class SearchingTab extends OpenedTab {
     titleNotifier.value = newTitle;
   }
 
-  String _normalizeFacet(String s) =>
-      s.trim().replaceAll(RegExp(r'/+'), '/'); // אחידות סלאשים + רווחים
-
-  String _optionsHash() {
-    String normMap(Map m) => Map.fromEntries(
-      m.entries.toList()
-        ..sort((a, b) => a.key.toString().compareTo(b.key.toString())),
-    ).toString();
-    return [
-      normMap(searchOptions),
-      normMap(globalSearchOptions),
-      useGlobalSearchOptions.value.toString(),
-      normMap(spacingValues),
-      negativeQueryController.text.trim(),
-      normMap(negativeSearchOptions),
-      normMap(negativeGlobalSearchOptions),
-      useGlobalNegativeSearchOptions.value.toString(),
-      normMap(negativeSpacingValues),
-      Map.fromEntries(
-        negativeAlternativeWords.entries.toList()
-          ..sort((a, b) => a.key.compareTo(b.key)),
-      ).toString(),
-      Map.fromEntries(
-        alternativeWords.entries.toList()
-          ..sort((a, b) => a.key.compareTo(b.key)),
-      ).toString(),
-    ].join('|');
-  }
-
-  String _cacheKey(String facet) {
-    final f = _normalizeFacet(facet);
-    final q = (searchBloc.state.searchQuery).trim();
-    final bVer = searchBloc.state.booksToSearch.length.toString(); // מספר ספרים
-    return '$f|q=$q|o=${_optionsHash()}|b=$bVer';
-  }
-
   /// מחזיר את אפשרויות החיפוש האפקטיביות לפי המצב הנוכחי (גלובלי/פר-מילה).
   /// במצב גלובלי - מרחיב את ההגדרות הגלובליות לכל מילה בשאילתה.
   /// במצב פר-מילה - מחזיר את ההגדרות הפר-מיליות הקיימות.
@@ -247,108 +231,24 @@ class SearchingTab extends OpenedTab {
     );
   }
 
-  Future<int> countForFacet(String facet) {
-    final normalizedParameters = SearchQueryBuilder.normalizeParametersForMode(
-      searchBloc.state.configuration.searchMode,
-      customSpacing: spacingValues,
-      alternativeWords: alternativeWords,
-      searchOptions: effectiveSearchOptions(
-        query: searchBloc.state.searchQuery,
+  /// מעתיק הגדרות פר-מילה לעריכה בטאב הזה. המקור עשוי להיות פלט מנורמל
+  /// (רשימות באורך קבוע), ועריכה בטאב אינה משנה אותו.
+  void copyWordSettingsFrom({
+    required Map<String, Map<String, bool>> searchOptions,
+    required Map<int, List<String>> alternativeWords,
+    required Map<String, String> spacingValues,
+  }) {
+    this.searchOptions.addAll(
+      searchOptions.map(
+        (key, value) => MapEntry(key, Map<String, bool>.from(value)),
       ),
     );
-    final negativeParameters = SearchQueryBuilder.normalizeParametersForMode(
-      searchBloc.state.configuration.searchMode,
-      customSpacing: negativeSpacingValues,
-      alternativeWords: negativeAlternativeWords,
-      searchOptions: effectiveNegativeSearchOptions(
-        query: searchBloc.state.negativeQuery,
+    this.alternativeWords.addAll(
+      alternativeWords.map(
+        (key, value) => MapEntry(key, List<String>.from(value)),
       ),
     );
-    return searchBloc.countForFacet(
-      facet,
-      customSpacing: normalizedParameters.customSpacing,
-      alternativeWords: normalizedParameters.alternativeWords,
-      searchOptions: normalizedParameters.searchOptions,
-      negativeCustomSpacing: negativeParameters.customSpacing,
-      negativeAlternativeWords: negativeParameters.alternativeWords,
-      negativeSearchOptions: negativeParameters.searchOptions,
-    );
-  }
-
-  /// ספירה מקבצת של תוצאות עבור מספר facets בבת אחת - לשיפור ביצועים
-  Future<Map<String, int>> countForMultipleFacets(List<String> facets) {
-    final normalizedParameters = SearchQueryBuilder.normalizeParametersForMode(
-      searchBloc.state.configuration.searchMode,
-      customSpacing: spacingValues,
-      alternativeWords: alternativeWords,
-      searchOptions: effectiveSearchOptions(
-        query: searchBloc.state.searchQuery,
-      ),
-    );
-    final negativeParameters = SearchQueryBuilder.normalizeParametersForMode(
-      searchBloc.state.configuration.searchMode,
-      customSpacing: negativeSpacingValues,
-      alternativeWords: negativeAlternativeWords,
-      searchOptions: effectiveNegativeSearchOptions(
-        query: searchBloc.state.negativeQuery,
-      ),
-    );
-    return searchBloc.countForMultipleFacets(
-      facets,
-      customSpacing: normalizedParameters.customSpacing,
-      alternativeWords: normalizedParameters.alternativeWords,
-      searchOptions: normalizedParameters.searchOptions,
-      negativeCustomSpacing: negativeParameters.customSpacing,
-      negativeAlternativeWords: negativeParameters.alternativeWords,
-      negativeSearchOptions: negativeParameters.searchOptions,
-    );
-  }
-
-  /// ספירה חכמה - מחזירה תוצאות מהירות מה-state או מבצעת ספירה
-  Future<int> countForFacetCached(String facet) async {
-    final f = _normalizeFacet(facet);
-
-    // 0) אם יש ב-state (כולל 0) — החזר מיד
-    if (searchBloc.state.facetCounts.containsKey(f)) {
-      final v = searchBloc.getFacetCountFromState(f);
-      debugPrint('💾 Cache hit for $f: $v');
-      return v;
-    }
-
-    // 1) מפתח קאש כולל query/אפשרויות/גרסת ספרים
-    final key = _cacheKey(facet);
-
-    // 2) אם ספירה פעילה — הצמד אליה
-    final existing = _inflight[key];
-    if (existing != null) {
-      debugPrint('⏳ Count in progress for [$key], waiting...');
-      return existing;
-    }
-
-    debugPrint('🔄 Cache miss for $key, direct count...');
-    final sw = Stopwatch()..start();
-
-    final fut = countForFacet(f)
-        .then((result) {
-          sw.stop();
-          debugPrint(
-            '⏱️ Direct count for $key took ${sw.elapsedMilliseconds}ms: $result',
-          );
-          searchBloc.add(UpdateFacetCounts({f: result}));
-          return result;
-        })
-        .whenComplete(() {
-          // תמיד מנקים, גם בשגיאה
-          _inflight.remove(key);
-        });
-
-    _inflight[key] = fut;
-    return fut;
-  }
-
-  /// מחזיר ספירה סינכרונית מה-state (אם קיימת)
-  int getFacetCountFromState(String facet) {
-    return searchBloc.getFacetCountFromState(_normalizeFacet(facet));
+    this.spacingValues.addAll(spacingValues);
   }
 
   @override

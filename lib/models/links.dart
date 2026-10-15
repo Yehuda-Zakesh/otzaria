@@ -2,6 +2,7 @@
 
 import 'dart:collection';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:otzaria/data/data_providers/library_provider_manager.dart';
 import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
@@ -156,6 +157,9 @@ class Link {
     this.baseProvenance = 0,
   });
 
+  /// זהות תוכן היעד, כולל המסד והטווח, לשיתוף בין מטמוני תצוגה וייצוא.
+  String get contentIdentityKey => _contentKey;
+
   static final LinkedHashMap<String, Future<String>> _contentCache =
       LinkedHashMap<String, Future<String>>();
   static final Map<String, String> _loadedContent = {};
@@ -217,7 +221,9 @@ class Link {
 
   String _displayHeRefFor(String targetTitle) {
     final trimmed = heRef.trim();
-    final end = heRefEnd?.trim();
+    final dafRef = refUpToDaf(trimmed);
+    if (dafRef != trimmed) return dafRef;
+    final end = _displayHeRefEnd;
     if (end != null && end.isNotEmpty && end != trimmed) return trimmed;
 
     // כתובת בפורמט המופרד ("<שם הספר>, <רמות>") נמדדת לפי רמות המיקום בלבד:
@@ -239,12 +245,18 @@ class Link {
     return parts.sublist(0, parts.length - 1).join(',').trimRight();
   }
 
+  String? get _displayHeRefEnd {
+    final end = heRefEnd?.trim();
+    return end == null ? null : refUpToDaf(end);
+  }
+
   /// סיומת טווח לכתובת התצוגה: לקישור-טווח מוסיפה "–<קצה>" כשרק הרכיב האחרון
   /// שונה (למשל "יח, י, ב–ג"), או " – <כתובת מלאה>" כשהכתובות שונות לגמרי.
   String get _rangeDisplaySuffix {
-    final end = heRefEnd?.trim();
-    if (end == null || end.isEmpty || end == heRef.trim()) return '';
-    final startSegs = heRef.trim().split(', ');
+    final start = refUpToDaf(heRef.trim());
+    final end = _displayHeRefEnd;
+    if (end == null || end.isEmpty || end == start) return '';
+    final startSegs = start.split(', ');
     final endSegs = end.split(', ');
     var common = 0;
     while (common < startSegs.length - 1 &&
@@ -494,26 +506,35 @@ Future<List<Link>> getLinksforIndexs({
     return commentatorsSet.contains(utils.getTitleFromPath(link.path2));
   }).toList();
 
-  // אם אין קישורים, מחזיר רשימה ריקה מיד
-  if (filteredLinks.isEmpty) {
-    return [];
+  if (filteredLinks.length < 2) {
+    return filteredLinks;
   }
 
-  // מיון אחד משולב במקום שני מיונים נפרדים
-  filteredLinks.sort((a, b) {
-    // קודם לפי סדר המפרשים
-    final commentatorComparison = commentatorsToShow
-        .indexOf(utils.getTitleFromPath(a.path2))
-        .compareTo(commentatorsToShow.indexOf(utils.getTitleFromPath(b.path2)));
+  return sortLinksByCommentatorOrder(filteredLinks, commentatorsToShow);
+}
 
-    if (commentatorComparison != 0) {
-      return commentatorComparison;
-    }
+/// ממיין לפי סדר המפרשים ב-[commentatorsToShow], ובתוך מפרש לפי index2.
+@visibleForTesting
+List<Link> sortLinksByCommentatorOrder(
+  List<Link> links,
+  List<String> commentatorsToShow,
+) {
+  if (links.length < 2) return List.of(links);
 
-    // אם אותו מפרש — לפי סדר השורות בספר המפרש. השוואת מחרוזות על הכתובת
-    // אינה סדר הספר: טו/טז מוקדמים לי', ובמדבר מוקדם לויקרא.
-    return a.index2.compareTo(b.index2);
+  // הדרגה מחושבת פעם לקישור; ריצה מהסוף משמרת את המופע הראשון כמו indexOf.
+  final rankByTitle = <String, int>{
+    for (var i = commentatorsToShow.length - 1; i >= 0; i--)
+      commentatorsToShow[i]: i,
+  };
+  final ranked = [
+    for (final link in links)
+      (rank: rankByTitle[utils.getTitleFromPath(link.path2)] ?? -1, link: link),
+  ];
+  ranked.sort((a, b) {
+    final commentatorComparison = a.rank.compareTo(b.rank);
+    if (commentatorComparison != 0) return commentatorComparison;
+    // השוואת מחרוזות על הכתובת אינה סדר הספר: טו/טז מוקדמים לי'.
+    return a.link.index2.compareTo(b.link.index2);
   });
-
-  return filteredLinks;
+  return [for (final entry in ranked) entry.link];
 }

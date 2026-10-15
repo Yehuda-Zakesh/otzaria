@@ -127,7 +127,7 @@ xml.XmlElement? _childNamed(xml.XmlElement parent, String localName) {
   return null;
 }
 
-/// Word כותב ‎.xml‎ ב-UTF-8, אך קובץ שנערך ידנית עלול להיות ב-latin1.
+/// Word כותב .xml ב-UTF-8, אך קובץ שנערך ידנית עלול להיות ב-latin1.
 String _decodeXml(Uint8List bytes) {
   try {
     return utf8.decode(bytes);

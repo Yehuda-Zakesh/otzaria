@@ -161,11 +161,11 @@ class MacMenuBar extends StatelessWidget {
     ];
   }
 
-  static void _navigate(Screen screen) {
+  static bool _navigate(Screen screen) {
     final context = navigatorKey.currentContext;
-    if (context == null) return;
-    _closeOverlayRoutes(context);
+    if (context == null || !_closeOverlayRoutes(context)) return false;
     context.read<NavigationBloc>().add(NavigateToScreen(screen));
+    return true;
   }
 
   static void _openSettings() => _navigate(Screen.settings);
@@ -173,30 +173,35 @@ class MacMenuBar extends StatelessWidget {
   static void _openLibrary() {
     final context = navigatorKey.currentContext;
     if (context == null) return;
-    _navigate(Screen.library);
+    if (!_navigate(Screen.library)) return;
     context.read<FocusRepository>().requestLibrarySearchFocus(selectAll: true);
   }
 
   static void _openTools() {
     final context = navigatorKey.currentContext;
-    if (context == null) return;
-    _closeOverlayRoutes(context);
+    if (context == null || !_closeOverlayRoutes(context)) return;
     ToolsLauncherController.instance.open();
   }
 
   static void _showDialog(Widget dialog) {
     final context = navigatorKey.currentContext;
-    if (context == null) return;
-    _closeOverlayRoutes(context);
+    if (context == null || !_closeOverlayRoutes(context)) return;
     showDialog(context: context, builder: (_) => dialog);
   }
 
   /// דיאלוג או תפריט פתוח נסגר לפני המעבר — בדיוק כמו במסלול הקיצורים.
-  static void _closeOverlayRoutes(BuildContext context) {
+  static bool _closeOverlayRoutes(BuildContext context) {
     final navigator = Navigator.maybeOf(context, rootNavigator: true);
+    var blocked = false;
     if (navigator?.canPop() ?? false) {
-      navigator!.popUntil((route) => route.isFirst);
+      navigator!.popUntil((route) {
+        blocked =
+            !route.isFirst &&
+            route.popDisposition == RoutePopDisposition.doNotPop;
+        return route.isFirst || blocked;
+      });
     }
+    return !blocked;
   }
 }
 

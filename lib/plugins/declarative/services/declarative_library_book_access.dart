@@ -61,7 +61,10 @@ class DeclarativeLibraryBookAccess
         inSidePane: inSidePane,
         externalMatches: externalMatches,
       ),
-      externalBookOpener: (book) => OtzarUtils.launchOtzarWeb(book.link),
+      externalBookOpener: (book) =>
+          PluginBookIdentity.externalOf(book)?.provider == 'otzar'
+          ? OtzarUtils.openBook(book.id, book.link)
+          : OtzarUtils.launchOtzarWeb(book.link),
     );
   }
 
@@ -74,13 +77,6 @@ class DeclarativeLibraryBookAccess
       for (final book in books)
         if (book == null) null else PluginBookIdentity.toJson(book),
     ];
-  }
-
-  Future<Map<String, dynamic>?> resolveUnique(
-    Map<String, dynamic> identity,
-  ) async {
-    final book = (await findUniqueBooks([identity])).single;
-    return book == null ? null : PluginBookIdentity.toJson(book);
   }
 
   @override

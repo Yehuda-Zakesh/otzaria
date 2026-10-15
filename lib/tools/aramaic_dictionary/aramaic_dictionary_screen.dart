@@ -11,22 +11,59 @@ import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/theme/theme_exports.dart';
 import 'package:otzaria/tools/aramaic_dictionary/widgets/aramaic_result_card.dart';
 import 'package:otzaria/tools/dictionary/repository/dictionary_lookup_repository.dart';
+import 'package:otzaria/tools/tool_query.dart';
+import 'package:otzaria/utils/text/text_manipulation.dart';
 import 'package:otzaria/widgets/navigation/app_top_bar.dart';
 import 'package:otzaria/widgets/text/otzaria_search_field.dart';
 import 'package:otzaria/widgets/feedback/tool_empty_state.dart';
 import 'package:otzaria/widgets/misc/tool_ui_helpers.dart';
 
+/// מסנן ערכים ש-[field] שלהם מכיל את [query] וממיין: מדויק < מתחיל ב- < מילה שלמה < מכיל.
+/// הדירוג נקבע פעם אחת לערך ולא בכל השוואה, כי המיון מריץ RegExp על ערכים ארוכים.
+@visibleForTesting
+List<Map<String, String>> rankAramaicMatches(
+  List<Map<String, String>> entries,
+  String field,
+  String query,
+) {
+  final wholeWord = RegExp('(^|\\s)${RegExp.escape(query)}(\$|\\s)');
+  final ranked = <({int rank, int pos, Map<String, String> entry})>[];
+  for (final entry in entries) {
+    final text = entry[field]!;
+    final pos = text.indexOf(query);
+    if (pos < 0) continue;
+    final rank = text == query
+        ? 0
+        : pos == 0
+        ? 1
+        : wholeWord.hasMatch(text)
+        ? 2
+        : 3;
+    ranked.add((rank: rank, pos: pos, entry: entry));
+  }
+  ranked.sort((a, b) {
+    final rankCompare = a.rank.compareTo(b.rank);
+    if (rankCompare != 0) return rankCompare;
+    final posCompare = a.pos.compareTo(b.pos);
+    if (posCompare != 0) return posCompare;
+    return a.entry[field]!.length.compareTo(b.entry[field]!.length);
+  });
+  return [for (final r in ranked) r.entry];
+}
+
 class AramaicDictionaryScreen extends StatefulWidget {
-  const AramaicDictionaryScreen({super.key, this.repository});
+  const AramaicDictionaryScreen({super.key, this.repository, this.queryInbox});
 
   final DictionaryLookupRepository? repository;
+  final ToolQueryInbox? queryInbox;
 
   @override
   State<AramaicDictionaryScreen> createState() =>
       _AramaicDictionaryScreenState();
 }
 
-class _AramaicDictionaryScreenState extends State<AramaicDictionaryScreen> {
+class _AramaicDictionaryScreenState extends State<AramaicDictionaryScreen>
+    with ToolQueryConsumer {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   late final DictionaryLookupRepository _dictionaryRepository =
@@ -35,6 +72,19 @@ class _AramaicDictionaryScreenState extends State<AramaicDictionaryScreen> {
   List<Map<String, String>> _filteredResults = [];
   bool _isLoading = true;
   bool _isHebrewToAramaic = false;
+
+  @override
+  ToolQueryInbox? get toolQueryInbox => widget.queryInbox;
+
+  @override
+  bool get canApplyToolQuery => !_isLoading;
+
+  @override
+  void applyToolQuery(ToolQuery query) {
+    _isHebrewToAramaic = query.hebrewToAramaic;
+    fillSearchField(_searchController, query.text);
+    _performSearch(query.text);
+  }
 
   @override
   void initState() {
@@ -69,6 +119,9 @@ class _AramaicDictionaryScreenState extends State<AramaicDictionaryScreen> {
           return <String, String>{
             'aramaic': entry.aramaic,
             'hebrew': entry.hebrew,
+            // שדות החיפוש בלי ניקוד, כדי שהקלדה רגילה תמצא ערכים מנוקדים.
+            'aramaicPlain': removeVolwels(entry.aramaic),
+            'hebrewPlain': removeVolwels(entry.hebrew),
           };
         }).toList();
         _isLoading = false;
@@ -81,10 +134,11 @@ class _AramaicDictionaryScreenState extends State<AramaicDictionaryScreen> {
       });
       UiSnack.showError(ToolsMessages.dictionaryLoadError(e));
     }
+    consumeToolQuery();
   }
 
   void _performSearch(String query) {
-    query = query.trim();
+    query = removeVolwels(query.trim());
 
     if (query.isEmpty) {
       setState(() {
@@ -93,39 +147,10 @@ class _AramaicDictionaryScreenState extends State<AramaicDictionaryScreen> {
       return;
     }
 
+    final field = _isHebrewToAramaic ? 'hebrewPlain' : 'aramaicPlain';
     setState(() {
-      _filteredResults =
-          _dictionaryData.where((entry) {
-            final searchIn = _isHebrewToAramaic
-                ? entry['hebrew']!
-                : entry['aramaic']!;
-            return searchIn.contains(query);
-          }).toList()..sort((a, b) {
-            final textA = _isHebrewToAramaic ? a['hebrew']! : a['aramaic']!;
-            final textB = _isHebrewToAramaic ? b['hebrew']! : b['aramaic']!;
-            final rankCompare = _matchRank(
-              textA,
-              query,
-            ).compareTo(_matchRank(textB, query));
-            if (rankCompare != 0) return rankCompare;
-            final posCompare = textA
-                .indexOf(query)
-                .compareTo(textB.indexOf(query));
-            if (posCompare != 0) return posCompare;
-            return textA.length.compareTo(textB.length);
-          });
+      _filteredResults = rankAramaicMatches(_dictionaryData, field, query);
     });
-  }
-
-  /// דירוג התאמת טקסט לשאילתה: נמוך = דומה יותר.
-  /// מדויק < מתחיל ב- < מילה שלמה < מכיל.
-  int _matchRank(String text, String query) {
-    if (text == query) return 0;
-    if (text.startsWith(query)) return 1;
-    if (RegExp('(^|\\s)${RegExp.escape(query)}(\$|\\s)').hasMatch(text)) {
-      return 2;
-    }
-    return 3;
   }
 
   void _toggleDirection() {
@@ -161,7 +186,7 @@ class _AramaicDictionaryScreenState extends State<AramaicDictionaryScreen> {
             center: OtzariaSearchField(
               controller: _searchController,
               focusNode: _searchFocusNode,
-              icon: OtzariaIcons.search_in_the_text_24_regular,
+              icon: OtzariaIcons.search_in_text_24_regular,
               hintText: _isHebrewToAramaic
                   ? 'חפש מילה בעברית...'
                   : 'חפש מילה בארמית...',
@@ -238,7 +263,7 @@ class _AramaicDictionaryScreenState extends State<AramaicDictionaryScreen> {
   Widget _buildResultsList() {
     if (_searchController.text.isEmpty) {
       return const ToolEmptyState(
-        icon: OtzariaIcons.alef_near_alef_stam_24_regular,
+        icon: OtzariaIcons.alef_near_alef_stam_24_filled,
         message: 'הזן מילה לחיפוש במילון',
       );
     }

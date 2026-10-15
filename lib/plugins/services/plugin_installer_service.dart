@@ -7,6 +7,7 @@ import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/models/plugin_manifest.dart';
 import 'package:otzaria/plugins/models/plugin_valid_permissions.dart';
+import 'package:otzaria/update/app_release_version.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/plugins/services/plugin_manifest_validator.dart';
@@ -25,12 +26,23 @@ class PluginNewerVersionInstalledException implements Exception {
   final String pluginName;
   final String requestedVersion;
   final String installedVersion;
+  final String? pluginId;
 
   PluginNewerVersionInstalledException(
     this.pluginName,
     this.requestedVersion,
-    this.installedVersion,
-  );
+    this.installedVersion, {
+    this.pluginId,
+  });
+}
+
+/// התוסף מצהיר על טווח גרסאות אוצריא שהגרסה המותקנת מחוצה לו.
+class PluginIncompatibleAppVersionException implements Exception {
+  final String message;
+  PluginIncompatibleAppVersionException(this.message);
+
+  @override
+  String toString() => message;
 }
 
 class PreparedInstall {
@@ -98,6 +110,7 @@ class PluginInstallerService {
             manifest.name,
             manifest.version,
             existingPlugin.version,
+            pluginId: manifest.id,
           );
         } else if (diff == 0 && !forceOverwrite) {
           throw PluginOverwriteException(manifest.name, manifest.version);
@@ -106,10 +119,19 @@ class PluginInstallerService {
       }
 
       final packageInfo = await PackageInfo.fromPlatform();
+      final appVersionErrors = PluginManifestValidator.appVersionErrors(
+        manifest,
+        canonicalAppVersion(packageInfo),
+      );
+      if (appVersionErrors.isNotEmpty) {
+        throw PluginIncompatibleAppVersionException(
+          appVersionErrors.join('\n'),
+        );
+      }
       await PluginManifestValidator.validateManifest(
         manifest: manifest,
         directoryPath: tempDir.path,
-        currentAppVersion: packageInfo.version,
+        currentAppVersion: canonicalAppVersion(packageInfo),
       );
       final extendedReport = await Isolate.run(
         () => PluginExtendedValidator.validate(

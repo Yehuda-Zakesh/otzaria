@@ -56,7 +56,11 @@ void main() {
       final repository = SearchRepository(engineProvider: () async => engine);
       const config = SemanticConfigInput(
         rootDir: '/semantic',
-        modelPath: '/model.gguf',
+        modelPath: '/model.onnx',
+        pooling: 'in-graph',
+        maxTokens: 256,
+        modelQuantization: 'int8',
+        embeddingTextVersion: 2,
         modelId: 'otzaria-v1',
         embeddingDim: 1024,
       );
@@ -194,6 +198,9 @@ class _RecordingSemanticEngine extends RecordingSearchEngine
 }
 
 const _status = SemanticStatus(
+  state: SemanticState.ready,
+  vectorSegments: 0,
+  needsCompaction: false,
   enabled: true,
   available: true,
   modelLoaded: true,
@@ -201,7 +208,7 @@ const _status = SemanticStatus(
   vectorCount: 1,
   modelId: 'otzaria-v1',
   embeddingDim: 1024,
-  embeddingBackend: 'llama.cpp',
+  embeddingBackend: 'onnxruntime-sentence-v1',
   vectorBackend: 'memory',
   vectorsPersisted: false,
 );

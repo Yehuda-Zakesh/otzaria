@@ -30,13 +30,6 @@ class UserImportResult {
     this.versionsApplied = 0,
     this.errors = const [],
   });
-
-  bool get hasAny =>
-      generationsApplied > 0 ||
-      linksApplied > 0 ||
-      headingsApplied > 0 ||
-      versionsApplied > 0 ||
-      errors.isNotEmpty;
 }
 
 /// קולט קבצי CSV/JSON שהמשתמש בחר ידנית, וכותב את הדורות והקישורים
@@ -460,29 +453,56 @@ class UserContentImporter {
     for (final err in parsed.errors) {
       errors.add('$fileName ${err.message} (שורה ${err.lineNumber})');
     }
+    // אלפי שורות חוזרות על אותו ספר ואותה כתובת; כל חיפוש נעשה פעם אחת.
+    final foundCache = <(String, int?, bool), bool>{};
+    final refCache = <(String, int?, bool, String), int?>{};
+    Future<bool> cachedSourceFound(
+      String title,
+      int? categoryId,
+      bool isUserBook,
+    ) async {
+      final key = (title, categoryId, isUserBook);
+      final cached = foundCache[key];
+      if (cached != null) return cached;
+      // מקור אישי מאומת מול user_books.db הנתון (כמו קודם); מקור רשמי מול
+      // seforim.db דרך [sourceExists] — כדי לחסום כותרת שגויה שתיצור קישור מת.
+      final found = isUserBook
+          ? await repo.bookIdByTitle(title, categoryId: categoryId) != null
+          : await sourceExists(
+              title: title,
+              categoryId: categoryId,
+              isUserBook: false,
+            );
+      return foundCache[key] = found;
+    }
+
+    Future<int?> cachedResolveRef({
+      required String targetTitle,
+      required int? targetCategoryId,
+      required bool targetIsUserBook,
+      required String ref,
+    }) async {
+      final key = (targetTitle, targetCategoryId, targetIsUserBook, ref);
+      if (refCache.containsKey(key)) return refCache[key];
+      return refCache[key] = await resolveRef(
+        targetTitle: targetTitle,
+        targetCategoryId: targetCategoryId,
+        targetIsUserBook: targetIsUserBook,
+        ref: ref,
+      );
+    }
+
     for (final row in parsed.rows) {
       final sourceTitle = bookTitleFromFile ?? row.sourceBookTitle;
       if (sourceTitle == null || sourceTitle.isEmpty) {
         errors.add('$fileName: חסר ספר מקור (עמודת "ספר_מקור")');
         continue;
       }
-      // מקור אישי מאומת מול user_books.db הנתון (כמו קודם); מקור רשמי מול
-      // seforim.db דרך [sourceExists] — כדי לחסום כותרת שגויה שתיצור קישור מת.
-      final bool found;
-      if (row.sourceIsUserBook) {
-        found =
-            await repo.bookIdByTitle(
-              sourceTitle,
-              categoryId: row.sourceCategoryId,
-            ) !=
-            null;
-      } else {
-        found = await sourceExists(
-          title: sourceTitle,
-          categoryId: row.sourceCategoryId,
-          isUserBook: false,
-        );
-      }
+      final found = await cachedSourceFound(
+        sourceTitle,
+        row.sourceCategoryId,
+        row.sourceIsUserBook,
+      );
       if (!found) {
         errors.add('$fileName: ספר המקור "$sourceTitle" לא נמצא');
         continue;
@@ -490,7 +510,7 @@ class UserContentImporter {
       final record = await _resolveRecord(
         sourceTitle,
         row,
-        resolveRef,
+        cachedResolveRef,
         fileName,
         errors,
       );

@@ -136,8 +136,3 @@ class TikkunBookmarkOpened extends TikkunKorimEvent {
   @override
   List<Object?> get props => [bookmark];
 }
-
-/// התצוגה ביצעה את בקשת הגלילה האחרונה.
-class TikkunScrollHandled extends TikkunKorimEvent {
-  const TikkunScrollHandled();
-}

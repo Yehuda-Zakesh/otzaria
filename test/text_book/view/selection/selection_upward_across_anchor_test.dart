@@ -20,7 +20,6 @@ import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/combined_view/combined_book_screen.dart';
 import 'package:otzaria/widgets/selection/viewport_aligned_selection_container.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../test_helpers/memory_cache_provider.dart';
 
@@ -106,8 +105,6 @@ void main() {
       selectedIndex: null,
       pinLeftPane: false,
       searchText: '',
-      scrollController: ItemScrollController(),
-      positionsListener: ItemPositionsListener.create(),
     );
     final textBookBloc = _TestTextBookBloc(state);
     final personalNotesBloc = _TestPersonalNotesBloc(
@@ -148,7 +145,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     unawaited(
-      tab.mainOffsetController.animateScroll(
+      tab.lines.offsetController.animateScroll(
         offset: 450,
         duration: const Duration(milliseconds: 100),
       ),

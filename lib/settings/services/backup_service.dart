@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:isolate';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:hive_ce/hive.dart';
 import 'package:path/path.dart' as p;
@@ -55,7 +56,6 @@ class BackupStatus {
 /// Service for backing up and restoring app data
 class BackupService {
   static final Logger _logger = Logger('BackupService');
-  static const String backupFolderName = 'backups';
 
   /// תקרת סך תוכן התוספים בגיבוי אחד. עם [BackupStore] הבייטים נכתבים כ-blob
   /// לדיסק ומוסרים מהזיכרון; בגיבוי ידני הם נכנסים כ-base64 (×1.33) למחרוזת
@@ -74,18 +74,6 @@ class BackupService {
       await dir.create(recursive: true);
     }
     return backupPath;
-  }
-
-  /// Open the backup directory in the file explorer
-  static Future<void> openBackupDirectory() async {
-    final dir = await getBackupDirectory();
-    if (Platform.isWindows) {
-      await Process.run('explorer', [dir]);
-    } else if (Platform.isMacOS) {
-      await Process.run('open', [dir]);
-    } else if (Platform.isLinux) {
-      await Process.run('xdg-open', [dir]);
-    }
   }
 
   /// Create a backup with specified options.
@@ -242,6 +230,10 @@ class BackupService {
   static const Map<String, String> unbackedStores = {
     'pending_external_activations.jsonl':
         'תור זמני של בקשות פתיחה מחוץ לתוכנה, מתרוקן בעיבוד',
+    'otzaria_capabilities.json':
+        'הצהרת יכולות הגרסה למעדכן הלא-מקוון; נכתבת מחדש בכל עלייה',
+    'plugin_install_results.jsonl':
+        'יומן תוצאות התקנה למעדכן הלא-מקוון; מקומי ומוגבל בגודל',
     'books': 'תוכן הספרייה, מגיע מההתקנה או מההורדה',
     'הספרים שלי': 'קובצי הספרים; הנתיב נשמר בהגדרות והתיקייה נסרקת מחדש',
     'מסדים אישיים':
@@ -250,16 +242,30 @@ class BackupService {
     'index': 'אינדקס החיפוש, נבנה מחדש מהספרים',
     'dictionaries': 'נכסי מילון שניתן להוריד שוב',
     'library_update_cache': 'קאש הורדות זמני',
+    'pending_library_changes':
+        '"מה חדש בספרים" שהורד או נמסר מהמעדכן הלא-מקוון וטרם הוצג; '
+        'שייך לעדכון הספרייה במכשיר זה',
+    'library_changes_seen':
+        '"מה חדש בספרים" שכבר הוצג; ניתן להורדה שוב מה-release',
+    'library_changes_fetch_queue.json':
+        'תור זמני של הערות עדכון שטרם פורסמו, לניסיון חוזר במכשיר זה',
     'webview2': 'נתוני מנוע הדפדפן המשובץ',
     'backups': 'תיקיית הגיבויים עצמה',
     'library_loaded.marker':
         'סימון מקומי שספרייה נטענה במכשיר זה — שחזורו למכשיר אחר מטעה',
+    'startup_attempts.txt':
+        'מונה הפעלות שהסתיימו לפני שהתוכנה התייצבה; מקומי לריצה במכשיר זה',
     'biographies.tsb': 'נתוני ביוגרפיות ארוזים באפליקציה ומתעדכנים מהרשת',
     windowRootsDirName:
         'עותקי box ההגדרות של חלונות נוספים; נמחקים בהפעלה קרה '
         '(deleteStaleWindowRoots) ומסונכרנים חי עם ההגדרות של החלון הראשון',
     'user_books.db': 'קטלוג הספרים האישיים, נבנה מחדש מסריקת התיקיות',
     'cache.db': 'קאש חישובים, נבנה מחדש לפי הצורך',
+    'search_feedback':
+        'זהות אנונימית של ההתקנה ותור משוב שלא נשלח — אסור שיעברו להתקנה אחרת',
+    AppPaths.libraryDatabasePathRecordFileName:
+        'תיקיית מסד הספרים עבור המתקין; נגזרת מההגדרות ונרשמת מחדש בכל '
+        'עלייה ושינוי מיקום הספרייה, ושחזור נתיב ממכשיר אחר מטעה את המתקין',
     AppPaths.libraryPathRecordFileName:
         'נתיב הספרייה עבור ה-uninstaller; נגזר מההגדרות ונרשם מחדש בכל '
         'עלייה, ושחזור נתיב ממכשיר אחר מטעה אותו',
@@ -291,6 +297,13 @@ class BackupService {
     SettingsRepository.keyGoogleCalendarCredentialsJson,
     HiddenLibraryStore.pendingIndexReconciliationSetting,
     HiddenLibraryStore.pendingVisibilityIndexSetting,
+    // הסכמה לשליחת נתוני שימוש ניתנת לכל התקנה בנפרד, לא משוחזרת מגיבוי.
+    SettingsRepository.keySearchFeedbackConsent,
+    SettingsRepository.keySearchFeedbackConsentVersion,
+    // מצביע על נתונים שהורדו למכשיר הזה; שחזור היה מפעיל הורדה של 1.6GB.
+    SettingsRepository.keySemanticDataEnabled,
+    SettingsRepository.keySemanticDownloadPaused,
+    SettingsRepository.keySemanticSkippedVectorsRelease,
     // דגל פנימי שמסמן שברירות המחדל נכתבו לדיסק.
     'settings_initialized',
   };
@@ -420,7 +433,7 @@ class BackupService {
 
         result.add({
           'bookId': bookInfo.bookId,
-          'notes': notes.map((note) => _noteToBackupJson(note)).toList(),
+          'notes': notes.map((note) => note.toJson()).toList(),
         });
       } catch (e) {
         _logger.warning(
@@ -430,28 +443,6 @@ class BackupService {
     }
 
     return result;
-  }
-
-  /// Convert PersonalNote to backup JSON format
-  static Map<String, dynamic> _noteToBackupJson(PersonalNote note) {
-    return {
-      'id': note.id,
-      'bookId': note.bookId,
-      'lineNumber': note.lineNumber,
-      'displayTitle': note.displayTitle,
-      'anchorText': note.anchorText,
-      'anchorPrefix': note.anchorPrefix,
-      'anchorSuffix': note.anchorSuffix,
-      'anchorStart': note.anchorStart,
-      'anchorEnd': note.anchorEnd,
-      'lastKnownLineNumber': note.lastKnownLineNumber,
-      'status': note.status.name,
-      'content': note.content,
-      'contentPlain': note.contentPlain,
-      'contentFormat': note.contentFormat.name,
-      'createdAt': note.createdAt.toIso8601String(),
-      'updatedAt': note.updatedAt.toIso8601String(),
-    };
   }
 
   // [EDITING DISABLED]
@@ -1076,9 +1067,7 @@ class BackupService {
       await repo.replaceBookmarks(bookmarks);
       return;
     }
-    // ⚠️ `mutate` ולא `load` + `replace`. הייבוא הממזג הוא **תוספת**, ולכן
-    // הוא בדיוק המקרה שבו read-modify-write מוחק: סימנייה שנוספה בחלון אחר
-    // בין הקריאה לכתיבה נעלמה. אותה המרה נעשתה כבר בשולחנות העבודה.
+    // `mutate` משמר סימנייה שנוספה בחלון אחר בין הקריאה לכתיבה.
     var added = 0;
     await repo.mutateBookmarks((current) {
       final result = BackupImportMerge.mergeBookmarks(current, bookmarks);
@@ -1146,6 +1135,8 @@ class BackupService {
   }) async {
     final database = PersonalNotesDatabase.instance;
     var anchorlessNotes = 0;
+    // כתיבה בטרנזקציה אחת: commit לכל הערה עולה כחצי מילישנייה ותוקע את ה-UI.
+    final toWrite = <String, PersonalNote>{};
 
     for (final entry in notesData) {
       try {
@@ -1159,24 +1150,32 @@ class BackupService {
           for (final noteData in notesList) {
             try {
               final json = noteData as Map<String, dynamic>;
-              var note = _noteFromBackupJson(json);
+              var note = PersonalNote.fromJson(json);
               if (!json.containsKey(_noteAnchorKey)) {
-                note = await _restoreNoteAnchoredAsBefore(database, note);
+                note = await _restoreNoteAnchoredAsBefore(
+                  database,
+                  note,
+                  pendingNote: toWrite[note.id],
+                );
                 if (!note.isWordAnchored) anchorlessNotes++;
               }
               if (counts != null) {
-                // `insertNote` הוא INSERT OR REPLACE — בייבוא ממזג הוא היה
-                // דורס הערה מקומית שנערכה מאוחר יותר מזו שבקובץ.
-                final existing = await database.getNote(note.id);
-                if (existing == null) {
-                  counts.notes++;
-                } else if (note.updatedAt.isAfter(existing.updatedAt)) {
-                  counts.notesUpdated++;
-                } else {
+                // בייבוא ממזג אין לדרוס הערה מקומית או ממתינה חדשה יותר.
+                final existing =
+                    toWrite[note.id] ?? await database.getNote(note.id);
+                if (existing != null &&
+                    !note.updatedAt.isAfter(existing.updatedAt)) {
                   continue;
                 }
+                if (!toWrite.containsKey(note.id)) {
+                  if (existing == null) {
+                    counts.notes++;
+                  } else {
+                    counts.notesUpdated++;
+                  }
+                }
               }
-              await database.insertNote(note);
+              toWrite[note.id] = note;
             } catch (e) {
               _logger.warning('Failed to restore single note from backup: $e');
             }
@@ -1187,21 +1186,23 @@ class BackupService {
       }
     }
 
+    try {
+      await database.batchInsertNotes(toWrite.values.toList(), replace: true);
+    } catch (e) {
+      _logger.warning('Failed to write restored notes: $e');
+    }
+
     return anchorlessNotes;
   }
 
-  /// משמר את עוגן ההערה הקיימת כששדות העיגון חסרים לגמרי בקובץ הגיבוי.
-  ///
-  /// גיבוי מלפני שהעיגון נכנס אליו אינו מבדיל בין "הערה על כל השורה" לבין
-  /// "הערה על מילה" — בשניהם המפתח נעדר. `insertNote` הוא `INSERT OR REPLACE`,
-  /// ולכן בלי השימור שחזור כזה מוחק עיגון קיים והערה שהצביעה על מילה מסוימת
-  /// נמתחת על כל השורה. מפתח שקיים בערך `null` הוא בחירת משתמש ומכובד.
+  /// משמר עוגן קיים כששדות העיגון חסרים בגיבוי; `null` מפורש מכובד.
   static Future<PersonalNote> _restoreNoteAnchoredAsBefore(
     PersonalNotesDatabase database,
-    PersonalNote note,
-  ) async {
+    PersonalNote note, {
+    PersonalNote? pendingNote,
+  }) async {
     try {
-      final existing = await database.getNote(note.id);
+      final existing = pendingNote ?? await database.getNote(note.id);
       if (existing == null || !existing.isWordAnchored) return note;
       return note.copyWith(
         anchorText: existing.anchorText,
@@ -1215,54 +1216,6 @@ class BackupService {
       return note;
     }
   }
-
-  /// Convert backup JSON to PersonalNote
-  static PersonalNote _noteFromBackupJson(Map<String, dynamic> json) {
-    return PersonalNote(
-      id: json['id'] as String,
-      bookId: json['bookId'] as String,
-      lineNumber: json['lineNumber'] as int?,
-      displayTitle: json['displayTitle'] as String?,
-      anchorText: json['anchorText'] as String?,
-      anchorPrefix: json['anchorPrefix'] as String?,
-      anchorSuffix: json['anchorSuffix'] as String?,
-      anchorStart: json['anchorStart'] as int?,
-      anchorEnd: json['anchorEnd'] as int?,
-      lastKnownLineNumber: json['lastKnownLineNumber'] as int?,
-      status: PersonalNoteStatus.values.byName(json['status'] as String),
-      content: json['content'] as String,
-      contentPlain:
-          (json['contentPlain'] as String?) ?? (json['content'] as String),
-      contentFormat: PersonalNoteContentFormat.values.byName(
-        json['contentFormat'] as String? ??
-            PersonalNoteContentFormat.plain.name,
-      ),
-      createdAt: DateTime.parse(json['createdAt'] as String),
-      updatedAt: DateTime.parse(json['updatedAt'] as String),
-    );
-  }
-
-  // [EDITING DISABLED]
-  /// Restore user overrides to files
-  // static Future<void> _restoreUserOverrides(
-  //     Map<String, dynamic> overridesData) async {
-  //   final overridesDir = Directory(await AppPaths.getUserOverridesRootPath());
-  //   for (final entry in overridesData.entries) {
-  //     try {
-  //       final relativePath = entry.key;
-  //       final content = entry.value as String;
-  //       final filePath = p.join(overridesDir.path, relativePath);
-  //       final file = File(filePath);
-  // Ensure parent directory exists
-  //       await file.parent.create(recursive: true);
-  // Only restore if file doesn't exist, to not overwrite user's latest edits,
-  // or overwrite it if wanted. The standard restore overwrites.
-  //       await file.writeAsString(content);
-  //     } catch (e) {
-  //       _logger.warning('Failed to restore override file ${entry.key}: $e');
-  //     }
-  //   }
-  // }
 
   // כשל בתוסף אחד מדווח כשחזור חלקי בלי למנוע שחזור של שאר התוספים.
   static Future<({bool hadFailures, int restored})> _restorePlugins(
@@ -1645,8 +1598,13 @@ class BackupService {
 
       Map<String, dynamic> backupData;
       try {
-        final content = await latestFile.readAsString();
-        backupData = json.decode(content) as Map<String, dynamic>;
+        // גיבוי של כמה MB חוסם את ה-UI עשרות ms בפתיחת לשונית "מערכת".
+        final path = latestFile.path;
+        backupData = await Isolate.run(
+          () =>
+              json.decode(File(path).readAsStringSync())
+                  as Map<String, dynamic>,
+        );
       } catch (_) {
         return BackupStatus(
           lastBackupDate: backupDate,
@@ -1818,21 +1776,12 @@ class BackupService {
     }
 
     try {
-      final database = PersonalNotesDatabase.instance;
-      final booksWithNotes = await database.listBooksWithNotes();
-
-      int currentNoteCount = 0;
-      int editedAfterBackup = 0;
-
-      for (final bookInfo in booksWithNotes) {
-        try {
-          final notes = await database.loadNotes(bookInfo.bookId);
-          currentNoteCount += notes.length;
-          editedAfterBackup += notes
-              .where((n) => n.updatedAt.isAfter(backupDate))
-              .length;
-        } catch (_) {}
-      }
+      final updateTimes = await PersonalNotesDatabase.instance
+          .listNoteUpdateTimes();
+      final currentNoteCount = updateTimes.length;
+      final editedAfterBackup = updateTimes
+          .where((t) => t.isAfter(backupDate))
+          .length;
 
       // 5+ new notes
       if (currentNoteCount - backupNoteCount >= 5) return true;

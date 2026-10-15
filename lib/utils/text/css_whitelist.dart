@@ -43,9 +43,6 @@ String? cssStyleFrom(
   return kept.isEmpty ? null : kept.join('; ');
 }
 
-/// האם התכונה מוכרת בכלל — לצורכי בדיקות ותיעוד.
-bool isKnownCssProperty(String property) => _validators.containsKey(property);
-
 /// תכונות שאין להן משמעות על תג inline. `text-align` על `<span>` אינו עובד
 /// בקורא, ו-`direction` לבדה על `<span>` אינה עושה דבר בלי `inline-block`.
 const Set<String> _blockOnlyProperties = {'text-align'};

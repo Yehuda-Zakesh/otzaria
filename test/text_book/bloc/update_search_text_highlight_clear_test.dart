@@ -7,8 +7,7 @@ import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
 
@@ -36,8 +35,6 @@ void main() {
     bloc = TextBookBloc(
       repository: _FakeTextBookRepository(),
       initialState: TextBookInitial.named(book, 0, false, const []),
-      scrollController: ItemScrollController(),
-      positionsListener: ItemPositionsListener.create(),
     );
   });
 
@@ -64,8 +61,6 @@ void main() {
     visibleIndices: const [0],
     pinLeftPane: false,
     searchText: searchText,
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
     searchMode: searchMode,
     highlightText: 'ויאמר',
     permanentHighlightLine: 1,

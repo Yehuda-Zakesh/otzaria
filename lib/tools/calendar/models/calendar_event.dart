@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 import 'package:kosher_dart/kosher_dart.dart';
+import 'package:otzaria/tools/calendar/helpers/calendar_date_helpers.dart';
 
 enum RecurrenceType {
   none,
@@ -94,23 +95,37 @@ class CustomEvent extends Equatable {
 
   static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
+  static int _dayNumber(DateTime d) =>
+      DateTime.utc(d.year, d.month, d.day).millisecondsSinceEpoch ~/
+      Duration.millisecondsPerDay;
+
   /// האם האירוע חל בתאריך הנתון — כולל טווח רב-יומי, חזרתיות וסוף חזרה.
   bool occursOn(DateTime date) {
+    // סינון זול בלי DateTime מקומי; יום אחד אחרי הסוף נשאר להשוואה המלאה.
+    if (recurrenceType == RecurrenceType.none) {
+      final day = _dayNumber(date);
+      final startDay = _dayNumber(baseGregorianDate);
+      final endDay = _dayNumber(endGregorianDate ?? baseGregorianDate);
+      if (day < startDay || day > max(startDay, endDay) + 1) return false;
+    }
     final current = _dateOnly(date);
     final start = _dateOnly(baseGregorianDate);
     final durationDays = endGregorianDate == null
         ? 0
-        : _dateOnly(endGregorianDate!).difference(start).inDays.clamp(0, 366);
+        : calendarDaysBetween(
+            start,
+            _dateOnly(endGregorianDate!),
+          ).clamp(0, 366);
 
     if (recurrenceType == RecurrenceType.none) {
       return !current.isBefore(start) &&
-          current.difference(start).inDays <= durationDays;
+          calendarDaysBetween(start, current) <= durationDays;
     }
 
     if (current.isBefore(start)) return false;
     // מחפשים תחילת מופע שהתאריך הנוכחי בתוך טווח הימים שלו.
     for (var back = 0; back <= durationDays; back++) {
-      final day = current.subtract(Duration(days: back));
+      final day = addCalendarDays(current, -back);
       if (day.isBefore(start)) break;
       if (_isOccurrenceStart(day) && _occurrenceInEffect(day)) return true;
     }
@@ -315,12 +330,8 @@ class CustomEvent extends Equatable {
       final base = DateTime.fromMillisecondsSinceEpoch(
         json['baseGregorianDate'] as int,
       );
-      final span = DateTime(
-        endGregorianDate.year,
-        endGregorianDate.month,
-        endGregorianDate.day,
-      ).difference(DateTime(base.year, base.month, base.day)).inDays;
-      if (span >= minRecurrencePeriodDays(type)) {
+      final periodEnd = addCalendarDays(base, minRecurrencePeriodDays(type));
+      if (!_dateOnly(endGregorianDate).isBefore(periodEnd)) {
         recurrenceEndDate = endGregorianDate;
         endGregorianDate = null;
       }

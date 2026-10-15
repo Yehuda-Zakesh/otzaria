@@ -7,8 +7,8 @@ import 'package:crypto/crypto.dart';
 /// מפענח את קובץ הביוגרפיות (`biographies.tsb`) שמופץ דרך GitHub Releases
 /// של `ta-shma-to-otzaria`.
 ///
-/// פורמט TSB1: 4 בייטים ASCII‏ `TSB1`, ואחריהם ‎gzip(JSON-UTF8)‎ שעבר XOR
-/// בייט-בייט מול keystream של 32 בייט — ‎SHA-256 של מפתח העירפול — החוזר
+/// פורמט TSB1: 4 בייטים ASCII `TSB1`, ואחריהם gzip(JSON-UTF8) שעבר XOR
+/// בייט-בייט מול keystream של 32 בייט — SHA-256 של מפתח העירפול — החוזר
 /// מחזורית. זהו עירפול קל בלבד (המפתח מוטמע בקוד), שנועד למנוע פתיחה
 /// אגבית של הקובץ, לא הצפנה.
 class BiographiesCodec {

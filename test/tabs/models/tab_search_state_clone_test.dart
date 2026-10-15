@@ -12,7 +12,6 @@ import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart'
     show SearchScope, WordMatchMode;
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
 
@@ -312,7 +311,5 @@ TextBookLoaded _loadedState({
     searchMode: searchMode,
     searchDistance: searchDistance,
     matchPolicy: matchPolicy,
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }

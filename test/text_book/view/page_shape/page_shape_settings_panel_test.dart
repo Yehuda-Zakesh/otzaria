@@ -1,16 +1,10 @@
-// טסטים לתוכן פאנל הגדרות צורת הדף:
-// 1. גופן הפאנל מיועד למפרשים התחתונים בלבד (התווית "גופן מפרשים תחתונים:"),
-//    והמפרשים הצדדיים נשארים עם גופן המפרשים הגלובלי.
-// 2. עדכון חי: כל שינוי (גופן, גודל, הדגשה) נשמר מיידית ומפעיל את
-//    onSettingsChanged כדי שהמסך יתרענן בלי לסגור את הפאנל.
-// 3. שדות המפרשים נפתחים כתפריט חיפוש מוצמד (לא דיאלוג): בחירה נשמרת מיידית,
-//    "ללא מפרש" ממופה ל-null, וחיפוש מסנן את הרשימה.
-// הפאנל נגלל ע"י ContextOverlayPanel העוטף; כאן עוטפים ב-SingleChildScrollView.
+// הפאנל נגלל ב-ContextOverlayPanel; כאן נדרשת מעטפת גלילה מקבילה.
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
 import 'package:otzaria/text_book/view/page_shape/page_shape_settings_panel.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_commentary_selection.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_settings_manager.dart';
@@ -31,6 +25,7 @@ void main() {
 
   Future<void> pumpPanel(
     WidgetTester tester, {
+    SettingsLanguage language = SettingsLanguage.hebrew,
     VoidCallback? onSettingsChanged,
     String? currentWorkspaceId,
     String? currentLeft,
@@ -41,21 +36,24 @@ void main() {
     List<String> availableCommentators = const ['רש"י על בראשית'],
   }) async {
     await tester.pumpWidget(
-      MaterialApp(
-        home: Directionality(
-          textDirection: TextDirection.rtl,
-          child: Scaffold(
-            body: SingleChildScrollView(
-              child: PageShapeSettingsPanel(
-                availableCommentators: availableCommentators,
-                bookTitle: 'בראשית',
-                heCategories: heCategories,
-                currentWorkspaceId: currentWorkspaceId,
-                currentLeft: currentLeft,
-                currentRight: currentRight,
-                currentBottom: currentBottom,
-                currentBottomRight: currentBottomRight,
-                onSettingsChanged: onSettingsChanged,
+      SettingsTextScope(
+        language: language,
+        child: MaterialApp(
+          home: Directionality(
+            textDirection: TextDirection.rtl,
+            child: Scaffold(
+              body: SingleChildScrollView(
+                child: PageShapeSettingsPanel(
+                  availableCommentators: availableCommentators,
+                  bookTitle: 'בראשית',
+                  heCategories: heCategories,
+                  currentWorkspaceId: currentWorkspaceId,
+                  currentLeft: currentLeft,
+                  currentRight: currentRight,
+                  currentBottom: currentBottom,
+                  currentBottomRight: currentBottomRight,
+                  onSettingsChanged: onSettingsChanged,
+                ),
               ),
             ),
           ),
@@ -166,7 +164,8 @@ void main() {
   testWidgets('תחום שמירת התצוגה מוצג כשלוש בחירות', (tester) async {
     await pumpPanel(tester, currentWorkspaceId: 'workspace-1');
 
-    expect(find.text('ספר זה'), findsOneWidget);
+    // "ספר זה" מופיע גם בבורר שמירת המפרשים.
+    expect(find.text('ספר זה'), findsNWidgets(2));
     expect(find.text('שולחן עבודה זה'), findsOneWidget);
     expect(find.text('גלובלי'), findsOneWidget);
   });
@@ -177,13 +176,48 @@ void main() {
     await pumpPanel(tester, currentWorkspaceId: 'workspace-1');
 
     expect(find.text('שמירת בחירת מפרשים'), findsOneWidget);
-    expect(find.text('שולחן עבודה'), findsOneWidget);
+    expect(find.text('ספר זה בשולחן'), findsOneWidget);
+  });
+
+  testWidgets(
+    'תוויות שמירת המפרשים מציינות שהבחירה לספר הנוכחי (issue #1731)',
+    (tester) async {
+      await pumpPanel(tester, currentWorkspaceId: 'workspace-1');
+
+      // "שולחן עבודה" לבדו נקרא כמו "שולחן עבודה זה" שבבורר התצוגה (כל ספרי
+      // השולחן), בעוד שכאן הבחירה היא לספר הנוכחי בשולחן זה בלבד.
+      expect(find.text('שולחן עבודה'), findsNothing);
+      expect(find.text('ספר'), findsNothing);
+    },
+  );
+
+  testWidgets('תוויות שמירת המפרשים באנגלית שומרות על היקף הספר', (
+    tester,
+  ) async {
+    await pumpPanel(
+      tester,
+      language: SettingsLanguage.english,
+      currentWorkspaceId: 'workspace-1',
+    );
+
+    expect(find.text('This Sefer'), findsOneWidget);
+    expect(find.text('Workspace Sefer'), findsOneWidget);
+    await tester.tap(find.text('Workspace Sefer'));
+    await tester.pumpAndSettle();
+    expect(
+      PageShapeSettingsManager.loadConfiguration(
+        'בראשית',
+        workspaceId: 'workspace-1',
+      ),
+      isNotNull,
+    );
+    expect(PageShapeSettingsManager.loadConfiguration('בראשית'), isNull);
   });
 
   testWidgets('בלי שולחן פעיל, בורר שמירת המפרשים אינו מוצג', (tester) async {
     await pumpPanel(tester);
 
-    expect(find.text('שולחן עבודה'), findsNothing);
+    expect(find.text('ספר זה בשולחן'), findsNothing);
   });
 
   testWidgets('שמירה בתחום שולחן עבודה אינה דורסת את הגדרת הספר', (
@@ -199,7 +233,7 @@ void main() {
       availableCommentators: const ['רש"י על בראשית', 'רמב"ן על בראשית'],
     );
 
-    await tester.tap(find.text('שולחן עבודה'));
+    await tester.tap(find.text('ספר זה בשולחן'));
     await tester.pumpAndSettle();
 
     expect(

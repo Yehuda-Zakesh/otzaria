@@ -61,6 +61,8 @@ void main() {
             filePath: indexedFilePath,
             mergedCount: 1,
             merged: const [],
+            textStatus: TextStatus.ok,
+            continuesToNextLine: false,
           ),
         ],
       ),

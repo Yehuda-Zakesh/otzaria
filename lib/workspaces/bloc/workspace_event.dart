@@ -59,11 +59,15 @@ class SwitchToWorkspace extends WorkspaceEvent {
   /// צד החלונית הפעילה לשמירה — ראו [Workspace.activePane].
   final String? currentActivePaneToSave;
 
+  /// נקרא בסיום: האם נפתחו כרטיסיות, או null אם המעבר לא הצליח.
+  final void Function(bool? hasTabs)? onCompleted;
+
   const SwitchToWorkspace({
     required this.targetWorkspaceId,
     required this.currentTabsToSave,
     required this.currentTabIndexToSave,
     this.currentActivePaneToSave,
+    this.onCompleted,
   });
 
   @override
@@ -72,6 +76,7 @@ class SwitchToWorkspace extends WorkspaceEvent {
     currentTabsToSave,
     currentTabIndexToSave,
     currentActivePaneToSave,
+    onCompleted,
   ];
 }
 
@@ -84,26 +89,6 @@ class RenameWorkspace extends WorkspaceEvent {
 
   @override
   List<Object?> get props => [workspaceId, newName];
-}
-
-/// Event to clear all workspaces and create a default one.
-///
-/// Carries the current tabs data to preserve them in the new default workspace.
-class ClearWorkspaces extends WorkspaceEvent {
-  final List<OpenedTab> currentTabs;
-  final int currentTabIndex;
-
-  /// צד החלונית הפעילה — ראו [Workspace.activePane].
-  final String? activePane;
-
-  const ClearWorkspaces({
-    required this.currentTabs,
-    required this.currentTabIndex,
-    this.activePane,
-  });
-
-  @override
-  List<Object?> get props => [currentTabs, currentTabIndex, activePane];
 }
 
 /// Event to update the current workspace with new tab data.
@@ -151,5 +136,33 @@ class MoveTabToWorkspace extends WorkspaceEvent {
     currentTabs,
     currentTabIndex,
     currentActivePane,
+  ];
+}
+
+/// מקבע או משחרר שולחן עבודה — ראו [Workspace.isPinned].
+///
+/// בקיבוע השולחן הפעיל, [tabsToSave] הם הכרטיסיות החיות שיהפכו לתמונה הקבועה.
+class SetWorkspacePinned extends WorkspaceEvent {
+  final String workspaceId;
+  final bool isPinned;
+  final List<OpenedTab>? tabsToSave;
+  final int tabIndexToSave;
+  final String? activePaneToSave;
+
+  const SetWorkspacePinned({
+    required this.workspaceId,
+    required this.isPinned,
+    this.tabsToSave,
+    this.tabIndexToSave = 0,
+    this.activePaneToSave,
+  });
+
+  @override
+  List<Object?> get props => [
+    workspaceId,
+    isPinned,
+    tabsToSave,
+    tabIndexToSave,
+    activePaneToSave,
   ];
 }

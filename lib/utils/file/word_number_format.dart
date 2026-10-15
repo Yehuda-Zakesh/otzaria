@@ -36,7 +36,7 @@ String formatWordNumber(int n, String numFmt) {
   }
 }
 
-/// סדרת הסימנים של Word בפורמט `chicago`: ‎*, †, ‡, § ואחר כך כפולים.
+/// סדרת הסימנים של Word בפורמט `chicago`: *, †, ‡, § ואחר כך כפולים.
 String _chicagoSymbol(int n) {
   if (n < 1) return '';
   const symbols = ['*', '†', '‡', '§'];

@@ -16,7 +16,7 @@ class PluginDeepLinkPolicy {
 
   /// האם הניווט נובע מלחיצת המשתמש על קישור.
   ///
-  /// ב-Windows/macOS/iOS ‏`LINK_ACTIVATED` נגזר מ-`IsUserInitiated` של המנוע;
+  /// ב-Windows/macOS/iOS `LINK_ACTIVATED` נגזר מ-`IsUserInitiated` של המנוע;
   /// ב-Android השדה אינו מאוכלס ולכן נופלים ל-[NavigationAction.hasGesture].
   static bool isUserActivated(NavigationAction navigationAction) =>
       navigationAction.navigationType == NavigationType.LINK_ACTIVATED ||

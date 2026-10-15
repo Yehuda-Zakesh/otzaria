@@ -10,6 +10,7 @@ import 'package:otzaria/navigation/bloc/navigation_event.dart';
 import 'package:otzaria/navigation/navigation_repository.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
+import 'package:otzaria/tabs/models/pdf_tab.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/tabs/tabs_repository.dart';
@@ -47,12 +48,14 @@ class _CapturingTabsBloc extends TabsBloc {
 }
 
 class _FakeHistoryRepository extends HistoryRepository {
+  _FakeHistoryRepository([this.entries = const []]);
+  final List<Bookmark> entries;
   @override
-  Future<List<Bookmark>> load() async => [];
+  Future<List<Bookmark>> load() async => entries;
   @override
   Future<List<Bookmark>> mutate(
     List<Bookmark> Function(List<Bookmark> current) apply,
-  ) async => apply(const []);
+  ) async => apply(entries);
 }
 
 class _FakeNavigationBloc extends NavigationBloc {
@@ -72,6 +75,20 @@ BookOpenCoordinator _makeCoordinator(_CapturingTabsBloc tabsBloc) =>
       historyBloc: HistoryBloc(_FakeHistoryRepository()),
       navigationBloc: _FakeNavigationBloc(),
     );
+
+Future<BookOpenCoordinator> _coordinatorWithLastRead(
+  _CapturingTabsBloc tabsBloc,
+  Bookmark lastRead,
+) async {
+  final historyBloc = HistoryBloc(_FakeHistoryRepository([lastRead]));
+  addTearDown(historyBloc.close);
+  await historyBloc.stream.firstWhere((s) => s.history.isNotEmpty);
+  return BookOpenCoordinator(
+    tabsBloc: tabsBloc,
+    historyBloc: historyBloc,
+    navigationBloc: _FakeNavigationBloc(),
+  );
+}
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
@@ -124,6 +141,27 @@ void main() {
       final event = tabsBloc.capturedEvents.first as OpenOrFocusTab;
       expect(event.navigateToPositionIfReused, isTrue);
       expect((event.tab as TextBookTab).index, 42);
+    });
+
+    test('URI עם ?index=0 נפתח בשורה 0 ולא במיקום מההיסטוריה', () async {
+      final book = TextBook(title: 'ספר בדיקה', id: 7);
+      final tabsBloc = _CapturingTabsBloc();
+      final coordinator = await _coordinatorWithLastRead(
+        tabsBloc,
+        Bookmark(ref: 'ספר בדיקה', book: book, index: 120),
+      );
+      final action =
+          ExternalUriRouter.parseUri(Uri.parse('otzaria://open/book/7?index=0'))
+              as OpenBookAction;
+
+      dispatchOpenBookAction(
+        action: action,
+        book: book,
+        coordinator: coordinator,
+      );
+
+      final event = tabsBloc.capturedEvents.first as OpenOrFocusTab;
+      expect((event.tab as TextBookTab).index, 0);
     });
 
     test('URI עם ?mark → navigateToPositionIfReused=true', () {
@@ -225,6 +263,27 @@ void main() {
 
       final event = tabsBloc.capturedEvents.first as OpenOrFocusTab;
       expect(event.navigateToPositionIfReused, isTrue);
+    });
+
+    test('URI עם ?index=1 נפתח בעמוד 1 ולא בעמוד מההיסטוריה', () async {
+      final book = PdfBook(title: 'ספר PDF', path: '/x/a.pdf', id: 9);
+      final tabsBloc = _CapturingTabsBloc();
+      final coordinator = await _coordinatorWithLastRead(
+        tabsBloc,
+        Bookmark(ref: 'ספר PDF', book: book, index: 77),
+      );
+      final action =
+          ExternalUriRouter.parseUri(Uri.parse('otzaria://open/pdf/9?index=1'))
+              as OpenPdfBookAction;
+
+      dispatchOpenPdfBookAction(
+        action: action,
+        book: book,
+        coordinator: coordinator,
+      );
+
+      final event = tabsBloc.capturedEvents.first as OpenOrFocusTab;
+      expect((event.tab as PdfBookTab).pageNumber, 1);
     });
   });
 }

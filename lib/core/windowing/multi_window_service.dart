@@ -193,31 +193,23 @@ class MultiWindowService {
   ///
   /// מחזיר null כשלא ניתן היה לברר — אז אין לסנן, כי סינון על סמך מידע
   /// חסר היה מסתיר חלונות פתוחים מהתפריט.
-  Future<Set<int>?> visibleSlots() async {
-    if (!canOpenWindows) return null;
-    try {
-      final slots = await channel.invokeListMethod<int>('visibleSlots');
-      return slots?.toSet();
-    } catch (e) {
-      debugPrint('visibleSlots failed: $e');
-      return null;
-    }
-  }
+  Future<Set<int>?> visibleSlots() =>
+      _guarded(canOpenWindows, 'visibleSlots', null, () async {
+        final slots = await channel.invokeListMethod<int>('visibleSlots');
+        return slots?.toSet();
+      });
 
   /// המשבצת של החלון הגלוי שהופעל אחרון, או null כשאין כזה.
   ///
   /// ⚠️ הנייטיב הוא מקור האמת: `LastActiveWindow` הוא static פר-isolate,
   /// ולכן כל חלון רואה בו את עצמו בלבד. נדרש כדי שקישור `otzaria://` לא
   /// יצוף בחלון שרירותי — או גרוע מכך, בחלון שהמשתמש סגר.
-  Future<int?> lastActiveSlot() async {
-    if (!canOpenWindows) return null;
-    try {
-      return await channel.invokeMethod<int>('lastActiveSlot');
-    } catch (e) {
-      debugPrint('lastActiveSlot failed: $e');
-      return null;
-    }
-  }
+  Future<int?> lastActiveSlot() => _guarded(
+    canOpenWindows,
+    'lastActiveSlot',
+    null,
+    () => channel.invokeMethod<int>('lastActiveSlot'),
+  );
 
   /// מספר החלונות הפתוחים, התקרה, ומספר המנועים החיים.
   ///
@@ -261,14 +253,7 @@ class MultiWindowService {
   ///
   /// ⚠️ חלון משני נוצר מוסתר כדי שלא ייראה מצטייר, ו-`show()` על חלון
   /// מוסתר אינו מפעיל אותו — הוא נחשף **מאחורי** החלון שפתח אותו.
-  Future<void> raiseSelf() async {
-    if (!canOpenWindows) return;
-    try {
-      await channel.invokeMethod<void>('raiseSelf');
-    } catch (e) {
-      debugPrint('raiseSelf failed: $e');
-    }
-  }
+  Future<void> raiseSelf() => _send(canOpenWindows, 'raiseSelf');
 
   /// מתחיל להציג את הכרטיסיה הנגררת **מחוץ** לחלון.
   ///
@@ -284,17 +269,15 @@ class MultiWindowService {
   Future<void> beginTabDrag(
     String title, {
     required DragPreviewColors colors,
-  }) async {
-    if (!canDragTabsOut) return;
-    try {
-      await channel.invokeMethod<void>('beginTabDrag', {
-        'title': title,
-        ...colors.toArgb(),
-      });
-    } catch (e) {
-      debugPrint('beginTabDrag failed: $e');
-    }
-  }
+  }) => _guarded(
+    canDragTabsOut,
+    'beginTabDrag',
+    null,
+    () => channel.invokeMethod<void>('beginTabDrag', {
+      'title': title,
+      ...colors.toArgb(),
+    }),
+  );
 
   /// שולח צילום RGBA מוקטן לתצוגת הגרירה; GDI מותח אותו לגודל חלון היעד.
   /// הפיקסלים מוכפלים מראש כנדרש ב־AlphaBlend.
@@ -304,22 +287,16 @@ class MultiWindowService {
     int height, {
     int? targetWidth,
     int? targetHeight,
-  }) async {
-    if (!canDragTabsOut) return false;
-    try {
-      await channel.invokeMethod<void>('setTabDragImage', {
-        'bytes': rgba,
-        'width': width,
-        'height': height,
-        'targetWidth': ?targetWidth,
-        'targetHeight': ?targetHeight,
-      });
-      return true;
-    } catch (e) {
-      debugPrint('setTabDragImage failed: $e');
-      return false;
-    }
-  }
+  }) => _guarded(canDragTabsOut, 'setTabDragImage', false, () async {
+    await channel.invokeMethod<void>('setTabDragImage', {
+      'bytes': rgba,
+      'width': width,
+      'height': height,
+      'targetWidth': ?targetWidth,
+      'targetHeight': ?targetHeight,
+    });
+    return true;
+  });
 
   /// מוסר ל-Windows את המשך הגרירה, וממתין עד שהמשתמש שחרר.
   ///
@@ -336,31 +313,26 @@ class MultiWindowService {
   ///
   /// ⚠️ הקריאה חוסמת לכל משך הגרירה, וזה במתכוון: התשובה היא המסגרת
   /// הסופית — כולל הצמדה, אם המשתמש הצמיד.
-  Future<SystemDragOutcome?> dragOutToSystem() async {
-    if (!canDragTabsOut) return null;
-    try {
-      final info = await channel.invokeMapMethod<String, dynamic>(
-        'dragOutToSystem',
-      );
-      if (info == null) return null;
-      return (
-        ran: info['ran'] == true,
-        snapped: info['snapped'] == true,
-        left: (info['left'] as int?) ?? 0,
-        top: (info['top'] as int?) ?? 0,
-        width: (info['width'] as int?) ?? 0,
-        height: (info['height'] as int?) ?? 0,
-        x: (info['x'] as int?) ?? 0,
-        y: (info['y'] as int?) ?? 0,
-        slot: info['slot'] as int?,
-        isSelf: info['isSelf'] == true,
-        isShellTray: info['isShellTray'] == true,
-      );
-    } catch (e) {
-      debugPrint('dragOutToSystem failed: $e');
-      return null;
-    }
-  }
+  Future<SystemDragOutcome?> dragOutToSystem() =>
+      _guarded(canDragTabsOut, 'dragOutToSystem', null, () async {
+        final info = await channel.invokeMapMethod<String, dynamic>(
+          'dragOutToSystem',
+        );
+        if (info == null) return null;
+        return (
+          ran: info['ran'] == true,
+          snapped: info['snapped'] == true,
+          left: (info['left'] as int?) ?? 0,
+          top: (info['top'] as int?) ?? 0,
+          width: (info['width'] as int?) ?? 0,
+          height: (info['height'] as int?) ?? 0,
+          x: (info['x'] as int?) ?? 0,
+          y: (info['y'] as int?) ?? 0,
+          slot: info['slot'] as int?,
+          isSelf: info['isSelf'] == true,
+          isShellTray: info['isShellTray'] == true,
+        );
+      });
 
   /// עוצר את המעקב ומשאיר את התצוגה **גלויה במקום השחרור**.
   ///
@@ -371,75 +343,47 @@ class MultiWindowService {
   ///
   /// ה-runner מסתיר את התצוגה כשהחלון האמיתי נחשף, וגם ברשת ביטחון של
   /// ארבע שניות.
-  Future<void> freezeTabDrag() async {
-    if (!canDragTabsOut) return;
-    try {
-      await channel.invokeMethod<void>('freezeTabDrag');
-    } catch (e) {
-      debugPrint('freezeTabDrag failed: $e');
-    }
-  }
+  Future<void> freezeTabDrag() => _send(canDragTabsOut, 'freezeTabDrag');
 
   /// מסתיר את תצוגת הגרירה מיד. לכל מסלול סיום שאינו פותח חלון.
-  Future<void> endTabDrag() async {
-    if (!canDragTabsOut) return;
-    try {
-      await channel.invokeMethod<void>('endTabDrag');
-    } catch (e) {
-      debugPrint('endTabDrag failed: $e');
-    }
-  }
+  Future<void> endTabDrag() => _send(canDragTabsOut, 'endTabDrag');
 
   /// משחזר את החלון האחרון שנסגר. מחזיר true אם היה כזה.
   ///
   /// ⚠️ אפשרי **רק** מפני שחלון סגור מוסתר ולא נהרס: המנוע שלו חי עם
   /// הכרטיסיות שהיו בו, ולכן השחזור הוא הצגה בלבד ולא טעינה מחדש.
-  Future<bool> restoreLastClosedWindow() async {
-    if (!canOpenWindows) return false;
-    try {
-      return await channel.invokeMethod<bool>('restoreLastClosedWindow') ??
-          false;
-    } catch (e) {
-      debugPrint('restoreLastClosedWindow failed: $e');
-      return false;
-    }
-  }
+  Future<bool> restoreLastClosedWindow() => _guarded(
+    canOpenWindows,
+    'restoreLastClosedWindow',
+    false,
+    () async =>
+        await channel.invokeMethod<bool>('restoreLastClosedWindow') ?? false,
+  );
 
   /// ממיר נקודת מסך לקואורדינטות אזור-הלקוח של החלון הזה, בפיקסלים
   /// לוגיים.
   ///
   /// ⚠️ ההמרה ב-runner ולא כאן: המיקום מגיע מחלון אחר, ו-Flutter אינו
   /// יודע היכן החלון שלו יושב על המסך.
-  Future<Offset?> screenToClient(int x, int y, double devicePixelRatio) async {
-    if (!canDragTabsOut) return null;
-    try {
-      final p = await channel.invokeMapMethod<String, dynamic>(
-        'screenToClient',
-        {'x': x, 'y': y},
-      );
-      if (p == null) return null;
-      return Offset(
-        ((p['x'] as int?) ?? 0) / devicePixelRatio,
-        ((p['y'] as int?) ?? 0) / devicePixelRatio,
-      );
-    } catch (e) {
-      debugPrint('screenToClient failed: $e');
-      return null;
-    }
-  }
+  Future<Offset?> screenToClient(int x, int y, double devicePixelRatio) =>
+      _guarded(canDragTabsOut, 'screenToClient', null, () async {
+        final p = await channel.invokeMapMethod<String, dynamic>(
+          'screenToClient',
+          {'x': x, 'y': y},
+        );
+        if (p == null) return null;
+        return Offset(
+          ((p['x'] as int?) ?? 0) / devicePixelRatio,
+          ((p['y'] as int?) ?? 0) / devicePixelRatio,
+        );
+      });
 
   /// מודיע ל-runner באיזו משבצת באפיק החלון הזה יושב.
   ///
   /// ⚠️ בלי זה אי אפשר לגרור כרטיסיה בין חלונות: Win32 יודע איזה **חלון**
   /// נמצא תחת הסמן, ו-Dart מזהה חלונות לפי משבצת. זה המתרגם.
-  Future<void> setBusSlot(int slot) async {
-    if (!canOpenWindows) return;
-    try {
-      await channel.invokeMethod<void>('setBusSlot', slot);
-    } catch (e) {
-      debugPrint('setBusSlot failed: $e');
-    }
-  }
+  Future<void> setBusSlot(int slot) =>
+      _send(canOpenWindows, 'setBusSlot', slot);
 
   /// מה נמצא תחת סמן העכבר ברגע זה.
   ///
@@ -467,42 +411,55 @@ class MultiWindowService {
       int y,
     })?
   >
-  windowAtCursor() async {
-    if (!canOpenWindows) return null;
-    try {
-      final info = await channel.invokeMapMethod<String, dynamic>(
-        'windowAtCursor',
-      );
-      if (info == null) return null;
-      return (
-        slot: info['slot'] as int?,
-        isSelf: info['isSelf'] == true,
-        isShellTray: info['isShellTray'] == true,
-        approachingTop: info['approachingTop'] == true,
-        // ערך חסר דורש נסיעה שמרנית יותר.
-        minUpwardTravel: (info['minUpwardTravel'] as int?) ?? 24,
-        x: (info['x'] as int?) ?? 0,
-        y: (info['y'] as int?) ?? 0,
-      );
-    } catch (e) {
-      debugPrint('windowAtCursor failed: $e');
-      return null;
-    }
-  }
+  windowAtCursor() =>
+      _guarded(canOpenWindows, 'windowAtCursor', null, () async {
+        final info = await channel.invokeMapMethod<String, dynamic>(
+          'windowAtCursor',
+        );
+        if (info == null) return null;
+        return (
+          slot: info['slot'] as int?,
+          isSelf: info['isSelf'] == true,
+          isShellTray: info['isShellTray'] == true,
+          approachingTop: info['approachingTop'] == true,
+          // ערך חסר דורש נסיעה שמרנית יותר.
+          minUpwardTravel: (info['minUpwardTravel'] as int?) ?? 24,
+          x: (info['x'] as int?) ?? 0,
+          y: (info['y'] as int?) ?? 0,
+        );
+      });
 
   /// סוגר את החלון הנוכחי בלי לסיים את התהליך.
   ///
   /// ⚠️ ולא `AppWindowController.quitApplication`: ב-Windows הוא
   /// `PostQuitMessage(0)` בלבד — לולאת ההודעות של **התהליך** יוצאת, כל
   /// החלונות נסגרים, והמנוע נהרס בעוד Dart רץ עליו. ראו התיעוד שם.
-  Future<void> closeSelf() async {
-    if (!canOpenWindows) return;
+  Future<void> closeSelf() => _send(canOpenWindows, 'closeSelf');
+
+  /// מריץ [call] רק כש-[enabled]; כשל בערוץ מודפס ומחזיר את [fallback].
+  Future<T> _guarded<T>(
+    bool enabled,
+    String method,
+    T fallback,
+    Future<T> Function() call,
+  ) async {
+    if (!enabled) return fallback;
     try {
-      await channel.invokeMethod<void>('closeSelf');
+      return await call();
     } catch (e) {
-      debugPrint('closeSelf failed: $e');
+      debugPrint('$method failed: $e');
+      return fallback;
     }
   }
+
+  /// קריאת void לערוץ דרך [_guarded].
+  Future<void> _send(bool enabled, String method, [Object? arguments]) =>
+      _guarded(
+        enabled,
+        method,
+        null,
+        () => channel.invokeMethod<void>(method, arguments),
+      );
 
   /// שם ה-box של ההעדפות. חייב להתאים ל-[HiveCache.keyName].
   static const String _preferencesBoxName = 'app_preferences';
@@ -595,19 +552,26 @@ class MultiWindowService {
 
   /// מבקש מכל שאר החלונות להיבנות מחדש — אחרי שחזור גיבוי או ייבוא, כדי
   /// שיטענו את הנתונים החדשים במקום לכתוב מעליהם את מה שבזיכרונם.
-  static void restartPeers() {
+  static void restartPeers({bool? pluginSafeMode}) {
     if (!canOpenWindows) return;
-    WindowBus.instance.broadcast({'type': requestRestart});
+    WindowBus.instance.broadcast({
+      'type': requestRestart,
+      'pluginSafeMode': ?pluginSafeMode,
+    });
   }
 
   /// בקשה לחלון להיסגר במסלול הסגירה הרגיל שלו.
   static const String requestCloseWindow = 'closeWindow';
+
+  /// סגירה לעדכון בחלון הזה; מנוקה בתום הניסיון, גם בביטול.
+  static bool closingAll = false;
 
   /// מבקש משאר החלונות להיסגר — למשל כשמעדכן חיצוני ממתין להחלפת קבצים.
   ///
   /// ⚠️ שידור בלי תשובה, במכוון: החלון היעד עובר במסלול הסגירה הרגיל ורשאי
   /// לסרב (שינויים שלא נשמרו), וסירוב אינו כשל שהקורא יכול או צריך לטפל בו.
   static void closePeers() {
+    closingAll = true;
     if (!canOpenWindows) return;
     WindowBus.instance.broadcast({'type': requestCloseWindow});
   }

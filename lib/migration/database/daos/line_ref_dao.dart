@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
-import '../query_loader.dart';
 import 'database.dart';
 
 /// גישה ל-`line_ref` — אינדקס ההפניות הקנוני `(bookId, refKeyHash) → lineIndex`.
@@ -17,11 +16,8 @@ typedef LineRefCandidate = ({
 
 class LineRefDao {
   final MyDatabase _db;
-  late final Map<String, String> _queries;
 
-  LineRefDao(this._db) {
-    _queries = QueryLoader.loadQueries('LineRefQueries.sq');
-  }
+  LineRefDao(this._db);
 
   Future<sqlite3.Database> get database => _db.database;
 
@@ -69,14 +65,4 @@ class LineRefDao {
       'ON l.bookId = lr.bookId AND l.lineIndex = lr.lineIndex '
       'WHERE lr.refKeyHash = ? AND lr.bookId IN (${bookIds.join(',')}) '
       'ORDER BY lr.bookId, lr.lineIndex';
-
-  Future<void> insert(int bookId, int refKeyHash, int lineIndex) async {
-    final db = await database;
-    db.execute(_queries['insert']!, [bookId, refKeyHash, lineIndex]);
-  }
-
-  Future<void> deleteByBookId(int bookId) async {
-    final db = await database;
-    db.execute(_queries['deleteByBookId']!, [bookId]);
-  }
 }

@@ -4,7 +4,7 @@
 //
 // הפעלה:  dart run tool/generate_document_fixtures.dart <תיקיית-יעד>
 //
-// למה בדארט ולא בסקריפט חיצוני: הפורמטים הבינאריים (CFB של ‎.doc‎, FIB,
+// למה בדארט ולא בסקריפט חיצוני: הפורמטים הבינאריים (CFB של .doc, FIB,
 // piece table) חייבים להיבנות *נכון* — קובץ שרק נראה כמו OLE אך אינו מכיל
 // מבנה אמיתי אינו בודק דבר, והממיר דוחה אותו בצדק. הבנייה כאן משתמשת
 // באותם מבנים שמתועדים ב-`docs/legacy_word_doc_research.md`.
@@ -90,7 +90,7 @@ Map<String, Uint8List> buildFixtureCorpus() => {
   'encrypted.doc': buildWordBinary(_basicDocPieces(), encrypted: true),
   'fake.docx': _utf8Bytes('זה קובץ טקסט רגיל עם סיומת docx'),
   'fake.odt': _utf8Bytes('זה קובץ טקסט רגיל עם סיומת odt'),
-  // ‎.xml‎ שאינו Word — הסורק אמור לדלג עליו לפי תוכנו ולא לאסוף אותו כספר.
+  // .xml שאינו Word — הסורק אמור לדלג עליו לפי תוכנו ולא לאסוף אותו כספר.
   'not_word.xml': _utf8Bytes(
     '<?xml version="1.0"?><config><item>ערך</item></config>',
   ),
@@ -101,14 +101,14 @@ Map<String, Uint8List> buildFixtureCorpus() => {
     '<body></body></html>',
   ),
   'invalid.wbk': _utf8Bytes('%PDF-1.7 גיבוי שאינו Word כלל'),
-  // חבילת ZIP שהוסוותה בסיומת ‎.html‎ — אין לקרוא אותה כטקסט.
+  // חבילת ZIP שהוסוותה בסיומת .html — אין לקרוא אותה כטקסט.
   'fake.html': _buildDocx(_basicWordBody()),
 };
 
 Uint8List _utf8Bytes(String text) => Uint8List.fromList(utf8.encode(text));
 Uint8List _latin1Bytes(String text) => Uint8List.fromList(latin1.encode(text));
 
-/// קידוד Windows-1255 — ‏ISO-8859-8 חופף לו בטווח האותיות העבריות, וזה כל
+/// קידוד Windows-1255 — ISO-8859-8 חופף לו בטווח האותיות העבריות, וזה כל
 /// מה שהדגימה מכילה מעבר ל-ASCII.
 Uint8List _cp1255Bytes(String text) => Uint8List.fromList(
   text.runes
@@ -290,7 +290,7 @@ Uint8List _buildDocx(String body, {bool rich = false}) {
   );
 }
 
-/// עוטף גוף מסמך כחבילת Flat OPC — חבילת OOXML שנשטחה לקובץ ‎.xml‎ אחד.
+/// עוטף גוף מסמך כחבילת Flat OPC — חבילת OOXML שנשטחה לקובץ .xml אחד.
 Uint8List _buildFlatOpc(String body) {
   final document = '<w:document $_wordNs><w:body>$body</w:body></w:document>';
   return _utf8Bytes(
@@ -305,7 +305,7 @@ Uint8List _buildFlatOpc(String body) {
   );
 }
 
-/// מסמך WordprocessingML 2003 — הדיאלקט השני של ‎.xml‎, עם שורש
+/// מסמך WordprocessingML 2003 — הדיאלקט השני של .xml, עם שורש
 /// `w:wordDocument` וגוף עטוף ב-`wx:sect`.
 Uint8List _buildWordMl2003() => _utf8Bytes(
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'

@@ -15,9 +15,9 @@ import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/alt_toc_sidebar_view.dart';
 import 'package:otzaria/user_content_import/repository/user_content_repository.dart';
 import 'package:otzaria/user_content_import/services/user_headings_builder.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 
 class _TestTextBookBloc extends Bloc<TextBookEvent, TextBookState>
     implements TextBookBloc {
@@ -113,8 +113,6 @@ void main() {
         selectedIndex: null,
         pinLeftPane: false,
         searchText: '',
-        scrollController: ItemScrollController(),
-        positionsListener: ItemPositionsListener.create(),
       ),
     );
     addTearDown(bloc.close);
@@ -130,7 +128,7 @@ void main() {
               child: AltTocSidebarView(
                 book: book,
                 closeLeftPaneCallback: () {},
-                scrollController: ItemScrollController(),
+                lines: LineScrollController(),
               ),
             ),
           ),

@@ -294,8 +294,9 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
         hasUpdate: true,
         changedBookIds: deltaResult.changedBookIds,
         requiresFullIndexRefresh: deltaResult.requiresFullIndexRefresh,
+        appliedReleaseTags: releaseTagsOf(plan.deltaSteps),
       );
-      await _runCompanionAssets(emit, opId);
+      await _runCompanionAssets(emit, opId, libraryTag: libraryTagOf(plan));
       final completed = _pendingCompleted;
       _pendingCompleted = null;
       if (_isStale(opId) || completed == null) return;
@@ -319,6 +320,9 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
           : e;
       final requiresFullIndexRefresh =
           drift != null || (partial?.requiresFullIndexRefresh ?? false);
+      final appliedTags = releaseTagsOf(
+        plan.deltaSteps.take(partial?.appliedSteps ?? 0),
+      );
       // כל כשל apply (וגם סטייה שהתגלתה אחרי commit) מנותב להורדה מלאה — אחרת
       // כשל שאינו אי-התאמת תוכן משאיר את המשתמש בלולאת שגיאה עד עדכון אפליקציה.
       final mismatchReason = drift != null
@@ -342,6 +346,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
               hasUpdate: partial?.hasDatabaseChanges ?? false,
               changedBookIds: partial?.changedBookIds ?? const {},
               requiresFullIndexRefresh: requiresFullIndexRefresh,
+              appliedReleaseTags: appliedTags,
             ),
           );
           return;
@@ -358,6 +363,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
           hasUpdate: partial?.hasDatabaseChanges ?? false,
           changedBookIds: partial?.changedBookIds ?? const {},
           requiresFullIndexRefresh: requiresFullIndexRefresh,
+          appliedReleaseTags: appliedTags,
           errorMessage: _errorDetail(applyError),
         ),
       );
@@ -412,8 +418,9 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
         status: LibraryUpdateStatus.completed,
         message: 'הספרייה הותקנה מחדש לגרסה ${plan.targetVersion}',
         hasUpdate: true,
+        appliedReleaseTags: _withFullDbTag(plan),
       );
-      await _runCompanionAssets(emit, opId);
+      await _runCompanionAssets(emit, opId, libraryTag: libraryTagOf(plan));
       final completed = _pendingCompleted;
       _pendingCompleted = null;
       if (_isStale(opId) || completed == null) return;
@@ -438,6 +445,9 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
           requiresFullIndexRefresh:
               dbReplaced || state.requiresFullIndexRefresh,
           plan: dbReplaced ? plan : null,
+          appliedReleaseTags: dbReplaced
+              ? _withFullDbTag(plan)
+              : state.appliedReleaseTags,
           errorMessage: _errorDetail(e),
         ),
       );
@@ -468,17 +478,48 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
     await _runDelta(plan, emit, opId);
   }
 
+  /// תג ה-release של גרסת היעד: מכתובת המניפסט של צעד הדלתא האחרון, או תג
+  /// ה-DB המלא; `null` כשאינו ידוע.
+  @visibleForTesting
+  static String? libraryTagOf(LibraryUpdatePlan plan) {
+    if (plan.deltaSteps.isNotEmpty) {
+      final tag = _releaseTagOfStep(plan.deltaSteps.last);
+      if (tag != null) return tag;
+    }
+    return plan.fullDbReleaseTag;
+  }
+
+  static final _releaseDownloadPath = RegExp(r'/releases/download/([^/]+)/');
+
+  static String? _releaseTagOfStep(PatchEdge step) {
+    final match = _releaseDownloadPath.firstMatch(step.manifestUrl);
+    return match == null ? null : Uri.decodeComponent(match.group(1)!);
+  }
+
+  /// תגי ה-releases של צעדי הדלתא [steps], לפי סדרם.
+  @visibleForTesting
+  static List<String> releaseTagsOf(Iterable<PatchEdge> steps) => [
+    for (final step in steps) ?_releaseTagOfStep(step),
+  ];
+
+  List<String> _withFullDbTag(LibraryUpdatePlan plan) => [
+    ...state.appliedReleaseTags,
+    ?plan.fullDbReleaseTag,
+  ];
+
   /// מוודא שהקבצים הנלווים (תלמוד, קטלוגים, מילון) קיימים ומעודכנים, בסוף
   /// כל בדיקת/החלת עדכון. best-effort — כשל לא הופך את העדכון לשגיאה.
   /// מחזיר האם תוכן הספרייה השתנה (ראה [CompanionAssetsService.verifyAndUpdate]).
   Future<bool> _runCompanionAssets(
     Emitter<LibraryUpdateState> emit,
-    int opId,
-  ) async {
+    int opId, {
+    String? libraryTag,
+  }) async {
     final service = companionAssets;
     if (service == null) return false;
     try {
       return await service.verifyAndUpdate(
+        libraryReleaseTag: libraryTag,
         isCancelled: () => _isStale(opId),
         onStatus: (message, phase) {
           if (_isStale(opId)) return;
@@ -529,6 +570,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
         hasUpdate: state.hasUpdate,
         changedBookIds: state.changedBookIds,
         requiresFullIndexRefresh: state.requiresFullIndexRefresh,
+        appliedReleaseTags: state.appliedReleaseTags,
       ),
     );
   }
@@ -556,6 +598,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
           hasUpdate: true,
           changedBookIds: state.changedBookIds,
           requiresFullIndexRefresh: state.requiresFullIndexRefresh,
+          appliedReleaseTags: state.appliedReleaseTags,
         ),
       );
       return;

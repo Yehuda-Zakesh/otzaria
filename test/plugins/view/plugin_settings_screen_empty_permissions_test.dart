@@ -13,6 +13,7 @@ import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/plugins/services/plugin_installer_service.dart';
 import 'package:otzaria/plugins/storage/plugin_system_database.dart';
 import 'package:otzaria/plugins/view/plugin_settings_screen.dart';
+import 'package:otzaria/plugins/models/plugin_valid_permissions.dart';
 
 import '../../helpers/memory_settings_cache.dart';
 
@@ -106,6 +107,41 @@ void main() {
 
       expect(find.text('ניהול הרשאות'), findsOneWidget);
       expect(find.text('אין הרשאות מיוחדות נדרשות'), findsNothing);
+    });
+
+    testWidgets('תוסף ניווט שלא ביקש את הכפתור אינו מקבל UI חדש', (
+      tester,
+    ) async {
+      await _pumpDialog(tester, _plugin(const ['navigation.write']));
+      expect(find.text('כפתור לשונית חדשה (+)'), findsNothing);
+    });
+
+    testWidgets('intent חסום מציג את הבעלים השמור גם לפני רישום runtime', (
+      tester,
+    ) async {
+      final repo = PluginRegistryRepository();
+      final requester = _plugin(const ['navigation.write']);
+      final owner = requester.copyWith(pluginId: 'owner', name: 'בעל הכפתור');
+      await repo.savePluginWithPermissions(owner, const {
+        'navigation.write': true,
+      });
+      await repo.savePluginWithPermissions(requester, const {
+        'navigation.write': true,
+      });
+      await repo.grantNewTabPage(
+        owner.pluginId,
+        allowPreviouslyDenied: true,
+        expectedOwner: null,
+        onGranted: () {},
+      );
+      await repo.setPermission(
+        requester.pluginId,
+        pluginNewTabPagePermission,
+        false,
+      );
+      await _pumpDialog(tester, requester);
+      expect(find.text('כפתור לשונית חדשה (+)'), findsOneWidget);
+      expect(find.textContaining('בעל הכפתור כעת: בעל הכפתור'), findsOneWidget);
     });
   });
 }

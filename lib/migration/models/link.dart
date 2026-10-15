@@ -26,9 +26,6 @@ enum ConnectionType {
         return ConnectionType.other;
     }
   }
-
-  /// Converts the enum to its JSON string representation.
-  String toJson() => name;
 }
 
 /// Link between two texts (commentary, reference, etc.)
@@ -59,51 +56,6 @@ class Link {
     required this.targetLineId,
     required this.connectionType,
   });
-
-  /// Creates a [Link] instance from a JSON map.
-  factory Link.fromJson(Map<String, dynamic> json) {
-    return Link(
-      id: json['id'] as int? ?? 0,
-      sourceBookId: json['sourceBookId'] as int,
-      targetBookId: json['targetBookId'] as int,
-      sourceLineId: json['sourceLineId'] as int,
-      targetLineId: json['targetLineId'] as int,
-      connectionType: ConnectionType.fromString(
-        json['connectionType'] as String,
-      ),
-    );
-  }
-
-  /// Converts the [Link] instance to a JSON map.
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'sourceBookId': sourceBookId,
-      'targetBookId': targetBookId,
-      'sourceLineId': sourceLineId,
-      'targetLineId': targetLineId,
-      'connectionType': connectionType.toJson(),
-    };
-  }
-
-  /// Creates a copy of this Link but with the given fields replaced with the new values.
-  Link copyWith({
-    int? id,
-    int? sourceBookId,
-    int? targetBookId,
-    int? sourceLineId,
-    int? targetLineId,
-    ConnectionType? connectionType,
-  }) {
-    return Link(
-      id: id ?? this.id,
-      sourceBookId: sourceBookId ?? this.sourceBookId,
-      targetBookId: targetBookId ?? this.targetBookId,
-      sourceLineId: sourceLineId ?? this.sourceLineId,
-      targetLineId: targetLineId ?? this.targetLineId,
-      connectionType: connectionType ?? this.connectionType,
-    );
-  }
 
   @override
   String toString() {

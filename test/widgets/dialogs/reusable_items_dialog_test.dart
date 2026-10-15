@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:otzaria/widgets/widgets_exports.dart' show ActionButton;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/widgets/dialogs/reusable_items_dialog.dart';
 
@@ -45,6 +47,65 @@ void main() {
     );
     await tester.pump();
   }
+
+  testWidgets('חסימת סגירה משאירה Tab, Enter ו-Space לביטול פעולה', (
+    tester,
+  ) async {
+    var cancelled = 0;
+    final dismissible = ValueNotifier(false);
+    addTearDown(dismissible.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (_) => ValueListenableBuilder<bool>(
+                valueListenable: dismissible,
+                builder: (_, canDismiss, _) => AppCustomContentDialog(
+                  title: 'התקנה',
+                  canDismiss: canDismiss,
+                  actions: [
+                    ActionButton.ghost(
+                      text: 'ביטול פריסה',
+                      onPressed: () => cancelled++,
+                    ),
+                  ],
+                  child: const Text('תוכן'),
+                ),
+              ),
+            ),
+            child: const Text('פתח'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('פתח'));
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.text('התקנה'), findsOneWidget);
+    expect(
+      tester.widget<IconButton>(find.byType(IconButton)).onPressed,
+      isNull,
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(cancelled, 1);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(cancelled, 2);
+    expect(find.text('התקנה'), findsOneWidget);
+
+    dismissible.value = true;
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.text('התקנה'), findsNothing);
+  });
 
   group('AppCustomContentDialog — רוחב רספונסיבי', () {
     testWidgets('מסך רחב: הדיאלוג מבקש רוחב של 50% מהמסך', (tester) async {

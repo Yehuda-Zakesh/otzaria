@@ -48,12 +48,6 @@ class FakeTikkunEngine implements TikkunEngine {
   ];
 
   @override
-  List<TikkunToken> markSpecialSections(
-    List<TikkunToken> tokens,
-    String bookName,
-  ) => tokens;
-
-  @override
   List<TikkunLine> paginateAllTokens(
     List<TikkunToken> tokens,
     StamWidthModel widths,
@@ -156,29 +150,6 @@ class FakeTikkunEngine implements TikkunEngine {
   @override
   bool precededBySetuma(List<TikkunToken> tokens, int fromCh, int fromVs) =>
       false;
-
-  @override
-  int findWordSequence(
-    List<TikkunToken> tokens,
-    List<String> words,
-    int fromIdx,
-  ) {
-    if (words.isEmpty) return -1;
-    for (var i = fromIdx; i < tokens.length; i++) {
-      if (tokens[i].value == words.first) return i;
-    }
-    return -1;
-  }
-
-  @override
-  int findParashaStart(
-    List<TikkunToken> tokens,
-    String normalizedParashaName,
-    int fromIdx,
-  ) => fromIdx;
-
-  @override
-  String maskDivineName(String text) => text;
 
   @override
   List<VerseRange> computeContinuousSegments(List<ReadingAliya> aliyot) =>
@@ -334,9 +305,6 @@ class FakeTikkunDataSource implements TikkunDataSource {
   @override
   String aliyaDisplayName(String aliyaKey) =>
       aliyaKey == 'עליה א' ? 'ראשון' : 'שני';
-
-  @override
-  String? combinedParashaOf(String parashaName) => null;
 
   @override
   ({String bookId, String parashaName})? resolveParasha(String calendarName) =>

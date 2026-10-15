@@ -33,8 +33,10 @@ void main() {
       BooksCache.instance.setBooksForTesting(bookEntries);
       final acronymsByBook = <int, List<String>>{};
       for (final row in acronyms) {
-        (acronymsByBook.putIfAbsent(row['bookId'] as int, () => []))
-            .add(row['term'] as String);
+        (acronymsByBook.putIfAbsent(
+          row['bookId'] as int,
+          () => [],
+        )).add(row['term'] as String);
       }
       AcronymsCache.instance.setAcronymsForTesting(acronymsByBook);
 
@@ -56,8 +58,10 @@ void main() {
         'תפלה',
         'ראש בבא בתרא',
       ];
-      debugPrint('real-db books=${books.length} acronyms=${acronyms.length} '
-          'buildMs=$buildMs');
+      debugPrint(
+        'real-db books=${books.length} acronyms=${acronyms.length} '
+        'buildMs=$buildMs',
+      );
       for (final query in queries) {
         stopwatch
           ..reset()
@@ -73,8 +77,10 @@ void main() {
           warm.add(stopwatch.elapsedMicroseconds);
         }
         warm.sort();
-        debugPrint('real-db query="$query" hits=${cold.length} '
-            'coldUs=$coldUs warmMedianUs=${warm[2]}');
+        debugPrint(
+          'real-db query="$query" hits=${cold.length} '
+          'coldUs=$coldUs warmMedianUs=${warm[2]}',
+        );
       }
     } finally {
       db.close();

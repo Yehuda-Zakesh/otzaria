@@ -25,7 +25,7 @@ import 'package:otzaria/utils/file/word_xml_to_otzaria.dart';
 import 'package:otzaria/utils/text/inline_style.dart';
 
 /// גרסת הממיר, והטביעה של הפלט שהיא מתארת. **לעדכן את שניהם יחד.**
-/// ‎`ooxml`‎ ו-‎`word-xml`‎ חולקים טביעה — Flat OPC מגיע לאותו מנוע ומייצר פלט
+/// `ooxml` ו-`word-xml` חולקים טביעה — Flat OPC מגיע לאותו מנוע ומייצר פלט
 /// זהה בייט-בבייט. אי-שוויון ביניהם הוא סימן שהמנוע הותקף מכיוון אחד בלבד.
 const Map<String, ({int version, String fingerprint})> _pinned = {
   'ooxml': (version: 15, fingerprint: 'd810aa9cf47cbdef'),
@@ -74,7 +74,7 @@ const _ooxmlBody =
     '<w:tc><w:tcPr><w:gridSpan w:val="2"/>'
     '<w:shd w:fill="EEEEEE"/><w:vAlign w:val="center"/></w:tcPr>'
     '<w:p><w:r><w:t>תא</w:t></w:r></w:p></w:tc></w:tr>'
-    // ‏vMerge המשך בלי תא פותח מעליו — תוכנו אינו נמחק.
+    // vMerge המשך בלי תא פותח מעליו — תוכנו אינו נמחק.
     '<w:tr><w:tc><w:tcPr><w:vMerge/></w:tcPr>'
     '<w:p><w:r><w:t>המשך</w:t></w:r></w:p></w:tc></w:tr></w:tbl>';
 
@@ -281,7 +281,7 @@ void main() {
   }
 
   test('גרסת ה-XML נגזרת ממנוע ה-OOXML', () {
-    // קבוע עצמאי היה נשאר מאחור בשקט בכל שינוי במנוע, והמטמון של ‎.xml‎ היה
+    // קבוע עצמאי היה נשאר מאחור בשקט בכל שינוי במנוע, והמטמון של .xml היה
     // מגיש פלט מיושן.
     expect(kWordXmlConverterVersion % 1000, kOoxmlWordConverterVersion);
   });

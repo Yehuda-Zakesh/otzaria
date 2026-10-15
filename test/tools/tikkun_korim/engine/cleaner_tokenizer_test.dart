@@ -2,6 +2,7 @@
 library;
 
 import 'package:otzaria/tools/tikkun_korim/tikkun_korim.dart';
+import 'package:otzaria/tools/tikkun_korim/view/widgets/reader_row.dart';
 import 'package:test/test.dart';
 
 final _kqStart = String.fromCharCode(kKetivQereStart);
@@ -92,9 +93,9 @@ void main() {
     });
   });
 
-  test('maskDivineName שומר ניקוד וטעמים', () {
-    final masked = maskDivineName('יְהֹוָ֖ה');
+  test('maskTikkunDivineName שומר ניקוד וטעמים', () {
+    final masked = maskTikkunDivineName('יְהֹוָ֖ה');
     expect(masked, 'יְקֹוָ֖ק');
-    expect(maskDivineName('שלום'), 'שלום');
+    expect(maskTikkunDivineName('שלום'), 'שלום');
   });
 }

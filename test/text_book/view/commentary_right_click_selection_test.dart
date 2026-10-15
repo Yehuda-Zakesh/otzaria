@@ -23,7 +23,6 @@ import 'package:otzaria/utils/ui/context_menu_utils.dart';
 import 'package:otzaria/text_display/models/text_display_profile.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 import 'package:otzaria/widgets/misc/progressive_scrolling.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../../test_helpers/memory_cache_provider.dart';
 
 // שני היבטים של באג לחיצה ימנית במפרשים בצד ובכרטיסיית המפרשים:
@@ -33,6 +32,11 @@ import '../../test_helpers/memory_cache_provider.dart';
 //     ה-onPointerDown לדלג בלחיצה ימנית (kSecondaryButton).
 // (2) העתקה — פעולת "העתק" קראה את הטקסט הנבחר בזמן הלחיצה (כבר null אחרי
 //     שהבחירה שוחררה) במקום בזמן בניית התפריט. התיקון לוכד snapshot בבנייה.
+AppContextMenuIconAction iconAction(
+  List<AppContextMenuEntry> entries,
+  String label,
+) => entries.first.iconRowActions!.firstWhere((a) => a.label == label);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -187,7 +191,7 @@ void main() {
           ),
         );
 
-        final copyEntry = entries.firstWhere((e) => e.label == 'העתק');
+        final copyEntry = iconAction(entries, 'העתקה');
         expect(
           copyEntry.enabled,
           isTrue,
@@ -246,7 +250,7 @@ void main() {
           ),
         );
 
-        final copyEntry = entries.firstWhere((e) => e.label == 'העתק');
+        final copyEntry = iconAction(entries, 'העתקה');
         expect(
           copyEntry.enabled,
           isFalse,
@@ -255,7 +259,9 @@ void main() {
       }
     });
 
-    testWidgets('כולל הוספת הערה אישית והעתקת קישור ישיר', (tester) async {
+    testWidgets('שורת אייקונים: חיפוש, העתקה, הערה וקישור ישיר', (
+      tester,
+    ) async {
       late List<AppContextMenuEntry> entries;
       await tester.pumpWidget(
         MaterialApp(
@@ -276,16 +282,12 @@ void main() {
         ),
       );
 
-      expect(entries.map((entry) => entry.label), contains('הוסף הערה אישית'));
-      final noteIndex = entries.indexWhere(
-        (entry) => entry.label == 'הוסף הערה אישית',
+      expect(
+        entries.first.iconRowActions!.map((action) => action.label),
+        ['חיפוש', 'העתקה', 'הערה', 'קישור'],
       );
-      expect(entries[noteIndex + 1].label, 'דווח על טעות בספר');
-      expect(entries[noteIndex + 2].isDivider, isTrue);
-      final directLinkEntry = entries.firstWhere(
-        (entry) => entry.label == 'העתק קישור ישיר',
-      );
-      final children = directLinkEntry.childrenBuilder!();
+      expect(entries.last.label, 'דווח על טעות בספר');
+      final children = iconAction(entries, 'קישור').submenuBuilder!();
       expect(
         children.map((entry) => entry.label),
         containsAll(<String>[
@@ -336,16 +338,13 @@ void main() {
         ),
       );
 
-      final directLinkEntry = entries.firstWhere(
-        (entry) => entry.label == 'העתק קישור ישיר',
-      );
-      directLinkEntry.childrenBuilder!().first.onTap!();
+      iconAction(entries, 'קישור').submenuBuilder!().first.onTap!();
       await tester.pump();
 
       expect(copied, 'otzaria://open/book/907?index=0');
     });
 
-    testWidgets('בלי targetBookId אין פריט "העתק קישור ישיר"', (tester) async {
+    testWidgets('בלי targetBookId אין אייקון "קישור"', (tester) async {
       late List<AppContextMenuEntry> entries;
       await tester.pumpWidget(
         MaterialApp(
@@ -375,8 +374,8 @@ void main() {
       );
 
       expect(
-        entries.map((entry) => entry.label),
-        isNot(contains('העתק קישור ישיר')),
+        entries.first.iconRowActions!.map((action) => action.label),
+        isNot(contains('קישור')),
       );
     });
   });
@@ -637,8 +636,6 @@ TextBookLoaded _loadedState() {
     selectedIndex: 0,
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }
 

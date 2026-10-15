@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/semantic_search/models/semantic_paths.dart'
+    show kSemanticModelFolderName;
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:path/path.dart' as path;
 import 'package:seforim_library_updater/seforim_library_updater.dart'
@@ -32,6 +34,14 @@ class DatabaseConstants {
 
   /// The morphology dictionary used by fuzzy search.
   static const String lexicalDatabaseFileName = 'lexical.db';
+
+  /// שמות נכס המילון ב-release לפי סדר העדפה. `lexical.db` קפוא לגרסאות ישנות
+  /// שאינן מחליפות קובץ פתוח; תוכן חדש מתפרסם רק בשם הראשון. מקומית תמיד
+  /// [lexicalDatabaseFileName].
+  static const List<String> lexicalReleaseAssetFileNames = [
+    'lexical-v2.db',
+    lexicalDatabaseFileName,
+  ];
 
   /// The name of the external catalogs database file
   static const String externalCatalogDatabaseFileName = 'otzar-HB_catalog.db';
@@ -73,9 +83,6 @@ class DatabaseConstants {
   /// The name of the external catalogs version file in GitHub releases
   static const String externalCatalogVersionFileName = 'version.txt';
 
-  /// The default name of the Otzaria folder
-  static const String otzariaFolderName = 'Otzaria';
-
   /// שמות הקבצים והתיקיות שהתוכנה מנהלת בתוך תיקיית הספרייה. בהעברת מיקום
   /// הספרייה מעבירים רק אותם — קבצים שהמשתמש הוסיף לתיקייה נשארים במקומם.
   /// כולל קובצי לוואי של SQLite (-wal/-shm) שעשויים להישאר ליד ה-DB.
@@ -85,12 +92,17 @@ class DatabaseConstants {
     '$databaseFileName-wal',
     '$databaseFileName-shm',
     lexicalDatabaseFileName,
+    // בלי הסימון והעותק הממתין המילון היה מורד שוב אחרי העברה.
+    '$lexicalDatabaseFileName.version',
+    '$lexicalDatabaseFileName.next',
+    '$lexicalDatabaseFileName.next.version',
     externalCatalogDatabaseFileName,
     '$externalCatalogDatabaseFileName-wal',
     '$externalCatalogDatabaseFileName-shm',
     externalCatalogVersionFileName,
     talmudBavliFolderName,
     'files_manifest.json',
+    kSemanticModelFolderName,
   };
 
   /// Gets the full database path based on the library path setting.
@@ -131,14 +143,6 @@ class DatabaseConstants {
     return path.join(
       getDatabaseDirectoryPath(),
       externalCatalogDatabaseFileName,
-    );
-  }
-
-  /// Gets the full path for the compressed external catalogs archive.
-  static String getExternalCatalogArchivePath() {
-    return path.join(
-      getDatabaseDirectoryPath(),
-      externalCatalogArchiveFileName,
     );
   }
 

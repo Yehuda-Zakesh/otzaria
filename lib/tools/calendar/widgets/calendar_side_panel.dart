@@ -8,7 +8,6 @@ enum CalendarSidePanelView { times, events }
 class CalendarSidePanel extends StatelessWidget {
   final CalendarState state;
   final CalendarSidePanelView activeView;
-  final ValueChanged<CalendarSidePanelView> onViewChanged;
   final CalendarTimesPanel timesPanel;
   final CalendarEventsPanel eventsPanel;
 
@@ -16,7 +15,6 @@ class CalendarSidePanel extends StatelessWidget {
     super.key,
     required this.state,
     required this.activeView,
-    required this.onViewChanged,
     required this.timesPanel,
     required this.eventsPanel,
   });

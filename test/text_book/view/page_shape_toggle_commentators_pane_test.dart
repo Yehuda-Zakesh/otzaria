@@ -24,7 +24,6 @@ import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/page_shape/page_shape_screen.dart';
 import 'package:otzaria/text_book/view/tabbed_commentary_panel.dart';
 import 'package:otzaria/widgets/navigation/panel_tab_header.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
 
@@ -48,7 +47,7 @@ void main() {
   setUp(() async {
     await Settings.init(cacheProvider: MemoryCacheProvider());
     // קונפיגורציה ריקה לספר → `_loadConfiguration` חוזרת בלי לקרוא ל-
-    // `DefaultCommentators.getDefaults` (שניגש ל-DB ולא יעבוד בטסט).
+    // `PageShapeDefaultCommentators.getPageShapeDefaults` (שניגש ל-DB ולא יעבוד בטסט).
     await Settings.setValue<String>(
       'page_shape_book_$bookTitle',
       'left|null||right|null||bottom|null||bottomRight|null',
@@ -190,8 +189,6 @@ TextBookLoaded _loadedState(TextBook book) {
     selectedIndex: 0,
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
     searchMode: SearchMode.exact,
   );
 }

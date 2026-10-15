@@ -89,7 +89,7 @@ UnderlineKind underlineKindFromName(String? value) {
 /// 17 צבעי הפלטה של Word, לפי סדר האינדקס (`ico`).
 ///
 /// אותה טבלה בדיוק משרתת שלושה מקומות: `sprmCIco`/`sprmCHighlight` ב-Word
-/// הבינארי, ‎`\highlightN`‎ ב-RTF, ושמות ה-`w:highlight` ב-OOXML — שם הצבע
+/// הבינארי, `\highlightN` ב-RTF, ושמות ה-`w:highlight` ב-OOXML — שם הצבע
 /// באינדקס N הוא בדיוק המילה ש-OOXML כותב.
 const List<String> kWordColorPalette = [
   'auto',

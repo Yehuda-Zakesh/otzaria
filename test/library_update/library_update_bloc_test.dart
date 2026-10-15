@@ -32,10 +32,6 @@ class _FakeService implements LibraryUpdateService {
   });
 
   @override
-  Future<RecoveryResult> recoverIfNeeded() async =>
-      const RecoveryResult(RecoveryAction.none);
-
-  @override
   Future<LibraryUpdatePlan> checkForUpdate({
     required bool allowPrerelease,
   }) async {
@@ -225,10 +221,6 @@ class _GatedAtApplyService implements LibraryUpdateService {
   });
 
   @override
-  Future<RecoveryResult> recoverIfNeeded() async =>
-      const RecoveryResult(RecoveryAction.none);
-
-  @override
   Future<LibraryUpdatePlan> checkForUpdate({
     required bool allowPrerelease,
   }) async => plan;
@@ -270,10 +262,6 @@ class _GatedAtApplyService implements LibraryUpdateService {
 class _VerifyThenCommitService implements LibraryUpdateService {
   final LibraryUpdatePlan plan;
   _VerifyThenCommitService(this.plan);
-
-  @override
-  Future<RecoveryResult> recoverIfNeeded() async =>
-      const RecoveryResult(RecoveryAction.none);
 
   @override
   Future<LibraryUpdatePlan> checkForUpdate({
@@ -351,10 +339,6 @@ class _GatedService implements LibraryUpdateService {
   _GatedService(this.plan, this.gate);
 
   @override
-  Future<RecoveryResult> recoverIfNeeded() async =>
-      const RecoveryResult(RecoveryAction.none);
-
-  @override
   Future<LibraryUpdatePlan> checkForUpdate({
     required bool allowPrerelease,
   }) async => plan;
@@ -390,6 +374,7 @@ class _FakeCompanionService extends CompanionAssetsService {
     CompanionAssetStatusCallback? onStatus,
     void Function(int received, int? total)? onDownloadProgress,
     bool Function()? isCancelled,
+    String? libraryReleaseTag,
   }) async {
     calls++;
     if (throwOnRun) throw Exception('companion failed');
@@ -411,6 +396,7 @@ class _GatedCompanionService extends CompanionAssetsService {
     CompanionAssetStatusCallback? onStatus,
     void Function(int received, int? total)? onDownloadProgress,
     bool Function()? isCancelled,
+    String? libraryReleaseTag,
   }) async {
     onStatus?.call(
       'מוריד את התלמוד הבבלי',
@@ -434,6 +420,7 @@ class _RaceCompanionService extends CompanionAssetsService {
     CompanionAssetStatusCallback? onStatus,
     void Function(int received, int? total)? onDownloadProgress,
     bool Function()? isCancelled,
+    String? libraryReleaseTag,
   }) async {
     calls++;
     if (calls == 1) {
@@ -501,6 +488,26 @@ void main() {
       size: 1200000000,
     ),
     fullDbReleaseTag: 'v3',
+  );
+  PatchEdge edge(int from, int to) => PatchEdge(
+    manifest: DeltaManifest(
+      fromVersion: from,
+      toVersion: to,
+      fromSchemaVersion: 5,
+      toSchemaVersion: 5,
+      fromContentHash: 'a',
+      toContentHash: 'b',
+      patchFiles: const [],
+    ),
+    patchFileUrls: const {},
+    manifestUrl:
+        'https://github.com/Otzaria/SeforimLibrary/releases/download/'
+        'v$to-t/patch-v$from-v$to.db.zst.manifest.json',
+  );
+  final twoStepPlan = LibraryUpdatePlan.delta(
+    localVersion: 1,
+    targetVersion: 3,
+    steps: [edge(1, 2), edge(2, 3)],
   );
   final heavyDeltaWithFullPlan = LibraryUpdatePlan.delta(
     localVersion: 23,
@@ -606,6 +613,88 @@ void main() {
         isA<LibraryUpdateState>()
             .having((s) => s.status, 'status', LibraryUpdateStatus.completed)
             .having((s) => s.hasUpdate, 'hasUpdate', true),
+      ],
+    );
+
+    blocTest<LibraryUpdateBloc, LibraryUpdateState>(
+      'דלתא שהושלמה מדווחת את תגי ה-releases שהוחלו ("מה חדש בספרים")',
+      build: () => _bloc(_FakeService(twoStepPlan)),
+      act: (b) => b.add(const StartLibraryUpdate()),
+      skip: 1,
+      expect: () => [
+        isA<LibraryUpdateState>()
+            .having((s) => s.status, 'status', LibraryUpdateStatus.completed)
+            .having((s) => s.appliedReleaseTags, 'tags', ['v2-t', 'v3-t']),
+      ],
+    );
+
+    blocTest<LibraryUpdateBloc, LibraryUpdateState>(
+      'דלתא חלקית שנכשלה מדווחת רק את תגי הצעדים שהוחלו',
+      build: () => _bloc(
+        _FakeService(
+          twoStepPlan,
+          applyError: PartiallyAppliedLibraryDeltaException(
+            cause: Exception('step 2 failed'),
+            appliedResult: const LibraryDeltaApplyResult(appliedSteps: 1),
+          ),
+        ),
+      ),
+      act: (b) => b.add(const StartLibraryUpdate()),
+      skip: 1,
+      expect: () => [
+        isA<LibraryUpdateState>()
+            .having((s) => s.status, 'status', LibraryUpdateStatus.error)
+            .having((s) => s.hasUpdate, 'hasUpdate', true)
+            .having((s) => s.appliedReleaseTags, 'tags', ['v2-t']),
+      ],
+    );
+
+    blocTest<LibraryUpdateBloc, LibraryUpdateState>(
+      'סירוב להורדה מלאה אחרי דלתא חלקית שומר את התגים שהוחלו',
+      build: () => _bloc(_FakeService(fullPlan)),
+      seed: () => LibraryUpdateState(
+        status: LibraryUpdateStatus.needsFullConfirmation,
+        plan: fullPlan,
+        hasUpdate: true,
+        appliedReleaseTags: const ['v2-t'],
+      ),
+      act: (b) => b.add(const DeclineFullDownload()),
+      expect: () => [
+        isA<LibraryUpdateState>()
+            .having((s) => s.status, 'status', LibraryUpdateStatus.completed)
+            .having((s) => s.appliedReleaseTags, 'tags', ['v2-t']),
+      ],
+    );
+
+    blocTest<LibraryUpdateBloc, LibraryUpdateState>(
+      'הורדה מלאה שהושלמה מוסיפה את תג ה-DB המלא לתגים שכבר הוחלו',
+      build: () => _bloc(_FakeService(fullPlan)),
+      seed: () => LibraryUpdateState(
+        status: LibraryUpdateStatus.needsFullConfirmation,
+        plan: fullPlan,
+        hasUpdate: true,
+        appliedReleaseTags: const ['v2-t'],
+      ),
+      act: (b) => b.add(const ConfirmFullDownload()),
+      skip: 1,
+      expect: () => [
+        isA<LibraryUpdateState>()
+            .having((s) => s.status, 'status', LibraryUpdateStatus.completed)
+            .having((s) => s.appliedReleaseTags, 'tags', ['v2-t', 'v3']),
+      ],
+    );
+
+    blocTest<LibraryUpdateBloc, LibraryUpdateState>(
+      'אין עדכון — אין תגים',
+      build: () => _bloc(_FakeService(nonePlan)),
+      act: (b) => b.add(const StartLibraryUpdate()),
+      skip: 1,
+      expect: () => [
+        isA<LibraryUpdateState>().having(
+          (s) => s.appliedReleaseTags,
+          'tags',
+          isEmpty,
+        ),
       ],
     );
 

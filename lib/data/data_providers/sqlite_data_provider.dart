@@ -15,6 +15,7 @@ import 'package:otzaria/migration/database/journal_mode.dart';
 import 'package:otzaria/migration/models/model_adapters.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/find_ref/repository/find_ref_db_isolate.dart';
+import 'package:otzaria/search/library_line_source.dart';
 import 'package:otzaria/migration/models/toc_entry.dart' as db_models;
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' show SqliteException;
@@ -131,6 +132,7 @@ class SqliteDataProvider {
       await _repository.ensureInitialized();
       _isInitialized = true;
       DbReadWorker.allowReopen();
+      unawaited(LibraryLineSource.configure(_dbPath));
     } on SqliteException catch (e) {
       // SQLITE_CANTOPEN (code 14) on Android: clear a stale keyDbEffectivePath
       // so the library path is re-resolved on the next check.
@@ -170,6 +172,8 @@ class SqliteDataProvider {
     }
     // ה-worker פותח לפי הנתיב של החיבור הזה, ולכן לא יחזיק את הקובץ אחריו.
     await DbReadWorker.closeConnectionIfRunning(wait: waitForWorker);
+    // ביציאה אין טעם, ובכתיבה חיצונית closeForExternalWrite מחזיק אותו סגור.
+    if (waitForWorker) await LibraryLineSource.closeNow();
   }
 
   /// מספר ה-write-sessions הפעילים. כשהוא > 0 חיבור ה-RO סגור ו-[initialize]
@@ -219,6 +223,7 @@ class SqliteDataProvider {
     _externalWriteGate ??= Completer<void>();
     _activeWriteSessions++;
     try {
+      await LibraryLineSource.holdForExternalWrite();
       try {
         await _initializationFuture;
       } finally {
@@ -265,6 +270,7 @@ class SqliteDataProvider {
       // וקטלוג עד סוף ה-session.
       await FindRefDbIsolate.resumeAfterExternalWrite();
       await DbReadWorker.resumeAfterExternalWrite();
+      await LibraryLineSource.releaseExternalWriteHold();
       // משחררים את הקוראים הממתינים. ה-finally מבטיח שחרור גם אם הפתיחה-מחדש
       // נכשלה (אחרת היו נתקעים לנצח).
       final gate = _externalWriteGate;
@@ -384,12 +390,13 @@ class SqliteDataProvider {
     }
   }
 
-  /// Retrieves the full text content of a book from the database
+  /// טקסט הספר מהמסד; [emptyWhenNoLines] מבדיל ספר קיים שהתרוקן מכשל קריאה.
   Future<String?> getBookTextFromDb(
     String title, [
     int? categoryId,
     String? fileType,
     BookSource preferSource = BookSource.official,
+    bool emptyWhenNoLines = false,
   ]) async {
     if (!_isInitialized) {
       await initialize();
@@ -404,10 +411,17 @@ class SqliteDataProvider {
         preferSource: preferSource,
       );
       if (resolvedBook == null) return null;
-      return await BookTextReader.text(
+      final text = await BookTextReader.text(
         resolvedBook.repository,
         resolvedBook.book,
       );
+      // מסד חסר אינו ספר שהתרוקן, גם כשקיים ספר בשם זהה במקור אחר.
+      if (emptyWhenNoLines &&
+          resolvedBook.source != preferSource &&
+          (text == null || text.isEmpty)) {
+        return null;
+      }
+      return text ?? (emptyWhenNoLines ? '' : null);
     } catch (e, st) {
       debugPrint(
         '[SqliteDataProvider] getBookTextFromDb failed for '
@@ -420,7 +434,9 @@ class SqliteDataProvider {
   /// כמו [getBookTextFromDb], אבל כבייטים גולמיים (UTF-8 כפי שמאוחסן),
   /// מאוחים ב-`\n` — מסלול האינדוקס מעביר אותם למנוע כמות-שהם
   /// (addTextBookBytes) בלי פענוח ל-String וקידוד חוזר על גשר ה-FFI.
-  Future<Uint8List?> getBookTextBytesFromDb(
+  /// [officialBookId] — ה-id ב-seforim.db כשהשורות נקראו משם, אחרת null.
+  /// גם null כששורה מכילה `\n`: מספרי השורות במנוע לא יתאימו לרשומות.
+  Future<({Uint8List bytes, int? officialBookId})?> getBookTextBytesFromDb(
     String title, [
     int? categoryId,
     String? fileType,
@@ -440,12 +456,17 @@ class SqliteDataProvider {
       );
       if (resolvedBook == null) return null;
 
-      final bytes = await BookTextReader.bytes(
+      final read = await BookTextReader.bytes(
         resolvedBook.repository,
         resolvedBook.book,
       );
-      if (bytes == null || bytes.isEmpty) return null;
-      return bytes;
+      if (read == null || read.bytes.isEmpty) return null;
+      return (
+        bytes: read.bytes,
+        officialBookId: resolvedBook.source.isOfficial && !read.rowHasNewline
+            ? resolvedBook.book.id
+            : null,
+      );
     } catch (e, st) {
       debugPrint(
         '[SqliteDataProvider] getBookTextBytesFromDb failed for '
@@ -477,7 +498,7 @@ class SqliteDataProvider {
       if (resolvedBook == null) return null;
       final book = resolvedBook.book;
 
-      // ‏TOC של seforim.db יכול למנות אלפי שורות ולחסום את פתיחת הספר, ולכן
+      // TOC של seforim.db יכול למנות אלפי שורות ולחסום את פתיחת הספר, ולכן
       // נקרא ב-isolate, שמכיר רק אותו. שאר המסדים נקראים בחיבור המקומי.
       final List<db_models.TocEntry> migrationTocEntries;
       if (!resolvedBook.source.isOfficial) {
@@ -486,8 +507,7 @@ class SqliteDataProvider {
         );
       } else {
         final isolate = await FindRefDbIsolate.instance();
-        final tocRows = await isolate.getBookTocRows(book.id);
-        migrationTocEntries = tocRows.map(db_models.TocEntry.fromMap).toList();
+        migrationTocEntries = await isolate.getBookTocEntries(book.id);
       }
 
       // Convert migration TOC entries to otzaria TOC entries
@@ -561,82 +581,6 @@ class SqliteDataProvider {
   Future<bool> databaseExists() async {
     final dbFile = File(_dbPath);
     return await dbFile.exists();
-  }
-
-  /// Exports the database to a specified path
-  Future<void> exportDatabase(String destinationPath) async {
-    if (!_isInitialized) {
-      await initialize();
-    }
-
-    final dbFile = File(_dbPath);
-    if (!await dbFile.exists()) {
-      throw Exception('Database file does not exist');
-    }
-
-    await dbFile.copy(destinationPath);
-  }
-
-  /// Imports a database from a specified path
-  Future<void> importDatabase(String sourcePath) async {
-    final sourceFile = File(sourcePath);
-    if (!await sourceFile.exists()) {
-      throw Exception('Source database file does not exist');
-    }
-
-    // Close existing connection if open
-    if (_isInitialized) {
-      _repository.database.close();
-      _isInitialized = false;
-    }
-
-    // Copy the file
-    await sourceFile.copy(_dbPath);
-
-    // Reinitialize
-    await initialize();
-  }
-
-  /// Performs a health check on the database
-  Future<Map<String, dynamic>> performHealthCheck() async {
-    final results = <String, dynamic>{
-      'healthy': true,
-      'issues': <String>[],
-      'warnings': <String>[],
-    };
-
-    try {
-      if (!_isInitialized) {
-        await initialize();
-      }
-
-      if (!_isInitialized) {
-        results['healthy'] = false;
-        (results['issues'] as List).add('Database not initialized');
-        return results;
-      }
-
-      // Check if database file exists
-      if (!await databaseExists()) {
-        results['healthy'] = false;
-        (results['issues'] as List).add('Database file does not exist');
-        return results;
-      }
-
-      // Check if we can query the database
-      try {
-        await _repository.countAllBooks();
-      } catch (e) {
-        results['healthy'] = false;
-        (results['issues'] as List).add('Cannot query database: $e');
-        return results;
-      }
-    } catch (e) {
-      results['healthy'] = false;
-      (results['issues'] as List).add('Health check failed: $e');
-    }
-
-    return results;
   }
 
   /// השורות [start]..[end] כטקסט אחד; seforim.db מפוענח ב-[DbReadWorker].

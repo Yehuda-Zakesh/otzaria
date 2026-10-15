@@ -93,11 +93,20 @@ class AppSurfaces {
       ? const Color(0xFFF8FAFC)
       : cs.primary.withValues(alpha: 0.08);
 
+  /// רקע זמני לשורת ספר שהודגשה (מעבר מקישור/חיפוש/תוכן עניינים).
+  static Color highlightedLineBackground(ColorScheme cs) =>
+      cs.secondaryContainer.withValues(alpha: 0.4);
+
   /// רקע הדגשה לשורה שמעליה מרחפים בגרירה (drag target).
   ///
   /// 8% primary — רמז עדין למקום השחרור מבלי להסתיר את תוכן השורה.
   static Color dragTargetHighlight(ColorScheme cs) =>
       cs.primary.withValues(alpha: 0.08);
+
+  /// רקע הקטע שהחיפוש החכם סימן לפי עניין: גוון הדגשת המילים בתוצאות,
+  /// שקוף מספיק כדי שלא יתחרה בהתאמה מילולית.
+  static Color semanticPassageHighlight(ColorScheme cs) =>
+      cs.error.withValues(alpha: 0.12);
 
   /// מילוי חיווי ההפלה של חלונית קריאה — המלבן שמסמן היכן תיפול החלונית.
   ///
@@ -153,9 +162,4 @@ class AppSurfaces {
   /// הדגשת קישור בתוך עמוד PDF בריחוף — 20% primary, קריא מעל עמוד סרוק.
   static Color pdfLinkHover(ColorScheme cs) =>
       cs.primary.withValues(alpha: 0.2);
-
-  /// overlayColor ל-TabBar שמצייר hover מותאם אישית (foregroundPainter)
-  /// ולכן רוצה לבטל את ה-hover/focus הגלובלי של [TabBarTheme].
-  static final WidgetStateProperty<Color?> tabBarNoOverlay =
-      WidgetStateProperty.all(Colors.transparent);
 }

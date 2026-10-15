@@ -279,7 +279,7 @@ Future<void> _collectBookFilesRecursive(
       } else if (entity is File) {
         final format = documentFormatFromExtension(name);
         if (format == null || !format.isProductionSupported) continue;
-        // ‎.xml‎ ו-‎.wbk‎ נאספים רק אם תוכנם אכן מסמך — אותו שער בדיוק שבסורק
+        // .xml ו-.wbk נאספים רק אם תוכנם אכן מסמך — אותו שער בדיוק שבסורק
         // הסנכרון וב-generator. בלעדיו כל קובץ XML שיושב בתיקיית ספרים היה
         // מדווח למשתמש ככשל המרה.
         if (format.needsContentSniffing &&
@@ -487,16 +487,19 @@ List<Map<String, dynamic>> _loadInverseSourceRows(
   final rangeEndSelect = _rangeEndSelectColumns(hasLinkRanges);
   final rangeEndJoin = _rangeEndJoinClause(hasLinkRanges, panelSide: 0);
 
+  final String windowLinksArm;
+  final String coverageArm;
+  final List<Object?> params;
   if (hasRange) {
     // מסד שאינו הרשמי נשאר בדיוק עם השאילתה המקורית (ראו officialForwardWindowSql).
-    final windowLinksArm = official
+    windowLinksArm = official
         ? officialInverseWindowLinksSql
         : '''SELECT l.id, l.targetLineId FROM link l
           WHERE l.targetLineId IN (
             SELECT id FROM line WHERE bookId = ? AND lineIndex BETWEEN ? AND ?
           )
             AND l.targetBookId = ?''';
-    final coverageArm = hasLinkRanges
+    coverageArm = hasLinkRanges
         ? '''
           UNION ALL
           SELECT lc.linkId, lc.lineId FROM link_coverage lc
@@ -504,7 +507,7 @@ List<Map<String, dynamic>> _loadInverseSourceRows(
             SELECT id FROM line WHERE bookId = ? AND lineIndex BETWEEN ? AND ?
           )'''
         : '';
-    final params = <Object?>[
+    params = [
       bookId,
       startLineIndex,
       endLineIndex,
@@ -512,53 +515,20 @@ List<Map<String, dynamic>> _loadInverseSourceRows(
       if (hasLinkRanges) ...[bookId, startLineIndex, endLineIndex],
       ...types,
     ];
-    return db.select('''
-        WITH anchors(linkId, anchorLineId) AS (
-          $windowLinksArm
-          $coverageArm
-        )
-        SELECT
-          tl.lineIndex as sourceLineIndex,
-          sl.lineIndex as targetLineIndex,
-          sl.heRef as targetLineHeRef,
-          sb.title as targetBookTitle,
-          sb.categoryId as targetCategoryId,
-          sb.id as targetBookId,
-          NULL as targetFileType,
-          $rangeEndSelect
-          $anchorSelect
-          $provenanceSelect
-          $connectionTypeExpr as connectionTypeName
-        FROM anchors a
-        ${official ? 'CROSS JOIN' : 'JOIN'} link l ON l.id = a.linkId
-        JOIN line tl ON tl.id = a.anchorLineId
-        JOIN line sl ON l.sourceLineId = sl.id
-        JOIN book sb ON l.sourceBookId = sb.id
-        JOIN connection_type ct ON l.connectionTypeId = ct.id
-        $rangeEndJoin
-        $anchorJoin
-        WHERE ct.name IN ($typePlaceholders)
-          $inverseBookFilter
-          $suppressedFilter
-        ORDER BY tl.lineIndex
-      ''', params).toMapList();
-  }
-
-  final coverageArm = hasLinkRanges
-      ? '''
+  } else {
+    windowLinksArm = 'SELECT id, targetLineId FROM link WHERE targetBookId = ?';
+    coverageArm = hasLinkRanges
+        ? '''
         UNION ALL
         SELECT lc.linkId, lc.lineId FROM link_coverage lc
         JOIN link cl ON cl.id = lc.linkId
         WHERE lc.side = 1 AND cl.targetBookId = ?'''
-      : '';
-  final params = <Object?>[
-    bookId,
-    if (hasLinkRanges) bookId,
-    ...types,
-  ];
+        : '';
+    params = [bookId, if (hasLinkRanges) bookId, ...types];
+  }
   return db.select('''
       WITH anchors(linkId, anchorLineId) AS (
-        SELECT id, targetLineId FROM link WHERE targetBookId = ?
+        $windowLinksArm
         $coverageArm
       )
       SELECT
@@ -574,7 +544,7 @@ List<Map<String, dynamic>> _loadInverseSourceRows(
         $provenanceSelect
         $connectionTypeExpr as connectionTypeName
       FROM anchors a
-      JOIN link l ON l.id = a.linkId
+      ${hasRange && official ? 'CROSS JOIN' : 'JOIN'} link l ON l.id = a.linkId
       JOIN line tl ON tl.id = a.anchorLineId
       JOIN line sl ON l.sourceLineId = sl.id
       JOIN book sb ON l.sourceBookId = sb.id
@@ -688,6 +658,40 @@ List<LinkAnchorSpan> _parseAnchorSpans(String? spans) {
   return result;
 }
 
+/// שורת קישור מהשאילתה (אינדקסים 0-based) → [Link] (אינדקסים 1-based).
+Link _linkFromRow(Map<String, Object?> row, BookSource source) {
+  final targetTitle = row['targetBookTitle'] as String;
+  final targetLineHeRef = row['targetLineHeRef'] as String?;
+  final connectionType = row['connectionTypeName'] as String? ?? 'reference';
+
+  return Link(
+    heRef: targetLineHeRef?.trim().isNotEmpty == true
+        ? targetLineHeRef!.trim()
+        : targetTitle,
+    index1: (row['sourceLineIndex'] as int) + 1,
+    path2: targetTitle,
+    index2: (row['targetLineIndex'] as int) + 1,
+    connectionType: connectionType,
+    targetCategoryId: row['targetCategoryId'] as int?,
+    targetBookId: row['targetBookId'] as int?,
+    targetFileType: row['targetFileType'] as String?,
+    anchorStart: row['anchorCharStart'] as int?,
+    anchorEnd: row['anchorCharEnd'] as int?,
+    anchorLabel: row['anchorLabel'] as String?,
+    linkedAnchorStart: row['anchorLinkedCharStart'] as int?,
+    linkedAnchorEnd: row['anchorLinkedCharEnd'] as int?,
+    anchorSpans: _parseAnchorSpans(row['anchorSpans'] as String?),
+    heRefEnd: (row['targetRangeEndHeRef'] as String?)?.trim().isNotEmpty == true
+        ? (row['targetRangeEndHeRef'] as String).trim()
+        : null,
+    index2End: row['targetRangeEndLineIndex'] != null
+        ? (row['targetRangeEndLineIndex'] as int) + 1
+        : null,
+    baseProvenance: row['baseProvenance'] as int? ?? 0,
+    targetSource: source,
+  );
+}
+
 List<Map<String, dynamic>> _loadBookLinksRowsInIsolate({
   required ReadOnlyDbTarget target,
   required String title,
@@ -769,6 +773,47 @@ List<Map<String, dynamic>> _loadBookLinksRowsInIsolate({
   }
 }
 
+/// השאילתה הקדמית של [_loadBookLinkTargetsSummaryRowsInIsolate]: מספר
+/// הקישורים לפי (שם ספר-יעד, שם סוג חיבור).
+@visibleForTesting
+String bookLinkTargetsForwardSql({
+  required bool hasLinkRanges,
+  required String suppressedFilter,
+}) {
+  // קישור-טווח נספר פעם לכל שורה מכוסה — כמו בטעינת הקישורים המלאה, כדי
+  // שסיווג "מפרש נדיר" לפי הספירה יישאר שקול.
+  final coverageArm = hasLinkRanges
+      ? '''
+          UNION ALL
+          SELECT lc.linkId FROM link_coverage lc
+          JOIN link cl ON cl.id = lc.linkId
+          WHERE lc.side = 0 AND cl.sourceBookId = ?'''
+      : '';
+  return '''
+        WITH anchors(linkId) AS (
+          SELECT id FROM link WHERE sourceBookId = ?
+          $coverageArm
+        ),
+        -- ספירה לפי מזהים לפני ה-JOIN לשמות: שליפת ספר ושם סוג לכל קישור
+        -- (עשרות אלפים בספר גדול) היא רוב זמן השאילתה.
+        counts AS (
+          SELECT l.targetBookId, l.connectionTypeId, COUNT(*) AS n
+          FROM anchors a
+          JOIN link l ON l.id = a.linkId
+          WHERE 1=1
+            $suppressedFilter
+          GROUP BY l.targetBookId, l.connectionTypeId
+        )
+        SELECT tb.title as targetBookTitle,
+               ct.name as connectionTypeName,
+               SUM(c.n) as linkCount
+        FROM counts c
+        JOIN book tb ON c.targetBookId = tb.id
+        LEFT JOIN connection_type ct ON c.connectionTypeId = ct.id
+        GROUP BY tb.title, ct.name
+      ''';
+}
+
 /// Top-level worker לסיכום קישורי ספר לפי (ספר-יעד, סוג חיבור) — שאילתת
 /// GROUP BY זולה במקום למשוך עשרות אלפי שורות קישורים לדארט.
 ({List<Map<String, dynamic>> rows, int? maxSourceLineIndex})
@@ -800,36 +845,13 @@ _loadBookLinkTargetsSummaryRowsInIsolate({
       displayedSide: 0,
     );
 
-    // קישור-טווח נספר פעם לכל שורה מכוסה — כמו בטעינת הקישורים המלאה, כדי
-    // שסיווג "מפרש נדיר" לפי הספירה יישאר שקול.
-    final coverageArm = hasLinkRanges
-        ? '''
-          UNION ALL
-          SELECT lc.linkId FROM link_coverage lc
-          JOIN link cl ON cl.id = lc.linkId
-          WHERE lc.side = 0 AND cl.sourceBookId = ?'''
-        : '';
-    final forwardRows = db
-        .select(
-          '''
-        WITH anchors(linkId) AS (
-          SELECT id FROM link WHERE sourceBookId = ?
-          $coverageArm
-        )
-        SELECT tb.title as targetBookTitle,
-               ct.name as connectionTypeName,
-               COUNT(*) as linkCount
-        FROM anchors a
-        JOIN link l ON l.id = a.linkId
-        JOIN book tb ON l.targetBookId = tb.id
-        LEFT JOIN connection_type ct ON l.connectionTypeId = ct.id
-        WHERE 1=1
-          $forwardSuppressed
-        GROUP BY tb.title, ct.name
-      ''',
-          [bookId, if (hasLinkRanges) bookId],
-        )
-        .toMapList();
+    final forwardRows = db.select(
+      bookLinkTargetsForwardSql(
+        hasLinkRanges: hasLinkRanges,
+        suppressedFilter: forwardSuppressed,
+      ),
+      [bookId, if (hasLinkRanges) bookId],
+    ).toMapList();
 
     // הזרוע ההפוכה — סופרת שורות link בלבד, בלי זרוע ה-coverage שיש
     // ל-_loadInverseSourceRows, ולכן היא נמוכה ממנה. הצרכן היחיד
@@ -933,7 +955,7 @@ bool _hasManySourceLinks(sqlite3.Database db, int bookId) => db.select(
 ).isNotEmpty;
 
 /// Top-level wrapper עבור סיכום קישורי ספר ב-isolate.
-/// ראה ההסבר ב-[_runAlternativeStructuresInIsolate].
+/// ראה ההסבר ב-[_runBookLoadInIsolate].
 Future<({List<Map<String, dynamic>> rows, int? maxSourceLineIndex})>
 _runBookLinkTargetsSummaryInIsolate({
   required ReadOnlyDbTarget target,
@@ -1097,25 +1119,25 @@ List<Map<String, dynamic>> _loadAlternativeStructuresRowsInIsolate({
   }
 }
 
-/// Top-level wrapper שמרכז את כל הלוגיקה של קריאת alt-structures בתוך
+/// Top-level wrapper שמריץ את [load] (טעינת נתוני ספר לפי שם וקטגוריה) בתוך
 /// `Isolate.run`. חיוני שהקריאה ל-`Isolate.run` תיווצר *כאן* (בפונקציה
 /// ברמת קובץ), ולא בתוך instance method של `DatabaseLibraryProvider` -
 /// אחרת ה-closure של Dart עלול לתפוס את `this` (כולל ה-`FfiDatabase`
 /// שאינו ניתן לשליחה ל-isolate) ולגרום לכשל
 /// "Illegal argument in isolate message".
-Future<List<Map<String, dynamic>>> _runAlternativeStructuresInIsolate({
+Future<T> _runBookLoadInIsolate<T>(
+  T Function({
+    required ReadOnlyDbTarget target,
+    required String bookTitle,
+    int? categoryId,
+  })
+  load, {
   required ReadOnlyDbTarget target,
   required String bookTitle,
   int? categoryId,
-}) {
-  return Isolate.run(
-    () => _loadAlternativeStructuresRowsInIsolate(
-      target: target,
-      bookTitle: bookTitle,
-      categoryId: categoryId,
-    ),
-  );
-}
+}) => Isolate.run(
+  () => load(target: target, bookTitle: bookTitle, categoryId: categoryId),
+);
 
 /// סמני חלוקה וכותרות נושא בגוף הטקסט של ספר, ממופתחים לפי `lineIndex`.
 /// [markers] — עלי `Simanim` (אותיות פסקה במדרש רבה, "א") ו-`Seifim`
@@ -1244,22 +1266,6 @@ typedef InlineSectionMarks = ({
   Map<int, List<String>> headings,
 });
 
-/// Top-level wrapper עבור טעינת סמני החלוקה ב-isolate.
-/// ראה ההסבר ב-[_runAlternativeStructuresInIsolate].
-Future<InlineSectionMarks> _runInlineSectionMarksInIsolate({
-  required ReadOnlyDbTarget target,
-  required String bookTitle,
-  int? categoryId,
-}) {
-  return Isolate.run(
-    () => _loadInlineSectionMarksInIsolate(
-      target: target,
-      bookTitle: bookTitle,
-      categoryId: categoryId,
-    ),
-  );
-}
-
 /// דיבורי-המתחיל של ספר, ממופתחים לפי `lineIndex` — הצורה המודפסת
 /// (`dhDisplay`) מטבלת `line_dh`. מסד ישן, בלי הטבלה או בלי העמודה, נותן
 /// מפה ריקה.
@@ -1301,24 +1307,8 @@ Map<int, String> _loadDibburHamatchilInIsolate({
   }
 }
 
-/// Top-level wrapper עבור טעינת דיבורי-המתחיל ב-isolate.
-/// ראה ההסבר ב-[_runAlternativeStructuresInIsolate].
-Future<Map<int, String>> _runDibburHamatchilInIsolate({
-  required ReadOnlyDbTarget target,
-  required String bookTitle,
-  int? categoryId,
-}) {
-  return Isolate.run(
-    () => _loadDibburHamatchilInIsolate(
-      target: target,
-      bookTitle: bookTitle,
-      categoryId: categoryId,
-    ),
-  );
-}
-
 /// Top-level wrapper עבור טעינת קישורי ספר ב-isolate.
-/// ראה ההסבר ב-[_runAlternativeStructuresInIsolate].
+/// ראה ההסבר ב-[_runBookLoadInIsolate].
 Future<List<Map<String, Object?>>> _runBookLinksInIsolate({
   required ReadOnlyDbTarget target,
   required String title,
@@ -1336,7 +1326,7 @@ Future<List<Map<String, Object?>>> _runBookLinksInIsolate({
 }
 
 /// Top-level wrapper עבור טעינת קישורי טווח ב-isolate.
-/// ראה ההסבר ב-[_runAlternativeStructuresInIsolate].
+/// ראה ההסבר ב-[_runBookLoadInIsolate].
 Future<List<Map<String, Object?>>> _runBookLinksInRangeInIsolate({
   required ReadOnlyDbTarget target,
   required bool official,
@@ -1362,7 +1352,7 @@ Future<List<Map<String, Object?>>> _runBookLinksInRangeInIsolate({
 }
 
 /// Top-level worker לטעינת טווח שורות על חיבור RO חדש ב-isolate; ה-join+split
-/// מתבצע כאן כדי לא לחסום את ה-UI thread. ראה [_runAlternativeStructuresInIsolate].
+/// מתבצע כאן כדי לא לחסום את ה-UI thread. ראה [_runBookLoadInIsolate].
 ({int startLine, int endLine, int totalLines, List<String> lines})?
 _loadBookTextRangeRowsInIsolate({
   required ReadOnlyDbTarget target,
@@ -1462,7 +1452,7 @@ _loadBookTextRangeRowsInIsolate({
 }
 
 /// Top-level wrapper עבור טעינת טווח תוכן ב-isolate.
-/// ראה ההסבר ב-[_runAlternativeStructuresInIsolate].
+/// ראה ההסבר ב-[_runBookLoadInIsolate].
 Future<({int startLine, int endLine, int totalLines, List<String> lines})?>
 _runBookTextRangeInIsolate({
   required ReadOnlyDbTarget target,
@@ -1585,7 +1575,7 @@ List<Map<String, dynamic>> _loadBookVersionsRowsInIsolate({
 }
 
 /// Top-level wrapper עבור רשימת מהדורות ב-isolate.
-/// ראה ההסבר ב-[_runAlternativeStructuresInIsolate].
+/// ראה ההסבר ב-[_runBookLoadInIsolate].
 Future<List<Map<String, dynamic>>> _runBookVersionsInIsolate({
   required ReadOnlyDbTarget target,
   required String title,
@@ -2153,6 +2143,12 @@ class DatabaseLibraryProvider implements LibraryProvider {
     return false;
   }
 
+  /// מסכתות PDF בלי טקסט בבלי תואם: הסדר שלהן והמסכת שאחריה הן מוצגות.
+  static const _talmudBavliPdfSederPlacement = {
+    'שקלים': (seder: 'סדר מועד', after: 'פסחים'),
+    'עדיות': (seder: 'סדר נזיקין', after: 'שבועות'),
+  };
+
   Future<void> _addBundledTalmudBavliPdfBooksToCategory(
     Category category,
     Map<String, Map<String, dynamic>> metadata,
@@ -2191,10 +2187,21 @@ class DatabaseLibraryProvider implements LibraryProvider {
       final title = getTitleFromPath(entity.path);
       if (existingPdfTitles.contains(title)) continue;
 
+      final placement = titleToSubCategory.containsKey(title)
+          ? null
+          : _talmudBavliPdfSederPlacement[title];
+      final placementSeder = placement == null
+          ? null
+          : category.subCategories
+                .where((c) => c.title == placement.seder)
+                .firstOrNull;
+
       // Place PDF in the sub-category of its matching TextBook.
       // Orphans (no matching TextBook) go into a dedicated sub-category
       // appended after "סדר טהרות" so they don't float to the top.
-      if (orphanCategory == null && !titleToSubCategory.containsKey(title)) {
+      if (orphanCategory == null &&
+          placementSeder == null &&
+          !titleToSubCategory.containsKey(title)) {
         // Place right after "סדר טהרות" (order 30 in DB) → use 31.
         final tohorotOrder = category.subCategories
             .where((c) => c.title == 'סדר טהרות')
@@ -2214,7 +2221,10 @@ class DatabaseLibraryProvider implements LibraryProvider {
         category.subCategories.sort((a, b) => a.order.compareTo(b.order));
       }
       final targetCategory =
-          titleToSubCategory[title] ?? orphanCategory ?? category;
+          titleToSubCategory[title] ??
+          placementSeder ??
+          orphanCategory ??
+          category;
       final targetCategoryId = titleToSubCategory.containsKey(title)
           ? targetCategory.title.hashCode
           : DatabaseConstants.talmudBavliFolderName.hashCode;
@@ -2236,7 +2246,14 @@ class DatabaseLibraryProvider implements LibraryProvider {
         heShortDesc: bookMeta?['heShortDesc'] as String?,
         pubDate: bookMeta?['pubDate'] as String?,
         pubPlace: bookMeta?['pubPlace'] as String?,
-        order: matchingTextBook?.order ?? bookMeta?['order'] as int? ?? 999,
+        order:
+            matchingTextBook?.order ??
+            placementSeder?.books
+                .where((b) => b.title == placement!.after)
+                .firstOrNull
+                ?.order ??
+            bookMeta?['order'] as int? ??
+            999,
         topics: DatabaseConstants.talmudBavliFolderName,
         categoryPath: DatabaseConstants.talmudBavliFolderName,
         categoryId: targetCategoryId,
@@ -2619,21 +2636,6 @@ class DatabaseLibraryProvider implements LibraryProvider {
     return categoryPath;
   }
 
-  /// Checks if any book with the given title exists in the database.
-  Future<bool> hasBookWithTitle(String title) async {
-    if (!_titlesCached) {
-      await getDatabaseOnlyBookTitles();
-    }
-
-    for (final key in _cachedKeys) {
-      if (key.matchesTitle(title)) return true;
-    }
-    for (final key in _userBooksCachedKeys) {
-      if (key.matchesTitle(title)) return true;
-    }
-    return false;
-  }
-
   BookCompositeKey? _findMatchingCachedKey(
     String title, {
     int? categoryId,
@@ -2945,8 +2947,7 @@ class DatabaseLibraryProvider implements LibraryProvider {
           await _bundledTalmudBavliDirectoryExists();
       // Only base fields are needed; loading every relation again doubles the
       // catalog cost.
-      final books = await repository.getAllBooksLean();
-      final categories = await repository.getAllCategories();
+      final (:books, :categories) = await _bookCatalog(repository);
 
       _cachedKeys.clear();
       _categoriesById
@@ -2986,6 +2987,28 @@ class DatabaseLibraryProvider implements LibraryProvider {
       debugPrint('⚠️ Error building DB key cache: $e');
       return {};
     }
+  }
+
+  /// כל ספרי seforim.db וקטגוריותיו: על ה-UI isolate זו חסימה של כ-90ms,
+  /// ולכן הם נקראים ב-worker.
+  Future<({List<db_models.Book> books, List<db_models.Category> categories})>
+  _bookCatalog(SeforimRepository repository) async {
+    final dbPath = _sqliteProvider.dbPath;
+    if (dbPath.isNotEmpty) {
+      try {
+        return await DbReadWorker.request('bookCatalog', {'dbPath': dbPath})
+            as ({
+              List<db_models.Book> books,
+              List<db_models.Category> categories,
+            });
+      } on DbReadWorkerUnavailable {
+        // נופלים לשאילתה הישירה, כמו שאר הקריאות כשה-worker אינו זמין.
+      }
+    }
+    return (
+      books: await repository.getAllBooksLean(),
+      categories: await repository.getAllCategories(),
+    );
   }
 
   /// Clears the cached titles (call when database changes)
@@ -3264,7 +3287,11 @@ class DatabaseLibraryProvider implements LibraryProvider {
   Future<List<TocEntry>> _parsePdfOutline(File file) async {
     PdfDocument? document;
     try {
-      document = await PdfDocument.openFile(file.path);
+      // progressive: בלעדיו pdfium מפענח כל עמוד לפני ה-outline (שניות בסריקה).
+      document = await PdfDocument.openFile(
+        file.path,
+        useProgressiveLoading: true,
+      );
       final outline = await document.loadOutline();
 
       if (outline.isEmpty) {
@@ -4294,60 +4321,21 @@ class DatabaseLibraryProvider implements LibraryProvider {
     String fileType, {
     BookSource source = BookSource.official,
   }) async {
-    // ראה הערה ב-_runAlternativeStructuresInIsolate: ה-Isolate.run עצמו
+    // ראה הערה ב-_runBookLoadInIsolate: ה-Isolate.run עצמו
     // חייב להיווצר בתוך פונקציה ברמת קובץ, אחרת `this` עלול להיתפס.
-    final target = _isolateTargetFor(source);
-    if (target == null) return [];
-
-    try {
+    return _readTarget(source, [], 'getAllLinksForBook "$title"', (
+      target,
+    ) async {
       final result = await _runBookLinksInIsolate(
         target: target,
         title: title,
         categoryId: categoryId,
         fileType: fileType,
       );
-
-      final links = result.map((row) {
-        final targetTitle = row['targetBookTitle'] as String;
-        final targetLineHeRef = row['targetLineHeRef'] as String?;
-        final connectionType =
-            row['connectionTypeName'] as String? ?? 'reference';
-
-        return Link(
-          heRef: targetLineHeRef?.trim().isNotEmpty == true
-              ? targetLineHeRef!.trim()
-              : targetTitle,
-          index1: (row['sourceLineIndex'] as int) + 1,
-          path2: targetTitle,
-          index2: (row['targetLineIndex'] as int) + 1,
-          connectionType: connectionType,
-          targetCategoryId: row['targetCategoryId'] as int?,
-          targetBookId: row['targetBookId'] as int?,
-          targetFileType: row['targetFileType'] as String?,
-          anchorStart: row['anchorCharStart'] as int?,
-          anchorEnd: row['anchorCharEnd'] as int?,
-          anchorLabel: row['anchorLabel'] as String?,
-          linkedAnchorStart: row['anchorLinkedCharStart'] as int?,
-          linkedAnchorEnd: row['anchorLinkedCharEnd'] as int?,
-          anchorSpans: _parseAnchorSpans(row['anchorSpans'] as String?),
-          heRefEnd:
-              (row['targetRangeEndHeRef'] as String?)?.trim().isNotEmpty == true
-              ? (row['targetRangeEndHeRef'] as String).trim()
-              : null,
-          index2End: row['targetRangeEndLineIndex'] != null
-              ? (row['targetRangeEndLineIndex'] as int) + 1
-              : null,
-          baseProvenance: row['baseProvenance'] as int? ?? 0,
-          targetSource: source,
-        );
-      }).toList();
-
+      final links = [for (final row in result) _linkFromRow(row, source)];
       debugPrint('💾 Found ${links.length} links for book "$title"');
       return links;
-    } catch (e) {
-      debugPrint('⚠️ Error in getAllLinksForBook "$title": $e');
-      return [];
-    }
+    });
   }
 
   Future<List<Link>> getLinksForBookRange(
@@ -4373,7 +4361,7 @@ class DatabaseLibraryProvider implements LibraryProvider {
       throw StateError('המסד של "$title" אינו פתוח — הקישורים לא נטענו');
     }
 
-    // ראה הערה ב-_runAlternativeStructuresInIsolate.
+    // ראה הערה ב-_runBookLoadInIsolate.
     final result = await _loadOnReadWorker(
       target,
       'linksRange',
@@ -4397,41 +4385,7 @@ class DatabaseLibraryProvider implements LibraryProvider {
       ),
     );
 
-    final links = result.map((row) {
-      final targetTitle = row['targetBookTitle'] as String;
-      final targetLineHeRef = row['targetLineHeRef'] as String?;
-      final connectionType =
-          row['connectionTypeName'] as String? ?? 'reference';
-
-      return Link(
-        heRef: targetLineHeRef?.trim().isNotEmpty == true
-            ? targetLineHeRef!.trim()
-            : targetTitle,
-        index1: (row['sourceLineIndex'] as int) + 1,
-        path2: targetTitle,
-        index2: (row['targetLineIndex'] as int) + 1,
-        connectionType: connectionType,
-        targetCategoryId: row['targetCategoryId'] as int?,
-        targetBookId: row['targetBookId'] as int?,
-        targetFileType: row['targetFileType'] as String?,
-        anchorStart: row['anchorCharStart'] as int?,
-        anchorEnd: row['anchorCharEnd'] as int?,
-        anchorLabel: row['anchorLabel'] as String?,
-        linkedAnchorStart: row['anchorLinkedCharStart'] as int?,
-        linkedAnchorEnd: row['anchorLinkedCharEnd'] as int?,
-        anchorSpans: _parseAnchorSpans(row['anchorSpans'] as String?),
-        heRefEnd:
-            (row['targetRangeEndHeRef'] as String?)?.trim().isNotEmpty == true
-            ? (row['targetRangeEndHeRef'] as String).trim()
-            : null,
-        index2End: row['targetRangeEndLineIndex'] != null
-            ? (row['targetRangeEndLineIndex'] as int) + 1
-            : null,
-        baseProvenance: row['baseProvenance'] as int? ?? 0,
-        targetSource: source,
-      );
-    }).toList();
-    return links;
+    return [for (final row in result) _linkFromRow(row, source)];
   }
 
   /// סיכום קישורי הספר לפי (ספר-יעד, סוג חיבור), בתוספת השורה הגבוהה ביותר
@@ -4444,11 +4398,10 @@ class DatabaseLibraryProvider implements LibraryProvider {
     int categoryId, {
     BookSource source = BookSource.official,
   }) async {
-    // ראה הערה ב-_runAlternativeStructuresInIsolate.
-    final target = _isolateTargetFor(source);
-    if (target == null) return null;
-
-    try {
+    // ראה הערה ב-_runBookLoadInIsolate.
+    return _readTarget(source, null, 'getBookLinkTargetsSummary "$title"', (
+      target,
+    ) async {
       final result = await _runBookLinkTargetsSummaryInIsolate(
         target: target,
         official: source is OfficialBookSource,
@@ -4476,10 +4429,7 @@ class DatabaseLibraryProvider implements LibraryProvider {
             ? external.maxSourceLine
             : maxSourceLine,
       );
-    } catch (e) {
-      debugPrint('⚠️ Error in getBookLinkTargetsSummary "$title": $e');
-      return null;
-    }
+    });
   }
 
   /// טוען טווח שורות תוכן ב-isolate נפרד (כמו [getLinksForBookRange]), כדי
@@ -4495,12 +4445,12 @@ class DatabaseLibraryProvider implements LibraryProvider {
     String? versionTitle,
     BookSource source = BookSource.official,
   }) async {
-    // ראה הערה ב-_runAlternativeStructuresInIsolate.
-    final target = _isolateTargetFor(source);
-    if (target == null) return null;
-
-    try {
-      return await _loadOnReadWorker(
+    // ראה הערה ב-_runBookLoadInIsolate.
+    return _readTarget(
+      source,
+      null,
+      'getBookTextRange "$title"',
+      (target) => _loadOnReadWorker(
         target,
         'textRange',
         {
@@ -4520,11 +4470,8 @@ class DatabaseLibraryProvider implements LibraryProvider {
           endLine: endLine,
           versionTitle: versionTitle,
         ),
-      );
-    } catch (e) {
-      debugPrint('⚠️ Error in getBookTextRange "$title": $e');
-      return null;
-    }
+      ),
+    );
   }
 
   /// רשימת המהדורות (book_version) של ספר, מהדורות עם טקסט מלא תחילה.
@@ -4534,19 +4481,16 @@ class DatabaseLibraryProvider implements LibraryProvider {
     int categoryId, {
     BookSource source = BookSource.official,
   }) async {
-    final target = _isolateTargetFor(source);
-    if (target == null) return const [];
-    try {
+    return _readTarget(source, const [], 'getBookVersions "$title"', (
+      target,
+    ) async {
       final rows = await _runBookVersionsInIsolate(
         target: target,
         title: title,
         categoryId: categoryId,
       );
       return rows.map(BookVersionInfo.fromDbRow).toList();
-    } catch (e) {
-      debugPrint('⚠️ Error in getBookVersions "$title": $e');
-      return const [];
-    }
+    });
   }
 
   /// האם להציג לספר תפריט 'גרסאות' — כלומר יש מהדורה לבחירה (2+ גרסאות, או
@@ -4584,23 +4528,39 @@ class DatabaseLibraryProvider implements LibraryProvider {
     if (link.path2.isEmpty) return 'שגיאה: נתיב ריק';
     if (link.index2 <= 0) return 'שגיאה: אינדקס לא תקין';
 
-    final targetTitle = link.path2.contains('/')
-        ? _bookTitleFromLinkPath(link.path2)
-        : link.path2;
+    final normalizedTitle = _bookTitleFromLinkPath(link.path2);
+    // כותרת ללא תיקייה עשויה להסתיים בסיומת אמיתית; נסה אותה לפני שם הקובץ.
+    final targetTitles = [
+      if (!link.path2.contains('/') && link.path2 != normalizedTitle)
+        link.path2,
+      normalizedTitle,
+    ];
 
     final repository = _sqliteProvider.repository;
     if (repository == null) return 'שגיאה: מאגר לא מאותחל';
 
-    final fromWorker = await _officialLinkContentOnWorker(link, targetTitle);
-    if (fromWorker != null) return fromWorker;
+    for (final title in targetTitles) {
+      final fromWorker = await _officialLinkContentOnWorker(link, title);
+      if (fromWorker != null) return fromWorker;
+    }
 
     try {
-      final resolvedBook = await BookDatabaseResolver.resolveBook(
-        title: targetTitle,
-        categoryId: link.targetCategoryId,
-        fileType: link.targetFileType,
-        preferSource: link.targetSource,
-      );
+      ResolvedDbBookRecord? resolvedBook;
+      findBook:
+      for (final candidate
+          in await BookDatabaseResolver.loadRepositoryCandidates(
+            preferSource: link.targetSource,
+          )) {
+        for (final title in targetTitles) {
+          resolvedBook = await BookDatabaseResolver.resolveBookInCandidates(
+            title: title,
+            candidates: [candidate],
+            categoryId: link.targetCategoryId,
+            fileType: link.targetFileType,
+          );
+          if (resolvedBook != null) break findBook;
+        }
+      }
       if (resolvedBook == null) return 'שגיאה: הספר לא נמצא במסד הנתונים';
 
       // ספר file-backed (תיקייה שנוספה בלי "הוסף למסד הנתונים") — אין שורות
@@ -4615,9 +4575,8 @@ class DatabaseLibraryProvider implements LibraryProvider {
           (dbBookFormat?.isTextual ?? false)) {
         final file = File(dbBook.filePath!);
         if (!await file.exists()) return 'שגיאה: הקובץ לא נמצא';
-        // הווריאנט המלא ולא חסר-התמונות: זה שהקורא מקבל ממילא, ולכן הוא כבר
-        // במטמון. וריאנט נפרד היה מכפיל את טקסט הספר ב-`cache.db` ומציג
-        // בתצוגת המפרש תג תמונה ריק במקום התמונה.
+        // הווריאנט המלא כבר במטמון הקורא; וריאנט נפרד מכפיל את הטקסט
+        // ב-cache.db ומחליף את תמונת המפרש בתג תמונה ריק.
         final text =
             await readFileBackedBookText(file, dbBook.fileType, dbBook.title) ??
             '';
@@ -4701,8 +4660,6 @@ class DatabaseLibraryProvider implements LibraryProvider {
         'getAlternativeStructuresForBook (user) "${book.title}"',
       );
     }
-    final target = _isolateTargetFor(book.source);
-    if (target == null) return [];
     final bookTitle = book.title;
 
     // לא להעביר ל-Isolate.run closure שנוצר בתוך instance method הזה -
@@ -4710,23 +4667,24 @@ class DatabaseLibraryProvider implements LibraryProvider {
     // הלא-ניתן-לשליחה), והקריאה תיכשל עם "Illegal argument in isolate
     // message". במקום זאת אנו משתמשים ב-tear-off של פונקציה ברמת קובץ
     // ומעבירים את הפרמטרים כ-record של ערכים פרימיטיביים.
-    try {
-      final results = await _runAlternativeStructuresInIsolate(
-        target: target,
-        bookTitle: bookTitle,
-        categoryId: book.categoryId,
-      );
+    return _readTarget(
+      book.source,
+      [],
+      'getAlternativeStructuresForBook "$bookTitle"',
+      (target) async {
+        final results = await _runBookLoadInIsolate(
+          _loadAlternativeStructuresRowsInIsolate,
+          target: target,
+          bookTitle: bookTitle,
+          categoryId: book.categoryId,
+        );
 
-      return [
-        for (final json in results)
-          AltTocStructure.fromJson(json, source: book.source),
-      ];
-    } catch (e) {
-      debugPrint(
-        '⚠️ Error in getAlternativeStructuresForBook "$bookTitle": $e',
-      );
-      return [];
-    }
+        return [
+          for (final json in results)
+            AltTocStructure.fromJson(json, source: book.source),
+        ];
+      },
+    );
   }
 
   /// כמו [getInlineSectionMarksByLineIndex], לספר אישי. התוכן אינו במסד,
@@ -4771,6 +4729,23 @@ class DatabaseLibraryProvider implements LibraryProvider {
     }
   }
 
+  /// מריץ [read] על מסד [source]; מסד שאינו פתוח או כשל מחזירים את [fallback].
+  Future<T> _readTarget<T>(
+    BookSource source,
+    T fallback,
+    String errorContext,
+    Future<T> Function(ReadOnlyDbTarget target) read,
+  ) async {
+    final target = _isolateTargetFor(source);
+    if (target == null) return fallback;
+    try {
+      return await read(target);
+    } catch (e) {
+      debugPrint('⚠️ Error in $errorContext: $e');
+      return fallback;
+    }
+  }
+
   /// סמני חלוקה וכותרות נושא להצגה בגוף הטקסט, לפי `lineIndex` של שורת
   /// התוכן (issues #773, #1121). לספר בלי מבנים כאלה — מפות ריקות.
   Future<InlineSectionMarks> getInlineSectionMarksByLineIndex(
@@ -4779,27 +4754,23 @@ class DatabaseLibraryProvider implements LibraryProvider {
     BookSource source = BookSource.official,
   }) async {
     const empty = (markers: <int, String>{}, headings: <int, List<String>>{});
-    final target = _isolateTargetFor(source);
-    if (target == null) return empty;
-
     // ב-worker הקבוע: מפענח השורות נטען פעם אחת לחיבור, לא בכל פתיחת ספר.
-    try {
-      return await _loadOnReadWorker(
+    return _readTarget(
+      source,
+      empty,
+      'getInlineSectionMarksByLineIndex "$bookTitle"',
+      (target) => _loadOnReadWorker(
         target,
         'inlineSectionMarks',
         {'bookTitle': bookTitle, 'categoryId': categoryId},
-        () => _runInlineSectionMarksInIsolate(
+        () => _runBookLoadInIsolate(
+          _loadInlineSectionMarksInIsolate,
           target: target,
           bookTitle: bookTitle,
           categoryId: categoryId,
         ),
-      );
-    } catch (e) {
-      debugPrint(
-        '⚠️ Error in getInlineSectionMarksByLineIndex "$bookTitle": $e',
-      );
-      return empty;
-    }
+      ),
+    );
   }
 
   /// דיבורי-המתחיל של ספר (`line_dh`, מגרסת ספרייה 25), ממופתחים לפי
@@ -4810,33 +4781,16 @@ class DatabaseLibraryProvider implements LibraryProvider {
     int? categoryId,
     BookSource source = BookSource.official,
   }) async {
-    final target = _isolateTargetFor(source);
-    if (target == null) return const {};
-
-    try {
-      return await _runDibburHamatchilInIsolate(
+    return _readTarget(
+      source,
+      const {},
+      'getDibburHamatchilByLineIndex "$bookTitle"',
+      (target) => _runBookLoadInIsolate(
+        _loadDibburHamatchilInIsolate,
         target: target,
         bookTitle: bookTitle,
         categoryId: categoryId,
-      );
-    } catch (e) {
-      debugPrint('⚠️ Error in getDibburHamatchilByLineIndex "$bookTitle": $e');
-      return const {};
-    }
-  }
-
-  /// Get all alternative TOC structures available in the database
-  Future<List<AltTocStructure>> getAlternativeStructures() async {
-    return _dbOperation<List<AltTocStructure>>(
-      (db) async {
-        final results = db
-            .select('SELECT * FROM alt_toc_structure')
-            .toMapList();
-        return results.map((json) => AltTocStructure.fromJson(json)).toList();
-      },
-      [],
-      'getAlternativeStructures',
-      requires: (c) => c.hasAltTocStructures,
+      ),
     );
   }
 

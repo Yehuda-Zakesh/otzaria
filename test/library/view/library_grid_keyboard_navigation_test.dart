@@ -149,6 +149,96 @@ void main() {
     });
   });
 
+  group('רשת גוללת ארוכה', () {
+    const count = 300;
+    late List<FocusNode> nodes;
+    late int exitTopCount;
+
+    tearDown(() {
+      for (final node in nodes) {
+        node.dispose();
+      }
+    });
+
+    /// 600×600 → שתי עמודות; 300 כרטיסים = 150 שורות, רובן מחוץ לתצוגה.
+    Widget buildGrid({required bool scrollable}) {
+      nodes = List.generate(count, (i) => FocusNode(debugLabel: 'card$i'));
+      exitTopCount = 0;
+      final grid = MyGridView(
+        scrollable: scrollable,
+        onExitTop: () => exitTopCount++,
+        items: [
+          for (var i = 0; i < count; i++)
+            CategoryGridItem(
+              category: _category('פריט $i'),
+              onCategoryClickCallback: () {},
+              focusNode: nodes[i],
+            ),
+        ],
+      );
+      return MaterialApp(
+        home: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Material(
+            child: Center(
+              child: SizedBox(
+                width: 600,
+                height: 600,
+                child: scrollable ? grid : SingleChildScrollView(child: grid),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    int? focusedIndex() {
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].hasPrimaryFocus) return i;
+      }
+      return null;
+    }
+
+    testWidgets('רשת גוללת בונה רק את הכרטיסים שבתצוגה', (tester) async {
+      await tester.pumpWidget(buildGrid(scrollable: true));
+      final built = find.byType(CategoryGridItem).evaluate().length;
+      expect(built, greaterThan(0));
+      expect(built, lessThan(count ~/ 5));
+    });
+
+    for (final scrollable in [false, true]) {
+      testWidgets(
+        'מטה עובר את כל השורות ומעלה חוזר לחיפוש (scrollable: $scrollable)',
+        (tester) async {
+          await tester.pumpWidget(buildGrid(scrollable: scrollable));
+          nodes[1].requestFocus();
+          await tester.pump();
+
+          for (var row = 1; row < count ~/ 2; row++) {
+            await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+            await tester.pump();
+            expect(focusedIndex(), row * 2 + 1);
+          }
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+          await tester.pump();
+          expect(focusedIndex(), count - 1);
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+          await tester.pump();
+          expect(focusedIndex(), count - 2);
+
+          for (var row = count ~/ 2 - 2; row >= 0; row--) {
+            await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+            await tester.pump();
+            expect(focusedIndex(), row * 2);
+          }
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+          await tester.pump();
+          expect(exitTopCount, 1);
+        },
+      );
+    }
+  });
+
   group('resolveLibraryBackspaceAction', () {
     test('בשדה החיפוש הריק של הספרייה — עולים תיקייה', () {
       expect(

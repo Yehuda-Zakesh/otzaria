@@ -11,6 +11,7 @@ import 'package:otzaria/data/data_providers/book_database_resolver.dart';
 import 'package:otzaria/data/data_providers/cache_database_holder.dart';
 import 'package:otzaria/data/repository/data_repository.dart'
     show bookSearchWordMatchesFuzzy, bookSearchWordPairMatches;
+import 'package:otzaria/find_ref/book_name_match.dart';
 import 'package:otzaria/data/data_providers/file_system_library_provider.dart';
 import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
@@ -913,7 +914,8 @@ class ReferenceBooksCache {
   ) async {
     PdfDocument? doc;
     try {
-      doc = await PdfDocument.openFile(filePath);
+      // progressive: בלעדיו pdfium מפענח כל עמוד לפני ה-outline (שניות בסריקה).
+      doc = await PdfDocument.openFile(filePath, useProgressiveLoading: true);
       final outline = await doc.loadOutline();
       final entries = <(String, String, int)>[];
       _collectOutlineEntries(outline, entries, maxDepth: 2, currentDepth: 0);
@@ -1010,8 +1012,15 @@ class BookTitleIndex {
   /// ל-[ReferenceBookHit] כדי שהצרכנים לא יפצלו מחדש בכל הקלדה.
   final Map<int, List<String>> _titleTokens = <int, List<String>>{};
 
-  /// [titleMatchTokens] לכל ספר, בעצלתיים — רק מעטים מגיעים למסלול שצריך אותם.
-  final Map<int, Set<String>> _titleMatchTokens = <int, Set<String>>{};
+  /// הכותרות ב-[bookNameMatchForm]; ההחלטה אם יש התאמה נעשית בהן.
+  final Map<int, String> _matchTitles = <int, String>{};
+
+  /// [titleMatchTokens] של [_matchTitles], בעצלתיים — רק מעטים מגיעים למסלול שצריך אותם.
+  final Map<int, Set<String>> _matchTitleTokens = <int, Set<String>>{};
+
+  /// כינויי הספר ב-[bookNameSpellingForm], לפי אותו סדר. נבנים מחדש כשהקאש נטען מחדש.
+  final Map<int, (List<String>, List<String>)> _matchAcronyms =
+      <int, (List<String>, List<String>)>{};
 
   /// כל המילים השונות שבכותרות ובכינויים, ומזהי הספרים לכל מילה. הספרייה
   /// כולה מכילה ~6,900 מילים שונות בלבד, ולכן ההתאמה המקורבת רצה עליהן פעם
@@ -1034,7 +1043,14 @@ class BookTitleIndex {
         for (final entry in titles.entries)
           entry.key: _splitTitleTokens(entry.value),
       });
-    _titleMatchTokens.clear();
+    _matchTitles
+      ..clear()
+      ..addAll({
+        for (final entry in titles.entries)
+          entry.key: bookNameMatchForm(entry.value),
+      });
+    _matchTitleTokens.clear();
+    _matchAcronyms.clear();
   }
 
   void clearTitles() {
@@ -1074,12 +1090,19 @@ class BookTitleIndex {
           ? null
           : scans.putIfAbsent(q, () {
               final words = q.split(' ');
+              final mq = bookNameMatchForm(q);
+              final aq = [
+                bookNameSpellingForm(q),
+                if (mq != bookNameSpellingForm(q)) mq,
+              ];
               return _QueryScan(
                 q,
+                mq,
+                aq,
                 words,
-                // מסננת הביגרמים חוסכת את המעבר על כינויי כל הספרים — היא
-                // קבוצת-על, ולכן הלולאה נשארת הפוסקת היחידה על הדירוג.
-                _acronymCandidates(q),
+                // מסננת הביגרמים חוסכת את המעבר על כינויי כל הספרים — כינוי שמתאים
+                // לצורה של השאילתה מכיל כל ביגרם שלה, כי הכינויים אינם משמיטים ה"א.
+                [for (final form in aq) _acronymCandidates(form)],
                 // בלעדיה כל שאילתה הייתה מריצה מרחק-עריכה על כל ספר.
                 _fuzzyCandidateBooks(words),
               );
@@ -1102,7 +1125,12 @@ class BookTitleIndex {
     final parentOf = List<int>.filled(active.length, -1);
     for (var i = 0; i < active.length; i++) {
       for (var j = 0; j < i; j++) {
-        if (active[i].q.contains(active[j].q)) parentOf[i] = j;
+        if (active[i].mq.contains(active[j].mq) &&
+            active[i].acronymQueries.first.contains(
+              active[j].acronymQueries.first,
+            )) {
+          parentOf[i] = j;
+        }
       }
     }
     final masks = List<int>.filled(active.length, 0);
@@ -1155,42 +1183,59 @@ class BookTitleIndex {
     String t,
     int parentMask,
   ) {
-    final q = scan.q;
+    final q = scan.mq;
+    final mt = _matchTitles[book.id] ?? bookNameMatchForm(t);
     int? matchRank;
     String? matchedTerm;
     var tailIsTitleWords = false;
+    var exactAlias = false;
     var mask = 0;
 
     if (parentMask & _titleMay != 0) {
-      if (t == q) {
+      if (mt == q) {
         matchRank = 0;
-      } else if (t.startsWith(q)) {
+      } else if (mt.startsWith(q)) {
         matchRank = 1;
-      } else if (t.contains(q)) {
+      } else if (mt.contains(q)) {
         matchRank = 2;
       }
     }
     if (matchRank != null) {
       // ענף הכינויים לא נבדק — אין מידע שמותר לפסול בו.
       mask = _mayMatchAll;
+      if (matchRank > 0 && scan.mayHaveAcronymMatch(book.id)) {
+        exactAlias = _hasExactAcronym(book.id, scan.acronymQueries);
+      }
     } else if (parentMask & _acronymMay != 0 &&
-        (scan.acronymCandidates?.contains(book.id) ?? true)) {
+        scan.mayHaveAcronymMatch(book.id)) {
       // התאמת ראשי תיבות — המונחים כבר מנורמלים בעת טעינת הקאש.
       final normalizedAcronyms = _acronymsOf(book.id);
       if (normalizedAcronyms != null) {
+        final matchAcronyms = _matchAcronymsFor(book.id, normalizedAcronyms);
         // עצל: רק התאמת-תחילית של ראשי-תיבות צריכה את טוקני הכותרת.
         Set<String>? titleTokens;
-        for (final a in normalizedAcronyms) {
-          if (a == q) {
-            matchRank = 3;
-            matchedTerm = a;
-            break;
+        final queries = scan.acronymQueries;
+        aliases:
+        for (var i = 0; i < normalizedAcronyms.length; i++) {
+          final a = normalizedAcronyms[i];
+          final ma = matchAcronyms[i];
+          String? aq;
+          for (final form in queries) {
+            if (ma == form) {
+              matchRank = 3;
+              matchedTerm = a;
+              break aliases;
+            }
+            if (aq == null && ma.startsWith(form)) aq = form;
           }
-          if (a.startsWith(q)) {
-            titleTokens ??= _titleMatchTokensFor(book.id, t);
+          if (aq != null) {
+            titleTokens ??= _matchTitleTokens[book.id] ??= titleMatchTokensOf(
+              _splitTitleTokens(mt),
+            );
+            // הכותרת בצורת ההשוואה, ולכן גם הזנב — ה"א שבכינוי אינה מבדילה כאן.
             final tailIsTitle = ReferenceBooksCache._acronymTailIsTitleWords(
-              a,
-              q,
+              bookNameMatchForm(ma),
+              bookNameMatchForm(aq),
               titleTokens,
             );
             // דירוג טוב יותר גובר על קודמיו — אחרת מונח "contains" (5) שנסרק
@@ -1202,7 +1247,9 @@ class BookTitleIndex {
               matchedTerm = a;
               tailIsTitleWords = tailIsTitle;
             }
-          } else if (a.contains(q) && matchRank == null) {
+          } else if (matchRank == null &&
+              (ma.contains(queries[0]) ||
+                  (queries.length > 1 && ma.contains(queries[1])))) {
             matchRank = 5;
             matchedTerm = a;
           }
@@ -1234,17 +1281,26 @@ class BookTitleIndex {
         matchedTerm: matchedTerm,
         orderIndex: book.orderIndex,
         acronymTailIsTitleWords: tailIsTitleWords,
+        isExactAlias: exactAlias,
         titleTokens: _titleTokens[book.id],
-        titleMatchTokens: _titleMatchTokens[book.id],
       ),
     );
     return mask;
   }
 
-  Set<String> _titleMatchTokensFor(int bookId, String title) =>
-      _titleMatchTokens[bookId] ??= titleMatchTokensOf(
-        _titleTokens[bookId] ?? _splitTitleTokens(title),
-      );
+  bool _hasExactAcronym(int bookId, List<String> queries) {
+    final acronyms = _acronymsOf(bookId);
+    if (acronyms == null) return false;
+    return _matchAcronymsFor(bookId, acronyms).any(queries.contains);
+  }
+
+  List<String> _matchAcronymsFor(int bookId, List<String> acronyms) {
+    final cached = _matchAcronyms[bookId];
+    if (cached != null && identical(cached.$1, acronyms)) return cached.$2;
+    final forms = acronyms.map(bookNameSpellingForm).toList(growable: false);
+    _matchAcronyms[bookId] = (acronyms, forms);
+    return forms;
+  }
 
   /// אורך המילה המינימלי להתאמה מקורבת.
   static const int _minFuzzyWordLength = 3;
@@ -1399,6 +1455,12 @@ class ReferenceBookHit {
   /// הוא כותרת פנימית ("טור חושן" ⊂ "טור חושן משפט", ו"משפט" אינה בכותרת "טור").
   final bool acronymTailIsTitleWords;
 
+  /// השאילתה היא גם כינוי מדויק של ספר שהותאם לפי כותרתו ("זהר" ל"ספר הזהר").
+  final bool isExactAlias;
+
+  /// השאילתה היא שמו המדויק של הספר — כותרת מלאה או כינוי.
+  bool get namesBookExactly => matchRank == 0 || matchRank == 3 || isExactAlias;
+
   ReferenceBookHit({
     required this.bookId,
     required this.title,
@@ -1409,6 +1471,7 @@ class ReferenceBookHit {
     required this.orderIndex,
     this.matchedTerm,
     this.acronymTailIsTitleWords = false,
+    this.isExactAlias = false,
     List<String>? titleTokens,
     Set<String>? titleMatchTokens,
   }) : _givenTitleTokens = titleTokens,
@@ -1457,12 +1520,34 @@ class ReferenceBookSearchBatch {
 
 /// שאילתה אחת בתוך סריקה משותפת: אוספת התאמות ובוחרת רק את הטובות ביותר.
 class _QueryScan {
-  _QueryScan(this.q, this.words, this.acronymCandidates, this.fuzzyCandidates);
+  _QueryScan(
+    this.q,
+    this.mq,
+    this.acronymQueries,
+    this.words,
+    this.acronymCandidates,
+    this.fuzzyCandidates,
+  );
 
   final String q;
+
+  /// [q] ב-[bookNameMatchForm] — מול כותרות.
+  final String mq;
+
+  /// צורות [q] מול כינויים: [bookNameSpellingForm], ו-[mq] כשהיא שונה ממנה.
+  final List<String> acronymQueries;
   final List<String> words;
-  final AcronymCandidateBooks? acronymCandidates;
+
+  /// לכל צורה ב-[acronymQueries]; `null` = אין צמצום.
+  final List<AcronymCandidateBooks?> acronymCandidates;
   final Set<int> fuzzyCandidates;
+
+  bool mayHaveAcronymMatch(int bookId) {
+    for (final c in acronymCandidates) {
+      if (c == null || c.contains(bookId)) return true;
+    }
+    return false;
+  }
 
   List<ReferenceBookHit> _starts = <ReferenceBookHit>[];
   List<ReferenceBookHit> _contains = <ReferenceBookHit>[];

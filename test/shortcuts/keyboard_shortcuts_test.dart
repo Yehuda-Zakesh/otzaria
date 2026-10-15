@@ -27,6 +27,8 @@ import 'package:otzaria/search/view/search_dialog.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
 import 'package:otzaria/settings/engine/settings_state.dart';
+import 'package:otzaria/shortcuts/dynamic/dynamic_shortcut.dart';
+import 'package:otzaria/shortcuts/dynamic/dynamic_shortcut_registry.dart';
 import 'package:otzaria/shortcuts/keyboard_shortcuts.dart';
 import 'package:otzaria/shortcuts/shortcut_helper.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
@@ -42,6 +44,9 @@ import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
+import 'package:otzaria/widgets/text/selection_copy_shortcuts.dart';
+import 'package:otzaria/widgets/dialogs/reusable_items_dialog.dart';
+import 'package:otzaria/widgets/widgets_exports.dart' show ActionButton;
 import 'package:provider/provider.dart';
 import '../helpers/memory_settings_cache.dart';
 
@@ -86,14 +91,15 @@ class _StubNavigationBloc extends Bloc<NavigationEvent, NavigationState>
 
 class _StubTextBookBloc extends Bloc<TextBookEvent, TextBookState>
     implements TextBookBloc {
-  _StubTextBookBloc()
+  _StubTextBookBloc([TextBookState? state])
     : super(
-        TextBookInitial.named(
-          TextBook(title: 'ספר בדיקה'),
-          0,
-          false,
-          const [],
-        ),
+        state ??
+            TextBookInitial.named(
+              TextBook(title: 'ספר בדיקה'),
+              0,
+              false,
+              const [],
+            ),
       ) {
     on<TextBookEvent>((_, _) {});
   }
@@ -1125,6 +1131,157 @@ void main() {
         expect(tester.takeException(), isNull);
       },
     );
+
+    testWidgets(
+      'Ctrl+C שהוגדר כקיצור דינמי גובר על ההעתקה המובנית (issue #2380)',
+      (tester) async {
+        final tab = TextBookTab(
+          book: TextBook(title: 'ספר בדיקה'),
+          index: 0,
+          blocOverride: _StubTextBookBloc(
+            TextBookLoaded.initial(
+              book: TextBook(title: 'ספר בדיקה'),
+              index: 0,
+              showLeftPane: false,
+              splitView: false,
+            ),
+          ),
+        );
+        addTearDown(tab.dispose);
+        var builtInCopies = 0;
+        final selectionFocus = FocusNode();
+        addTearDown(selectionFocus.dispose);
+        // אותו מיירט Ctrl+C שעוטף את הבחירה בגוף הספר ובחלונית המפרשים.
+        await pumpWithTab(
+          tester,
+          tab,
+          child: SelectionCopyShortcuts(
+            onCopy: () => builtInCopies++,
+            child: SelectionArea(
+              focusNode: selectionFocus,
+              child: const Text('טקסט'),
+            ),
+          ),
+        );
+        selectionFocus.requestFocus();
+        await tester.pump();
+        Future<void> pressCtrlC({bool hold = false}) async {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.keyC);
+          if (hold) await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyC);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.keyC);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+          await tester.pump();
+        }
+
+        await pressCtrlC();
+        expect(builtInCopies, 1, reason: 'בלי קיצור דינמי נשארת ההעתקה הרגילה');
+
+        DynamicShortcutRegistry.instance.put(
+          const DynamicShortcut(
+            id: 'issue2380',
+            key: 'ctrl+c',
+            kind: DynamicShortcutKind.copySelectionWith,
+            change: DynamicDisplayChange(nikud: DynamicMarkChange.hide),
+            plainTextOnly: true,
+          ),
+        );
+        addTearDown(() => DynamicShortcutRegistry.instance.remove('issue2380'));
+        // גם החזרות של מקש מוחזק אינן מגיעות להעתקה המובנית.
+        await pressCtrlC(hold: true);
+
+        expect(builtInCopies, 1);
+        final request = tab.dynamicCopyRequestNotifier.value;
+        expect(request?.profile.removeNikud, isTrue);
+        expect(request?.plainTextOnly, isTrue);
+      },
+    );
+    for (final editing in [true, false]) {
+      testWidgets(
+        'Ctrl+C דינמי מכבד ${editing ? 'שדה טקסט' : 'דיאלוג שלא ניתן לסגור'}',
+        (tester) async {
+          final tab = TextBookTab(
+            book: TextBook(title: 'ספר בדיקה'),
+            index: 0,
+            blocOverride: _StubTextBookBloc(
+              TextBookLoaded.initial(
+                book: TextBook(title: 'ספר בדיקה'),
+                index: 0,
+                showLeftPane: false,
+                splitView: false,
+              ),
+            ),
+          );
+          addTearDown(tab.dispose);
+          final clipboardWrites = <String>[];
+          tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            SystemChannels.platform,
+            (call) async {
+              if (call.method == 'Clipboard.setData') {
+                clipboardWrites.add(call.arguments['text'] as String);
+              }
+              if (call.method == 'Clipboard.getData') return {'text': ''};
+              return null;
+            },
+          );
+          addTearDown(
+            () => tester.binding.defaultBinaryMessenger
+                .setMockMethodCallHandler(SystemChannels.platform, null),
+          );
+          final controller = TextEditingController(text: 'טקסט בשדה');
+          addTearDown(controller.dispose);
+          DynamicShortcutRegistry.instance.put(
+            const DynamicShortcut(
+              id: 'editing-dialog-copy',
+              key: 'ctrl+c',
+              kind: DynamicShortcutKind.copySelectionWith,
+              change: DynamicDisplayChange(nikud: DynamicMarkChange.hide),
+            ),
+          );
+          addTearDown(
+            () =>
+                DynamicShortcutRegistry.instance.remove('editing-dialog-copy'),
+          );
+          await pumpWithTab(
+            tester,
+            tab,
+            child: editing
+                ? RtlTextField(controller: controller, autofocus: true)
+                : const SizedBox(),
+          );
+          await tester.pumpAndSettle();
+          if (editing) {
+            controller.selection = TextSelection(
+              baseOffset: 0,
+              extentOffset: controller.text.length,
+            );
+          } else {
+            unawaited(
+              showDialog<void>(
+                context: tester.element(find.byType(KeyboardShortcuts)),
+                barrierDismissible: false,
+                builder: (_) => const PopScope(
+                  canPop: false,
+                  child: Dialog(child: Text('פעולה בתהליך')),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+          }
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.keyC);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.keyC);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+          await tester.pump();
+          expect(tab.dynamicCopyRequestNotifier.value, isNull);
+          if (editing) {
+            expect(clipboardWrites, ['טקסט בשדה']);
+          } else {
+            expect(find.text('פעולה בתהליך'), findsOneWidget);
+          }
+        },
+      );
+    }
   });
 
   group('KeyboardShortcuts - Ctrl+W מוגבל למסך עיון', () {
@@ -1291,7 +1448,11 @@ void main() {
         _StubNavigationBloc navigationBloc,
       })
     >
-    pumpWithDialog(WidgetTester tester) async {
+    pumpWithDialog(
+      WidgetTester tester, {
+      bool blocked = false,
+      VoidCallback? onCancel,
+    }) async {
       final tabsBloc = TabsBloc(repository: _FakeTabsRepository());
       final historyBloc = _StubHistoryBloc();
       final navigationBloc = _StubNavigationBloc();
@@ -1320,10 +1481,18 @@ void main() {
             Provider<FocusRepository>.value(value: FocusRepository()),
           ],
           child: MaterialApp(
-            home: Scaffold(
-              body: KeyboardShortcuts(
-                onFindRefRequested: () {},
-                child: const SizedBox(width: 100, height: 100),
+            home: PopScope(
+              canPop: false,
+              child: Scaffold(
+                body: KeyboardShortcuts(
+                  onFindRefRequested: () => navigationBloc.add(
+                    const NavigateToScreen(Screen.find),
+                  ),
+                  onNewSearchRequested: () => navigationBloc.add(
+                    const NavigateToScreen(Screen.search),
+                  ),
+                  child: const SizedBox(width: 100, height: 100),
+                ),
               ),
             ),
           ),
@@ -1333,10 +1502,26 @@ void main() {
 
       showDialog(
         context: tester.element(find.byType(SizedBox)),
-        builder: (_) => const AlertDialog(title: Text('דיאלוג בדיקה')),
+        builder: (_) => blocked
+            ? AppCustomContentDialog(
+                title: 'התקנה פעילה',
+                canDismiss: false,
+                actions: [
+                  if (onCancel != null)
+                    ActionButton.ghost(
+                      text: 'ביטול פריסה',
+                      onPressed: onCancel,
+                    ),
+                ],
+                child: const SizedBox.shrink(),
+              )
+            : const AlertDialog(title: Text('דיאלוג בדיקה')),
       );
       await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(
+        find.byType(blocked ? AppCustomContentDialog : AlertDialog),
+        findsOneWidget,
+      );
 
       return (tabsBloc: tabsBloc, navigationBloc: navigationBloc);
     }
@@ -1365,6 +1550,60 @@ void main() {
 
       await tester.pump(const Duration(milliseconds: 400));
     });
+
+    for (final extraRoute in [false, true]) {
+      testWidgets('Ctrl+L מכבד התקנה חסומה, שכבה נוספת: $extraRoute', (
+        tester,
+      ) async {
+        final blocs = await pumpWithDialog(tester, blocked: true);
+        if (extraRoute) {
+          showDialog<void>(
+            context: tester.element(find.byType(AppCustomContentDialog)),
+            builder: (_) => const AlertDialog(title: Text('שכבה נוספת')),
+          );
+          await tester.pumpAndSettle();
+        }
+        await sendCtrl(tester, LogicalKeyboardKey.keyL);
+        await tester.pumpAndSettle();
+        expect(find.text('שכבה נוספת'), findsNothing);
+        expect(find.text('התקנה פעילה'), findsOneWidget);
+        expect(blocs.navigationBloc.events, isEmpty);
+      });
+    }
+
+    for (final cancellable in [false, true]) {
+      testWidgets(
+        'דיאלוג עסוק חוסם callbacks ושומר ביטול מקומי: $cancellable',
+        (
+          tester,
+        ) async {
+          var cancelled = 0;
+          final blocs = await pumpWithDialog(
+            tester,
+            blocked: true,
+            onCancel: cancellable ? () => cancelled++ : null,
+          );
+          await sendCtrl(tester, LogicalKeyboardKey.keyF);
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+          await tester.pump();
+          expect(blocs.navigationBloc.events, isEmpty);
+          expect(find.text('התקנה פעילה'), findsOneWidget);
+          if (cancellable) {
+            await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+            await tester.sendKeyEvent(LogicalKeyboardKey.space);
+            await tester.pumpAndSettle();
+            expect(cancelled, 1);
+            await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+            await tester.pumpAndSettle();
+            expect(cancelled, 2);
+          }
+        },
+      );
+    }
 
     testWidgets('Ctrl+W כשדיאלוג פתוח אינו סוגר טאב שברקע', (tester) async {
       final blocs = await pumpWithDialog(tester);

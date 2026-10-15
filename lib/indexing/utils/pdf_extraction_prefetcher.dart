@@ -55,7 +55,7 @@ class PdfExtractionPrefetcher {
   /// בזמן ההמתנה, ולכן ברירת המחדל שומרת חילוץ יחיד בטיסה.
   static const int defaultMaxInFlight = 1;
 
-  /// תקרת התווים של תוצאות שהושלמו וממתינות לאינדוקס. ‏String ב-Dart הוא
+  /// תקרת התווים של תוצאות שהושלמו וממתינות לאינדוקס. String ב-Dart הוא
   /// UTF-16, כך שהתקרה שקולה לכ-24MB heap.
   static const int defaultMaxPendingChars = 12 * 1024 * 1024;
 
@@ -115,7 +115,7 @@ class PdfExtractionPrefetcher {
     return null;
   }
 
-  /// שולף את החילוץ של [book] אם הוזנק — מוכן או עדיין רץ. ‏null אם אינו
+  /// שולף את החילוץ של [book] אם הוזנק — מוכן או עדיין רץ. null אם אינו
   /// בתור, ואז על הקורא לחלץ בעצמו.
   Future<PdfExtraction>? take(PdfBook book) {
     for (final slot in _slots) {

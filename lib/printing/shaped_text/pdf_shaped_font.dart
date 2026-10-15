@@ -102,9 +102,6 @@ class PdfShapedFont extends PdfFont {
   @override
   double get descent => shaper.metrics.descender / unitsPerEm;
 
-  /// Distance between baselines, as a fraction of the font size.
-  double get lineSpacing => shaper.metrics.lineHeight / unitsPerEm;
-
   @override
   bool isRuneSupported(int charCode) {
     final run = _shapeForMetrics(String.fromCharCode(charCode));

@@ -36,16 +36,6 @@ class AltTocStructure extends Equatable {
     );
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'bookId': bookId,
-      'key': key,
-      'title': title,
-      'heTitle': heTitle,
-    };
-  }
-
   @override
   List<Object?> get props => [id, bookId, key, title, heTitle, source];
 }

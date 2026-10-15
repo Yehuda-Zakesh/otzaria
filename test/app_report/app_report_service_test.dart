@@ -1,19 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:otzaria/app_report/models/app_report.dart';
-import 'package:otzaria/app_report/models/app_report_image.dart';
+import 'package:otzaria/app_report/models/app_report_draft.dart';
 import 'package:otzaria/app_report/services/app_report_service.dart';
 import 'package:otzaria/core/user_state/pending_report_store.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/services/sent_reports_counter.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 
 AppReport _report({String? id, String title = 'באג'}) => AppReport(
   reportId: id ?? AppReport.generateReportId(),
@@ -70,6 +71,91 @@ void main() {
     reportStore: store,
     sentCounter: SentReportsCounter.inMemory(),
   );
+
+  test('טיוטה: נשמרת אחת, נטענת עם התמונות, ולא נכנסת לתור', () async {
+    final service = build(MockClient((_) async => _json(500, {})));
+    final image = AppReportImage(
+      bytes: Uint8List.fromList([1, 2, 3]),
+      fileName: 'shot.png',
+      mimeType: 'image/png',
+    );
+    await service.saveDraft(
+      const AppReportDraft(
+        type: AppReportType.bug,
+        title: 'ראשונה',
+        description: '',
+        steps: '',
+        email: '',
+      ),
+    );
+    final draft = AppReportDraft(
+      type: AppReportType.suggestion,
+      title: 'שנייה',
+      description: 'תיאור',
+      steps: 'שלב',
+      email: 'a@b.com',
+      includeDiagnostics: false,
+      images: [image],
+    );
+    await service.saveDraft(draft);
+
+    final loaded = (await service.loadDraft())!;
+    expect(loaded.title, 'שנייה');
+    expect(loaded.type, AppReportType.suggestion);
+    expect(loaded.steps, 'שלב');
+    expect(loaded.includeDiagnostics, isFalse);
+    expect(loaded.images.single.fileName, 'shot.png');
+    expect(loaded.images.single.bytes, [1, 2, 3]);
+    expect(await store.countByKind(AppReportService.draftKind), 1);
+    expect(await service.getPendingReportsCount(), 0);
+    expect(await service.flushPendingReports(), 0);
+
+    await service.deleteDraft();
+    expect(await service.loadDraft(), isNull);
+  });
+
+  AppReportDraft draft(String title) => AppReportDraft(
+    type: AppReportType.bug,
+    title: title,
+    description: '',
+    steps: '',
+    email: '',
+  );
+
+  test('שמירות טיוטה מקבילות משני חיבורים משאירות טיוטה אחת', () async {
+    final service = build(MockClient((_) async => _json(500, {})));
+    final secondDb = UserStateDatabase.openAt(
+      '${tmp.path}${Platform.pathSeparator}user_state.db',
+    );
+    addTearDown(secondDb.close);
+    final second = AppReportService(
+      reportStore: PendingReportStore(database: secondDb),
+    );
+    await service.saveDraft(draft('קודמת'));
+    await Future.wait([
+      service.saveDraft(draft('ראשונה')),
+      second.saveDraft(draft('שנייה')),
+    ]);
+
+    expect(await store.countByKind(AppReportService.draftKind), 1);
+    expect((await service.loadDraft())?.title, 'שנייה');
+  });
+
+  test('כשל בהחלפת טיוטה משמר את הטיוטה הקודמת', () async {
+    final service = build(MockClient((_) async => _json(500, {})));
+    await service.saveDraft(draft('קודמת'));
+    final connection = await db.database;
+    connection.execute("""
+      CREATE TRIGGER reject_draft BEFORE INSERT ON pending_reports
+      WHEN NEW.kind = '${AppReportService.draftKind}'
+      BEGIN SELECT RAISE(ABORT, 'simulated insert failure'); END
+    """);
+
+    await expectLater(service.saveDraft(draft('חדשה')), throwsA(anything));
+
+    expect((await service.loadDraft())?.title, 'קודמת');
+    expect(await store.countByKind(AppReportService.draftKind), 1);
+  });
 
   test('200: נשלח, שדות ה-issue נשמרים בהיסטוריה בלי צרופות', () async {
     Map<String, dynamic>? sentBody;
@@ -148,6 +234,163 @@ void main() {
     expect(result.report.reportId, ids.last);
   });
 
+  group('minidump שנדחה נשלח שוב בלעדיו (issue #1978)', () {
+    final withDump = _report().copyWith(
+      minidump: AppReportMinidump(
+        gzipBytes: Uint8List.fromList(gzip.encode(utf8.encode('MDMP...'))),
+        fileName: 'a.dmp',
+      ),
+    );
+
+    for (final (status, field) in [
+      (422, 'attachments.minidump'),
+      (413, null),
+    ]) {
+      test('$status', () async {
+        final bodies = <Map<String, dynamic>>[];
+        final service = build(
+          MockClient((request) async {
+            final body = jsonDecode(utf8.decode(request.bodyBytes));
+            bodies.add(body as Map<String, dynamic>);
+            final attachments = body['attachments'] as Map;
+            if (attachments.containsKey('minidump')) {
+              return _json(status, {'error': 'x', 'field': ?field});
+            }
+            return _json(200, {'success': true, 'issueNumber': 7});
+          }),
+        );
+        final result = await service.send(withDump);
+        expect(result.isSent, isTrue);
+        expect(bodies, hasLength(2));
+        expect((bodies.first['attachments'] as Map)['minidump'], isNotNull);
+        expect(bodies.last['reportId'], bodies.first['reportId']);
+        expect((bodies.last['attachments'] as Map)['diagnostics'], isNotNull);
+      });
+    }
+
+    for (final (status, field) in [
+      (422, 'attachments.minidump'),
+      (413, null),
+    ]) {
+      test('flush: $status ואז כשל זמני שומרים את הסרת ה-dump', () async {
+        final bodies = <Map<String, dynamic>>[];
+        final service = build(
+          MockClient((request) async {
+            final body =
+                jsonDecode(utf8.decode(request.bodyBytes))
+                    as Map<String, dynamic>;
+            bodies.add(body);
+            if ((body['attachments'] as Map).containsKey('minidump')) {
+              return _json(status, {'error': 'x', 'field': ?field});
+            }
+            return _json(503, {'error': 'temporary'});
+          }),
+        );
+        await service.queueReport(withDump);
+        final original = (await store.listByKind(
+          AppReportService.pendingKind,
+        )).single;
+
+        expect(await service.flushPendingReports(), 0);
+        expect(await service.flushPendingReports(), 0);
+        expect(
+          bodies.map(
+            (body) => (body['attachments'] as Map).containsKey('minidump'),
+          ),
+          [true, false, false],
+        );
+        expect(
+          bodies.map((body) => body['reportId']),
+          everyElement(withDump.reportId),
+        );
+        final pending = (await store.listByKind(
+          AppReportService.pendingKind,
+        )).single;
+        expect(pending.id, original.id);
+        expect(pending.createdAt, original.createdAt);
+        expect(pending.payload, withDump.copyWith(minidump: null).toJson());
+        expect(await service.getSentReports(), isEmpty);
+        expect(await service.getSentReportsTotal(), 0);
+      });
+    }
+
+    for (final fallbackStatus in [200, 400, 409]) {
+      test('flush: הסרת dump וניסיון המשך $fallbackStatus', () async {
+        final bodies = <Map<String, dynamic>>[];
+        final service = build(
+          MockClient((request) async {
+            final body =
+                jsonDecode(utf8.decode(request.bodyBytes))
+                    as Map<String, dynamic>;
+            bodies.add(body);
+            return (body['attachments'] as Map).containsKey('minidump')
+                ? _json(422, {'field': 'attachments.minidump'})
+                : _json(fallbackStatus, {'success': true, 'issueNumber': 7});
+          }),
+        );
+        await service.queueReport(withDump);
+
+        expect(
+          await service.flushPendingReports(),
+          fallbackStatus == 200 ? 1 : 0,
+        );
+        expect(bodies, hasLength(2));
+        expect(bodies.last, withDump.copyWith(minidump: null).toApiPayload());
+        final pending = await service.getPendingReports();
+        final sent = await service.getSentReports();
+        if (fallbackStatus == 409) {
+          expect(pending, hasLength(1));
+          expect(pending.single.reportId, isNot(withDump.reportId));
+          expect(pending.single.minidump, isNull);
+        } else {
+          expect(pending, isEmpty);
+        }
+        if (fallbackStatus == 200) {
+          expect(sent.single.reportId, withDump.reportId);
+          expect(sent.single.issueNumber, 7);
+          expect(sent.single.minidump, isNull);
+          expect(sent.single.diagnostics, isNull);
+          expect(await service.getSentReportsTotal(), 1);
+        } else {
+          expect(sent, isEmpty);
+          expect(await service.getSentReportsTotal(), 0);
+        }
+      });
+    }
+
+    test('flush: כשל זמני בלי דחיית dump שומר את כל המטען', () async {
+      final service = build(MockClient((_) async => http.Response('', 503)));
+      await service.queueReport(withDump);
+      expect(await service.flushPendingReports(), 0);
+      expect(
+        (await service.getPendingReports()).single.toJson(),
+        withDump.toJson(),
+      );
+    });
+
+    test('422 על שדה אחר — דחייה רגילה, בלי ניסיון נוסף', () async {
+      var calls = 0;
+      final service = build(
+        MockClient((_) async {
+          calls++;
+          return _json(422, {'error': 'x', 'field': 'reporterEmail'});
+        }),
+      );
+      final result = await service.send(withDump);
+      expect(result.status, AppReportDeliveryStatus.failed);
+      expect(calls, 1);
+    });
+
+    test('ה-dump לא נשמר בהיסטוריה', () async {
+      final service = build(
+        MockClient((_) async => _json(200, {'success': true})),
+      );
+      await service.send(withDump);
+      final sent = await service.getSentReports();
+      expect(sent.single.minidump, isNull);
+    });
+  });
+
   test('422: דחייה קבועה, לא נכנס לתור', () async {
     final service = build(
       MockClient(
@@ -155,7 +398,7 @@ void main() {
       ),
     );
     final result = await service.send(_report());
-    expect(result.isFailed, isTrue);
+    expect(result.status, AppReportDeliveryStatus.failed);
     expect(result.failureReason, AppReportFailureReason.rejected);
     expect(result.rejectedField, 'reporterEmail');
     expect(result.httpStatus, 422);
@@ -249,10 +492,114 @@ void main() {
       report.copyWith(description: 'אחר'),
     );
     expect(changed!.reportId, isNot(report.reportId));
-    expect(
-      (await service.getPendingReports()).single.description,
-      'אחר',
+    expect((await service.getPendingReports()).single.description, 'אחר');
+  });
+
+  test(
+    'markPendingReportAsSent: עובר להיסטוריה בלי פנייה לשרת (#1766)',
+    () async {
+      var requests = 0;
+      final service = build(
+        MockClient((_) async {
+          requests++;
+          return http.Response('', 500);
+        }),
+      );
+      final report = _report();
+      await service.queueReport(report);
+
+      await service.markPendingReportAsSent(report);
+
+      expect(requests, 0);
+      expect(await service.getPendingReportsCount(), 0);
+      final sent = (await service.getSentReports()).single;
+      expect(sent.reportId, report.reportId);
+      expect(sent.sentAt, isNotNull);
+      expect(sent.diagnostics, isNull);
+      expect(await service.getSentReportsTotal(), 1);
+    },
+  );
+
+  test('סימון כנשלח ממתין לסיום שליחה ידנית לפני שמחזיר אותה לתור', () async {
+    final requestStarted = Completer<void>();
+    final response = Completer<http.Response>();
+    final report = _report();
+    final sender = build(
+      MockClient((_) {
+        requestStarted.complete();
+        return response.future;
+      }),
     );
+    final marker = build(
+      MockClient((_) async => fail('הסימון לא אמור לשלוח בקשת רשת')),
+    );
+    await sender.queueReport(report);
+
+    final submission = sender.submitPendingReport(report);
+    await requestStarted.future;
+    var marked = false;
+    final marking = marker.markPendingReportAsSent(report).then((_) {
+      marked = true;
+    });
+    expect(marked, isFalse);
+
+    response.complete(http.Response('', 503));
+    expect((await submission).isQueued, isTrue);
+    await marking;
+
+    expect(await sender.getPendingReportsCount(), 0);
+    final sent = (await sender.getSentReports()).single;
+    expect(sent.reportId, report.reportId);
+    expect(sent.diagnostics, isNull);
+  });
+
+  test('סימון כנשלח ממתין גם לשליחת flush שכבר התחילה', () async {
+    final requestStarted = Completer<void>();
+    final response = Completer<http.Response>();
+    final report = _report();
+    final sender = build(
+      MockClient((_) {
+        requestStarted.complete();
+        return response.future;
+      }),
+    );
+    final marker = build(
+      MockClient((_) async => fail('הסימון לא אמור לשלוח בקשת רשת')),
+    );
+    await sender.queueReport(report);
+
+    final flushing = sender.flushPendingReports();
+    await requestStarted.future;
+    var marked = false;
+    final marking = marker.markPendingReportAsSent(report).then((_) {
+      marked = true;
+    });
+    expect(marked, isFalse);
+
+    response.complete(http.Response('', 503));
+    expect(await flushing, 0);
+    await marking;
+
+    expect(await sender.getPendingReportsCount(), 0);
+    expect((await sender.getSentReports()).single.reportId, report.reportId);
+  });
+
+  test('flush מסיר כפילות pending שכבר קיימת בהיסטוריה בלי לשלוח', () async {
+    var requests = 0;
+    final service = build(
+      MockClient((_) async {
+        requests++;
+        return http.Response('', 503);
+      }),
+    );
+    final report = _report();
+    await service.markPendingReportAsSent(report);
+    await store.add(AppReportService.pendingKind, report.toJson());
+
+    expect(await service.flushPendingReports(), 0);
+    expect(requests, 0);
+    expect(await service.getPendingReportsCount(), 0);
+    expect((await service.getSentReports()).single.reportId, report.reportId);
   });
 
   test('צילומי מסך: נשלחים, נשמרים בתור בכשל, ונמחקים מההיסטוריה', () async {
@@ -284,6 +631,43 @@ void main() {
     expect(sent.images, isEmpty);
     expect(sent.toJson().containsKey('images'), isFalse);
   });
+
+  test(
+    'גוף הבקשה (כולל צילומי מסך) מקודד מחוץ ל-UI isolate (issue #2008)',
+    () async {
+      Map<String, dynamic>? sentBody;
+      final service = build(
+        MockClient((request) async {
+          sentBody = jsonDecode(utf8.decode(request.bodyBytes));
+          return _json(200, {'issueNumber': 1});
+        }),
+      );
+      final report = _report().copyWith(
+        diagnostics: {'probe': const _EncodingIsolateProbe()},
+        images: [
+          AppReportImage(
+            bytes: Uint8List.fromList([1, 2, 3]),
+            fileName: 'screenshot.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+
+      expect((await service.send(report)).isSent, isTrue);
+      final attachments = sentBody!['attachments'] as Map;
+      expect(attachments['images'], hasLength(1));
+      expect(
+        (attachments['diagnostics'] as Map)['probe'],
+        allOf(isNotNull, isNot(Isolate.current.debugName)),
+      );
+    },
+  );
+}
+
+class _EncodingIsolateProbe {
+  const _EncodingIsolateProbe();
+
+  String? toJson() => Isolate.current.debugName;
 }
 
 class _MemoryCacheProvider extends CacheProvider {

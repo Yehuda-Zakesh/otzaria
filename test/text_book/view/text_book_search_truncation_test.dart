@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/models/books.dart';
-import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/search/search_repository.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
@@ -16,10 +15,10 @@ import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/utils/section_search_utils.dart';
 import 'package:otzaria/text_book/view/text_book_search_screen.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../support/search_engine_test_init.dart';
 import '../../test_helpers/memory_cache_provider.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 
 /// issue #1053 — חיווי חיתוך בסרגל תוצאות החיפוש בספר: כשהחיפוש נעצר
 /// בתקרת התוצאות, הכיתוב הופך ל"מוצגות N התוצאות הראשונות" במקום
@@ -67,7 +66,7 @@ Future<void> main() async {
           child: Scaffold(
             body: TextBookSearchView(
               contentLoader: () async => const ['שורה א'],
-              scrollControler: ItemScrollController(),
+              lines: LineScrollController(),
               focusNode: focusNode,
               closeLeftPaneCallback: () {},
               initialQuery: initialQuery,
@@ -151,6 +150,8 @@ SearchResult _result({
     filePath: 'id:1',
     mergedCount: 1,
     merged: const [],
+    textStatus: TextStatus.ok,
+    continuesToNextLine: false,
   );
 }
 
@@ -160,31 +161,7 @@ class _FixedResultsRepository extends SearchRepository {
   final List<SearchResult> results;
 
   @override
-  Future<List<SearchResult>> searchTexts(
-    String query,
-    List<String> facets,
-    int limit, {
-    int offset = 0,
-    ResultsOrder order = ResultsOrder.relevance,
-    bool fuzzy = false,
-    int distance = 0,
-    String negativeQuery = '',
-    int? negativeDistance,
-    SearchScope scope = SearchScope.wordDistance,
-    SearchScope? negativeScope,
-    SearchMode searchMode = SearchMode.exact,
-    Map<String, String>? customSpacing,
-    Map<String, String>? negativeCustomSpacing,
-    Map<int, List<String>>? alternativeWords,
-    Map<int, List<String>>? negativeAlternativeWords,
-    Map<String, Map<String, bool>>? searchOptions,
-    Map<String, Map<String, bool>>? negativeSearchOptions,
-    bool matchNikud = false,
-    bool matchTaamim = false,
-    ResultGrouping? grouping,
-    WordMatchMode wordMatchMode = WordMatchMode.all,
-    int? wordMatchCount,
-  }) async {
+  Future<List<SearchResult>> searchTexts(SearchEngineRequest request) async {
     return results;
   }
 }
@@ -228,7 +205,5 @@ TextBookLoaded _loadedState() {
     selectedIndex: 0,
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }

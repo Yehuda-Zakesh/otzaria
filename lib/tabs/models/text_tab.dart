@@ -1,9 +1,8 @@
 import 'package:otzaria/shortcuts/dynamic/dynamic_shortcut_dispatcher.dart';
 import 'dart:async';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 // [EDITING DISABLED] import 'package:otzaria/text_book/editing/repository/local_overrides_repository.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/models/books.dart';
@@ -16,7 +15,7 @@ import 'package:flutter/foundation.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/utils/text/ref_helper.dart';
 import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
-import 'package:otzaria/widgets/lists/jump_aware_item_scroll_controller.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 
 /// Represents a tab that contains a text book.
 ///
@@ -26,8 +25,9 @@ class TextBookTab extends OpenedTab {
   /// The text book.
   final TextBook book;
 
-  /// The index of the scrollable list.
-  int index;
+  /// שורת המקור הנוכחית. נכתבת רק מ-[LineScrollController.position].
+  int get index => _index;
+  int _index;
 
   /// The initial search text for this tab.
   final String searchText;
@@ -64,18 +64,18 @@ class TextBookTab extends OpenedTab {
   final int? pinpointHighlightSectionIndex;
 
   /// The bloc that manages the text book state and logic.
-  late final TextBookBloc bloc;
+  ///
+  /// נבנה בגישה הראשונה: שולחנות עבודה מפענחים את כל הטאבים בכל שינוי, ו-bloc
+  /// שלא נסגר נשאר רשום לזרם ההסתרות הסטטי ואינו משתחרר.
+  TextBookBloc get bloc => _bloc ??= _createBloc();
+  TextBookBloc? _bloc;
+  late final TextBookInitial _initialState;
 
-  final JumpAwareItemScrollController scrollController =
-      JumpAwareItemScrollController();
-  final ItemPositionsListener positionsListener =
-      ItemPositionsListener.create();
-  // בקרים נוספים עבור תצוגה מפוצלת או רשימות מקבילות
-  final ItemScrollController auxScrollController = ItemScrollController();
-  final ItemPositionsListener auxPositionsListener =
-      ItemPositionsListener.create();
-  final ScrollOffsetController mainOffsetController = ScrollOffsetController();
-  final ScrollOffsetController auxOffsetController = ScrollOffsetController();
+  /// ה-state הנוכחי, בלי לבנות bloc לטאב שטרם הוצג.
+  TextBookState get blocState => _bloc?.state ?? _initialState;
+
+  /// גלילת הקורא ומיקומו, בשורות מקור.
+  final LineScrollController lines = LineScrollController();
 
   /// הכותרת הנוכחית של המיקום בספר (למשל "בראשית פרק ד")
   final currentTitle = ValueNotifier<String>("");
@@ -144,7 +144,7 @@ class TextBookTab extends OpenedTab {
   /// and the [commentators] parameter represents the list of commentaries to show.
   TextBookTab({
     required this.book,
-    required this.index,
+    required int index,
     this.searchText = '',
     this.highlightText = '',
     this.permanentHighlightLine,
@@ -165,7 +165,8 @@ class TextBookTab extends OpenedTab {
     this.pinpointHighlightSectionIndex,
     @visibleForTesting TextBookBloc? blocOverride,
     // מהדורה חלופית מקבלת כותרת טאב עם שם המהדורה, להבחנה מהנוסח הממוזג.
-  }) : super(
+  }) : _index = index,
+       super(
          book.versionDisplayTitle == null
              ? book.title
              : '${book.title} (${book.versionDisplayTitle})',
@@ -186,51 +187,58 @@ class TextBookTab extends OpenedTab {
     _lastSplitView = effectiveSplitedView;
     _lastShowPageShapeView = effectiveShowPageShapeView;
 
-    // Initialize the bloc with initial state. ב‑production תמיד נבנה bloc חדש;
-    // ה‑blocOverride קיים רק לטסטים שצריכים להזריק bloc עם repository מזויף
-    // ולהביא אותו ל‑Loaded בלי תשתית קבצים אמיתית.
-    bloc =
-        blocOverride ??
-        TextBookBloc(
-          repository: TextBookRepository(
-            fileSystem: FileSystemData.instance,
-          ),
-          // [EDITING DISABLED] overridesRepository: LocalOverridesRepository(),
-          initialState: TextBookInitial.named(
-            book,
-            index,
-            openLeftPane,
-            commentators ?? [],
-            searchText: searchText,
-            searchOptions: searchOptions,
-            alternativeWords: alternativeWords,
-            spacingValues: spacingValues,
-            searchMode: searchMode,
-            searchDistance: searchDistance,
-            matchPolicy: matchPolicy,
-            initialSearchResultLines: initialSearchResultLines,
-            splitedView: effectiveSplitedView,
-            showPageShapeView: effectiveShowPageShapeView,
-            highlightText: highlightText,
-            permanentHighlightLine: permanentHighlightLine,
-            pinpointHighlightIndex:
-                pinpointHighlight != null && pinpointHighlight!.isNotEmpty
-                ? (pinpointHighlightSectionIndex ?? index)
-                : null,
-            pinpointHighlightText:
-                pinpointHighlight != null && pinpointHighlight!.isNotEmpty
-                ? pinpointHighlight
-                : null,
-          ),
-          scrollController: scrollController,
-          positionsListener: positionsListener,
-          scrollOffsetController: mainOffsetController,
-        );
+    _initialState = TextBookInitial.named(
+      book,
+      index,
+      openLeftPane,
+      commentators ?? [],
+      searchText: searchText,
+      searchOptions: searchOptions,
+      alternativeWords: alternativeWords,
+      spacingValues: spacingValues,
+      searchMode: searchMode,
+      searchDistance: searchDistance,
+      matchPolicy: matchPolicy,
+      initialSearchResultLines: initialSearchResultLines,
+      splitedView: effectiveSplitedView,
+      showPageShapeView: effectiveShowPageShapeView,
+      highlightText: highlightText,
+      permanentHighlightLine: permanentHighlightLine,
+      pinpointHighlightIndex:
+          pinpointHighlight != null && pinpointHighlight!.isNotEmpty
+          ? (pinpointHighlightSectionIndex ?? index)
+          : null,
+      pinpointHighlightText:
+          pinpointHighlight != null && pinpointHighlight!.isNotEmpty
+          ? pinpointHighlight
+          : null,
+    );
+    lines.position.addListener(_onReadingPosition);
+    // ה‑blocOverride קיים רק לטסטים שצריכים להזריק bloc עם repository מזויף.
+    if (blocOverride != null) _bloc = _attachBloc(blocOverride);
+  }
 
-    // הוספת listener לעדכון האינדקס כשה-state משתנה
+  TextBookBloc _createBloc() {
+    final created = _attachBloc(
+      TextBookBloc(
+        repository: TextBookRepository(fileSystem: FileSystemData.instance),
+        // [EDITING DISABLED] overridesRepository: LocalOverridesRepository(),
+        initialState: _initialState,
+        readingPosition: lines.position,
+      ),
+    );
+    if (_isDisposed) created.close();
+    return created;
+  }
+
+  void _onReadingPosition() {
+    final position = lines.position.value;
+    if (position != null) _index = position.topLine;
+  }
+
+  TextBookBloc _attachBloc(TextBookBloc bloc) {
     _stateSubscription = bloc.stream.listen((state) {
-      if (state is TextBookLoaded && state.visibleIndices.isNotEmpty) {
-        index = state.visibleIndices.first;
+      if (state is TextBookLoaded) {
         _lastSplitView = state.showSplitView;
         _lastShowPageShapeView = state.showPageShapeView;
         // עדכון הכותרת הנוכחית
@@ -239,6 +247,7 @@ class TextBookTab extends OpenedTab {
         }
       }
     });
+    return bloc;
   }
 
   /// `OpenedTab.from` מטפל ב-[TextBookTab] בענף ייעודי ואינו מגיע לכאן;
@@ -261,7 +270,9 @@ class TextBookTab extends OpenedTab {
     navNextTocNotifier.dispose();
     dynamicCopyRequestNotifier.dispose();
     pageShapePluginController.detach();
-    bloc.close();
+    lines.position.removeListener(_onReadingPosition);
+    _bloc?.close();
+    lines.dispose();
     super.dispose();
   }
 
@@ -338,7 +349,6 @@ class TextBookTab extends OpenedTab {
     List<String> commentators = this.commentators ?? [];
     bool splitedView = _lastSplitView;
     bool showPageShapeView = _lastShowPageShapeView;
-    int currentIndex = index; // שמירת האינדקס הנוכחי כברירת מחדל
     // ספר ה-state כולל העשרה שנעשתה ברקע (id/מחבר/קטגוריות) — עדיף לשמירה.
     TextBook bookToSave = book;
     // חמשת שדות ההדגשה. בלעדיהם הפעלה מחדש החזירה את הספר בלי ההדגשה
@@ -360,8 +370,8 @@ class TextBookTab extends OpenedTab {
       matchPolicy: matchPolicy,
     );
 
-    if (bloc.state is TextBookLoaded) {
-      final loadedState = bloc.state as TextBookLoaded;
+    if (blocState is TextBookLoaded) {
+      final loadedState = blocState as TextBookLoaded;
       bookToSave = loadedState.book;
       searchState = ReadingTabSearchState(
         searchText: loadedState.searchText,
@@ -380,22 +390,16 @@ class TextBookTab extends OpenedTab {
       searchResultLines = loadedState.searchResultLines;
       pinpointHighlight = loadedState.pinpointHighlightText;
       pinpointHighlightSectionIndex = loadedState.pinpointHighlightIndex;
-      // עדכון האינדקס מה-state הנטען - תמיד לוקחים את האינדקס האחרון שנראה
-      if (loadedState.visibleIndices.isNotEmpty) {
-        currentIndex = loadedState.visibleIndices.first;
-        // עדכון גם את ה-index של הטאב עצמו כדי שישמר
-        index = currentIndex;
-      }
     }
 
     return {
       'title': title,
       'book': bookToSave.toJson(),
-      'initalIndex': currentIndex,
+      'initalIndex': index,
       'commentators': commentators,
       'splitedView': splitedView,
       'showPageShapeView': showPageShapeView,
-      'showLeftPane': bloc.state.showLeftPane,
+      'showLeftPane': blocState.showLeftPane,
       'isPinned': isPinned,
       'type': 'TextBookTab',
       // ערכי ברירת מחדל אינם נכתבים, כדי לא לנפח את הקובץ ולא להבדיל בין

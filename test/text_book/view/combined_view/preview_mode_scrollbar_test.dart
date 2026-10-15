@@ -51,8 +51,6 @@ TextBookLoaded _loadedState(List<String> content) {
     selectedIndex: null,
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }
 

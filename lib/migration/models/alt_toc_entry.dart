@@ -41,20 +41,6 @@ class AltTocEntry extends Equatable {
     );
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'structureId': structureId,
-      'parentId': parentId,
-      'textId': textId,
-      'level': level,
-      'lineId': lineId,
-      'isLastChild': isLastChild,
-      'hasChildren': hasChildren,
-      if (text != null) 'text': text,
-    };
-  }
-
   @override
   List<Object?> get props => [
     id,

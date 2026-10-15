@@ -3,7 +3,6 @@ import 'package:otzaria/models/books.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/commentators_tab_screen.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 TextBookLoaded _loaded(TextBook book, {int? selectedIndex}) {
   return TextBookLoaded(
@@ -26,8 +25,6 @@ TextBookLoaded _loaded(TextBook book, {int? selectedIndex}) {
     pinLeftPane: false,
     searchText: '',
     currentTitle: 'סימן א',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
     searchMode: SearchMode.exact,
   );
 }

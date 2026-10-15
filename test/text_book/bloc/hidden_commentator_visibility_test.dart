@@ -17,9 +17,8 @@ import 'package:otzaria/models/links.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/models/commentator_group.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:otzaria/book_common/models/commentator_group.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
 
@@ -109,8 +108,6 @@ TextBookLoaded _loaded(TextBook book) => TextBookLoaded(
   visibleIndices: const [0],
   pinLeftPane: false,
   searchText: '',
-  scrollController: ItemScrollController(),
-  positionsListener: ItemPositionsListener.create(),
 );
 
 Future<TextBookLoaded> _waitFor(
@@ -151,8 +148,6 @@ void main() {
     bloc = TextBookBloc(
       repository: _Repository(),
       initialState: TextBookInitial.named(book, 0, true, const []),
-      scrollController: ItemScrollController(),
-      positionsListener: ItemPositionsListener.create(),
     );
   });
 
@@ -215,8 +210,6 @@ void main() {
         true,
         const ['מפרש מוסתר', 'מפרש גלוי'],
       ),
-      scrollController: ItemScrollController(),
-      positionsListener: ItemPositionsListener.create(),
     );
     bloc.add(
       const LoadContent(
@@ -243,8 +236,6 @@ void main() {
     bloc = TextBookBloc(
       repository: _Repository(),
       initialState: TextBookInitial.named(hiddenBook, 0, true, const []),
-      scrollController: ItemScrollController(),
-      positionsListener: ItemPositionsListener.create(),
     );
     bloc.add(
       const LoadContent(
@@ -272,8 +263,6 @@ void main() {
     bloc = TextBookBloc(
       repository: _Repository(),
       initialState: TextBookInitial.named(openedBook, 0, true, const []),
-      scrollController: ItemScrollController(),
-      positionsListener: ItemPositionsListener.create(),
     );
     bloc.add(
       const LoadContent(

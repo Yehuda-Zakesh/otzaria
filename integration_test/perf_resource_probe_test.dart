@@ -102,7 +102,7 @@ void main() {
       // ה-controller נצמד רק אחרי שהרשימה נבנתה — ממתינים לו בנפרד.
       final attached = await _waitUntil(
         tester,
-        () => firstTab.scrollController.isAttached,
+        () => firstTab.lines.isAttached,
         timeout: const Duration(seconds: 10),
         what: 'scrollController attached',
         failSilently: true,
@@ -112,9 +112,9 @@ void main() {
         return;
       }
       for (final target in [60, 140, 30, 200]) {
-        if (!firstTab.scrollController.isAttached) break;
-        firstTab.scrollController.scrollTo(
-          index: target,
+        if (!firstTab.lines.isAttached) break;
+        firstTab.lines.scrollToLine(
+          target,
           duration: const Duration(milliseconds: 900),
           curve: Curves.easeInOut,
         );
@@ -340,16 +340,16 @@ void main() {
 
     await _runPhase(rec, 'scroll_all_commentators', () async {
       final tab = tabsBloc.state.currentTab;
-      if (tab is! TextBookTab || !tab.scrollController.isAttached) {
+      if (tab is! TextBookTab || !tab.lines.isAttached) {
         rec.note('scroll_all_commentators_skipped', {
           'reason': 'scrollController not attached',
         });
         return;
       }
       for (final target in [50, 110, 70]) {
-        if (!tab.scrollController.isAttached) break;
-        tab.scrollController.scrollTo(
-          index: target,
+        if (!tab.lines.isAttached) break;
+        tab.lines.scrollToLine(
+          target,
           duration: const Duration(milliseconds: 900),
           curve: Curves.easeInOut,
         );

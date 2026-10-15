@@ -146,7 +146,7 @@ void main() {
 
       expect(outcome.ok, isFalse);
       expect((await library.list()).single.enabled, isFalse);
-      expect((await library.rebuildFromEnabled()).errors, isEmpty);
+      expect((await library.setEnabled(id, false)).ok, isTrue);
     });
 
     test('השהיה מורידה את הנתונים, והחזרה מחזירה אותם', () async {
@@ -237,8 +237,8 @@ void main() {
 
       // הספרייה חזרה למצבה הקודם, ולכן פעולה רגילה עליה מצליחה.
       expect((await library.list()).map((f) => f.name), ['קישורים.csv']);
-      final rebuilt = await library.rebuildFromEnabled();
-      expect(rebuilt.errors, isEmpty);
+      final id = (await library.list()).single.id;
+      expect((await library.setEnabled(id, true)).ok, isTrue);
       expect(await storedLinks(), hasLength(1));
     });
 
@@ -365,8 +365,8 @@ void main() {
       File(path).deleteSync();
 
       // בנייה מחדש (כמו אחרי השהיה) אינה נוגעת בדיסק.
-      final rebuilt = await library.rebuildFromEnabled();
-      expect(rebuilt.errors, isEmpty);
+      final id = (await library.list()).single.id;
+      expect((await library.setEnabled(id, true)).ok, isTrue);
       expect(await storedLinks(), hasLength(1));
     });
   });

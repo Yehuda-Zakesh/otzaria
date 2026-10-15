@@ -4,25 +4,31 @@ library;
 import 'dart:math';
 import 'dart:ui';
 
-/// מחזיר את מספר העמוד (1-מבוסס) שנמצא בראש חלון התצוגה.
-///
-/// pdfrx מחזיר כברירת מחדל את העמוד ה"הכי נראה", כך שבראש עמוד מסוים הוא
-/// מדווח את הקודם (שעדיין תופס נתח גדול מהחלון). מאחר שכל עמוד הוא יחידה
-/// נפרדת והעיגון הוא לראש הדף, העמוד הנוכחי הוא זה שקצהו העליון של החלון
-/// נופל בתוכו. מחזיר null אם אין עמודים.
-/// נקרא בכל פריים; העמודים מסודרים אנכית ולכן החיפוש בינארי.
+/// העמוד הראשון (1-מבוסס) של השורה — עמוד או כפולה — שקצה החלון העליון נופל בה.
+/// null אם אין עמודים. נקרא בכל פריים, ולכן החיפוש בינארי על ראשי העמודים.
 int? pdfTopmostVisiblePage(Rect visibleRect, List<Rect> pageRects) {
   if (pageRects.isEmpty) return null;
   final top = visibleRect.top + 0.5;
   var low = 0, high = pageRects.length;
   while (low < high) {
     final mid = (low + high) >> 1;
-    if (pageRects[mid].bottom > top) {
-      high = mid;
-    } else {
+    if (pageRects[mid].top <= top) {
       low = mid + 1;
+    } else {
+      high = mid;
     }
   }
+  if (low == 0) return 1;
+  // השורה (עמוד או כפולה) שראשה מעל קצה החלון. גובה השורה הוא של העמוד
+  // הגבוה בה, כי בכפולה התחתית של כל עמוד שונה.
+  final rowTop = pageRects[low - 1].top;
+  var first = low - 1;
+  var rowBottom = pageRects[first].bottom;
+  while (first > 0 && pageRects[first - 1].top == rowTop) {
+    first--;
+    rowBottom = max(rowBottom, pageRects[first].bottom);
+  }
+  if (rowBottom > top) return first + 1;
   return low < pageRects.length ? low + 1 : pageRects.length;
 }
 

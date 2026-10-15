@@ -251,7 +251,7 @@ class TikkunLine {
   List<LayoutWord> words;
   LineLayout layout;
 
-  /// אינדקס האסימון הראשון שתרם לשורה; ‎-1 לשורה ריקה.
+  /// אינדקס האסימון הראשון שתרם לשורה; -1 לשורה ריקה.
   int startTokenIdx;
   int? firstVerseNum;
   int? firstChapterNum;

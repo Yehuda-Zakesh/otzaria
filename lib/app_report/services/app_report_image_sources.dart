@@ -3,8 +3,8 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
-import 'package:otzaria/app_report/models/app_report_image.dart';
 import 'package:otzaria/utils/file/file_picker_dialog_options.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 
 /// מקורות התמונות לטופס הדיווח: הלוח, בחירת קובץ וקבצים שנגררו.
@@ -23,7 +23,9 @@ class AppReportImageSources {
     // ב-Windows צילום של כלי החיתוך (DIB) ממומש כ-PNG, וקובץ שהועתק
     // בסייר מופיע גם הוא בפורמט התמונה שלו.
     for (final item in reader.items) {
+      // GIF ראשון: פריט שמציע גם PNG מאבד בו את ההנפשה.
       for (final (format, mimeType, extension) in const [
+        (Formats.gif, 'image/gif', 'gif'),
         (Formats.png, 'image/png', 'png'),
         (Formats.jpeg, 'image/jpeg', 'jpg'),
       ]) {

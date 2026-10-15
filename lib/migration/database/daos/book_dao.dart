@@ -312,11 +312,6 @@ class BookDao {
     ]);
   }
 
-  Future<List<Book>> getBooksByAuthor(String authorName) async {
-    if (!(await _capabilities).hasAuthors) return const [];
-    return _selectMany(_queries['selectByAuthor']!, ['%$authorName%']);
-  }
-
   Future<int> insertBook(
     int categoryId,
     int sourceId,
@@ -434,36 +429,6 @@ class BookDao {
     return db.updatedRows;
   }
 
-  /// Inserts an external content book (content stored externally, metadata in DB).
-  /// External content books store file path, type, size, and last modified.
-  Future<int> insertExternalContentBook({
-    required int categoryId,
-    required int sourceId,
-    required String title,
-    String? heShortDesc,
-    required double orderIndex,
-    bool isPersonal = false,
-    required String filePath,
-    required String fileType,
-    required int fileSize,
-    required int lastModified,
-  }) async {
-    final db = await database;
-    db.execute(_queries['insertExternalContent']!, [
-      categoryId,
-      sourceId,
-      title,
-      heShortDesc,
-      orderIndex,
-      isPersonal ? 1 : 0,
-      filePath,
-      fileType,
-      fileSize,
-      lastModified,
-    ]);
-    return db.lastInsertRowId;
-  }
-
   /// Updates external book metadata (file size and last modified).
   Future<int> updateExternalMetadata(
     int id,
@@ -479,45 +444,11 @@ class BookDao {
     return db.updatedRows;
   }
 
-  /// Gets all external content books.
-  Future<List<Book>> getExternalContentBooks() async {
-    final db = await database;
-    return db
-        .select(_queries['selectExternalContent']!)
-        .toMapList()
-        .map((row) => bookFromRow(row))
-        .toList();
-  }
-
-  /// Gets all personal books.
-  Future<List<Book>> getPersonalBooks() async {
-    final db = await database;
-    return db
-        .select(_queries['selectPersonal']!)
-        .toMapList()
-        .map((row) => bookFromRow(row))
-        .toList();
-  }
-
   /// Gets an external book by its file path.
   Future<Book?> getBookByFilePath(String filePath) async {
     final db = await database;
     final result = db.select(_queries['selectByFilePath']!, [
       filePath,
-    ]).toMapList();
-    if (result.isEmpty) return null;
-    return bookFromRow(result.first);
-  }
-
-  /// Gets an external book by its file path and file type.
-  Future<Book?> getBookByFilePathAndType(
-    String filePath,
-    String fileType,
-  ) async {
-    final db = await database;
-    final result = db.select(_queries['selectByFilePathAndType']!, [
-      filePath,
-      fileType,
     ]).toMapList();
     if (result.isEmpty) return null;
     return bookFromRow(result.first);
@@ -543,66 +474,8 @@ class BookDao {
     return db.updatedRows;
   }
 
-  Future<int> updateAltStructuresFlag(int id, bool hasAltStructures) async {
-    final db = await database;
-    db.execute(_queries['updateAltStructuresFlag']!, [
-      hasAltStructures ? 1 : 0,
-      id,
-    ]);
-    return db.updatedRows;
-  }
-
-  Future<int> updateTeamimFlag(int id, bool hasTeamim) async {
-    final db = await database;
-    db.execute(_queries['updateTeamimFlag']!, [hasTeamim ? 1 : 0, id]);
-    return db.updatedRows;
-  }
-
-  Future<int> updateNekudotFlag(int id, bool hasNekudot) async {
-    final db = await database;
-    db.execute(_queries['updateNekudotFlag']!, [hasNekudot ? 1 : 0, id]);
-    return db.updatedRows;
-  }
-
-  Future<int> deleteBook(int id) async {
-    final db = await database;
-    db.execute(_queries['delete']!, [id]);
-    return db.updatedRows;
-  }
-
-  Future<int> countBooksByCategory(int categoryId) async {
-    final db = await database;
-    return firstIntValue(
-          db.select(_queries['countByCategoryId']!, [categoryId]),
-        ) ??
-        0;
-  }
-
   Future<int> countAllBooks() async {
     final db = await database;
     return firstIntValue(db.select(_queries['countAll']!)) ?? 0;
-  }
-
-  Future<int?> getMaxBookId() async {
-    final db = await database;
-    return firstIntValue(db.select(_queries['getMaxId']!));
-  }
-
-  // Search functionality - kept inline due to dynamic LIKE pattern
-  Future<List<Book>> searchBooks(String query) async {
-    final db = await database;
-    return db
-        .select(
-          '''
-      SELECT * FROM book
-      WHERE (title LIKE ? OR heShortDesc LIKE ?)
-        AND COALESCE(fileType, '') NOT IN ('link', 'url')
-      ORDER BY orderIndex, title
-    ''',
-          ['%$query%', '%$query%'],
-        )
-        .toMapList()
-        .map((row) => bookFromRow(row))
-        .toList();
   }
 }

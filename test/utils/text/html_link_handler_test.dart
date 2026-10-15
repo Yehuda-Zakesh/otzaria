@@ -52,7 +52,7 @@ void main() {
       );
     });
 
-    // ‏`findBookByTitle` משווה `runtimeType` ולא `is`, ולכן בלי העטיפה
+    // `findBookByTitle` משווה `runtimeType` ולא `is`, ולכן בלי העטיפה
     // ב-`toTextBook()` כל קישור `book://` אל ספר-מסמך היה מת — וב-HTML זו
     // הדרך המתועדת לקשר בין ספרים.
     for (final entry in const {
@@ -123,7 +123,7 @@ void main() {
       );
 
       expect(
-        HtmlLinkHandler.findHeaderIndexInToc([root], '0-מפה-מהירה'),
+        HtmlLinkHandler.resolveHeaderPath([root], ['0-מפה-מהירה']).index,
         7,
       );
     });

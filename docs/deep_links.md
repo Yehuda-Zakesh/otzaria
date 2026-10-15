@@ -27,15 +27,22 @@
 |--------|--------|
 | `otzaria://open/calendar` | פותח את לוח השנה (לשונית במסך הכלים) |
 | `otzaria://open/gematria` | פותח את כלי הגימטריה |
+| `otzaria://open/gematria?q=<text>` | פותח את כלי הגימטריה ומחפש פסוקים בערך הגימטרי של `text`. מספר (`?q=26`) מחופש כערך עצמו |
 | `otzaria://open/notes` | פותח הערות אישיות |
 | `otzaria://open/shamor_zachor` | פותח שמור וזכור |
 | `otzaria://open/measurements` | פותח מדות ושיעורים |
 | `otzaria://open/aramaic_dictionary` | פותח מילון ארמי-עברי |
+| `otzaria://open/aramaic_dictionary?q=<text>` | פותח את המילון ומחפש את `text` מארמית לעברית |
+| `otzaria://open/aramaic_dictionary?q=<text>&from=hebrew` | כנ"ל, מעברית לארמית. `from=aramaic`, ערך לא מוכר או בלי `from` — מארמית לעברית |
 | `otzaria://open/acronyms_dictionary` | פותח ראשי תיבות |
+| `otzaria://open/acronyms_dictionary?q=<text>` | פותח ראשי תיבות ומחפש את `text` |
+| `otzaria://open/tikkun_korim` | פותח תיקון קוראים |
+| `otzaria://open/biographies` | פותח ביוגרפיות |
+| `otzaria://open/biographies?q=<text>` | פותח ביוגרפיות ומחפש רב לפי שם או כינוי |
 | `otzaria://open/library` | פותח את מסך הספרייה |
 | `otzaria://open/search` | פותח את מסך החיפוש (ללא הפעלת חיפוש) |
 | `otzaria://open/search?q=<text>` | פותח לשונית חיפוש חדשה ומפעיל חיפוש מיידית בכל הספרים, עם ברירות המחדל (מצב מתקדם, scope `/`) |
-| `otzaria://open/search?q=<text>&mode=<mode>` | כנ"ל, עם קביעת מצב החיפוש ללשונית: `advanced` (מתקדם), `exact` (מדויק) או `fuzzy` (מקורב). ערך לא מוכר מתעלם — מצב מתקדם |
+| `otzaria://open/search?q=<text>&mode=<mode>` | כנ"ל, עם קביעת מצב החיפוש ללשונית: `advanced` (מתקדם), `exact` (מדויק), `fuzzy` (מקורב) או `smart` (חיפוש חכם, בכרטיסייה חכמה). ערך לא מוכר מתעלם — מצב מתקדם |
 | `otzaria://open/settings` | פותח את ההגדרות (הלשונית הנוכחית) |
 | `otzaria://open/settings/design` | פותח הגדרות › מראה |
 | `otzaria://open/settings/text` | פותח הגדרות › כתב |
@@ -52,6 +59,7 @@
 | `otzaria://open/inspection` | פותח את מסך העיון (הספר האחרון שנפתח) |
 | `otzaria://open/sdk` | פותח את הגדרות › כלים (ניהול תוספים) |
 | `otzaria://open/daily_page` | פותח את הדף היומי (PDF תלמוד בבלי בדף הנכון ליום) |
+| `otzaria://open/report` | פותח את טופס הדיווח על התוכנה (תקלה, קריסה, ביצועים או הצעה) |
 | `otzaria://open/tool/<tool-id>` | פותח כרטיסיית כלי בעיון לפי מזהה מלא — תומך גם בתוספים |
 | `otzaria://open/plugin/<plugin-id>` | פותח כרטיסיית תוסף בעיון לפי מזהה התוסף |
 | `otzaria://open/tab/<index>` | מעבר לטאב פתוח לפי מיקומו (0-based). אינו פותח טאב חדש; אם המיקום לא קיים — מתעלם. נתמך לשימוש חיצוני; המיקום נפתר מול החלון הראשי |
@@ -75,6 +83,15 @@ otzaria://open/shamor_zachor
 otzaria://open/measurements
 otzaria://open/aramaic_dictionary
 otzaria://open/acronyms_dictionary
+otzaria://open/acronyms_dictionary?q=%D7%A8%D7%A9%22%D7%99
+otzaria://open/aramaic_dictionary?q=%D7%92%D7%91%D7%A8%D7%90
+otzaria://open/aramaic_dictionary?q=%D7%90%D7%99%D7%A9&from=hebrew
+otzaria://open/gematria?q=%D7%90%D7%9E%D7%AA
+otzaria://open/gematria?q=26
+otzaria://open/tikkun_korim
+otzaria://open/biographies
+otzaria://open/biographies?q=%D7%90%D7%95%D7%A0%D7%A7%D7%9C%D7%95%D7%A1
+otzaria://open/report
 otzaria://open/library
 otzaria://open/history
 otzaria://open/bookmarks
@@ -103,12 +120,15 @@ otzaria://open/book/1234?index=42&m=%D7%91%D7%A8%D7%90%D7%A9%D7%99%D7%AA
 otzaria://open/search?q=%D7%91%D7%A8%D7%90%D7%A9%D7%99%D7%AA
 otzaria://open/search?q=%D7%91%D7%A8%D7%90%D7%A9%D7%99%D7%AA&mode=exact
 otzaria://open/search?q=%D7%91%D7%A8%D7%90%D7%A9%D7%99%D7%AA&mode=fuzzy
+otzaria://open/search?q=%D7%91%D7%A8%D7%90%D7%A9%D7%99%D7%AA&mode=smart
 otzaria://open/pdf/120
 otzaria://open/pdf/120?index=17
 otzaria://open/detection?q=%D7%91%D7%A8%D7%90%D7%A9%D7%99%D7%AA
 ```
 
 **הערות על קידוד:** טקסט בעברית ב‑`q=` ו-`m=` מומלץ לקודד URL‑encoded (UTF‑8). עם זאת, הראוטר סלחני: עברית גולמית לא-מקודדת עוברת כמו שהיא, ואחוזי-קידוד בקידוד ANSI ישן (Windows‑1255 / ISO‑8859‑8 / CP862 — כפי שמייצרים מאקרו/VBA ותיקים של Office, למשל `?q=%F9%EC%E5%ED`) מזוהים ומפוענחים אוטומטית. ערך `index` שלילי או לא מספרי מתעלם — הספר ייפתח בתחילתו. `q=` ריק מתעלם. `m=` ריק או רווחים בלבד מתעלם. לגבי `detection?q=` — חובה לספק ערך לא-ריק; קישור ללא `q=` מתעלם לחלוטין.
+
+**`q=` בכלים:** נתמך בביוגרפיות, בראשי תיבות, במילון הארמי ובגימטריה — הכלים שמסכיהם יודעים לקבל טקסט (`ToolQuery.supportedToolIds`). בשאר הכלים הפרמטר מתעלם והכלי נפתח כרגיל. אותו פרמטר עובד גם בצורה המלאה, למשל `otzaria://open/tool/builtin.gematria?q=26`. כשהכלי כבר פתוח הכרטיסיה שלו ממוקדת והחיפוש מחליף את מה שהיה בשדה; כשהוא עוד נטען, החיפוש רץ בסוף הטעינה.
 
 **הבדל בין `mark` ל-`m=`:**
 - `?mark` — מדגיש את **כל רקע המקטע** בצהוב (הדגשת שורה שלמה).
@@ -436,18 +456,19 @@ _externalActivationWatchSub = queueFile.parent.watch().listen((event) {
 | variant | מאיפה | תוכן |
 |---------|--------|------|
 | `OpenScreenAction(Screen)` | `otzaria://open/library`, ... | מסך עליון |
-| `OpenToolAction(String toolId)` | `otzaria://open/calendar`, `/daily`, `/shamor_zachor`, `/measurements`, `/aramaic_dictionary`, `/acronyms_dictionary`, `/gematria`, `/notes`, `/tool/<id>`, ... | לשונית כלי |
+| `OpenToolAction(String toolId, {ToolQuery? query})` | `otzaria://open/calendar`, `/shamor_zachor`, `/measurements`, `/tikkun_korim`, `/biographies`, `/aramaic_dictionary`, `/acronyms_dictionary`, `/gematria`, `/notes`, `/tool/<id>`, ... | לשונית כלי; `query` מ-`q=`/`from=` לכלים שתומכים בו |
 | `OpenPluginAction(String pluginId)` | `otzaria://open/plugin/<plugin-id>` | פתיחת תוסף ישירות (גם לא-מוצמד) |
 | `SwitchToTabAction(int index)` | `otzaria://open/tab/<index>` | מעבר לטאב פתוח קיים לפי מיקומו |
 | `OpenBookAction(int bookId, {bool isUserBook, int? index, String? searchQuery, bool markSection, String? markText})` | `otzaria://open/book/<id>?source=user&index=<n>&q=<text>&mark&m=<text>` | ספר בעיון; `source=user` נדרש לספר אישי, וקישור ללא `source` נשאר רשמי לתאימות לאחור |
 | `OpenSettingsTabAction({SettingsTab? tab})` | `otzaria://open/settings`, `/settings/design`, `/settings/text`, ... | פתיחת הגדרות, אופציונלית עם ניווט לטאב |
 | `OpenHistoryAction()` | `otzaria://open/history` | דיאלוג היסטוריה |
 | `OpenBookmarksAction()` | `otzaria://open/bookmarks` | דיאלוג סימניות |
-| `RunSearchAction(String query, {SearchMode? mode})` | `otzaria://open/search?q=<text>&mode=<advanced\|exact\|fuzzy>` | חיפוש מלא בלשונית חדשה, אופציונלית עם מצב חיפוש |
+| `RunSearchAction(String query, {SearchMode? mode, bool smart})` | `otzaria://open/search?q=<text>&mode=<advanced\|exact\|fuzzy\|smart>` | חיפוש מלא בלשונית חדשה, אופציונלית עם מצב חיפוש; `smart` פותח כרטיסיית חיפוש חכם |
 | `RunDetectionAction(String query)` | `otzaria://open/detection?q=<text>`, `otzaria://open/detection` | פתיחת דיאלוג איתור מקורות (ריק או עם טקסט) |
 | `OpenInspectionAction()` | `otzaria://open/inspection` | מסך העיון (ספר אחרון) |
 | `OpenSdkAction()` | `otzaria://open/sdk` | פתיחת דיאלוג ניהול תוספים |
 | `OpenDailyPageAction()` | `otzaria://open/daily_page` | פתיחת ה-PDF של תלמוד בבלי בדף הנכון ליום |
+| `OpenAppReportAction()` | `otzaria://open/report` | פתיחת טופס הדיווח על התוכנה |
 | `ShowInfoAction(InfoTopic topic, {int errorLimit, int fileLimit})` | `otzaria://info`, `otzaria://info/app`, `/library`, `/folders?files=<n>`, `/plugins`, `/errors?limit=<n>` | שאילתת מידע — אוסף דוח JSON ומציג בפופאפ, ללא ניווט |
 | `InstallPluginAction(PluginStoreInstallRequest)` | `otzaria://plugin/install?url=...` | התקנת תוסף מהחנות |
 | `InstallLocalPluginAction(String archivePath)` | `otzaria://plugin/install-local?path=<abs>` | התקנת תוסף מקובץ `.otzplugin` מקומי (לחיצה כפולה על קובץ משויך) |
@@ -464,6 +485,7 @@ _externalActivationWatchSub = queueFile.parent.watch().listen((event) {
 3. `_dispatchExternalUriAction` עם `switch` יחיד על ה‑sealed class:
    - **`OpenScreenAction`** — שולח `NavigateToScreen` ל‑NavigationBloc.
    - **`OpenToolAction`** — קורא ל‑[`openToolTabById`](../lib/tools/open_tool_tab.dart), שפותח `ToolTab` דרך `OpenOrFocusTab` ומנווט ל‑`Screen.reading`. ה‑`dedupeKey` (`tool:<id>`) ממקד כרטיסיה קיימת במקום להכפיל. אין תור pending ואין retry — כשמערכת התוספים עדיין נטענת הכרטיסיה נפתחת אופטימיסטית ו‑`ToolTabScreen` מציג טעינה.
+     `query` מופקד ב‑`ToolTab.queryInbox` ([`ToolQueryInbox`](../lib/tools/tool_query.dart)). כשהכלי כבר פתוח, `TabsBloc` מעביר את הבקשה מהטאב הנכנס לטאב (או לחלונית) הקיים לפני שהנכנס נזרק. מסך הכלי (`ToolQueryConsumer`) לוקח את הבקשה אחרי הפריים הראשון, או בסוף טעינת הנתונים, ובכל בקשה חדשה. הבקשה נלקחת פעם אחת ואינה נשמרת עם הטאב, כך שבנייה מחדש של המסך אינה מריצה אותה שוב.
    - **`OpenPluginAction`** — זהה ל‑`OpenToolAction`: `openToolTabById(pluginId)`. תוסף שלא נמצא, מושבת, מוסתר מהממשק או חסום במצב מנותק — מציג `UiSnack.showError` עם הסיבה המדויקת ([`lookupTool`](../lib/tools/tool_catalog_entry.dart)).
    - **`OpenToolsLauncherAction`** — פותח את פאנל הכלים דרך `ToolsLauncherController.instance.open()`, בלי לנווט.
    - **`OpenSettingsTabAction`** — שולח `NavigateToScreen(Screen.settings)`. אם `tab != null` — קורא ל‑`_settingsScreenController.openTab(tab)` לניווט לטאב הרצוי.
@@ -471,6 +493,7 @@ _externalActivationWatchSub = queueFile.parent.watch().listen((event) {
    - **`OpenBookmarksAction`** — פותח `BookmarksDialog` דרך `showDialog`.
    - **`OpenBookAction`** — `await DataRepository.instance.library`, מחפש לפי `b.id`. אם נמצא — `openBook(context, book, index ?? 0, searchQuery ?? '', markSection: markSection, markText: markText)`. אם לא — `UiSnack.showError`.
    - **`RunSearchAction`** — יוצר `SearchingTab` חדש עם הקוורי, מוסיף ל‑`HistoryBloc` ול‑`TabsBloc`, ומנווט ל‑`Screen.search`. ה‑`UpdateSearchQuery` מופעל אוטומטית מ‑`TantivyFullTextSearch.initState` ברגע שהלשונית מוצגת.
+   - **`OpenAppReportAction`** — `showAppReportDialog`, נדחה לפוסט‑פריים מאותה סיבה כמו `ShowInfoAction`. כל עוד טופס פתוח, קישור נוסף מתעלם.
    - **`ShowInfoAction`** — `AppInfoService.collect` ואז `showAppInfoDialog`. אין ניווט ואין שינוי מצב. הדיאלוג נדחה לפוסט‑פריים ואינו מומתן, משתי סיבות: המתנה לסגירתו הייתה חוסמת את `_processPendingExternalActivations` (שמתנקז רק בעקבות אירוע קובץ, כך ש‑URI שנכנס בזמן שהפופאפ פתוח לא היה מטופל), וה‑`Navigator.pop` של דיאלוג איתור מקורות היה סוגר את הפופאפ הזה במקום את עצמו.
    - **`InstallPluginAction`** — `InstallRemotePluginRequested` ל‑PluginSystemBloc (ללא ניווט).
    - **`InstallLocalPluginAction`** — `InstallPluginRequested(archivePath)` ל‑PluginSystemBloc. הדיאלוג נפתח אוטומטית דרך `BlocListener` כשמתקבל `PluginSystemInstallRequiresPermissions`.
@@ -560,8 +583,11 @@ case OpenMyFeatureAction():
 | [`lib/bookmarks/view/bookmark_screen.dart`](../lib/bookmarks/view/bookmark_screen.dart) | `BookmarksDialog` — נפתח דרך `showDialog` |
 | [`lib/tools/open_tool_tab.dart`](../lib/tools/open_tool_tab.dart) | `openToolTab` / `openToolTabById` — פתיחת כרטיסיית כלי בעיון |
 | [`lib/tools/tool_catalog_entry.dart`](../lib/tools/tool_catalog_entry.dart) | `buildToolCatalog` / `lookupTool` — קטלוג הכלים וסיבות אי-זמינות |
+| [`lib/tools/tool_query.dart`](../lib/tools/tool_query.dart) | `ToolQuery` / `ToolQueryInbox` / `ToolQueryConsumer` — העברת `q=` למסך הכלי |
+| [`lib/app_report/view/app_report_dialog.dart`](../lib/app_report/view/app_report_dialog.dart) | `showAppReportDialog` — טופס הדיווח על התוכנה |
 | [`windows/runner/main.cpp`](../windows/runner/main.cpp) | זיהוי single‑instance + העברת ארגומנטים לתור (לא רישום); `IsCliInvocation` מזהה `pack-plugin` ו‑`info` ומריץ אותם headless |
 | [`test/core/external_uri_router_test.dart`](../test/core/external_uri_router_test.dart) | בדיקות הראוטר האחיד |
+| [`test/tools/tool_query_test.dart`](../test/tools/tool_query_test.dart) | החלת `q=` במסכי הכלים — לפני הבנייה, בזמן הטעינה ובכלי שכבר מוצג |
 | [`test/core/info/`](../test/core/info/) | בדיקות נושאי המידע, ציר הזמן, זיהוי החשבון, פענוח הלוג, חוזה ה-JSON, ה-CLI והפופאפ |
 | [`test/core/cli_command_test.dart`](../test/core/cli_command_test.dart) | אכיפת שקילות הנרמול מול `IsCliInvocation` ב-`main.cpp` |
 | [`test/plugins/services/plugin_store_link_parser_test.dart`](../test/plugins/services/plugin_store_link_parser_test.dart) | בדיקות פרסר התקנת תוסף |

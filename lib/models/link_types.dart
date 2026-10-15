@@ -214,9 +214,27 @@ class LinkTypes {
   /// מנרמל ערך connectionType להשוואה: מקורות שונים מספקים רישיות שונה
   /// (DB באותיות גדולות, JSON באותיות קטנות) ומפרידים ברווח במקום בקו תחתון.
   static String normalize(String? connectionType) {
+    // נקרא לכל קישור בספר; ערכי ה-DB כבר קנוניים ולכן מדלגים על ההמרות.
+    if (connectionType != null && _isCanonical(connectionType)) {
+      return connectionType;
+    }
     final trimmed = connectionType?.trim() ?? '';
     if (trimmed.isEmpty) return '';
-    return trimmed.toUpperCase().replaceAll(RegExp(r'[\s-]+'), '_');
+    return trimmed.toUpperCase().replaceAll(_separators, '_');
+  }
+
+  static final RegExp _separators = RegExp(r'[\s-]+');
+
+  /// לא ריק, ורק A-Z, 0-9 ו-`_`: [normalize] היה מחזיר אותו ללא שינוי.
+  static bool _isCanonical(String value) {
+    if (value.isEmpty) return false;
+    for (var i = 0; i < value.length; i++) {
+      final c = value.codeUnitAt(i);
+      final isUpper = c >= 0x41 && c <= 0x5A;
+      final isDigit = c >= 0x30 && c <= 0x39;
+      if (!isUpper && !isDigit && c != 0x5F) return false;
+    }
+    return true;
   }
 
   /// הסוג הקנוני שלפיו מקבצים וסופרים בפאנל הקישורים. סוג לא-מוכר נשמר כמות
@@ -233,15 +251,6 @@ class LinkTypes {
     final normalized = normalize(connectionType);
     if (normalized.isEmpty) return hebrewLabels[other]!;
     return hebrewLabels[normalized] ?? connectionType!.trim();
-  }
-
-  /// האם הקישור הוא קשר עיון/הפניה (לא מפרש ולא SOURCE הווירטואלי):
-  /// reference, quotation, mesorat hashas, ein mishpat, mishnah in talmud,
-  /// related, other.
-  static bool isReferenceLikeLink(String? connectionType) {
-    if (connectionType == null) return false;
-    final normalized = normalize(connectionType);
-    return normalized != source && !dependentTextTypes.contains(normalized);
   }
 
   /// `SOURCE` הוא קשר וירטואלי שנבנה בשאילתת inverse ואינו נשמר כשורת link.

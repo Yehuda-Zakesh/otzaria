@@ -26,6 +26,17 @@ const Map<String, String> apiCallToPermissionHint = {
   'library.getLinkTargetsSummary': pluginLinksReadPermission,
   'library.refreshUserBooks': pluginLibraryRefreshPermission,
 
+  // search.* — סשן של כפתור בשדה חיפוש
+  'search.setFieldText': pluginSearchFieldActionsPermission,
+  'search.setFieldActionState': pluginSearchFieldActionsPermission,
+  'search.endFieldSession': pluginSearchFieldActionsPermission,
+
+  // reader.* — בחירת קורא חלופי דורשת גם הרשאות ספרייה בפועל.
+  'reader.getDefaultTextReader': 'reader.open',
+  'reader.setDefaultTextReader': 'reader.open',
+  'reader.reportTextReaderLocation': 'reader.open',
+  'reader.setTextReaderFontSize': 'reader.open',
+
   // app.*
   'app.getUserEmail': 'app.user_email.read',
   'app.openUrl': 'app.open_url',
@@ -42,6 +53,7 @@ const Map<String, String> apiCallToPermissionHint = {
 
   // feedback.*
   'feedback.sendEmail': 'feedback.send_email',
+  'feedback.submitBookCorrection': 'feedback.send_email',
 
   // shortcut.*
   'shortcut.create': 'ui.create_shortcut',
@@ -112,6 +124,7 @@ const Map<String, String> apiCallToPermissionHint = {
   'reader.getHighlightCapabilities': 'reader.open',
   'reader.closeTab': 'reader.open',
   'reader.activateTab': 'reader.open',
+  'reader.printRange': 'reader.open',
 
   // workspace.*
   'workspace.list': pluginWorkspaceReadPermission,
@@ -181,9 +194,16 @@ const pluginLibraryRefreshPermission = 'library.refresh';
 /// (`contributes.startup.libraryBooks`). לחיצה על ספר כזה נמסרת לתוסף.
 const pluginLibraryBooksProvidePermission = 'library.books.provide';
 
+/// כפתורי תוסף בתוך שדות חיפוש (`contributes.startup.searchFieldActions`)
+/// וכתיבת טקסט לשדה בסשן שהמשתמש פתח בלחיצה.
+const pluginSearchFieldActionsPermission = 'search.field_actions';
+
 /// הרשאה לפתיחת דף של תוסף **אחר** (`plugin.openOther`). נפרדת מ-navigation.write
 /// כי היא מפעילה את ה-WebView של תוסף שלישי, ולא רק מזיזה את המשתמש בין מסכים.
 const pluginOpenOtherPermission = 'plugin.open_other';
+
+/// החלטת המשתמש על כפתור '+'; נוצרת רק אחרי בקשת רישום של התוסף.
+const pluginNewTabPagePermission = 'plugin.new_tab_page';
 
 /// הרשאה להפעלת מנוע התוסף ברקע ללא פתיחת הדף שלו — שער להפעלה העצלה
 /// (`contributes.startup`): המנוע קם רק בעקבות אירוע או לחיצה שהוצהרו.
@@ -306,6 +326,9 @@ const pluginValidPermissions = <String>[
 
   /// הוספת שורות סטטיות לדיאלוג החיפוש.
   'search.dialog',
+
+  /// כפתורי תוסף בתוך שדות חיפוש.
+  pluginSearchFieldActionsPermission,
 
   // ===== קורא =====
   /// פתיחת ספרים במצב קריאה

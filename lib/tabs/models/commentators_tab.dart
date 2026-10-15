@@ -4,9 +4,8 @@ import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 /// טאב המציג מפרשים לספר טקסט ספציפי עם בחירת פרק/פסוק עצמאית.
 ///
@@ -15,10 +14,16 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 class CommentatorsTab extends OpenedTab {
   final TextBookTab sourceTab;
   SourceTabOwnership? _sourceTabOwnership;
-  late final TextBookBloc bloc;
-  final ItemScrollController scrollController = ItemScrollController();
-  final ItemPositionsListener positionsListener =
-      ItemPositionsListener.create();
+
+  /// נבנה בגישה הראשונה, כמו ב-[TextBookTab.bloc]: שולחנות עבודה מפענחים
+  /// את כל הטאבים בכל שינוי.
+  TextBookBloc get bloc => _bloc ??= _createBloc();
+  TextBookBloc? _bloc;
+  late final TextBookInitial _initialState;
+  bool _isDisposed = false;
+
+  /// ה-state הנוכחי, בלי לבנות bloc לטאב שטרם הוצג.
+  TextBookState get blocState => _bloc?.state ?? _initialState;
 
   /// השורה שנבחרה ב-sourceTab בעת הפתיחה (אם הייתה), null אם לא הייתה בחירה
   final int? initialSelectedLine;
@@ -31,15 +36,13 @@ class CommentatorsTab extends OpenedTab {
   final int startIndex;
 
   static int? _resolveSelectedLine(TextBookTab tab) {
-    final s = tab.bloc.state;
+    final s = tab.blocState;
     return s is TextBookLoaded ? s.selectedIndex : null;
   }
 
   static int _resolveStartIndex(TextBookTab tab) {
-    final s = tab.bloc.state;
-    if (s is! TextBookLoaded) return tab.index;
-    return s.selectedIndex ??
-        (s.visibleIndices.isNotEmpty ? s.visibleIndices.first : tab.index);
+    final s = tab.blocState;
+    return (s is TextBookLoaded ? s.selectedIndex : null) ?? tab.index;
   }
 
   CommentatorsTab({
@@ -57,29 +60,20 @@ class CommentatorsTab extends OpenedTab {
            initialSelectedLine ?? _resolveSelectedLine(sourceTab),
        startIndex = startIndex ?? _resolveStartIndex(sourceTab),
        super('מפרשים | ${sourceTab.title}') {
-    final sourceState = sourceTab.bloc.state;
+    final sourceState = sourceTab.blocState;
     if (sourceState is TextBookLoaded &&
         sourceState.activeCommentators.isNotEmpty) {
       selectedCommentators = List<String>.from(sourceState.activeCommentators);
     }
 
-    // ב-production תמיד נבנה bloc חדש; blocOverride קיים רק לטסטים שצריכים
-    // להזריק bloc עם repository מזויף ולהביאו ל-Loaded ללא תשתית קבצים אמיתית.
-    bloc =
-        blocOverride ??
-        TextBookBloc(
-          repository: TextBookRepository(
-            fileSystem: FileSystemData.instance,
-          ),
-          initialState: TextBookInitial.named(
-            sourceTab.book,
-            this.startIndex,
-            false, // openLeftPane
-            const [], // commentators — ייטען אחרי availableCommentators
-          ),
-          scrollController: scrollController,
-          positionsListener: positionsListener,
-        );
+    _initialState = TextBookInitial.named(
+      sourceTab.book,
+      this.startIndex,
+      false, // openLeftPane
+      const [], // commentators — ייטען אחרי availableCommentators
+    );
+    // blocOverride קיים רק לטסטים שצריכים bloc עם repository מזויף.
+    _bloc = blocOverride;
     if (disposeSourceTabOnDispose) {
       _sourceTabOwnership = SourceTabOwnership(sourceTab)..retain();
     }
@@ -140,6 +134,15 @@ class CommentatorsTab extends OpenedTab {
             ? null
             : List<String>.from(selectedCommentators!);
 
+  TextBookBloc _createBloc() {
+    final created = TextBookBloc(
+      repository: TextBookRepository(fileSystem: FileSystemData.instance),
+      initialState: _initialState,
+    );
+    if (_isDisposed) created.close();
+    return created;
+  }
+
   /// יורש את הבעלות על [sourceTab] כשטאב הספר שהחזיק אותו נסגר.
   ///
   /// ⚠️ בלי זה שחרור טאב הספר משאיר את הכרטיסיה הזו מצביעה על `bloc`
@@ -151,16 +154,22 @@ class CommentatorsTab extends OpenedTab {
 
   @override
   void dispose() {
-    bloc.close();
+    _isDisposed = true;
+    _bloc?.close();
     _sourceTabOwnership?.release();
     _sourceTabOwnership = null;
     super.dispose();
   }
 
+  /// השורה הראשונה של הבחירה בניווט הכרטיסיה. ה-bloc שלה אינו גולל,
+  /// ולכן `visibleIndices` נשאר על מיקום הפתיחה.
+  int? navigatedIndex;
+
   /// המיקום שהכרטיסיה מוצגת בו כרגע. נופל ל-[startIndex] כל עוד ה-bloc
   /// לא נטען — ולא ל-`sourceTab.index`, שהוא המיקום של הספר ולא שלה.
   int get currentIndex {
-    final s = bloc.state;
+    if (navigatedIndex != null) return navigatedIndex!;
+    final s = blocState;
     if (s is TextBookLoaded && s.visibleIndices.isNotEmpty) {
       return s.visibleIndices.first;
     }

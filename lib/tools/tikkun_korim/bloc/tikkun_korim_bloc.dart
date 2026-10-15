@@ -14,6 +14,7 @@ import 'package:otzaria/tools/tikkun_korim/repository/tikkun_korim_repository.da
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_settings.dart';
 import 'package:otzaria/tools/tikkun_korim/view/stam_roof_metrics.dart';
 import 'package:otzaria/tools/tikkun_korim/view/stam_width_measurer.dart';
+import 'package:otzaria/utils/calendar_days.dart';
 import 'package:otzaria/utils/text/numeral_formats.dart';
 
 part 'tikkun_korim_event.dart';
@@ -28,7 +29,7 @@ String defaultUpcomingParashaName(
       ? 0
       : (DateTime.saturday - date.weekday) % 7;
   final shabbat = JewishCalendar.fromDateTime(
-    date.add(Duration(days: daysUntilShabbat)),
+    addCalendarDays(date, daysUntilShabbat),
   )..inIsrael = inIsrael;
   return (HebrewDateFormatter()..hebrewFormat = true).formatParsha(shabbat);
 }
@@ -80,9 +81,6 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
     on<TikkunBookmarkAdded>(_onBookmarkAdded);
     on<TikkunBookmarkRemoved>(_onBookmarkRemoved);
     on<TikkunBookmarkOpened>(_onBookmarkOpened);
-    on<TikkunScrollHandled>(
-      (_, emit) => emit(state.copyWith(clearScroll: true)),
-    );
   }
 
   /// רוחב הטור נגזר מן השיטה, ולכן הוא חלק ממודל הרוחב שהעימוד נחתך לפיו.
@@ -135,16 +133,12 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
     TikkunPosition? target,
   }) async {
     final requestId = ++_requestId;
+    // מכאן העמודים אינם תואמים עוד את הניווט — דיווחי שורה עליהם נדחים.
+    emit(state.copyWith(isLoading: true, clearError: true));
     repository.useDecalogueTaam(state.settings.decalogueTaam);
     await measureRoofs(state.settings.stamFontFamily);
     if (requestId != _requestId || emit.isDone) return;
-    emit(
-      state.copyWith(
-        isLoading: true,
-        clearError: true,
-        lineWidthEm: _widths.lineWidthEm,
-      ),
-    );
+    emit(state.copyWith(lineWidthEm: _widths.lineWidthEm));
     try {
       switch (state.nav.section) {
         case TikkunSection.torah:
@@ -419,10 +413,7 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
     Emitter<TikkunKorimState> emit,
   ) async {
     if (event.section == state.nav.section) return;
-    var nav = state.nav.copyWith(
-      section: event.section,
-      currentColumnIndex: 0,
-    );
+    var nav = state.nav.copyWith(section: event.section);
     switch (event.section) {
       case TikkunSection.neviim:
       case TikkunSection.ketuvim:
@@ -441,8 +432,8 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
         break;
     }
     emit(state.copyWith(nav: nav));
-    await _persistNav();
     await _reload(emit);
+    await _persistNav();
   }
 
   Future<void> _onMethodChanged(
@@ -496,8 +487,8 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
         ),
       );
     }
-    await _persistNav();
     await _reload(emit);
+    await _persistNav();
   }
 
   Future<void> _onParashaChanged(
@@ -510,8 +501,8 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
         clearAliya: true,
       ),
     );
-    await _persistNav();
     await _reload(emit);
+    await _persistNav();
   }
 
   Future<void> _onAliyaSelected(
@@ -585,8 +576,8 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
     Emitter<TikkunKorimState> emit,
   ) async {
     emit(state.copyWith(nav: state.nav.copyWith(haftarahId: event.haftarahId)));
-    await _persistNav();
     await _reload(emit);
+    await _persistNav();
   }
 
   Future<void> _onReadingChanged(
@@ -596,8 +587,8 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
     emit(
       state.copyWith(nav: state.nav.copyWith(torahReadingId: event.readingId)),
     );
-    await _persistNav();
     await _reload(emit);
+    await _persistNav();
   }
 
   Future<void> _onColumnSelected(
@@ -650,7 +641,15 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
                 state.nav.section == TikkunSection.torahReadings) &&
             (previous.nusach != event.settings.nusach ||
                 previous.nusachLand != event.settings.nusachLand));
-    if (needsReload) await _reload(emit);
+    if (!needsReload) return;
+    // השורות נשברות מחדש — חוזרים לפסוק המוצג, לא להיסט בשורות.
+    final position = _position;
+    await _reload(
+      emit,
+      target: position == null
+          ? null
+          : (verseKey: position.verseKey, lineOffset: 0),
+    );
   }
 
   void _onPeekToggled(
@@ -666,7 +665,9 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
     Emitter<TikkunKorimState> emit,
   ) async {
     final lines = state.currentLines;
-    if (event.lineIdx < 0 || event.lineIdx >= lines.length) return;
+    if (state.isLoading || event.lineIdx < 0 || event.lineIdx >= lines.length) {
+      return;
+    }
     final position = tikkunPositionAt(
       state.pages,
       state.nav.currentColumnIndex,
@@ -787,9 +788,13 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
     final target = saved.position;
     // נפתחים בשיטה הנוכחית; ההיסט בשורות תקף רק בשיטה שבה נשמרה הסימניה.
     final sameMethod = saved.methodId == state.nav.methodId;
+    // הטור מתחלף רק עם העמודים החדשים — עד אז נשאר מוצג העמוד הנוכחי.
     emit(
       state.copyWith(
-        nav: saved.copyWith(methodId: state.nav.methodId),
+        nav: saved.copyWith(
+          methodId: state.nav.methodId,
+          currentColumnIndex: state.nav.currentColumnIndex,
+        ),
         clearAliya: true,
       ),
     );

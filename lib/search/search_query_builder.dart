@@ -128,13 +128,6 @@ class SearchQueryBuilder {
   static bool isPluginControllableOptionId(String id) =>
       pluginOptionIdByWordOptionKey.containsValue(id);
 
-  static String? wordOptionKeyForPluginOptionId(String id) {
-    for (final entry in pluginOptionIdByWordOptionKey.entries) {
-      if (entry.value == id) return entry.key;
-    }
-    return null;
-  }
-
   /// האם אפשרויות פר-מילה מבקשות חיפוש מנוקד (מפתח ניקוד/טעמים דלוק
   /// באחת המילים). קובע אם מותר למחוק ניקוד מהשאילתה לפני החיפוש.
   static bool optionsRequestVocalized(Map<String, Map<String, bool>> options) {
@@ -211,10 +204,6 @@ class SearchQueryBuilder {
       }
     }
     return true;
-  }
-
-  static bool usesAdvancedParameters(SearchMode searchMode) {
-    return searchMode == SearchMode.advanced;
   }
 
   /// בונה מפת אפשרויות חיפוש אפקטיבית מתוך הגדרות גלובליות.
@@ -369,19 +358,4 @@ class SearchQueryBuilder {
   /// המקף העברי (־) והמקף הלועזי (-) מומרים לרווח; רווחים מרובים מצומצמים.
   static String sanitizeQuery(String query) =>
       engine.sanitizeQuery(query: query);
-
-  static Map<String, String> effectiveSpacingValues({
-    required int wordCount,
-    required Map<String, String> spacingValues,
-    required int searchDistance,
-  }) {
-    if (spacingValues.isNotEmpty || searchDistance <= 0 || wordCount < 2) {
-      return spacingValues;
-    }
-
-    return {
-      for (var index = 0; index < wordCount - 1; index++)
-        '$index-${index + 1}': '$searchDistance',
-    };
-  }
 }

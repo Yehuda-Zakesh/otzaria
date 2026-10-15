@@ -4,8 +4,8 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:otzaria/widgets/feedback/otzaria_empty_state.dart';
 import 'package:otzaria/theme/app_tokens.dart';
-import 'package:otzaria/text_book/models/commentator_group.dart';
-import 'package:otzaria/text_book/utils/category_settings_utils.dart';
+import 'package:otzaria/book_common/models/commentator_group.dart';
+import 'package:otzaria/book_common/utils/category_settings_utils.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart';
 import 'package:otzaria/widgets/dialogs/category_commentators_dialog.dart';
 import 'package:otzaria/widgets/lists/filter_chips_widget.dart';
@@ -27,7 +27,6 @@ class CommentatorsSelectionPanel extends StatefulWidget {
   final ValueChanged<List<String>> onSelectionChanged;
   final VoidCallback? onSelectionApplied;
   final String bookTitle;
-  final Widget? emptyState;
 
   /// מפרשים "נדירים" שמוסתרים מהרשימה, אלא אם הם ב-[lineRelevantCommentators].
   final Set<String> rareCommentators;
@@ -64,7 +63,6 @@ class CommentatorsSelectionPanel extends StatefulWidget {
     required this.onSelectionChanged,
     required this.bookTitle,
     this.onSelectionApplied,
-    this.emptyState,
     this.rareCommentators = const {},
     this.lineRelevantCommentators = const {},
     this.typeChipKeys = const [],
@@ -556,12 +554,11 @@ class _CommentatorsSelectionPanelState
   @override
   Widget build(BuildContext context) {
     if (widget.groups.every((group) => group.commentators.isEmpty)) {
-      return widget.emptyState ??
-          const Center(
-            child: Text(
-              'אין מפרשים',
-            ),
-          );
+      return const OtzariaEmptyState(
+        isCompact: true,
+        icon: OtzariaIcons.links_24_regular,
+        title: 'אין מפרשים',
+      );
     }
 
     final delegate = NavPanelSearchDelegate(
@@ -606,7 +603,7 @@ class _CommentatorsSelectionPanelState
                       padding: EdgeInsets.only(top: 24.0),
                       child: OtzariaEmptyState(
                         isCompact: true,
-                        icon: OtzariaIcons.search_in_the_library_24_regular,
+                        icon: OtzariaIcons.search_in_library_24_regular,
                         title: 'לא נמצאו מפרשים תואמים',
                       ),
                     );

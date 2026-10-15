@@ -259,43 +259,6 @@ void main() {
     }
   });
 
-  test('הנתיב עם שם הספר זהה ל-qualifyAltTocReference', () {
-    const book = AltTocBook(1, 'ספר חמש', 1);
-    AltTocIndexEntry entry(String text, [AltTocIndexEntry? parent]) =>
-        AltTocIndexEntry(
-          id: 0,
-          book: book,
-          parent: parent,
-          text: text,
-          segment: 0,
-          level: 0,
-          dbLineId: 0,
-          ownTokens: const [],
-        );
-    final root = entry('פרק א');
-    final titled = entry('ספר');
-    final empty = entry('', root);
-    final entries = [
-      root,
-      entry('סימן ב', root),
-      entry('ספר חמש'),
-      entry('חמש', titled),
-      entry('חמש סימן', titled),
-      entry('ספר חמשה', root),
-      empty,
-      entry('סעיף', empty),
-      entry('', entry('')),
-    ];
-    final references = AltTocQualifiedReferences();
-    for (final e in entries) {
-      expect(
-        references.of(e),
-        qualifyAltTocReference(book.title, e.reference),
-        reason: e.reference,
-      );
-    }
-  });
-
   group('הרשימה הסופית זהה עם חיתוך ב-worker ובלעדיו', () {
     tearDown(resetSeededLibrary);
 

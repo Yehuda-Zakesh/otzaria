@@ -283,31 +283,706 @@ final class StaleHashGateTests: XCTestCase {
 
 final class FormattingTests: XCTestCase {
     func testHumanSizeMatchesTheWindowsAssistant() {
-        XCTAssertEqual(humanSize(500), "1 קילו")
-        XCTAssertEqual(humanSize(5 * 1_048_576), "5 מגה")
-        XCTAssertEqual(humanSize(2_012_390_081), "1.8 ג׳יגה")
+        XCTAssertEqual(humanSize(500, english: true), "1\u{00A0}KB")
+        XCTAssertEqual(humanSize(5 * 1_048_576, english: true), "5\u{00A0}MB")
+        XCTAssertEqual(humanSize(2_012_390_081, english: true), "1.8\u{00A0}GB")
+        // בעברית אותו ערך, עטוף כדי שלא יתהפך בתוך משפט.
+        XCTAssertEqual(humanSize(5 * 1_048_576), "\u{202A}5\u{00A0}MB\u{202C}")
+        XCTAssertEqual(humanSpeed(1_500_000, english: true), "1.4 MB/s")
+        XCTAssertEqual(humanSpeed(10_240, english: true), "10 KB/s")
     }
 
-    func testSpeedIsAMovingAverage() {
-        var meter = SpeedMeter(window: 5)
-        XCTAssertNil(meter.bytesPerSecond)
-        for second in 0...10 {
-            meter.record(time: TimeInterval(second), bytes: Int64(second) * 1_000_000)
+    func testRemainingTextBuckets() {
+        let table: [(TimeInterval, String)] = [
+            (0, "עוד כמה שניות"),
+            (4.9, "עוד כמה שניות"),
+            (5, "נותרו כ-5 שניות"),
+            (57, "נותרו כ-55 שניות"),
+            // עיגול ל-60 שניות עובר לשורת הדקות, ולא "60 שניות".
+            (59, "נותרה כדקה"),
+            (60, "נותרה כדקה"),
+            (95, "נותרו כדקה ו-40 שניות"),
+            (90, "נותרו כדקה ו-30 שניות"),
+            (150, "נותרו כ-2 דקות ו-30 שניות"),
+            (599, "נותרו כ-10 דקות"),
+            (600, "נותרו כ-10 דקות"),
+            (44 * 60 + 10, "נותרו כ-44 דקות"),
+            (3599, "נותרה כשעה"),
+            (3600, "נותרה כשעה"),
+            (3600 + 20 * 60, "נותרו כשעה ו-20 דקות"),
+            (2 * 3600, "נותרו כשעתיים"),
+            (2 * 3600 + 310, "נותרו כשעתיים ו-5 דקות"),
+            (3 * 3600 + 3590, "נותרו כ-4 שעות"),
+            (4.7, "עוד כמה שניות"),
+            (44, "נותרו כ-45 שניות"),
+            (200, "נותרו כ-3 דקות ו-20 שניות"),
+            (1830, "נותרו כ-31 דקות"),
+            (4500, "נותרו כשעה ו-15 דקות"),
+            (3 * 3600 + 20 * 60, "נותרו כ-3 שעות ו-20 דקות"),
+        ]
+        for (seconds, expected) in table {
+            XCTAssertEqual(remainingText(seconds), expected, "\(seconds)")
         }
-        XCTAssertEqual(meter.bytesPerSecond ?? 0, 1_000_000, accuracy: 1)
-        XCTAssertEqual(meter.secondsRemaining(30_000_000) ?? 0, 30, accuracy: 0.01)
-        // אחרי עצירה הממוצע יורד תוך חלון אחד, ולא נשאר על המהירות הישנה.
-        for second in 11...16 {
-            meter.record(time: TimeInterval(second), bytes: 10_000_000)
-        }
-        XCTAssertEqual(meter.bytesPerSecond ?? -1, 0, accuracy: 1)
+        XCTAssertEqual(remainingText(4.9, english: true), "a few seconds left")
+        XCTAssertEqual(remainingText(30, english: true), "about 30 seconds left")
+        XCTAssertEqual(remainingText(95, english: true), "about 1 minute 40 seconds left")
+        XCTAssertEqual(remainingText(3600, english: true), "about 1 hour left")
+        XCTAssertEqual(remainingText(60, english: true), "about 1 minute left")
+        XCTAssertEqual(remainingText(2 * 3600 + 310, english: true), "about 2 hours 5 minutes left")
+    }
+}
+
+private let mb: Int64 = 1_000_000
+
+/// מעריך עם שעון מזויף. כמו ברץ: קריאה אחרי כל דיווח, וטיימר של שנייה בשקט.
+private final class EtaHarness {
+    var eta = DownloadEta()
+    let total: Int64
+    var micros: Int64 = 0
+    var bytes: Int64 = 0
+    /// הקצב האמיתי הנוכחי, לחישוב הזמן הנותר המדויק.
+    var trueRate: Int64 = 10 * mb
+
+    init(total: Int64 = 1000 * mb) {
+        self.total = total
     }
 
-    func testRemainingText() {
-        XCTAssertEqual(humanRemaining(30), "פחות מדקה")
-        XCTAssertEqual(humanRemaining(61), "כ-2 דקות")
-        XCTAssertEqual(humanRemaining(3600), "כשעה")
-        XCTAssertEqual(humanRemaining(2 * 3600 + 300), "כ-2 שעות ו-5 דקות")
+    var now: TimeInterval { Double(micros) / 1e6 }
+
+    func advance(seconds: Double) {
+        micros += Int64((seconds * 1e6).rounded())
+    }
+
+    func report(_ value: Int64) {
+        bytes = value
+        eta.report(receivedBytes: value, remainingBytes: total - value, now: now)
+        _ = eta.displayReading(now: now)
+    }
+
+    func feed(seconds: Double, bytesPerSecond: Int64? = nil) {
+        if let rate = bytesPerSecond { trueRate = rate }
+        let steps = Int((seconds * 10).rounded())
+        for _ in 0..<steps {
+            advance(seconds: 0.1)
+            report(bytes + trueRate / 10)
+        }
+    }
+
+    /// שקט בלי בתים; מחזיר את הקריאות בתקתוקי הטיימר.
+    func silence(_ seconds: Int) -> [EtaReading] {
+        (0..<seconds).map { _ -> EtaReading in
+            advance(seconds: 1)
+            return read()
+        }
+    }
+
+    func read() -> EtaReading { eta.read(now: now) }
+
+    var etaSeconds: TimeInterval {
+        if case .remaining(let value) = read() { return value }
+        return -1
+    }
+
+    var exactEta: TimeInterval { Double(total - bytes) / Double(trueRate) }
+}
+
+/// מחולל פסאודו-אקראי קבוע (SplitMix64), כדי שהרעש יהיה זהה בכל ריצה.
+private struct SplitMix64 {
+    var state: UInt64
+
+    mutating func nextDouble() -> Double {
+        state = state &+ 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        z ^= z >> 31
+        return Double(z >> 11) * (1.0 / 9_007_199_254_740_992.0)
+    }
+}
+
+/// צ'אנק רשת: זמן הגעה (ms) ומספר בתים.
+private struct Chunk {
+    let ms: Int
+    let bytes: Int64
+}
+
+/// זרם יציב: צ'אנק כל 100ms בקצב `rate` עם רעש של ±`jitter`.
+private func steadyChunks(totalBytes: Int64, rate: Int64, jitter: Double = 0) -> [Chunk] {
+    var random = SplitMix64(state: 7)
+    var chunks: [Chunk] = []
+    var sent: Int64 = 0
+    var ms = 100
+    while sent < totalBytes {
+        let factor = 1 + jitter * (2 * random.nextDouble() - 1)
+        let bytes = min(Int64((Double(rate) / 10 * factor).rounded()), totalBytes - sent)
+        chunks.append(Chunk(ms: ms, bytes: bytes))
+        sent += bytes
+        ms += 100
+    }
+    return chunks
+}
+
+/// פרצים בממוצע 5MB/s: `onChunks` צ'אנקים במרווח 100ms, ואז פער של `offSeconds` (במחזוריות)
+/// עד הצ'אנק הבא — הפער כפי שהמעריך רואה אותו.
+private func burstyChunks(offSeconds: [Double], onChunks: Int = 6, totalBytes: Int64 = 2000 * mb) -> [Chunk] {
+    let meanOff = offSeconds.reduce(0, +) / Double(offSeconds.count)
+    let cycle = Double(onChunks - 1) * 0.1 + meanOff
+    let chunkBytes = Int64((5 * Double(mb) * cycle / Double(onChunks)).rounded())
+    var chunks: [Chunk] = []
+    var sent: Int64 = 0
+    var ms = 0
+    var cycleIndex = 0
+    while sent < totalBytes {
+        ms += Int((offSeconds[cycleIndex % offSeconds.count] * 1000).rounded())
+        var index = 0
+        while index < onChunks && sent < totalBytes {
+            if index > 0 { ms += 100 }
+            let bytes = min(chunkBytes, totalBytes - sent)
+            chunks.append(Chunk(ms: ms, bytes: bytes))
+            sent += bytes
+            index += 1
+        }
+        cycleIndex += 1
+    }
+    return chunks
+}
+
+/// מקטעים של (שניות, קצב); קצב 0 = שקט. המקטע האחרון נמשך עד הסוף.
+private func segmentChunks(_ segments: [(seconds: Int, rate: Int64)], totalBytes: Int64) -> [Chunk] {
+    var chunks: [Chunk] = []
+    var sent: Int64 = 0
+    var start = 0
+    for segment in segments {
+        let end = start + segment.seconds * 1000
+        var ms = start + 100
+        while ms <= end && sent < totalBytes {
+            if segment.rate != 0 {
+                let bytes = min(segment.rate / 10, totalBytes - sent)
+                chunks.append(Chunk(ms: ms, bytes: bytes))
+                sent += bytes
+            }
+            ms += 100
+        }
+        start = end
+    }
+    return chunks
+}
+
+private struct EtaRun {
+    struct Record {
+        let t: TimeInterval
+        let shown: TimeInterval?
+        let reading: EtaReading
+    }
+
+    let records: [Record]
+    /// (זמן, ערך מעוגל) בכל החלפת טקסט שיש בו זמן.
+    let texts: [(TimeInterval, Int)]
+    let tEnd: TimeInterval
+
+    var firstShownT: TimeInterval? { records.first { $0.shown != nil }?.t }
+
+    func error(_ record: Record) -> Double {
+        abs((record.shown ?? 0) - (tEnd - record.t)) / (tEnd - record.t)
+    }
+
+    var firstError: Double { records.first { $0.shown != nil }.map(error) ?? .infinity }
+
+    /// השגיאה היחסית המרבית מ-`from`, כל עוד נותרו `minTruth` שניות לפחות.
+    func maxError(from: TimeInterval, minTruth: TimeInterval = 60) -> Double {
+        records.filter { $0.shown != nil && $0.t >= from && tEnd - $0.t >= minTruth }.map(error).reduce(0, max)
+    }
+
+    func errorAt(_ t: TimeInterval) -> Double {
+        records.last { $0.shown != nil && $0.t <= t }.map(error) ?? .infinity
+    }
+
+    func textIncreases(until: TimeInterval = .infinity) -> Int {
+        var count = 0
+        var index = 1
+        while index < texts.count && texts[index].0 <= until {
+            if texts[index].1 > texts[index - 1].1 { count += 1 }
+            index += 1
+        }
+        return count
+    }
+}
+
+private func timeText(_ reading: EtaReading) -> String {
+    switch reading {
+    case .calculating: return "calculating"
+    case .waitingForConnection: return "waiting"
+    case .remaining(let seconds): return remainingText(seconds)
+    }
+}
+
+/// מריץ את המעריך כמו הרץ: מושהה לפני ההורדה, קריאה אחרי כל צ'אנק, וטיימר של שנייה.
+/// האמת: הזמן עד הצ'אנק האחרון.
+private func simulate(_ chunks: [Chunk]) -> EtaRun {
+    var ms = 0
+    let total = chunks.reduce(Int64(0)) { $0 + $1.bytes }
+    var eta = DownloadEta()
+    var records: [EtaRun.Record] = []
+    var texts: [(TimeInterval, Int)] = []
+    var lastText: String?
+    func observe() {
+        let t = Double(ms) / 1000
+        let published = eta.displayReading(now: t)
+        let reading = eta.lastReading
+        var shown: TimeInterval?
+        if case .remaining(let value) = reading { shown = value }
+        records.append(EtaRun.Record(t: t, shown: shown, reading: reading))
+        let text = timeText(published)
+        if text != lastText, case .remaining(let value) = published {
+            texts.append((t, roundedRemainingSeconds(value)))
+        }
+        lastText = text
+    }
+    var bytes: Int64 = 0
+    var nextTick = 1050
+    for chunk in chunks {
+        while nextTick < chunk.ms {
+            ms = nextTick
+            observe()
+            nextTick += 1000
+        }
+        ms = chunk.ms
+        bytes += chunk.bytes
+        eta.report(receivedBytes: bytes, remainingBytes: total - bytes, now: Double(ms) / 1000)
+        observe()
+    }
+    return EtaRun(records: records, texts: texts, tEnd: Double(chunks.last?.ms ?? 0) / 1000)
+}
+
+/// פרצים: `dataSeconds` של נתונים (צ'אנק כל 100ms) ואז פער של `silenceSeconds` בין דגימות;
+/// מחזיר את הקצב בסוף כל פרץ במחצית השנייה.
+private func burstyRates(dataSeconds: Double, silenceSeconds: Double, averageRate: Double, cycles: Int = 40) -> [Double] {
+    let interval = 0.1
+    let chunksPerBurst = Int((dataSeconds / interval).rounded())
+    var rate = TransferRateEstimator()
+    let cycle = Double(chunksPerBurst - 1) * interval + silenceSeconds
+    let chunk = Int64((averageRate * cycle / Double(chunksPerBurst)).rounded())
+    var t = 0.0
+    var bytes: Int64 = 0
+    rate.addSample(bytes: 0, time: 0)
+    var measured: [Double] = []
+    for index in 0..<cycles {
+        for _ in 0..<chunksPerBurst {
+            t += interval
+            bytes += chunk
+            rate.addSample(bytes: bytes, time: t)
+        }
+        if index >= cycles / 2 { measured.append(rate.rate ?? 0) }
+        t += silenceSeconds - interval
+    }
+    return measured
+}
+
+final class EtaWarmUpTests: XCTestCase {
+    func testNoEstimateBeforeThreeSecondsOfData() {
+        let h = EtaHarness()
+        h.report(0)
+        h.feed(seconds: 2.5, bytesPerSecond: 10 * mb)
+        XCTAssertEqual(h.read(), .calculating)
+        h.feed(seconds: 1)
+        XCTAssertEqual(h.etaSeconds, h.exactEta, accuracy: h.exactEta * 0.05)
+    }
+
+    func testCalculatingBeforeTheFirstReportEvenWithPlannedPhases() {
+        let h = EtaHarness()
+        h.eta.planPhases([EtaPhase("join:0", .join, bytes: 400 * mb)])
+        h.eta.pause()
+        h.advance(seconds: 2)
+        XCTAssertEqual(h.read(), .calculating)
+    }
+
+    func testNoEstimateUntilEnoughBytes() {
+        let h = EtaHarness()
+        h.report(0)
+        // 100KB/s במשך 5 שניות = 500KB, פחות מ-1MiB ומ-1% מהנותר.
+        h.feed(seconds: 5, bytesPerSecond: 100_000)
+        XCTAssertEqual(h.read(), .calculating)
+    }
+
+    func testSpeedIsHiddenUntilASecondOfData() {
+        var eta = DownloadEta()
+        eta.report(receivedBytes: 0, remainingBytes: 10 * mb, now: 0)
+        eta.report(receivedBytes: 500_000, remainingBytes: 10 * mb, now: 0.5)
+        XCTAssertNil(eta.displaySpeed)
+        eta.report(receivedBytes: 1_000_000, remainingBytes: 9 * mb, now: 1)
+        XCTAssertEqual(eta.displaySpeed ?? 0, 1_000_000, accuracy: 1)
+    }
+
+    func testCounterGoingBackwardsNeitherResetsNorInflates() {
+        let h = EtaHarness()
+        h.report(0)
+        h.feed(seconds: 10, bytesPerSecond: 10 * mb)
+        // ניסיון חוזר שאינו ניתן להמשך: ההורדה מתחילה שוב מאפס.
+        h.advance(seconds: 0.1)
+        h.report(1000)
+        XCTAssertNotNil(remainingSeconds(h.read()))
+        h.feed(seconds: 2)
+        XCTAssertLessThanOrEqual(h.etaSeconds, h.exactEta * 1.1)
+        XCTAssertGreaterThan(h.etaSeconds, 50)
+    }
+}
+
+private func remainingSeconds(_ reading: EtaReading) -> TimeInterval? {
+    if case .remaining(let value) = reading { return value }
+    return nil
+}
+
+/// שניות שלמות אחרי עיגול למיקרו-שנייה, כמו Duration.inSeconds.
+private func wholeSeconds(_ reading: EtaReading) -> Int? {
+    remainingSeconds(reading).map { Int(($0 * 1e6).rounded()) / 1_000_000 }
+}
+
+final class EtaSilenceTests: XCTestCase {
+    func testKnownPauseFreezesWithoutStall() {
+        let h = EtaHarness()
+        h.report(0)
+        h.feed(seconds: 10, bytesPerSecond: 10 * mb)
+        let before = h.etaSeconds
+        h.eta.pause()
+        // hash של התחילית או חיבור: דקה בלי דיווחים, בלי מצב תקיעה.
+        for tick in h.silence(60) {
+            XCTAssertEqual(remainingSeconds(tick) ?? -1, before, accuracy: 1e-6)
+        }
+        h.report(h.bytes + 64 * 1024)
+        h.feed(seconds: 2)
+        XCTAssertLessThanOrEqual(h.etaSeconds, before)
+        XCTAssertEqual(h.etaSeconds, h.exactEta, accuracy: h.exactEta * 0.1)
+    }
+
+    func testStallShowsWaitingForConnection() {
+        let h = EtaHarness()
+        h.report(0)
+        h.feed(seconds: 10, bytesPerSecond: 10 * mb)
+        let ticks = h.silence(6)
+        XCTAssertNotNil(remainingSeconds(ticks[3]))
+        XCTAssertEqual(ticks[5], .waitingForConnection)
+    }
+
+    func testShortSilencesWithTimerTicksDoNotRaiseTheEta() {
+        let h = EtaHarness(total: 3000 * mb)
+        h.report(0)
+        h.feed(seconds: 20, bytesPerSecond: 10 * mb)
+        var previous = h.etaSeconds
+        for gap in [1, 2, 3, 4] {
+            for tick in h.silence(gap) {
+                let shown = remainingSeconds(tick) ?? .infinity
+                XCTAssertLessThanOrEqual(shown, previous, "gap \(gap)")
+                previous = shown
+            }
+            h.feed(seconds: 5)
+            previous = h.etaSeconds
+        }
+    }
+
+    func testTwelveSecondStallStaysWithinTruthPlusTwelve() {
+        let h = EtaHarness(total: 2000 * mb)
+        h.report(0)
+        h.feed(seconds: 20, bytesPerSecond: 10 * mb)
+        _ = h.silence(12)
+        for step in 0..<600 {
+            h.feed(seconds: 0.1)
+            XCTAssertLessThanOrEqual(h.etaSeconds, (h.exactEta + 12) * 1.1, "\(step)")
+        }
+    }
+
+    func testIsolatedStallAfterWarmUpDoesNotBringBackCalculating() {
+        let h = EtaHarness(total: 2000 * mb)
+        h.report(0)
+        h.feed(seconds: 5, bytesPerSecond: 10 * mb)
+        XCTAssertNotNil(remainingSeconds(h.read()))
+        for tick in h.silence(12) {
+            XCTAssertNotEqual(tick, .calculating)
+        }
+        for step in 0..<600 {
+            h.feed(seconds: 0.1)
+            XCTAssertNotEqual(h.read(), .calculating, "\(step)")
+        }
+    }
+
+    func testFortyFiveSecondStallCalculatesThenEstimatesWithinFifteenPercent() {
+        let h = EtaHarness(total: 2000 * mb)
+        h.report(0)
+        h.feed(seconds: 20, bytesPerSecond: 10 * mb)
+        _ = h.silence(45)
+        h.feed(seconds: 0.1)
+        XCTAssertEqual(h.read(), .calculating)
+        var guardSteps = 0
+        while h.read() == .calculating && guardSteps < 1000 {
+            h.feed(seconds: 0.1)
+            guardSteps += 1
+        }
+        XCTAssertEqual(h.etaSeconds, h.exactEta, accuracy: h.exactEta * 0.15)
+    }
+
+    func testPermanentRateChangeWithinTenPercentAfter45Seconds() {
+        for (from, to) in [(Int64(10), Int64(5)), (Int64(5), Int64(10))] {
+            let h = EtaHarness(total: 3000 * mb)
+            h.report(0)
+            h.feed(seconds: 30, bytesPerSecond: from * mb)
+            h.feed(seconds: 45, bytesPerSecond: to * mb)
+            XCTAssertEqual(h.etaSeconds, h.exactEta, accuracy: h.exactEta * 0.1, "\(from) -> \(to)")
+        }
+    }
+
+    func testBurstyRatesAreMeasuredWithTheirDutyCycle() {
+        let cases: [(silence: Double, tolerance: Double)] = [(0.4, 0.05), (1.9, 0.10), (4.9, 0.10)]
+        for (silence, tolerance) in cases {
+            let rates = burstyRates(dataSeconds: 0.6, silenceSeconds: silence, averageRate: 5.0 * Double(mb))
+            for rate in rates {
+                XCTAssertEqual(rate, 5.0 * Double(mb), accuracy: tolerance * 5.0 * Double(mb), "\(silence)")
+            }
+        }
+    }
+}
+
+final class EtaPhaseTests: XCTestCase {
+    func testPlannedPhasesAreIncluded() {
+        let h = EtaHarness()
+        h.eta.planPhases([EtaPhase("join:0", .join, bytes: 1000 * mb)])
+        h.report(0)
+        h.feed(seconds: 10, bytesPerSecond: 10 * mb)
+        // 1000MB בברירת המחדל של 100MB/s = 10 שניות נוספות.
+        XCTAssertEqual(h.etaSeconds, h.exactEta + 10, accuracy: h.exactEta * 0.05)
+    }
+
+    func testUntrackedPhaseCountsDownToAFewSeconds() {
+        let join = EtaPhase("join:0", .join, bytes: 1000 * mb)
+        let h = EtaHarness(total: 100 * mb)
+        h.eta.planPhases([join])
+        h.report(0)
+        h.feed(seconds: 10, bytesPerSecond: 10 * mb)
+        h.eta.startPhase(join, tracksProgress: false, now: h.now)
+        XCTAssertEqual(wholeSeconds(h.read()), 10)
+        _ = h.silence(4)
+        XCTAssertEqual(wholeSeconds(h.read()), 6)
+        _ = h.silence(20)
+        XCTAssertEqual(remainingSeconds(h.read()), 0)
+    }
+
+    func testTrackedPhaseUsesItsLiveRate() {
+        let join = EtaPhase("join:0", .join, bytes: 600 * mb)
+        let h = EtaHarness(total: 10 * mb)
+        h.eta.planPhases([join])
+        h.report(10 * mb)
+        h.eta.finishDownload()
+        h.eta.startPhase(join, now: h.now)
+        // 10MB/s בפועל — איטי פי 10 מברירת המחדל.
+        for step in 1...160 {
+            h.advance(seconds: 0.25)
+            h.eta.phaseProgress(Int64((Double(step) * 2.5).rounded()) * mb)
+            _ = h.read()
+        }
+        // 400MB עובדו מתוך 600 => 20 שניות (פס ההיסטרזיס ±5).
+        XCTAssertEqual(h.etaSeconds, 20, accuracy: 5)
+    }
+
+    func testInstantPhaseDoesNotInflateTheMeasuredRate() {
+        var eta = DownloadEta()
+        eta.startPhase(EtaPhase("place:0", .copy, bytes: 500 * mb), now: 10)
+        eta.phaseProgress(500 * mb)
+        eta.endPhase(now: 10.001)
+        eta.startPhase(EtaPhase("place:1", .copy, bytes: 400 * mb), now: 10.001)
+        eta.phaseProgress(200 * mb)
+        XCTAssertEqual(eta.phaseRate(.copy, now: 12.001), 100_000_000, accuracy: 1)
+    }
+
+    func testTextChangesAtMostOncePerSecond() {
+        let h = EtaHarness(total: 400 * mb)
+        h.report(0)
+        h.feed(seconds: 10, bytesPerSecond: 10 * mb)
+        let first = h.eta.displayReading(now: h.now)
+        h.feed(seconds: 0.5, bytesPerSecond: 100 * mb)
+        XCTAssertEqual(h.eta.displayReading(now: h.now), first)
+        h.feed(seconds: 1, bytesPerSecond: 100 * mb)
+        h.advance(seconds: 1.1)
+        XCTAssertNotEqual(h.eta.displayReading(now: h.now), first)
+    }
+
+    func testPhasesForActions() {
+        let item = DownloadItem(
+            name: "a.dmg", size: 500, sha256: "x", url: URL(string: "https://github.com/a")!, caption: "a"
+        )
+        let actions: [OutputAction] = [
+            .place(item),
+            .assemble(name: "b", size: 900, sha256: "y", caption: "b", parts: [], folder: ""),
+        ]
+        XCTAssertEqual(
+            EtaPhase.phases(for: actions, placeIsInstant: true),
+            [EtaPhase("join:1", .join, bytes: 900), EtaPhase("verify:1", .hash, bytes: 900)]
+        )
+        XCTAssertEqual(
+            EtaPhase.phases(for: actions, placeIsInstant: false),
+            [
+                EtaPhase("place:0", .copy, bytes: 500), EtaPhase("join:1", .join, bytes: 900),
+                EtaPhase("verify:1", .hash, bytes: 900),
+            ]
+        )
+        // הרכבה שנקטעה: רק מה שלא חובר עדיין, וה-hash עדיין על כל הקובץ.
+        XCTAssertEqual(
+            EtaPhase.phases(for: actions, placeIsInstant: true, alreadyJoined: ["b": 600]),
+            [EtaPhase("join:1", .join, bytes: 300), EtaPhase("verify:1", .hash, bytes: 900)]
+        )
+    }
+}
+
+final class EtaCountdownDisplayTests: XCTestCase {
+    /// זרימה רציפה: עדכון טרי כל 100ms עם `raw` קבוע, מ-`from` עד `to`.
+    private func flow(_ display: inout EtaCountdownDisplay, raw: Double, from: Double, to: Double) -> Double {
+        var shown = 0.0
+        var t = from
+        while t <= to + 1e-9 {
+            shown = display.update(raw: raw, time: t, fresh: true)
+            t += 0.1
+        }
+        return shown
+    }
+
+    func testSteadyCountdownWithOncePerSecondDataUnderNoise() {
+        var display = EtaCountdownDisplay()
+        display.update(raw: 300, time: 0, fresh: true)
+        var previous = 300.0
+        for t in 1...60 {
+            let raw = 300.0 - Double(t) + (t % 2 == 0 ? 12 : -12)
+            let shown = display.update(raw: raw, time: Double(t), fresh: true)
+            XCTAssertLessThanOrEqual(shown, previous)
+            XCTAssertEqual(shown, 300.0 - Double(t), accuracy: 2)
+            previous = shown
+        }
+    }
+
+    func testContinuousFlowRisesSlowlyAndFallsFast() {
+        var same = EtaCountdownDisplay()
+        var up = EtaCountdownDisplay()
+        var down = EtaCountdownDisplay()
+        _ = flow(&same, raw: 100, from: 0, to: 3)
+        _ = flow(&up, raw: 100, from: 0, to: 3)
+        _ = flow(&down, raw: 100, from: 0, to: 3)
+        let base = flow(&same, raw: 100, from: 3.1, to: 5)
+        let rose = flow(&up, raw: 150, from: 3.1, to: 5) - base
+        let fell = base - flow(&down, raw: 50, from: 3.1, to: 5)
+        XCTAssertGreaterThan(rose, 0)
+        XCTAssertLessThan(rose, 50 * 0.2)
+        XCTAssertGreaterThan(fell, rose * 2)
+    }
+
+    func testDropBelowHalfIsShownAtTheNextCorrectionPoint() {
+        var display = EtaCountdownDisplay()
+        _ = flow(&display, raw: 100, from: 0, to: 3)
+        XCTAssertEqual(display.update(raw: 30, time: 3.1, fresh: true), 30, accuracy: 1e-9)
+    }
+
+    func testEndOfRunCorrectsToTheLastDataSample() {
+        var display = EtaCountdownDisplay()
+        display.update(raw: 100, time: 0, fresh: true)
+        display.update(raw: 30, time: 0.5, fresh: true)
+        // פחות משנייה של שקט — עדיין לא סוף פרץ.
+        XCTAssertEqual(display.update(raw: 500, time: 1, fresh: false), 99, accuracy: 1e-9)
+        // שנייה של שקט: ירידה לפחות ממחצית — לפי 30 של הדגימה האחרונה.
+        XCTAssertEqual(display.update(raw: 500, time: 1.5, fresh: false), 30, accuracy: 1e-9)
+        XCTAssertEqual(display.update(raw: 500, time: 2.5, fresh: false), 29, accuracy: 1e-9)
+    }
+
+    func testWithoutACorrectionPointOnlyCountsDown() {
+        var display = EtaCountdownDisplay()
+        display.update(raw: 100, time: 0, fresh: true)
+        // פחות משנייה בין דגימות — עוד אין סוף פרץ או שתי שניות של זרימה.
+        XCTAssertEqual(display.update(raw: 200, time: 0.9, fresh: true), 99.1)
+    }
+}
+
+final class EtaScenarioTests: XCTestCase {
+    func testOncePerSecondRateChangesAcrossTimerPhases() {
+        for phase in [0.0, 0.05, 0.95] {
+            for (from, to): (Int64, Int64) in [(5, 1), (1, 5)] {
+                var eta = DownloadEta()
+                let total = 2000 * mb
+                var bytes: Int64 = 0
+                eta.report(receivedBytes: 0, remainingBytes: total, now: 0)
+                for second in 1...400 {
+                    bytes += (second <= 20 ? from : to) * mb
+                    eta.report(receivedBytes: bytes, remainingBytes: total - bytes, now: Double(second))
+                    _ = eta.read(now: Double(second))
+                    let reading = eta.read(now: Double(second) + phase)
+                    if second >= 120 {
+                        guard case .remaining(let shown) = reading else {
+                            XCTFail("Expected an estimate")
+                            return
+                        }
+                        let expected = Double(total - bytes) / Double(to * mb)
+                        XCTAssertEqual(shown, expected, accuracy: expected * 0.15)
+                    }
+                }
+            }
+        }
+    }
+
+    func testSteady3GBAt5MBpsWithNoise() {
+        let run = simulate(steadyChunks(totalBytes: 3000 * mb, rate: 5 * mb, jitter: 0.4))
+        XCTAssertEqual(run.textIncreases(), 0)
+        XCTAssertLessThan(run.maxError(from: 10), 0.10)
+    }
+
+    func testBursty06On49Off() {
+        let run = simulate(burstyChunks(offSeconds: [4.9]))
+        XCTAssertLessThan(run.maxError(from: (run.firstShownT ?? 0) + 20), 0.15)
+    }
+
+    func testBursty06On19Off() {
+        let run = simulate(burstyChunks(offSeconds: [1.9]))
+        XCTAssertLessThan(run.maxError(from: (run.firstShownT ?? 0) + 20), 0.10)
+    }
+
+    func testBursty06On20OffFirstEstimateAndFewIncreases() {
+        let run = simulate(burstyChunks(offSeconds: [2.0]))
+        XCTAssertLessThan(run.firstError, 0.20)
+        XCTAssertLessThanOrEqual(run.textIncreases(until: 120), 3)
+    }
+
+    func testBursty3On49OffFewIncreases() {
+        let run = simulate(burstyChunks(offSeconds: [4.9], onChunks: 30))
+        XCTAssertLessThanOrEqual(run.textIncreases(until: 120), 3)
+    }
+
+    func testRecurringLongSilences() {
+        for off in [6.0, 9.0] {
+            let run = simulate(burstyChunks(offSeconds: [off]))
+            XCTAssertLessThan(run.maxError(from: 60), 0.15, "\(off)")
+        }
+    }
+
+    func testSilencesAroundFiveSeconds() {
+        let run = simulate(burstyChunks(offSeconds: [4.8, 5.1, 4.9, 5.3]))
+        XCTAssertLessThan(run.maxError(from: 60), 0.15)
+    }
+
+    func testRateChangeWithinTenPercentAfter45Seconds() {
+        for (from, to) in [(Int64(10), Int64(5)), (Int64(5), Int64(10))] {
+            let run = simulate(segmentChunks([(30, from * mb), (100_000, to * mb)], totalBytes: 3000 * mb))
+            XCTAssertLessThan(run.errorAt(75), 0.10, "\(from) -> \(to)")
+        }
+    }
+
+    func testIsolatedTwelveSecondStall() {
+        let run = simulate(segmentChunks([(20, 10 * mb), (12, 0), (100_000, 10 * mb)], totalBytes: 2000 * mb))
+        for record in run.records where record.t > 32 {
+            guard let shown = record.shown else { continue }
+            XCTAssertLessThanOrEqual(shown, (run.tEnd - record.t + 12) * 1.1, "\(record.t)")
+        }
+    }
+
+    func testFortyFiveSecondStall() {
+        let run = simulate(segmentChunks([(20, 10 * mb), (45, 0), (100_000, 10 * mb)], totalBytes: 2000 * mb))
+        let after = run.records.filter { $0.t > 65.05 }
+        XCTAssertEqual(after.first?.reading, .calculating)
+        guard let reappeared = after.first(where: { $0.shown != nil }) else {
+            return XCTFail("no estimate after the stall")
+        }
+        XCTAssertLessThan(run.error(reappeared), 0.15)
     }
 }
 

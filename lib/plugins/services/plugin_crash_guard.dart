@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:otzaria/update/app_release_version.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 
@@ -56,7 +57,7 @@ class PluginCrashGuard {
   static Future<String> _resolveAppVersion() async {
     try {
       final info = await PackageInfo.fromPlatform();
-      final v = info.version.trim();
+      final v = canonicalAppVersion(info);
       final b = info.buildNumber.trim();
       if (v.isEmpty) return b.isEmpty ? 'unknown' : b;
       if (b.isEmpty || v.endsWith('+$b')) return v;
@@ -225,15 +226,6 @@ class PluginCrashGuard {
     _loadsInFlight.remove(pluginId);
     final removed = _blocked!.remove(pluginId);
     if (removed) await _persist();
-  }
-
-  /// המשתמש לחץ "נסה שוב את כולם". מסיר את כל הסימונים.
-  static Future<void> retryAll() async {
-    await ensureInitialized();
-    _loadsInFlight.clear();
-    if (_blocked!.isEmpty) return;
-    _blocked!.clear();
-    await _persist();
   }
 
   /// משמש לטסטים בלבד — מאפס את כל ה-state ה-static.

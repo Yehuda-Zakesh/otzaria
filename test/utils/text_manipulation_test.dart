@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart'
@@ -53,7 +55,10 @@ Future<void> main() async {
           'תורה מצוות',
           yellowBackground: true,
         );
-        expect(highlighted, contains('background-color: yellow'));
+        expect(
+          highlighted,
+          contains('background-color: rgba(255, 255, 0, 0.8)'),
+        );
         expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
       });
 
@@ -254,7 +259,7 @@ Future<void> main() async {
         expect(
           result,
           contains(
-            '<span style="background-color: yellow; color: black">רבי יוחנן משום</span>',
+            '<span style="background-color: rgba(255, 255, 0, 0.8); color: black">רבי יוחנן משום</span>',
           ),
         );
       });
@@ -270,7 +275,7 @@ Future<void> main() async {
         expect(
           result,
           contains(
-            '<span style="background-color: yellow; color: black">רבי יוחנן: הוא</span>',
+            '<span style="background-color: rgba(255, 255, 0, 0.8); color: black">רבי יוחנן: הוא</span>',
           ),
         );
       });
@@ -286,7 +291,9 @@ Future<void> main() async {
 
         expect(
           result,
-          contains('<span style="background-color: yellow; color: black">'),
+          contains(
+            '<span style="background-color: rgba(255, 255, 0, 0.8); color: black">',
+          ),
         );
         expect(result, contains('שֶׁנָּדַרְתָּ'));
       });
@@ -302,9 +309,9 @@ Future<void> main() async {
         expect(
           result,
           equals(
-            '<span style="background-color: yellow; color: black">אמר </span>'
-            '<b><span style="background-color: yellow; color: black">רבי</span></b>'
-            '<span style="background-color: yellow; color: black"> יוחנן</span>',
+            '<span style="background-color: rgba(255, 255, 0, 0.8); color: black">אמר </span>'
+            '<b><span style="background-color: rgba(255, 255, 0, 0.8); color: black">רבי</span></b>'
+            '<span style="background-color: rgba(255, 255, 0, 0.8); color: black"> יוחנן</span>',
           ),
         );
       });
@@ -383,6 +390,49 @@ Future<void> main() async {
       expect(stripHtmlIfNeeded('א<param>ב'), equals('אב'));
       expect(stripHtmlIfNeeded('א<h7>ב'), equals('אב'));
     });
+
+    test(
+      'זהה להסרה בשני ביטויים רגולריים על כל תו ועל צירופים אקראיים (perf)',
+      () {
+        // אורקל: המימוש הקודם.
+        final tags = RegExp(r'<[^>]*>');
+        final breaking = RegExp(
+          r'</?(?:address|article|aside|blockquote|br|caption|center|dd|div|dl'
+          r'|dt|figcaption|figure|footer|h[1-6]|header|hr|li|main|nav|ol|p|pre'
+          r'|section|table|tbody|td|tfoot|th|thead|tr|ul)(?:[^>a-zA-Z0-9][^>]*)?>',
+          caseSensitive: false,
+        );
+        String oracle(String text) => decodeHtmlEntities(
+          text.replaceAll(breaking, ' ').replaceAll(tags, ''),
+        );
+
+        final inputs = <String>[
+          for (var c = 0; c <= 0xFFFF; c++) ...[
+            'א<${String.fromCharCode(c)}>ב',
+            'א<br${String.fromCharCode(c)}>ב',
+            'א</t${String.fromCharCode(c)}>ב<',
+          ],
+        ];
+        const pieces = [
+          '<', '>', '/', '</', 'br', 'BR', 'Br', 'p', 'P', 'h1', 'H6', 'h7', //
+          'th', 'thead', 'tHeAd', 'ul', 'div', 'big', 'b', 'param', ' ', '=', //
+          '"', 'x', '1', 'א', 'שלום', '&amp;', '&lt;', '&nbsp;', '&', ';', //
+          'ſ', '\u212A', '\n', '<b>', '</p>', '<br/>', '<h2 class="x">', //
+        ];
+        final random = Random(5);
+        for (var i = 0; i < 20000; i++) {
+          inputs.add(
+            [
+              for (var j = random.nextInt(14); j > 0; j--)
+                pieces[random.nextInt(pieces.length)],
+            ].join(),
+          );
+        }
+        for (final input in inputs) {
+          expect(stripHtmlIfNeeded(input), oracle(input), reason: input);
+        }
+      },
+    );
   });
 
   group('stripHtmlPreservingBreaks', () {
@@ -1013,6 +1063,15 @@ Future<void> main() async {
       expect(replaceHolyNames('מגביהוהי'), equals('מגביהוהי'));
     });
 
+    test('שם בתחילת השורה מוחלף', () {
+      expect(replaceHolyNames('יהוה אלהים'), equals('יקוק אלהים'));
+    });
+
+    test('שתי אותיות מנוקדות לפני השם — מוחלף; שלוש — לא', () {
+      expect(replaceHolyNames('וּבַיהוָה'), equals('וּבַיקוָק'));
+      expect(replaceHolyNames('גוּבַיהוָה'), equals('גוּבַיהוָה'));
+    });
+
     group("סגנון ה'", () {
       test('שם הקודש בתוך פסוק מוחלף בה\'', () {
         expect(
@@ -1232,6 +1291,37 @@ Future<void> main() async {
         formatTextWithParentheses('א < ב (ג) ד'),
         'א < ב <small>(ג)</small> ד',
       );
+    });
+
+    test('כמה פותחים לפני סוגר אחד - רק הפנימי נעטף', () {
+      expect(
+        formatTextWithParentheses('(א (ב (ג) ד'),
+        '(א (ב <small>(ג)</small> ד',
+      );
+    });
+
+    test('סוגר בודד לפני הסוגריים אינו משפיע', () {
+      expect(
+        formatTextWithParentheses('א) ב (ג)'),
+        'א) ב <small>(ג)</small>',
+      );
+    });
+
+    test('שני זוגות פנימיים בתוך חיצוני נעטפים בנפרד', () {
+      expect(
+        formatTextWithParentheses('(א (ב) (ג))'),
+        '(א <small>(ב)</small> <small>(ג)</small>)',
+      );
+    });
+
+    test('שורה ארוכה עם פותחים רבים בלי סוגר מעובדת בזמן ליניארי', () {
+      final text = '${'ראה (שם ' * 2000}סוף (א)';
+      final stopwatch = Stopwatch()..start();
+      final result = formatTextWithParentheses(text);
+      stopwatch.stop();
+
+      expect(result, '${'ראה (שם ' * 2000}סוף <small>(א)</small>');
+      expect(stopwatch.elapsedMilliseconds, lessThan(300));
     });
   });
 }

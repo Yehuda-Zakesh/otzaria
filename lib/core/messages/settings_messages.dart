@@ -109,8 +109,6 @@ abstract class SettingsMessages {
   static String booksListLoadError(Object error) =>
       'שגיאה בטעינת רשימת הספרים: $error';
 
-  static const String libraryLoaded = 'הספרייה נטענה בהצלחה.';
-
   static String partialBackupSaved(String size, String missingSections) =>
       'גיבוי חלקי נשמר ($size) — חסרים: $missingSections';
 

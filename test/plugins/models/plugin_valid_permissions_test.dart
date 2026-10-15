@@ -2,6 +2,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/plugins/models/plugin_valid_permissions.dart';
 
 void main() {
+  test('בעלות כפתור היא החלטת מארח ולא הרשאה אוטומטית של מניפסט', () {
+    expect(pluginValidPermissions, isNot(contains(pluginNewTabPagePermission)));
+    expect(effectiveManifestPermissions(['navigation.write']), [
+      'navigation.write',
+    ]);
+  });
+
   group('pluginBaselinePermissions', () {
     test('כל הרשאת בסיס קיימת ברשימת ההרשאות התקפות', () {
       for (final permission in pluginBaselinePermissions) {

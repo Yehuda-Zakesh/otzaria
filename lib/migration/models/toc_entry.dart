@@ -59,48 +59,6 @@ class TocEntry {
     );
   }
 
-  /// Creates a TocEntry instance from JSON.
-  factory TocEntry.fromJson(Map<String, dynamic> json) {
-    return TocEntry(
-      id: json['id'] as int? ?? 0,
-      bookId: json['bookId'] as int,
-      parentId: json['parentId'] as int?,
-      textId: json['textId'] as int?,
-      text: json['text'] as String? ?? '',
-      level: json['level'] as int,
-      lineId: json['lineId'] as int?,
-      lineIndex: json['lineIndex'] as int?,
-      isLastChild: json['isLastChild'] as bool? ?? false,
-      hasChildren: json['hasChildren'] as bool? ?? false,
-    );
-  }
-
-  TocEntry copyWith({
-    int? id,
-    int? bookId,
-    int? parentId,
-    int? textId,
-    String? text,
-    int? level,
-    int? lineId,
-    int? lineIndex,
-    bool? isLastChild,
-    bool? hasChildren,
-  }) {
-    return TocEntry(
-      id: id ?? this.id,
-      bookId: bookId ?? this.bookId,
-      parentId: parentId ?? this.parentId,
-      textId: textId ?? this.textId,
-      text: text ?? this.text,
-      level: level ?? this.level,
-      lineId: lineId ?? this.lineId,
-      lineIndex: lineIndex ?? this.lineIndex,
-      isLastChild: isLastChild ?? this.isLastChild,
-      hasChildren: hasChildren ?? this.hasChildren,
-    );
-  }
-
   @override
   String toString() =>
       'TocEntry(id: $id, bookId: $bookId, level: $level, text: "$text")';

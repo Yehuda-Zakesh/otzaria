@@ -20,7 +20,7 @@ String _body(String content) =>
     '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/'
     '2006/main"><w:body>$content</w:body></w:document>';
 
-/// עוטף חלקי חבילה כ-Flat OPC — בדיוק המבנה ש-Word כותב ל-‎.xml‎.
+/// עוטף חלקי חבילה כ-Flat OPC — בדיוק המבנה ש-Word כותב ל-.xml.
 Uint8List _flatOpc(
   Map<String, String> xmlParts, {
   Map<String, Uint8List> binaryParts = const {},
@@ -371,7 +371,7 @@ void main() {
       expect(out, contains('<th'));
       expect(out, contains('colspan="2"'));
       expect(out, contains('background-color: #DDEBF7'));
-      // ‏Word כותב `center`, אך ב-CSS הערך הוא `middle` — `center` מתעלמים
+      // Word כותב `center`, אך ב-CSS הערך הוא `middle` — `center` מתעלמים
       // ממנו בשקט.
       expect(out, contains('vertical-align: middle'));
     });

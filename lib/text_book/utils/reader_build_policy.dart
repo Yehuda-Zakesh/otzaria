@@ -5,8 +5,7 @@ import 'package:otzaria/text_book/bloc/text_book_state.dart';
 /// כשצריך לבנות מחדש.
 ///
 /// התנאי לשימוש: אף חלק בתת-העץ אינו נגזר מ-`visibleIndices` או משדות
-/// הבחירה. מי שצריך את מיקום הגלילה קורא אותו חי מ-`positionsListener` דרך
-/// `resolveTopmostSourceLine`.
+/// הבחירה. מי שצריך את מיקום הגלילה קורא אותו חי מ-`LineScrollController.position`.
 ///
 /// חייב לעטוף גם כל פאנל מפרשים שמאזין ל-bloc בעצמו — `buildWhen` בהורה אינו
 /// מגן עליו, ובלעדיו כל תזוזת סימון בונה את כל המפרשים מחדש (issue #976).
@@ -19,6 +18,10 @@ bool shouldRebuildReader(TextBookState previous, TextBookState current) {
   if (!listEquals(previous.content, current.content)) return true;
   return previous.copyWith(
         visibleIndices: current.visibleIndices,
+        // נגזר מהגלילה לחלונית הקישורים, שנבנית בעצמה; הקורא נגזר מ-linksByLine.
+        visibleLinks: identical(previous.linksByLine, current.linksByLine)
+            ? current.visibleLinks
+            : null,
         clearSelectedText: true,
       ) !=
       current.copyWith(clearSelectedText: true);

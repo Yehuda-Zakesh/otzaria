@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:html/dom.dart' as dom;
@@ -5,17 +7,17 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:otzaria/theme/app_fonts.dart';
 import 'package:otzaria/utils/text/html_link_handler.dart';
 import 'package:otzaria/widgets/misc/inline_link_targets.dart';
-import 'package:otzaria/text_book/utils/link_anchor_variants.dart';
+import 'package:otzaria/book_common/utils/link_anchor_variants.dart';
 import 'package:otzaria/text_book/utils/link_preview_utils.dart';
 import 'package:otzaria/plugins/services/plugin_highlight_renderer.dart';
 import 'package:otzaria/plugins/view/plugin_highlight_frame_overlay.dart';
+import 'package:otzaria/text_book/view/reader_line/reader_line_render.dart';
 import 'package:otzaria/widgets/smart_text/exact_line_height.dart';
 import 'package:otzaria/widgets/smart_text/raised_markers.dart';
 import 'package:otzaria/widgets/smart_text/selection_fill_text.dart';
 import 'package:otzaria/widgets/smart_text/simple_inline_html.dart';
 
 /// תגובה ללחיצה על קישור inline בתוך פסקה של מצב טקסט רציף.
-/// יוחזר `true` אם הטיפול בקישור הסתיים והעיבוד הרגיל (לחיצה על שורה) לא נדרש.
 typedef ContinuousReadingUrlTap = Future<bool> Function(String url);
 
 /// ריחוף מעל עוגן-מילה (`otzaria://anchor`) — מקבל את מיקום הסמן הגלובלי.
@@ -27,17 +29,29 @@ typedef ContinuousReadingAnchorExit = void Function(String url);
 
 class ContinuousReadingParagraphLine {
   final int lineIndex;
+
+  /// הטקסט כשאין [htmlText].
   final String text;
   final String? htmlText;
   final TextStyle style;
   final List<PluginHighlightRenderedRange> frameRanges;
 
+  /// רקע לטקסט השורה בלבד (הדגשה קבועה/זמנית), בגובה שורת התצוגה.
+  final Color? background;
+  final bool selected;
+
+  /// כותרת נושא שנפתחת בשורה — מוצגת לפניה בתוך הזרימה.
+  final String? heading;
+
   const ContinuousReadingParagraphLine({
     required this.lineIndex,
-    required this.text,
+    this.text = '',
     required this.style,
     this.htmlText,
     this.frameRanges = const [],
+    this.background,
+    this.selected = false,
+    this.heading,
   });
 }
 
@@ -113,8 +127,6 @@ List<InlineSpan> buildInlineHtmlSpans(
 class ContinuousReadingParagraph extends StatefulWidget {
   final List<ContinuousReadingParagraphLine> lines;
   final TextStyle baseStyle;
-  final ValueChanged<int> onLineTap;
-  final ValueChanged<int>? onLineSecondaryTap;
   final ContinuousReadingUrlTap? onTapUrl;
 
   /// לחיצת גלגל על קישור לספר אחר — פתיחה בכרטיסייה חדשה ברקע.
@@ -127,12 +139,13 @@ class ContinuousReadingParagraph extends StatefulWidget {
   final Color? anchorActiveBackground;
   final TextAlign textAlign;
 
+  /// צבע כותרות הנושא שמוצגות בתוך הזרימה לפני השורה שהן פותחות.
+  final Color? headingColor;
+
   const ContinuousReadingParagraph({
     super.key,
     required this.lines,
     required this.baseStyle,
-    required this.onLineTap,
-    this.onLineSecondaryTap,
     this.onTapUrl,
     this.onMiddleClickUrl,
     this.onAnchorHover,
@@ -140,6 +153,7 @@ class ContinuousReadingParagraph extends StatefulWidget {
     this.linkStyle,
     this.anchorActiveBackground,
     this.textAlign = TextAlign.justify,
+    this.headingColor,
   });
 
   @override
@@ -147,68 +161,71 @@ class ContinuousReadingParagraph extends StatefulWidget {
       _ContinuousReadingParagraphState();
 }
 
+typedef _BuiltLine = ({List<InlineSpan> spans, int length});
+
 class _ContinuousReadingParagraphState
     extends State<ContinuousReadingParagraph> {
-  // recognizer-ים של לחיצה על שורה כולה (כדי לבחור/לבטל בחירה של סעיף)
-  final List<TapGestureRecognizer> _lineRecognizers = [];
-  // recognizer-ים של קישורי <a> inline שמתוך הספאנים המפורסרים
+  // recognizer-ים של קישורי <a> inline; נבנים מחדש בכל build.
   final List<TapGestureRecognizer> _linkRecognizers = [];
 
-  @override
-  void initState() {
-    super.initState();
-    _rebuildLineRecognizers();
-  }
-
-  @override
-  void didUpdateWidget(covariant ContinuousReadingParagraph oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!_sameLineOrder(oldWidget.lines, widget.lines)) {
-      _rebuildLineRecognizers();
-    }
-  }
+  // שורות בלי קישורים אינן תלויות ב-callbacks, ולכן נשמרות בין builds.
+  Map<(String, TextStyle), _BuiltLine> _staticLines = {};
 
   @override
   void dispose() {
-    _disposeLineRecognizers();
     _disposeLinkRecognizers();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // הספאנים נבנים מחדש בכל build כי הסגנון/הבחירה עשויים להשתנות.
-    // כדי למנוע דליפת recognizer-ים של קישורים, אנו מנקים את הרשימה כאן.
     _disposeLinkRecognizers();
+    final staticLines = <(String, TextStyle), _BuiltLine>{};
 
     final spans = <InlineSpan>[];
-    final frameRanges = <PluginHighlightRenderedRange>[];
-    var graphemeOffset = 0;
+    final lineData = <ReaderParagraphLineData>[];
+    final frames = <PluginHighlightRenderedRange>[];
+    final markerSources = <String>[];
+    var offset = 0;
     for (var i = 0; i < widget.lines.length; i++) {
       final line = widget.lines[i];
-      final hasNext = i < widget.lines.length - 1;
-      final lineSpans = _buildLineSpans(line);
-      for (final span in lineSpans) {
-        spans.add(_withRecognizer(span, _lineRecognizers[i], line.style));
+      final heading = line.heading;
+      if (heading != null && heading.isNotEmpty) {
+        final text = '$heading ';
+        spans.add(TextSpan(text: text, style: _headingStyle(line.style)));
+        offset += text.length;
+        markerSources.add(_htmlEscape.convert(text));
       }
+      final built = _buildLine(line, staticLines);
+      spans.addAll(built.spans);
+      lineData.add(
+        ReaderParagraphLineData(
+          lineIndex: line.lineIndex,
+          range: TextRange(start: offset, end: offset + built.length),
+          background: line.background,
+          selected: line.selected,
+        ),
+      );
       for (final range in line.frameRanges) {
         final mode = range.highlight.style.markerMode;
-        if (mode == 'text-background' || mode == 'box') {
-          frameRanges.add(
-            PluginHighlightRenderedRange(
-              start: range.start + graphemeOffset,
-              end: range.end + graphemeOffset,
-              highlight: range.highlight,
-            ),
-          );
-        }
+        if (mode != 'text-background' && mode != 'box') continue;
+        frames.add(
+          PluginHighlightRenderedRange(
+            start: offset + _lineUtf16Offset(line, range.start, isStart: true),
+            end: offset + _lineUtf16Offset(line, range.end, isStart: false),
+            highlight: range.highlight,
+          ),
+        );
       }
-      graphemeOffset += line.text.characters.length;
-      if (hasNext) {
+      offset += built.length;
+      markerSources.add(line.htmlText ?? line.text);
+      if (i < widget.lines.length - 1) {
         spans.add(TextSpan(text: ' ', style: line.style));
-        graphemeOffset++;
+        offset++;
+        markerSources.add(' ');
       }
     }
+    _staticLines = staticLines;
 
     final textSpan = TextSpan(style: widget.baseStyle, children: spans);
     // justify אינו מותח שורה אחרונה, ולכן גם לא פסקה בת שורה חזותית אחת.
@@ -218,18 +235,18 @@ class _ContinuousReadingParagraphState
       textAlign: widget.textAlign,
       strutStyle: exactLineHeightStrut(widget.baseStyle, textSpan),
     );
-    if (frameRanges.isNotEmpty) {
-      result = PluginHighlightFrameOverlay(ranges: frameRanges, child: result);
+    if (frames.isNotEmpty) {
+      result = PluginHighlightFrameOverlay(
+        ranges: _toGraphemeRanges(textSpan, frames),
+        child: result,
+      );
     }
-    // סימונים מורמים: כאן הספאנים הם טקסט טהור ואין דרך להרים אותם בפריסה,
-    // ולכן אותה שכבת ציור כמו במסך עיון. ספירת המופעים חייבת לרוץ על הפסקה
-    // כולה — לא לכל שורה בנפרד — כי השורות מאוחדות לטקסט אחד עם רווח מפריד,
-    // בדיוק כמו שהשכבה קוראת אותן מעץ הרינדור.
+    result = ReaderParagraphLines(lines: lineData, child: result);
+    // סימונים מורמים: ספירת המופעים רצה על הפסקה כולה, באותו סדר שהשכבה
+    // קוראת את הטקסט מעץ הרינדור.
     return RaisedMarkerOverlay.wrap(
       context: context,
-      markers: RaisedMarkers.extract(
-        widget.lines.map((line) => line.htmlText ?? line.text).join(' '),
-      ),
+      markers: RaisedMarkers.extract(markerSources.join()),
       baseStyle: widget.baseStyle,
       linkColor: widget.linkStyle?.color,
       activeBackground: widget.anchorActiveBackground,
@@ -237,13 +254,34 @@ class _ContinuousReadingParagraphState
     );
   }
 
-  List<InlineSpan> _buildLineSpans(ContinuousReadingParagraphLine line) {
+  TextStyle _headingStyle(TextStyle lineStyle) => lineStyle.copyWith(
+    fontSize: (lineStyle.fontSize ?? 18) * kHtmlSmallerFontScale,
+    fontWeight: FontWeight.bold,
+    fontVariations: AppFonts.boldFontVariations(lineStyle.fontFamily),
+    color: widget.headingColor,
+  );
+
+  _BuiltLine _buildLine(
+    ContinuousReadingParagraphLine line,
+    Map<(String, TextStyle), _BuiltLine> staticLines,
+  ) {
     final htmlText = line.htmlText;
     if (htmlText == null) {
-      return [TextSpan(text: line.text, style: line.style)];
+      return (
+        spans: [TextSpan(text: line.text, style: line.style)],
+        length: line.text.length,
+      );
     }
-
-    return buildInlineHtmlSpans(
+    final cacheable = !htmlText.contains('<a');
+    final key = (htmlText, line.style);
+    if (cacheable) {
+      final cached = staticLines[key] ?? _staticLines[key];
+      if (cached != null) {
+        staticLines[key] = cached;
+        return cached;
+      }
+    }
+    final spans = buildInlineHtmlSpans(
       htmlText,
       line.style,
       onTapUrl: widget.onTapUrl,
@@ -254,26 +292,13 @@ class _ContinuousReadingParagraphState
       recognizerSink: _linkRecognizers,
       onMiddleClickUrl: widget.onMiddleClickUrl,
     );
-  }
-
-  void _rebuildLineRecognizers() {
-    _disposeLineRecognizers();
-    for (var i = 0; i < widget.lines.length; i++) {
-      final recognizer = TapGestureRecognizer()
-        ..onTap = () => widget.onLineTap(widget.lines[i].lineIndex);
-      if (widget.onLineSecondaryTap != null) {
-        recognizer.onSecondaryTap = () =>
-            widget.onLineSecondaryTap!(widget.lines[i].lineIndex);
-      }
-      _lineRecognizers.add(recognizer);
+    var length = 0;
+    for (final span in spans) {
+      length += span.toPlainText(includeSemanticsLabels: false).length;
     }
-  }
-
-  void _disposeLineRecognizers() {
-    for (final recognizer in _lineRecognizers) {
-      recognizer.dispose();
-    }
-    _lineRecognizers.clear();
+    final built = (spans: spans, length: length);
+    if (cacheable) staticLines[key] = built;
+    return built;
   }
 
   void _disposeLinkRecognizers() {
@@ -282,21 +307,86 @@ class _ContinuousReadingParagraphState
     }
     _linkRecognizers.clear();
   }
+}
 
-  bool _sameLineOrder(
-    List<ContinuousReadingParagraphLine> oldLines,
-    List<ContinuousReadingParagraphLine> newLines,
-  ) {
-    if (oldLines.length != newLines.length) {
+const HtmlEscape _htmlEscape = HtmlEscape(HtmlEscapeMode.element);
+
+/// טווחי ההדגשה של התוספים נמדדים ב-graphemes על צמתי הטקסט של ה-HTML,
+/// ו-`<br>` אינו נספר בהם — בספאנים הוא `\n`. מחזיר אופסט UTF-16 בשורה.
+int _lineUtf16Offset(
+  ContinuousReadingParagraphLine line,
+  int grapheme, {
+  required bool isStart,
+}) {
+  final htmlText = line.htmlText;
+  if (htmlText == null) {
+    return line.text.characters.take(grapheme).join().length;
+  }
+  var remaining = grapheme;
+  var utf16 = 0;
+  bool walk(dom.Node node) {
+    if (node is dom.Text) {
+      final chars = node.data.characters;
+      final length = chars.length;
+      // תחילת טווח בגבול צומת שייכת לצומת הבא (אחרי <br>), סופו — לקודם.
+      if (isStart ? remaining < length : remaining <= length) {
+        utf16 += chars.take(remaining).join().length;
+        return true;
+      }
+      remaining -= length;
+      utf16 += node.data.length;
       return false;
     }
-    for (var i = 0; i < oldLines.length; i++) {
-      if (oldLines[i].lineIndex != newLines[i].lineIndex) {
-        return false;
+    if (node is dom.Element && node.localName == 'br') {
+      utf16++;
+      return false;
+    }
+    for (final child in node.nodes) {
+      if (walk(child)) return true;
+    }
+    return false;
+  }
+
+  for (final node in _parseFragmentCached(htmlText).nodes) {
+    if (walk(node)) break;
+  }
+  return utf16;
+}
+
+/// [PluginHighlightFrameOverlay] סופר graphemes על טקסט הפסקה כולו.
+List<PluginHighlightRenderedRange> _toGraphemeRanges(
+  TextSpan text,
+  List<PluginHighlightRenderedRange> utf16Ranges,
+) {
+  final boundaries = <int>[0];
+  var cursor = 0;
+  for (final grapheme
+      in text.toPlainText(includeSemanticsLabels: false).characters) {
+    cursor += grapheme.length;
+    boundaries.add(cursor);
+  }
+  int toGrapheme(int utf16) {
+    var lo = 0;
+    var hi = boundaries.length - 1;
+    while (lo < hi) {
+      final mid = (lo + hi + 1) >> 1;
+      if (boundaries[mid] <= utf16) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
       }
     }
-    return true;
+    return lo;
   }
+
+  return [
+    for (final range in utf16Ranges)
+      PluginHighlightRenderedRange(
+        start: toGrapheme(range.start),
+        end: toGrapheme(range.end),
+        highlight: range.highlight,
+      ),
+  ];
 }
 
 List<InlineSpan> _nodesToSpans(
@@ -365,29 +455,23 @@ List<InlineSpan> _nodeToSpans(
         style,
         hideRaisedMarkers: hideRaisedMarkers,
       );
-      // עוגן-מילה וטווח-ציטוט — צבע ה-primary של הנושא בלי קו תחתון; במצב
-      // active מודגש עם רקע; שאר הקישורים — קו תחתון + צבע theme.
+      // עוגן-מילה וטווח-ציטוט — צבע ה-primary של הנושא בלי קו תחתון; active
+      // מקבל רקע בלבד (הדגשה מרחיבה את האות ופורסת מחדש את השורה).
+      // שאר הקישורים — קו תחתון + צבע theme.
       //
       // כשהגליפים מוסתרים (hideRaisedMarkers) עוגן-מילה וסימון הערה נשארים
-      // שקופים: הצבע והרקע עוברים לציור המורם של RaisedMarkerOverlay, ורק
-      // ההדגשה של active נשארת כדי שרוחב המקום בשורה יתאים לציור.
+      // שקופים: הצבע והרקע עוברים לציור המורם של RaisedMarkerOverlay.
       final effectiveLinkStyle = node.classes.contains('link-anchor')
           // הווריאנט שב-childStyle נשמר גם ב-active (מיזוג linkStyle היה גורר
           // קו תחתון של קישור ומוחק את קו-התחתון שהוא סימנו של וריאנט 5).
-          ? (node.classes.contains('link-anchor-active')
-                ? childStyle.copyWith(
-                    color: hideRaisedMarkers ? null : linkStyle?.color,
-                    fontWeight: FontWeight.bold,
-                    fontVariations: AppFonts.boldFontVariations(
-                      childStyle.fontFamily,
-                    ),
-                    backgroundColor: hideRaisedMarkers
-                        ? null
-                        : anchorActiveBackground,
-                  )
-                : hideRaisedMarkers
+          ? (hideRaisedMarkers
                 ? childStyle
-                : childStyle.copyWith(color: linkStyle?.color))
+                : childStyle.copyWith(
+                    color: linkStyle?.color,
+                    backgroundColor: node.classes.contains('link-anchor-active')
+                        ? anchorActiveBackground
+                        : null,
+                  ))
           : node.classes.contains('book-note-marker') && hideRaisedMarkers
           ? childStyle
           : node.classes.contains('numbered-note-marker')
@@ -493,6 +577,9 @@ TextStyle _styleForElement(
 }) {
   var style = parentStyle;
   final localName = element.localName;
+  // נקראים פעם אחת: `classes` מפרק את המחרוזת מחדש בכל גישה.
+  final classes = element.classes.toSet();
+  final inlineStyle = element.attributes['style'] ?? '';
 
   if (localName == 'small') {
     style = style.copyWith(
@@ -504,7 +591,7 @@ TextStyle _styleForElement(
       fontSize: (style.fontSize ?? 18) * kHtmlLargerFontScale,
     );
   }
-  final inlineFontSize = _inlineFontSize(element, style.fontSize ?? 18);
+  final inlineFontSize = _inlineFontSize(inlineStyle, style.fontSize ?? 18);
   if (inlineFontSize != null) {
     style = style.copyWith(fontSize: inlineFontSize);
   }
@@ -512,24 +599,24 @@ TextStyle _styleForElement(
   // מוקטנים ונוטים לפי ה-CSS שהוגדר להם ב-SmartTextWidget.
   // `processText` ממיר כל sup לא-מספרי ל-span (ראו raised_markers.dart), ולכן
   // בפועל מגיע לכאן `raised-sup`; תג sup חשוף נשאר נתמך לקלט שלא עבר עיבוד.
-  if (localName == 'sup' || element.classes.contains(kRaisedSupClass)) {
+  if (localName == 'sup' || classes.contains(kRaisedSupClass)) {
     style = style.copyWith(
       fontSize: (style.fontSize ?? 18) * kHtmlSmallerFontScale,
     );
     // הגליף עצמו שקוף — RaisedMarkerOverlay מצייר אותו מורם. תג sup חשוף
     // (קלט שלא עבר processText) נשאר גלוי, שם אין סימון לשכבה לצייר.
-    if (hideRaisedMarkers && element.classes.contains(kRaisedSupClass)) {
+    if (hideRaisedMarkers && classes.contains(kRaisedSupClass)) {
       style = style.copyWith(color: const Color(0x00000000));
     }
   }
   // טקסט תחתי שהומר ל-span (ראו TextRendererService._fixSubscripts) — מוקטן.
-  if (element.classes.contains('subscript-text')) {
+  if (classes.contains('subscript-text')) {
     style = style.copyWith(
       fontSize: (style.fontSize ?? 18) * kHtmlSmallerFontScale,
     );
   }
-  if (element.classes.contains(kFootnoteMarkerClass) ||
-      element.classes.contains('book-note-marker')) {
+  if (classes.contains(kFootnoteMarkerClass) ||
+      classes.contains('book-note-marker')) {
     style = style.copyWith(
       fontSize: (style.fontSize ?? 18) * kFootnoteMarkerScale,
       fontStyle: FontStyle.italic,
@@ -542,9 +629,9 @@ TextStyle _styleForElement(
   }
   // סמן-אות של מפרש: מוקטן, והטיפוגרפיה נקבעת אך ורק בווריאנט שהוקצה למפרש.
   // נטייה כפויה כאן הייתה מוחקת את ההבחנה בין המפרשים.
-  if (element.classes.contains('link-anchor')) {
+  if (classes.contains('link-anchor')) {
     style = applyLinkAnchorVariant(
-      linkAnchorVariantFromClasses(element.classes),
+      linkAnchorVariantFromClasses(classes),
       style.copyWith(
         fontSize: (style.fontSize ?? 18) * kLinkAnchorMarkerScale,
       ),
@@ -556,7 +643,7 @@ TextStyle _styleForElement(
   }
   if (localName == 'i' ||
       localName == 'em' ||
-      _hasFontStyle(element, 'italic')) {
+      _italicRe.hasMatch(inlineStyle)) {
     style = style.copyWith(fontStyle: FontStyle.italic);
   }
   if (localName == 'b' || localName == 'strong') {
@@ -566,65 +653,66 @@ TextStyle _styleForElement(
     );
   }
 
-  // הדגשת תוצאות חיפוש מגיעות כ-`<span style="color: red">` או
-  // `<span style="color: blue; background-color: yellow">` (התוצאה הנוכחית).
-  // המפרסר חייב לכבד את ה-styles האלה אחרת תוצאות חיפוש לא יסומנו במצב רציף.
-  final inlineColor = _inlineColor(element);
+  // הדגשות החיפוש מגיעות כ-color/background-color ב-style; בלי פרסורן הן לא
+  // יסומנו במצב רציף.
+  final inlineColor = _inlineCssColor(_colorRe, inlineStyle);
   if (inlineColor != null) {
     style = style.copyWith(color: inlineColor);
   }
-  final inlineBackground = _inlineBackgroundColor(element);
+  final inlineBackground = _inlineCssColor(_backgroundColorRe, inlineStyle);
   if (inlineBackground != null) {
     style = style.copyWith(backgroundColor: inlineBackground);
   }
-  if (_hasTextDecoration(element, 'underline')) {
+  if (_underlineRe.hasMatch(inlineStyle)) {
     style = style.copyWith(
       decoration: TextDecoration.underline,
-      decorationColor: _inlineDecorationColor(element),
-      decorationThickness: _inlineDecorationThickness(element),
+      decorationColor: _inlineCssColor(_decorationColorRe, inlineStyle),
+      decorationThickness: _inlineDecorationThickness(inlineStyle),
     );
   }
 
   return style;
 }
 
-Color? _inlineColor(dom.Element element) {
-  final inlineStyle = element.attributes['style'] ?? '';
-  // לוכד `color: <value>` אך לא `background-color:` (שלפניו `-`).
-  final match = RegExp(
-    r'(?:^|[\s;])color\s*:\s*([^;]+)',
-    caseSensitive: false,
-  ).firstMatch(inlineStyle);
+// הביטויים נבנים פעם אחת ולא בכל אלמנט בכל build.
+// לוכד `color: <value>` אך לא `background-color:` (שלפניו `-`).
+final _colorRe = RegExp(
+  r'(?:^|[\s;])color\s*:\s*([^;]+)',
+  caseSensitive: false,
+);
+final _backgroundColorRe = RegExp(
+  r'background-color\s*:\s*([^;]+)',
+  caseSensitive: false,
+);
+final _decorationColorRe = RegExp(
+  r'text-decoration-color\s*:\s*([^;]+)',
+  caseSensitive: false,
+);
+final _decorationThicknessRe = RegExp(
+  r'text-decoration-thickness\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*(px|%)',
+  caseSensitive: false,
+);
+final _fontSizeRe = RegExp(
+  r'font-size\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*(em|rem|px|%)?',
+  caseSensitive: false,
+);
+final _italicRe = RegExp(r'font-style\s*:\s*italic', caseSensitive: false);
+final _underlineRe = RegExp(
+  r'text-decoration\s*:\s*[^;]*\bunderline\b',
+  caseSensitive: false,
+);
+final _rgbaRe = RegExp(
+  r'^rgba\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(0(?:\.\d+)?|\.\d+|1(?:\.0+)?)\s*\)$',
+);
+
+Color? _inlineCssColor(RegExp property, String inlineStyle) {
+  final match = property.firstMatch(inlineStyle);
   if (match == null) return null;
   return _parseCssColor(match.group(1)!.trim());
 }
 
-Color? _inlineBackgroundColor(dom.Element element) {
-  final inlineStyle = element.attributes['style'] ?? '';
-  final match = RegExp(
-    r'background-color\s*:\s*([^;]+)',
-    caseSensitive: false,
-  ).firstMatch(inlineStyle);
-  if (match == null) return null;
-  return _parseCssColor(match.group(1)!.trim());
-}
-
-Color? _inlineDecorationColor(dom.Element element) {
-  final inlineStyle = element.attributes['style'] ?? '';
-  final match = RegExp(
-    r'text-decoration-color\s*:\s*([^;]+)',
-    caseSensitive: false,
-  ).firstMatch(inlineStyle);
-  if (match == null) return null;
-  return _parseCssColor(match.group(1)!.trim());
-}
-
-double? _inlineDecorationThickness(dom.Element element) {
-  final inlineStyle = element.attributes['style'] ?? '';
-  final match = RegExp(
-    r'text-decoration-thickness\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*(px|%)',
-    caseSensitive: false,
-  ).firstMatch(inlineStyle);
+double? _inlineDecorationThickness(String inlineStyle) {
+  final match = _decorationThicknessRe.firstMatch(inlineStyle);
   if (match == null) return null;
   final value = double.tryParse(match.group(1)!);
   if (value == null) return null;
@@ -633,9 +721,7 @@ double? _inlineDecorationThickness(dom.Element element) {
 
 Color? _parseCssColor(String value) {
   final v = value.toLowerCase().trim();
-  final rgba = RegExp(
-    r'^rgba\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(0(?:\.\d+)?|\.\d+|1(?:\.0+)?)\s*\)$',
-  ).firstMatch(v);
+  final rgba = _rgbaRe.firstMatch(v);
   if (rgba != null) {
     final red = int.parse(rgba.group(1)!).clamp(0, 255).toInt();
     final green = int.parse(rgba.group(2)!).clamp(0, 255).toInt();
@@ -680,12 +766,8 @@ Color? _parseCssColor(String value) {
   return null;
 }
 
-double? _inlineFontSize(dom.Element element, double parentFontSize) {
-  final inlineStyle = element.attributes['style'] ?? '';
-  final match = RegExp(
-    r'font-size\s*:\s*([0-9]+(?:\.[0-9]+)?)\s*(em|rem|px|%)?',
-    caseSensitive: false,
-  ).firstMatch(inlineStyle);
+double? _inlineFontSize(String inlineStyle, double parentFontSize) {
+  final match = _fontSizeRe.firstMatch(inlineStyle);
   if (match == null) return null;
 
   final value = double.tryParse(match.group(1) ?? '');
@@ -698,46 +780,4 @@ double? _inlineFontSize(dom.Element element, double parentFontSize) {
     '%' => parentFontSize * value / 100,
     _ => value,
   };
-}
-
-bool _hasFontStyle(dom.Element element, String value) {
-  final inlineStyle = element.attributes['style'] ?? '';
-  return RegExp(
-    'font-style\\s*:\\s*$value',
-    caseSensitive: false,
-  ).hasMatch(inlineStyle);
-}
-
-bool _hasTextDecoration(dom.Element element, String value) {
-  final inlineStyle = element.attributes['style'] ?? '';
-  return RegExp(
-    'text-decoration\\s*:\\s*[^;]*\\b$value\\b',
-    caseSensitive: false,
-  ).hasMatch(inlineStyle);
-}
-
-InlineSpan _withRecognizer(
-  InlineSpan span,
-  TapGestureRecognizer recognizer,
-  TextStyle fallbackStyle,
-) {
-  if (span is! TextSpan) {
-    return span;
-  }
-
-  // אם הספאן עצמו כבר נושא recognizer (למשל קישור inline), משאירים את
-  // כל תת-העץ כמו שהוא: ה-recognizer של ההורה יורש ממילא לכל הצאצאים.
-  // ירידה רקורסיבית כאן הייתה דורסת את הקישור בלחיצת שורה.
-  if (span.recognizer != null) {
-    return span;
-  }
-
-  return TextSpan(
-    text: span.text,
-    children: span.children
-        ?.map((child) => _withRecognizer(child, recognizer, fallbackStyle))
-        .toList(),
-    style: span.style ?? fallbackStyle,
-    recognizer: recognizer,
-  );
 }

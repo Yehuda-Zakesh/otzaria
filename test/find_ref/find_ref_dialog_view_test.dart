@@ -21,6 +21,7 @@ import 'package:otzaria/library/hidden/hidden_library_selection.dart';
 import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/models/books.dart';
+import 'package:otzaria/plugins/services/plugin_search_field_actions_registry.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
 import 'package:otzaria/tour/tour_target_keys.dart';
 import 'package:otzaria/widgets/controls/action_buttons.dart';
@@ -297,6 +298,31 @@ void main() {
     // המתג נקרא מההגדרות בבניית ה-State, ולכן בדיקה שמפעילה אותו הייתה
     // משפיעה על הבדיקות שאחריה.
     Settings.setValue<bool>('key-find-ref-include-personal-books', false);
+  });
+
+  testWidgets('שדה ריק מתעדכן ברישום ובהסרת כפתור תוסף', (tester) async {
+    final registry = PluginSearchFieldActionsRegistry.instance;
+    addTearDown(() => registry.removeAll('voice'));
+    await _pumpDialog(tester);
+    final field = find.byType(TextField);
+    final initialSize = tester.getSize(field);
+    expect(tester.widget<TextField>(field).decoration!.suffixIcon, isNull);
+
+    registry.registerPayload('voice', {
+      'id': 'dictate',
+      'title': 'חיפוש בדיבור',
+      'icon': 'mic_24_regular',
+      'fields': ['findRef'],
+    });
+    await tester.pump();
+    expect(find.byTooltip('חיפוש בדיבור'), findsOneWidget);
+    expect(FocusRepository().findRefSearchController.text, isEmpty);
+
+    registry.removeAll('voice');
+    await tester.pump();
+    expect(find.byTooltip('חיפוש בדיבור'), findsNothing);
+    expect(tester.widget<TextField>(field).decoration!.suffixIcon, isNull);
+    expect(tester.getSize(field), initialSize);
   });
 
   testWidgets('מצב הפתיחה מציג כותרת, הסבר ודוגמאות', (tester) async {

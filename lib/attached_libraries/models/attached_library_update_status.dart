@@ -36,7 +36,6 @@ class AttachedUpdateOffer extends Equatable {
 
   int get dbVersion => manifest.dbVersion;
   int get downloadSize => plannedDownloadSize ?? manifest.full.compressedSize;
-  int get installedSize => manifest.full.size;
   String? get releaseNotes => manifest.releaseNotes;
 
   Map<String, dynamic> toJson() => {

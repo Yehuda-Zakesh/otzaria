@@ -573,10 +573,10 @@ class _ToolsLauncherPanelState extends State<ToolsLauncherPanel> {
       ),
       if (plugin != null)
         ToolTileAction(
-          icon: plugin.enabled
+          icon: plugin.savedEnabled
               ? FluentIcons.pause_circle_24_regular
               : FluentIcons.play_circle_24_regular,
-          label: plugin.enabled ? 'השבת' : 'הפעל',
+          label: plugin.savedEnabled ? 'השבת' : 'הפעל',
           onTap: () => togglePluginEnabled(context, plugin),
         ),
       if (plugin != null)
@@ -793,7 +793,7 @@ class _ToolsLauncherPanelState extends State<ToolsLauncherPanel> {
               : context.settingsText('לא נמצאו כלים זמינים'));
     return OtzariaEmptyState(
       icon: hasQuery
-          ? OtzariaIcons.search_in_the_library_24_regular
+          ? OtzariaIcons.search_in_library_24_regular
           : FluentIcons.toolbox_24_regular,
       title: message,
       message: hasQuery ? context.settingsText('נסה לחפש מילים אחרות') : null,
@@ -1486,7 +1486,7 @@ class ToolTile extends StatelessWidget {
               PositionedDirectional(
                 bottom: 2,
                 start: 4,
-                child: _Badge(label: 'DEV', color: cs.tertiary),
+                child: const PluginDevBadge(),
               ),
             if (isOpen)
               PositionedDirectional(
@@ -1646,32 +1646,6 @@ class _MovePulseState extends State<_MovePulse>
         );
       },
       child: widget.child,
-    );
-  }
-}
-
-class _Badge extends StatelessWidget {
-  final String label;
-  final Color color;
-
-  const _Badge({required this.label, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: AppTokens.borderRadiusAll,
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 8,
-          fontWeight: FontWeight.bold,
-          color: Theme.of(context).colorScheme.onTertiary,
-        ),
-      ),
     );
   }
 }

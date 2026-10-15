@@ -61,6 +61,9 @@ class ReaderPage extends StatefulWidget {
   final ItemScrollController? scrollController;
   final ItemPositionsListener? positionsListener;
 
+  /// השורה שהרשימה נפתחת בה — נקראת רק בבניית הרשימה.
+  final int initialLine;
+
   const ReaderPage({
     super.key,
     required this.lines,
@@ -72,6 +75,7 @@ class ReaderPage extends StatefulWidget {
     this.headerSubtitle,
     this.scrollController,
     this.positionsListener,
+    this.initialLine = 0,
     this.onZoomChanged,
   });
 
@@ -175,7 +179,7 @@ class _ReaderPageState extends State<ReaderPage> {
           maxPageWidth: constraints.maxWidth,
         );
         final zoomedWidth = metrics.pageWidth * zoom;
-        Widget page = Column(
+        final page = Column(
           children: [
             if (widget.headerTitle != null || widget.headerSubtitle != null)
               Center(
@@ -190,24 +194,26 @@ class _ReaderPageState extends State<ReaderPage> {
             Expanded(child: _buildList(metrics, zoomedWidth)),
           ],
         );
-        if (zoomedWidth > constraints.maxWidth) {
-          // העמוד רחב מהחלון — גוללים אותו לרוחב, כמו הגדלה בדפדפן.
-          page = Scrollbar(
+        // עמוד רחב מהחלון נגלל לרוחב, כמו הגדלה בדפדפן. העטיפה קבועה גם כשאין
+        // מה לגלול: עטיפה מותנית בונה את הרשימה מחדש ומאבדת את מיקום הקריאה.
+        final scrolled = Scrollbar(
+          controller: _horizontal,
+          thumbVisibility: true,
+          child: SingleChildScrollView(
             controller: _horizontal,
-            thumbVisibility: true,
-            child: SingleChildScrollView(
-              controller: _horizontal,
-              scrollDirection: Axis.horizontal,
-              child: SizedBox(width: zoomedWidth, child: page),
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: math.max(zoomedWidth, constraints.maxWidth),
+              child: page,
             ),
-          );
-        }
+          ),
+        );
         // גרירה בעכבר ובמגע בשני הצירים — העמוד מתנהג כקנבס כשהוא מוגדל.
         return ScrollConfiguration(
           behavior: ScrollConfiguration.of(context).copyWith(
             dragDevices: PointerDeviceKind.values.toSet(),
           ),
-          child: _wrapZoomGestures(page),
+          child: _wrapZoomGestures(scrolled),
         );
       },
     );
@@ -251,27 +257,32 @@ class _ReaderPageState extends State<ReaderPage> {
   Widget _buildList(TikkunRenderMetrics metrics, double width) {
     final horizontal = metrics.em(kTikkunRowPaddingEm);
     final gaps = _gapsFor(math.max(0.0, width - horizontal * 2), metrics);
-    return ScrollablePositionedList.builder(
-      physics: _zoomModifier ? const NeverScrollableScrollPhysics() : null,
-      itemScrollController: widget.scrollController,
-      itemPositionsListener: widget.positionsListener,
-      itemCount: widget.lines.length,
-      padding: EdgeInsets.symmetric(vertical: metrics.em(1)),
-      // הרשימה תופסת את כל הרוחב כדי שפס הגלילה יישב בקצה החלונית;
-      // מירכוז העמוד נעשה בכל שורה בנפרד.
-      itemBuilder: (context, index) => Center(
-        child: SizedBox(
-          width: width,
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: horizontal),
-            child: buildTikkunLineWidget(
-              line: widget.lines[index],
-              markers: _markers[index],
-              metrics: metrics,
-              settings: widget.settings,
-              hideStam: widget.hideStam,
-              hideNikud: widget.hideNikud,
-              gaps: gaps,
+    // הפריסה נמדדת ב-TextPainter בלי גודל הטקסט של המערכת, והזום מחליף אותו;
+    // בלי זה המילים מצוירות רחבות מהמדוד וגולשות מהטור.
+    return MediaQuery.withNoTextScaling(
+      child: ScrollablePositionedList.builder(
+        physics: _zoomModifier ? const NeverScrollableScrollPhysics() : null,
+        itemScrollController: widget.scrollController,
+        itemPositionsListener: widget.positionsListener,
+        initialScrollIndex: widget.initialLine,
+        itemCount: widget.lines.length,
+        padding: EdgeInsets.symmetric(vertical: metrics.em(1)),
+        // הרשימה תופסת את כל הרוחב כדי שפס הגלילה יישב בקצה החלונית;
+        // מירכוז העמוד נעשה בכל שורה בנפרד.
+        itemBuilder: (context, index) => Center(
+          child: SizedBox(
+            width: width,
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: horizontal),
+              child: buildTikkunLineWidget(
+                line: widget.lines[index],
+                markers: _markers[index],
+                metrics: metrics,
+                settings: widget.settings,
+                hideStam: widget.hideStam,
+                hideNikud: widget.hideNikud,
+                gaps: gaps,
+              ),
             ),
           ),
         ),

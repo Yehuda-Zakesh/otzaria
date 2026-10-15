@@ -411,6 +411,4 @@ class ParseResult<T> {
   final List<ImportRowError> errors;
 
   const ParseResult(this.rows, this.errors);
-
-  bool get hasErrors => errors.isNotEmpty;
 }

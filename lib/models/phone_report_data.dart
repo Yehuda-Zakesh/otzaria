@@ -1,11 +1,5 @@
 import 'package:equatable/equatable.dart';
 
-/// Enum representing different types of reporting actions
-enum ReportAction {
-  regular,
-  phone,
-}
-
 /// Represents an error type with ID and Hebrew label for phone reporting
 class ErrorType extends Equatable {
   final int id;
@@ -28,15 +22,6 @@ class ErrorType extends Equatable {
     ErrorType(id: 5, hebrewLabel: 'שגיאת מקור'),
     ErrorType(id: 6, hebrewLabel: 'אחר'),
   ];
-
-  /// Get error type by ID
-  static ErrorType? getById(int id) {
-    try {
-      return errorTypes.firstWhere((type) => type.id == id);
-    } catch (e) {
-      return null;
-    }
-  }
 }
 
 /// Data model for phone-based error reporting

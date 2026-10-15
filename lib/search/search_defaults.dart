@@ -19,6 +19,7 @@ class SearchDefaults {
   static const _exactSettingsKey = 'key-search-default-options-exact';
   static const _distanceKey = 'key-search-default-distance';
   static const _modeKey = 'key-search-default-mode';
+  static const _semanticModeKey = 'key-search-default-semantic-mode';
 
   // מטמון הסשן: מצב האפשרויות כפי שהמשתמש השאיר אותן בדיאלוג האחרון,
   // לכל מצב חיפוש בנפרד.
@@ -110,6 +111,14 @@ class SearchDefaults {
     _sessionExactOptions = Map<String, bool>.from(options);
   }
 
+  /// האפשרויות שאיתן נפתח חיפוש חדש במצב [mode] (במקורב אין אפשרויות מילה).
+  static Map<String, bool> initialOptionsForMode(SearchMode mode) =>
+      switch (mode) {
+        SearchMode.advanced => initialOptionsForNewSearch(),
+        SearchMode.exact => initialExactOptionsForNewSearch(),
+        SearchMode.fuzzy => const {},
+      };
+
   // ── מצב החיפוש ──────────────────────────────────────────────────────
 
   /// מצב החיפוש שבו נפתח חיפוש חדש: מצב הסשן אם קיים (מעבר ידני למצב
@@ -126,11 +135,40 @@ class SearchDefaults {
   static void saveModeDefault(SearchMode mode) {
     _saveEnum(_modeKey, mode.name);
     _sessionMode = mode;
+    if (Settings.isInitialized) {
+      Settings.setValue<bool>(_semanticModeKey, false);
+    }
+    _sessionSemantic = false;
   }
 
   /// משמר את מצב החיפוש להמשך הסשן (עד הפעלה מחדש של התוכנה).
   static void rememberSessionMode(SearchMode mode) {
     _sessionMode = mode;
+  }
+
+  // החיפוש החכם אינו SearchMode: הוא נבחר מעל המצב הלקסיקלי, שנשאר כגיבוי
+  // כשהמצב החכם אינו זמין.
+  static bool? _sessionSemantic;
+
+  /// האם חיפוש חדש נפתח במצב החכם: מצב הסשן אם קיים, אחרת ברירת המחדל.
+  static bool initialSemanticForNewSearch() =>
+      _sessionSemantic ?? loadSemanticDefault();
+
+  /// האם המצב החכם נשמר (בין הפעלות) כמצב פתיחת חיפוש חדש.
+  static bool loadSemanticDefault() {
+    if (!Settings.isInitialized) return false;
+    return Settings.getValue<bool>(_semanticModeKey) ?? false;
+  }
+
+  /// שומר את המצב החכם כמצב פתיחת חיפוש חדש; [saveModeDefault] מבטל אותו.
+  static void saveSemanticDefault() {
+    if (Settings.isInitialized) Settings.setValue<bool>(_semanticModeKey, true);
+    _sessionSemantic = true;
+  }
+
+  /// משמר את בחירת המצב החכם להמשך הסשן.
+  static void rememberSessionSemantic(bool semantic) {
+    _sessionSemantic = semantic;
   }
 
   // ── מרווח בין מילים (חיפוש רגיל/מתקדם) ─────────────────────────────

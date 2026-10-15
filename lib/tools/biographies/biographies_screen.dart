@@ -10,6 +10,7 @@ import 'package:otzaria/theme/theme_exports.dart';
 import 'package:otzaria/tools/biographies/models/biography.dart';
 import 'package:otzaria/tools/biographies/repository/biographies_repository.dart';
 import 'package:otzaria/tools/biographies/widgets/biography_card.dart';
+import 'package:otzaria/tools/tool_query.dart';
 import 'package:otzaria/widgets/navigation/app_top_bar.dart';
 import 'package:otzaria/widgets/text/otzaria_search_field.dart';
 import 'package:otzaria/widgets/feedback/tool_empty_state.dart';
@@ -17,15 +18,17 @@ import 'package:otzaria/widgets/misc/tool_ui_helpers.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 
 class BiographiesScreen extends StatefulWidget {
-  const BiographiesScreen({super.key, this.repository});
+  const BiographiesScreen({super.key, this.repository, this.queryInbox});
 
   final BiographiesRepository? repository;
+  final ToolQueryInbox? queryInbox;
 
   @override
   State<BiographiesScreen> createState() => _BiographiesScreenState();
 }
 
-class _BiographiesScreenState extends State<BiographiesScreen> {
+class _BiographiesScreenState extends State<BiographiesScreen>
+    with ToolQueryConsumer {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   late final BiographiesRepository _repository =
@@ -33,6 +36,18 @@ class _BiographiesScreenState extends State<BiographiesScreen> {
   List<Biography> _allBiographies = [];
   List<Biography> _filteredResults = [];
   bool _isLoading = true;
+
+  @override
+  ToolQueryInbox? get toolQueryInbox => widget.queryInbox;
+
+  @override
+  bool get canApplyToolQuery => !_isLoading;
+
+  @override
+  void applyToolQuery(ToolQuery query) {
+    fillSearchField(_searchController, query.text);
+    _performSearch(query.text);
+  }
 
   @override
   void initState() {
@@ -69,6 +84,7 @@ class _BiographiesScreenState extends State<BiographiesScreen> {
       setState(() => _isLoading = false);
       UiSnack.showError(ToolsMessages.biographiesLoadError(e));
     }
+    consumeToolQuery();
   }
 
   void _performSearch(String query) {
@@ -105,6 +121,7 @@ class _BiographiesScreenState extends State<BiographiesScreen> {
               controller: _searchController,
               focusNode: _searchFocusNode,
               hintText: 'חפש רב לפי שם או כינוי...',
+              icon: OtzariaIcons.search_in_person_24_regular,
               autofocus: true,
               onChanged: _performSearch,
               onClear: () => setState(() => _filteredResults = _allBiographies),
@@ -121,14 +138,14 @@ class _BiographiesScreenState extends State<BiographiesScreen> {
   Widget _buildResultsList() {
     if (_allBiographies.isEmpty) {
       return const ToolEmptyState(
-        icon: OtzariaIcons.search_in_the_person_24_regular,
+        icon: OtzariaIcons.person_24_regular,
         message: 'נתוני הביוגרפיות אינם זמינים',
       );
     }
 
     if (_filteredResults.isEmpty) {
       return const ToolEmptyState(
-        icon: OtzariaIcons.search_in_the_person_24_regular,
+        icon: OtzariaIcons.person_24_regular,
         message: 'לא נמצאו תוצאות',
       );
     }

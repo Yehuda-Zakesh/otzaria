@@ -21,22 +21,6 @@ class LineDao {
       ? _queries['${name}Split']!
       : _queries[name]!;
 
-  Future<Line?> getLineById(int id) async {
-    final db = await database;
-    final result = db.select(await _forShape('selectById'), [id]).toMapList();
-    if (result.isEmpty) return null;
-    return _mapToLine(result.first, LineContentCodec.of(db));
-  }
-
-  Future<List<Line>> selectByBookId(int bookId) async {
-    final db = await database;
-    return db
-        .select(await _forShape('selectByBookId'), [bookId])
-        .toMapList()
-        .map((row) => _mapToLine(row, LineContentCodec.of(db)))
-        .toList();
-  }
-
   /// תוכן כל שורות הספר בסדר השורות, בלי בניית Map ואובייקט [Line] לכל
   /// שורה — מסלול הקריאה של האינדוקס, שרק מאחה את התוכן לטקסט אחד.
   Future<List<String>> selectContentByBookId(int bookId) async {
@@ -75,15 +59,6 @@ class LineDao {
     return _mapToLine(result.first, LineContentCodec.of(db));
   }
 
-  Future<Line?> selectByHeRef(String heRef) async {
-    final db = await database;
-    final result = db.select(await _forShape('selectByHeRef'), [
-      heRef,
-    ]).toMapList();
-    if (result.isEmpty) return null;
-    return _mapToLine(result.first, LineContentCodec.of(db));
-  }
-
   /// זוגות (lineIndex, heRef) של כל השורות בעלות heRef בספר, בסדר השורות.
   /// מסלול רזה — בלי content — לרזולוציית הפניה לרמת שורה.
   Future<List<({int lineIndex, String heRef})>> selectRefsByBookId(
@@ -113,38 +88,10 @@ class LineDao {
     return db.lastInsertRowId;
   }
 
-  Future<int> updateTocEntryId(int lineId, int tocEntryId) async {
-    final db = await database;
-    db.execute(_queries['updateTocEntryId']!, [tocEntryId, lineId]);
-    return db.updatedRows;
-  }
-
-  Future<int> updateHeRef(int lineId, String heRef) async {
-    final db = await database;
-    db.execute(_queries['updateHeRef']!, [heRef, lineId]);
-    return db.updatedRows;
-  }
-
   Future<int> delete(int id) async {
     final db = await database;
     db.execute(_queries['delete']!, [id]);
     return db.updatedRows;
-  }
-
-  Future<int> deleteByBookId(int bookId) async {
-    final db = await database;
-    db.execute(_queries['deleteByBookId']!, [bookId]);
-    return db.updatedRows;
-  }
-
-  Future<int> countByBookId(int bookId) async {
-    final db = await database;
-    return firstIntValue(db.select(_queries['countByBookId']!, [bookId])) ?? 0;
-  }
-
-  Future<int> getLastInsertRowId() async {
-    final db = await database;
-    return db.lastInsertRowId;
   }
 
   Line _mapToLine(Map<String, dynamic> map, LineContentCodec codec) {

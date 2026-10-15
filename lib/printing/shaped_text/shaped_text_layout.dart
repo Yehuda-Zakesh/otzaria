@@ -83,8 +83,6 @@ class ShapedTextBlock {
   /// Distance from the top of a line box down to its baseline.
   final double baselineOffset;
 
-  double get height => lines.length * lineHeight;
-
   bool get isEmpty => lines.isEmpty;
 }
 

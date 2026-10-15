@@ -208,6 +208,10 @@ abstract interface class SemanticSearchEngineOperations {
 /// ממשק קטן וניתן לבדיקה מעל ה-API של `search_engine`.
 abstract class SearchEngineOperations {
   Future<List<SearchResult>> searchExact(SearchEngineRequest request);
+
+  /// ביטוי מדויק בתוך שורה אחת, ללא הרחבות או התאמות בין שורות.
+  Future<List<SearchResult>> searchInlineExact(SearchEngineRequest request) =>
+      throw UnsupportedError('המנוע אינו תומך בחיפוש ביטוי בתוך שורה');
   Future<List<SearchResult>> searchAdvanced(SearchEngineRequest request);
   Future<List<SearchResult>> searchFuzzy(SearchEngineRequest request);
 
@@ -344,6 +348,20 @@ class RustSearchEngineOperations
   }
 
   @override
+  Future<List<SearchResult>> searchInlineExact(SearchEngineRequest request) {
+    final words = queryWordSpans(query: request.query).map((span) => span.word);
+    return _engine.search(
+      regexTerms: words.map(RegExp.escape).toList(),
+      facets: request.facets,
+      limit: request.limit,
+      offset: request.offset,
+      slop: 0,
+      maxExpansions: 64,
+      order: ResultsOrder.catalogue,
+    );
+  }
+
+  @override
   Future<List<SearchResult>> searchExact(SearchEngineRequest request) {
     final gapped = _exactWithParametersAsAdvanced(request);
     if (gapped != null) return searchAdvanced(gapped);
@@ -403,18 +421,22 @@ class RustSearchEngineOperations
 
   @override
   Future<SemanticSearchResponse> searchSemantic(SemanticSearchRequest request) {
-    return _engine.searchSemantic(
-      query: request.query,
-      facets: request.facets,
-      limit: request.limit,
-      offset: request.offset,
-      lexicalMode: request.lexicalMode,
-      fuzzyMaxDistance: request.effectiveFuzzyMaxDistance,
-      retrievalMode: request.retrievalMode,
-      grouping: request.grouping,
-      matchNikud: request.matchNikud,
-      matchTaamim: request.matchTaamim,
-    );
+    final token = SemanticCancellationToken();
+    return _engine
+        .searchSemantic(
+          query: request.query,
+          facets: request.facets,
+          limit: request.limit,
+          offset: request.offset,
+          lexicalMode: request.lexicalMode,
+          fuzzyMaxDistance: request.effectiveFuzzyMaxDistance,
+          retrievalMode: request.retrievalMode,
+          grouping: request.grouping,
+          matchNikud: request.matchNikud,
+          matchTaamim: request.matchTaamim,
+          cancellation: token,
+        )
+        .whenComplete(token.dispose);
   }
 
   @override
@@ -953,23 +975,6 @@ class SearchEngineGateway {
         return engine.searchAndCountAdvanced(request);
       case SearchMode.fuzzy:
         return engine.searchAndCountFuzzy(request);
-    }
-  }
-
-  Stream<List<SearchResult>> searchStream(
-    SearchEngineOperations engine,
-    SearchEngineRequest request, {
-    required int chunkSize,
-  }) {
-    request = _withHolyNames(request);
-    engine.primeHighlightPattern(request);
-    switch (request.searchMode) {
-      case SearchMode.exact:
-        return engine.searchExactStream(request, chunkSize: chunkSize);
-      case SearchMode.advanced:
-        return engine.searchAdvancedStream(request, chunkSize: chunkSize);
-      case SearchMode.fuzzy:
-        return engine.searchFuzzyStream(request, chunkSize: chunkSize);
     }
   }
 

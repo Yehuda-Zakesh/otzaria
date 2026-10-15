@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
+import 'package:otzaria/plugins/models/plugin_valid_permissions.dart';
 import 'package:otzaria/plugins/models/plugin_permission_grant.dart';
 import 'package:otzaria/plugins/models/plugin_published_record.dart';
 import 'package:otzaria/migration/database/sqlite3_utils.dart';
@@ -194,15 +195,28 @@ class PluginSystemDatabase {
     try {
       _insertOrUpdatePlugin(db, plugin);
       db.execute(
-        'DELETE FROM plugin_permission_grant WHERE plugin_id = ?',
-        [plugin.pluginId],
+        'DELETE FROM plugin_permission_grant WHERE plugin_id = ? '
+        'AND (permission != ? OR ? = 0)',
+        [
+          plugin.pluginId,
+          pluginNewTabPagePermission,
+          plugin.manifest.permissions.contains('navigation.write') ? 1 : 0,
+        ],
       );
       final grantedAt = DateTime.now().toIso8601String();
       for (final entry in permissions.entries) {
+        if (entry.key == pluginNewTabPagePermission) continue;
         db.execute(
           'INSERT INTO plugin_permission_grant '
           '(plugin_id, permission, granted, granted_at) VALUES (?, ?, ?, ?)',
           [plugin.pluginId, entry.key, entry.value ? 1 : 0, grantedAt],
+        );
+      }
+      if (permissions['navigation.write'] != true) {
+        db.execute(
+          'UPDATE plugin_permission_grant SET granted = 0 '
+          'WHERE plugin_id = ? AND permission = ?',
+          [plugin.pluginId, pluginNewTabPagePermission],
         );
       }
       db.execute('RELEASE SAVEPOINT $savepoint');
@@ -355,10 +369,145 @@ class PluginSystemDatabase {
     bool granted,
   ) async {
     final db = await database;
+    applyPermission(db, pluginId, permission, granted);
+  }
+
+  @visibleForTesting
+  static void applyPermission(
+    Database db,
+    String pluginId,
+    String permission,
+    bool granted,
+  ) {
+    const savepoint = 'sp_plugin_permission';
+    db.execute('SAVEPOINT $savepoint');
+    try {
+      db.execute(
+        'INSERT OR REPLACE INTO plugin_permission_grant (plugin_id, permission, granted, granted_at) VALUES (?, ?, ?, ?)',
+        [
+          pluginId,
+          permission,
+          granted ? 1 : 0,
+          DateTime.now().toIso8601String(),
+        ],
+      );
+      if (permission == 'navigation.write' && !granted) {
+        db.execute(
+          'UPDATE plugin_permission_grant SET granted = 0 '
+          'WHERE plugin_id = ? AND permission = ?',
+          [pluginId, pluginNewTabPagePermission],
+        );
+      }
+      db.execute('RELEASE SAVEPOINT $savepoint');
+    } catch (_) {
+      db.execute('ROLLBACK TO SAVEPOINT $savepoint');
+      db.execute('RELEASE SAVEPOINT $savepoint');
+      rethrow;
+    }
+  }
+
+  Future<void> clearNewTabPageRegistration(String pluginId) async {
+    final db = await database;
     db.execute(
-      'INSERT OR REPLACE INTO plugin_permission_grant (plugin_id, permission, granted, granted_at) VALUES (?, ?, ?, ?)',
-      [pluginId, permission, granted ? 1 : 0, DateTime.now().toIso8601String()],
+      'DELETE FROM plugin_permission_grant WHERE plugin_id = ? '
+      'AND permission = ? AND granted = 1',
+      [pluginId, pluginNewTabPagePermission],
     );
+  }
+
+  Future<String?> getNewTabPageOwner() async =>
+      readNewTabPageOwner(await database);
+
+  @visibleForTesting
+  static String? readNewTabPageOwner(Database db) {
+    final rows = db.select(
+      'SELECT p.* FROM plugin_installation p '
+      'JOIN plugin_permission_grant button ON button.plugin_id = p.plugin_id '
+      'JOIN plugin_permission_grant nav ON nav.plugin_id = p.plugin_id '
+      'WHERE p.enabled = 1 AND button.permission = ? AND button.granted = 1 '
+      "AND nav.permission = 'navigation.write' AND nav.granted = 1",
+      [pluginNewTabPagePermission],
+    );
+    for (final row in rows) {
+      final plugin = InstalledPlugin.fromDbMap(row);
+      if (plugin.manifest.permissions.contains('navigation.write')) {
+        return plugin.pluginId;
+      }
+    }
+    return null;
+  }
+
+  Future<bool> grantNewTabPage(
+    String pluginId, {
+    required bool allowPreviouslyDenied,
+    required String? expectedOwner,
+    required void Function() onGranted,
+  }) async {
+    final db = await database;
+    final granted = applyNewTabPageGrant(
+      db,
+      pluginId,
+      allowPreviouslyDenied: allowPreviouslyDenied,
+      expectedOwner: expectedOwner,
+    );
+    // אין await בין החלטת ההרשאה לבעלות הפעילה: שלילה מקבילה תנקה את שתיהן.
+    if (granted) onGranted();
+    return granted;
+  }
+
+  @visibleForTesting
+  static bool applyNewTabPageGrant(
+    Database db,
+    String pluginId, {
+    bool allowPreviouslyDenied = true,
+    String? expectedOwner,
+  }) {
+    const savepoint = 'sp_plugin_new_tab';
+    db.execute('SAVEPOINT $savepoint');
+    try {
+      final eligible = db.select(
+        'SELECT p.* FROM plugin_installation p '
+        'JOIN plugin_permission_grant g ON g.plugin_id = p.plugin_id '
+        "WHERE p.plugin_id = ? AND p.enabled = 1 "
+        "AND g.permission = 'navigation.write' AND g.granted = 1",
+        [pluginId],
+      );
+      final denied =
+          !allowPreviouslyDenied &&
+          db.select(
+            'SELECT 1 FROM plugin_permission_grant WHERE plugin_id = ? '
+            'AND permission = ? AND granted = 0',
+            [pluginId, pluginNewTabPagePermission],
+          ).isNotEmpty;
+      if (eligible.isEmpty ||
+          !InstalledPlugin.fromDbMap(
+            eligible.first,
+          ).manifest.permissions.contains('navigation.write') ||
+          denied ||
+          readNewTabPageOwner(db) != expectedOwner) {
+        db.execute('RELEASE SAVEPOINT $savepoint');
+        return false;
+      }
+      db.execute(
+        'UPDATE plugin_permission_grant SET granted = 0 WHERE permission = ?',
+        [pluginNewTabPagePermission],
+      );
+      db.execute(
+        'INSERT OR REPLACE INTO plugin_permission_grant '
+        '(plugin_id, permission, granted, granted_at) VALUES (?, ?, 1, ?)',
+        [
+          pluginId,
+          pluginNewTabPagePermission,
+          DateTime.now().toIso8601String(),
+        ],
+      );
+      db.execute('RELEASE SAVEPOINT $savepoint');
+      return true;
+    } catch (_) {
+      db.execute('ROLLBACK TO SAVEPOINT $savepoint');
+      db.execute('RELEASE SAVEPOINT $savepoint');
+      rethrow;
+    }
   }
 
   Future<bool?> getPermission(String pluginId, String permission) async {
@@ -620,8 +769,18 @@ class PluginSystemDatabase {
     Map<String, dynamic> aux,
   ) async {
     final db = await database;
+    applyPluginAuxData(db, pluginId, aux);
+  }
+
+  @visibleForTesting
+  static void applyPluginAuxData(
+    Database db,
+    String pluginId,
+    Map<String, dynamic> aux,
+  ) {
     db.execute('BEGIN TRANSACTION');
     try {
+      final previousOwner = readNewTabPageOwner(db);
       db.execute('DELETE FROM plugin_permission_grant WHERE plugin_id = ?', [
         pluginId,
       ]);
@@ -633,7 +792,44 @@ class PluginSystemDatabase {
         final m = (row as Map).cast<String, dynamic>();
         db.execute(
           'INSERT OR REPLACE INTO plugin_permission_grant (plugin_id, permission, granted, granted_at) VALUES (?, ?, ?, ?)',
-          [pluginId, m['permission'], m['granted'], m['granted_at']],
+          [
+            pluginId,
+            m['permission'],
+            m['permission'] == pluginNewTabPagePermission &&
+                    previousOwner != null &&
+                    previousOwner != pluginId
+                ? 0
+                : m['granted'],
+            m['granted_at'],
+          ],
+        );
+      }
+      final eligible = db.select(
+        'SELECT p.* FROM plugin_installation p '
+        'JOIN plugin_permission_grant nav ON nav.plugin_id = p.plugin_id '
+        "WHERE p.plugin_id = ? AND nav.permission = 'navigation.write' "
+        'AND nav.granted = 1',
+        [pluginId],
+      );
+      if (eligible.isEmpty ||
+          !InstalledPlugin.fromDbMap(
+            eligible.first,
+          ).manifest.permissions.contains('navigation.write')) {
+        db.execute(
+          'UPDATE plugin_permission_grant SET granted = 0 '
+          'WHERE plugin_id = ? AND permission = ?',
+          [pluginId, pluginNewTabPagePermission],
+        );
+      }
+      if (db.select(
+        'SELECT 1 FROM plugin_permission_grant WHERE plugin_id = ? '
+        'AND permission = ? AND granted = 1',
+        [pluginId, pluginNewTabPagePermission],
+      ).isNotEmpty) {
+        db.execute(
+          'UPDATE plugin_permission_grant SET granted = 0 '
+          'WHERE permission = ? AND plugin_id != ?',
+          [pluginNewTabPagePermission, pluginId],
         );
       }
       for (final row in (aux['kvStore'] as List? ?? const [])) {

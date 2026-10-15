@@ -8,12 +8,8 @@ import 'package:otzaria/core/directory_writability.dart';
 import 'package:otzaria/plugins/services/plugin_asset_scheme.dart';
 import 'package:otzaria/plugins/services/plugin_webview_failure_log.dart';
 
-/// מחזיק את ה-WebViewEnvironment הסינגלטוני עם userDataFolder הניתן לכתיבה.
-///
-/// בהתקנה מערכתית (Program Files), WebView2 מנסה כברירת מחדל לכתוב לצד
-/// קובץ ה-EXE — תיקייה read-only למשתמש רגיל — ונכשל עם
-/// "Cannot create the InAppWebView instance!".
-/// הגדרת נתיב מפורש תחת APPDATA פותרת זאת.
+/// מחזיק סביבת WebView2 עם תיקיית נתונים הניתנת לכתיבה ב-APPDATA,
+/// כדי שהתקנה ב-Program Files לא תנסה לכתוב לצד ה-EXE.
 class WebViewEnvironmentHolder {
   static WebViewEnvironment? _environment;
   // Coalesces concurrent init calls (background host vs. plugin tab): two
@@ -116,26 +112,24 @@ class WebViewEnvironmentHolder {
     return _unwritableDataFolder = null;
   }
 
-  /// מאתחל את סביבת WebView2 עם תיקיית נתונים הניתנת לכתיבה.
-  /// חייב להיקרא לפני יצירת כל InAppWebView.
-  ///
-  /// בטוח לקריאה מקבילית: קוראים מקבילים יחלקו את אותו future ויראו את
-  /// אותה התוצאה. במקרה של כשל, ה-future מנוקה כך שניסיון הבא יבצע
-  /// retry במקום להחזיר את אותה שגיאה שמורה.
-  static Future<void> initialize() {
+  /// מאתחל לפני יצירת WebView; קוראים מקבילים חולקים Future שניתן לנסות שוב בכשל.
+  /// [dataFolderChecked] חוסך בדיקה חוזרת כשהקורא כבר בדק כתיבה מיד לפני הקריאה.
+  static Future<void> initialize({bool dataFolderChecked = false}) {
     if (_initializeOverride != null) return _initializeOverride!();
     if (!Platform.isWindows) return Future<void>.value();
     if (_environment != null) return Future<void>.value();
-    return _initializeFuture ??= _runInitialize();
+    return _initializeFuture ??= _runInitialize(
+      checkDataFolder: !dataFolderChecked,
+    );
   }
 
-  static Future<void> _runInitialize() async {
+  static Future<void> _runInitialize({required bool checkDataFolder}) async {
     String? webviewDataFolder;
     try {
       final dataRoot = await AppPaths.getDataRootPath();
       webviewDataFolder = p.join(dataRoot, 'webview2');
       await Directory(webviewDataFolder).create(recursive: true);
-      final blocked = await checkDataFolderWritable();
+      final blocked = checkDataFolder ? await checkDataFolderWritable() : null;
       if (blocked != null) {
         // WebView2 היה מגיב לזה בדיאלוג מערכת של Edge; עצירה כאן משאירה
         // את ההסבר בידי PluginDataFolderUnwritableView.
@@ -144,14 +138,8 @@ class WebViewEnvironmentHolder {
           blocked,
         );
       }
-      // הערה: אין להוסיף כאן --disable-smooth-scrolling או ארגומנטים אחרים
-      // שמשנים התנהגות גלילה. גלילת טאצ'פד מוזרקת ב-fork של
-      // flutter_inappwebview_windows כזרם אירועי wheel (מיידי, עם צבירת
-      // תת-פיקסלים, gain ואינרציה) — והאנימציה של Chromium בברירת המחדל היא
-      // שמאחה את הזרם לתנועה רציפה: נמדד שעם הדגל 23-26% מהפריימים תקועים,
-      // ובלעדיו 0%. מסלול מגע סינתטי נבחן ונפסל — סף תחילת-מחווה של ~34px
-      // ב-WebView2 הורג מיקרו-גלילות. מדידות:
-      // integration_test/webview_scroll_smoothness_probe_test.dart.
+      // ארגומנטים שעוקפים את גלילת Chromium גורמים לפריימים תקועים בטאצ׳פד.
+      // מדידה: integration_test/webview_scroll_smoothness_probe_test.dart.
       // מונע ממופע אחר לשתף את תהליך הדפדפן שמחזיק בתיקייה; במקרה של
       // התנגשות WebView2 דוחה את יצירת ה-controller והכשל נרשם בדיאגנוסטיקה.
       _environment = await WebViewEnvironment.create(

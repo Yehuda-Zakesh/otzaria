@@ -32,7 +32,12 @@ bool _isDiacritic(int code) =>
 // פיסוק שעשוי להיות מוסתר בתצוגה (כמו _isIgnored ב-html_slice): הבחירה מגיעה
 // בלעדיו, ולכן מתעלמים ממנו בשני צידי ההשוואה.
 final _punctuation = RegExp('[!"\',\\-.:;?\u05F3\u05F4\u2013\u2014]');
-bool _isPunctuation(String ch) => _punctuation.hasMatch(ch);
+bool _isPunctuation(int code) => switch (code) {
+  0x21 || 0x22 || 0x27 || 0x2C || 0x2D || 0x2E || 0x3A || 0x3B || 0x3F => true,
+  0x05F3 || 0x05F4 || 0x2013 || 0x2014 => true,
+  _ => false,
+};
+
 String _withoutPunctuation(String? s) =>
     s == null ? '' : s.replaceAll(_punctuation, '');
 
@@ -78,10 +83,9 @@ LineProjection projectLine(
   }
 
   for (int i = 0; i < rawLine.length; i++) {
-    final ch = rawLine[i];
     final code = rawLine.codeUnitAt(i);
 
-    if (omitInjectedAnchorMarkers && !inTag && ch == '<') {
+    if (omitInjectedAnchorMarkers && !inTag && code == 0x3C) {
       final isAnchor = rawLine.startsWith('<a class="link-anchor ', i);
       final isSpan = rawLine.startsWith('<span class="link-anchor ', i);
       if (isAnchor || isSpan) {
@@ -95,7 +99,7 @@ LineProjection projectLine(
     }
 
     if (inTag) {
-      if (ch == '>') {
+      if (code == 0x3E) {
         inTag = false;
         // <br> הוא שבירת שורה — הרינדור מציג אותו כרווח, לכן גם כאן, אחרת
         // בחירה שחוצה <br> לא תאותר בעיגון ותיפול לסימון כל השורה.
@@ -103,19 +107,23 @@ LineProjection projectLine(
       }
       continue;
     }
-    if (ch == '<') {
+    if (code == 0x3C) {
       inTag = true;
       tagStart = i;
       continue;
     }
 
     // ניקוד, טעמים ופיסוק — מושמטים לחלוטין.
-    if (_isDiacritic(code) || (!keepPunctuation && _isPunctuation(ch))) {
+    if (_isDiacritic(code) || (!keepPunctuation && _isPunctuation(code))) {
       continue;
     }
 
     // מקף עברי (מקף) ורווחים — מכווצים לרווח יחיד.
-    final isWhitespace = code == 0x05BE || ch.trim().isEmpty;
+    // אותיות עבריות אינן רווח — בלי להקצות להן מחרוזת.
+    final isWhitespace =
+        code == 0x05BE ||
+        ((code < 0x05D0 || code > 0x05EA) &&
+            String.fromCharCode(code).trim().isEmpty);
     if (isWhitespace) {
       markWhitespace(i);
       continue;
@@ -123,7 +131,7 @@ LineProjection projectLine(
 
     flushWhitespace();
     rawIndex.add(i);
-    buffer.write(ch);
+    buffer.writeCharCode(code);
   }
 
   // רווח בסוף נשמר במפה (כדי שאורך המפה יהיה עקבי) אך לא נכלל בטקסט —
@@ -401,9 +409,7 @@ String wrapHtmlRanges(String text, List<HtmlWrapRange> ranges) {
     }
     _appendWrapped(
       buffer,
-      text,
-      range.start,
-      range.end,
+      text.substring(range.start, range.end),
       range.openTag,
       range.closeTag,
     );
@@ -417,28 +423,21 @@ String wrapHtmlRanges(String text, List<HtmlWrapRange> ranges) {
   return buffer.toString();
 }
 
-/// עוטף את [text] בטווח [start,end) ב-openTag/closeTag, אך סוגר ופותח מחדש את
-/// העטיפה סביב תגיות שאינן מאוזנות בתוך הטווח (סגירה/פתיחה שבן-זוגה מחוץ לטווח,
-/// וכן <br>). בלי זה, עטיפה של טווח שחוצה גבול תגית יוצרת HTML מוצלב
-/// (למשל `<b><a>...</b>...</a>`) שמוצג חלקית. תגיות מאוזנות (כגון
-/// `<i data-commentator></i>` של שו"ע) נשארות בתוך העטיפה כדי לשמור קו רציף.
+/// עוטף את [text] וסוגר ופותח מחדש סביב תגיות לא מאוזנות, למניעת HTML מוצלב.
+/// תגיות מאוזנות נשארות בתוך העטיפה כדי לשמור קו רציף.
 void _appendWrapped(
   StringBuffer buffer,
   String text,
-  int start,
-  int end,
   String openTag,
   String closeTag,
 ) {
+  // text מכיל רק את הטווח המעוטף, כדי שחיפוש תגית לא יסרוק את המשך השורה.
+  final end = text.length;
   // שלב 1: איתור אינדקסי ה-'<' של תגיות לא-מאוזנות בטווח.
   final boundaries = <int>{};
   final openStack = <int>[];
-  int i = start;
-  while (i < end) {
-    if (text[i] != '<') {
-      i++;
-      continue;
-    }
+  var i = text.indexOf('<');
+  while (i >= 0 && i < end) {
     final gt = text.indexOf('>', i);
     final tagEnd = (gt < 0 || gt >= end) ? end - 1 : gt;
     final isClose = i + 1 < end && text[i + 1] == '/';
@@ -452,13 +451,13 @@ void _appendWrapped(
     } else if (!isSelfClose) {
       openStack.add(i);
     }
-    i = tagEnd + 1;
+    i = text.indexOf('<', tagEnd + 1);
   }
   boundaries.addAll(openStack);
 
   // שלב 2: בנייה — עוטפים רצפי טקסט, סוגרים/פותחים סביב תגיות-הגבול.
   bool wrapOpen = false;
-  i = start;
+  i = 0;
   while (i < end) {
     if (text[i] == '<') {
       final gt = text.indexOf('>', i);
@@ -481,8 +480,10 @@ void _appendWrapped(
         buffer.write(openTag);
         wrapOpen = true;
       }
-      buffer.write(text[i]);
-      i++;
+      final lt = text.indexOf('<', i);
+      final runEnd = lt < 0 || lt > end ? end : lt;
+      buffer.write(text.substring(i, runEnd));
+      i = runEnd;
     }
   }
   if (wrapOpen) buffer.write(closeTag);

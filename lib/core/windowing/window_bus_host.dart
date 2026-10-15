@@ -14,6 +14,7 @@ import 'package:otzaria/core/windowing/settings_sync.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/indexing/bloc/indexing_bloc.dart';
+import 'package:otzaria/indexing/utils/indexing_crash_canary.dart';
 import 'package:otzaria/indexing/bloc/indexing_event.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/library/hidden/hidden_library_selection.dart';
@@ -26,6 +27,11 @@ import 'package:otzaria/navigation/bloc/navigation_event.dart';
 import 'package:otzaria/navigation/bloc/navigation_state.dart';
 import 'package:otzaria/navigation/view/main_window_screen.dart';
 import 'package:otzaria/plugins/view/webview_environment_holder.dart';
+import 'package:otzaria/plugins/utils/plugin_safe_mode.dart';
+import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
+import 'package:otzaria/plugins/bloc/plugin_system_event.dart';
+import 'package:otzaria/plugins/services/plugin_new_tab_page_service.dart';
+import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
@@ -183,6 +189,12 @@ class _WindowBusHostState extends State<WindowBusHost> {
 
   Future<Object?> _handleRequest(Map<String, dynamic> request) async {
     switch (request['type']) {
+      case IndexingCrashCanary.finishRequest:
+        IndexingCrashCanary.current?.finish();
+        return true;
+      case PluginSafeMode.readyRequest:
+        await PluginSafeMode.ready;
+        return PluginSafeMode.isActive;
       case MultiWindowService.requestDescribe:
         return _describe();
       case MultiWindowService.requestReceiveTab:
@@ -208,11 +220,20 @@ class _WindowBusHostState extends State<WindowBusHost> {
       case LibraryAccessGate.requestResume:
       case LibraryAccessGate.requestOwnerExited:
         return LibraryAccessGate.instance.handlePeerRequest(request);
+      case PluginNewTabPageService.requestChanged:
+        await PluginNewTabPageService.instance.syncOwner(
+          PluginRegistryRepository(),
+        );
+        return true;
       case SettingsSync.requestChanged:
         // הגדרה שונתה בחלון אחר — מוחלת על ה-box המקומי ומרעננת את ה-state.
         return SettingsSync.instance.handleRequest(request);
       case MultiWindowService.requestRestart:
-        return _restartSelf();
+        return _restartSelf(
+          pluginSafeMode: request['pluginSafeMode'] is bool
+              ? request['pluginSafeMode'] as bool
+              : null,
+        );
       case MultiWindowService.requestCloseWindow:
         return _closeSelfPolitely();
       default:
@@ -224,9 +245,15 @@ class _WindowBusHostState extends State<WindowBusHost> {
   ///
   /// ⚠️ חלון מוסתר (שנסגר ומחכה ל-Ctrl+Shift+T) אינו נבנה מחדש: סגירת
   /// ה-`TabsBloc` שלו הייתה כותבת מחדש את הסשן שהמשתמש מחק בסגירה.
-  Future<bool> _restartSelf() async {
+  Future<bool> _restartSelf({bool? pluginSafeMode}) async {
     if (!mounted) return false;
-    if (!await AppWindowScope.controllerOf(context).isVisible()) return false;
+    if (pluginSafeMode != null) PluginSafeMode.active.value = pluginSafeMode;
+    await PluginSafeMode.ready;
+    if (!mounted) return false;
+    if (!await AppWindowScope.controllerOf(context).isVisible()) {
+      if (mounted) context.read<PluginSystemBloc>().add(LoadPlugins());
+      return false;
+    }
     if (!mounted) return false;
     await resetRuntimeStateForAppRestart();
     if (!mounted) return false;
@@ -248,6 +275,7 @@ class _WindowBusHostState extends State<WindowBusHost> {
     if (!mounted) return false;
     final window = AppWindowScope.controllerOf(context);
     if (!await window.isVisible()) return false;
+    MultiWindowService.closingAll = true;
     await window.close();
     return true;
   }

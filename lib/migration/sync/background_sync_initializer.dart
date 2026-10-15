@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:logging/logging.dart';
+import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/settings/engine/settings_wrapper.dart';
 import 'package:otzaria/settings/services/custom_folders/custom_folder.dart';
@@ -46,7 +47,8 @@ class BackgroundSyncInitializer {
     }
 
     _hasRun = true;
-    _syncCompleter = Completer<FileSyncResult?>();
+    // אין מאזין קבוע לתוצאה; בלי ignore כשל היה מדווח כשגיאה לא מטופלת.
+    _syncCompleter = Completer<FileSyncResult?>()..future.ignore();
 
     _log.info('Scheduling background sync in $delaySeconds seconds...');
 
@@ -137,6 +139,13 @@ class BackgroundSyncInitializer {
       _syncCompleter?.complete(result);
     } catch (e, stackTrace) {
       _log.severe('Error during background sync', e, stackTrace);
+      try {
+        ErrorLogFile.append(
+          title: 'Background sync failed',
+          error: e,
+          stackTrace: stackTrace,
+        );
+      } catch (_) {}
       _syncCompleter?.completeError(e);
     }
   }

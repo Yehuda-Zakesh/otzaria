@@ -35,7 +35,7 @@ class RecordedSemanticsNode {
   final String label;
   final String tooltip;
 
-  /// מזהה האב בסדר המעבר, או ‎-1 כשאין (כפי שנשלח למנוע).
+  /// מזהה האב בסדר המעבר, או -1 כשאין (כפי שנשלח למנוע).
   final int traversalParent;
   final List<int> childrenInTraversalOrder;
 
@@ -66,9 +66,6 @@ class SemanticsUpdateRecorder {
 
   /// כל העדכונים שנדחו היו נדחים על ידי המנוע.
   final List<SemanticsUpdateViolation> violations = [];
-
-  /// מספר העדכונים שהוקלטו.
-  int get updateCount => _updates;
 
   /// מנקה את המודל ואת הממצאים — לתחילת תרחיש חדש באותו קובץ בדיקה.
   void reset() {

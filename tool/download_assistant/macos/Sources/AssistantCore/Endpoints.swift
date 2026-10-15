@@ -84,7 +84,7 @@ public enum ReleaseTagChoice {
         return result
     }
 
-    /// 1 אם a גבוה מ-b, ‎-1‎ אם נמוך, 0 אם שווה.
+    /// 1 אם a גבוה מ-b, -1 אם נמוך, 0 אם שווה.
     public static func compare(_ a: String, _ b: String) -> Int {
         let pa = versionPart(a).split(separator: ".").map { Int64($0) ?? 0 }
         let pb = versionPart(b).split(separator: ".").map { Int64($0) ?? 0 }

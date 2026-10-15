@@ -26,7 +26,8 @@ class BiographiesRepository {
   BiographiesRepository({
     Future<String> Function()? updatedPathProvider,
     Future<ByteData> Function(String key)? loadAsset,
-  }) : _updatedPathProvider = updatedPathProvider ?? AppPaths.getBiographiesPath,
+  }) : _updatedPathProvider =
+           updatedPathProvider ?? AppPaths.getBiographiesPath,
        _loadAsset = loadAsset ?? rootBundle.load;
 
   /// טוען את כל הביוגרפיות, ממוינות לפי שם. הטעינה מתבצעת פעם אחת;
@@ -65,31 +66,36 @@ class BiographiesRepository {
   static List<Biography> filter(List<Biography> entries, String query) {
     query = query.trim();
     if (query.isEmpty) return entries;
-    return entries
-        .where(
-          (bio) =>
-              bio.name.contains(query) ||
-              bio.appelations.any((a) => a.contains(query)),
-        )
-        .toList()
-      ..sort((a, b) {
-        final rankCompare = _matchRank(
-          a.name,
-          query,
-        ).compareTo(_matchRank(b.name, query));
-        if (rankCompare != 0) return rankCompare;
-        return a.name.compareTo(b.name);
-      });
+
+    // ביטוי "מילה שלמה" נבנה פעם אחת לכל קריאה — לא בכל השוואה בתוך
+    // המיון — כדי לא לקמפל RegExp מחדש O(n log n) פעמים על אלפי הערכים.
+    final wholeWordPattern = RegExp('(^|\\s)${RegExp.escape(query)}(\$|\\s)');
+
+    final ranked = <_RankedBiography>[];
+    for (final bio in entries) {
+      if (bio.name.contains(query) ||
+          bio.appelations.any((a) => a.contains(query))) {
+        ranked.add(
+          _RankedBiography(bio, _matchRank(bio.name, query, wholeWordPattern)),
+        );
+      }
+    }
+
+    ranked.sort((a, b) {
+      final rankCompare = a.rank.compareTo(b.rank);
+      if (rankCompare != 0) return rankCompare;
+      return a.bio.name.compareTo(b.bio.name);
+    });
+
+    return ranked.map((r) => r.bio).toList();
   }
 
   /// דירוג התאמת שם לשאילתה: נמוך = דומה יותר.
   /// מדויק < מתחיל ב- < מילה שלמה < מכיל < רק בכינוי.
-  static int _matchRank(String name, String query) {
+  static int _matchRank(String name, String query, RegExp wholeWordPattern) {
     if (name == query) return 0;
     if (name.startsWith(query)) return 1;
-    if (RegExp('(^|\\s)${RegExp.escape(query)}(\$|\\s)').hasMatch(name)) {
-      return 2;
-    }
+    if (wholeWordPattern.hasMatch(name)) return 2;
     if (name.contains(query)) return 3;
     return 4;
   }
@@ -101,4 +107,12 @@ class BiographiesRepository {
         .map(Biography.fromEntry)
         .toList();
   }
+}
+
+/// ביוגרפיה עם דירוג ההתאמה שלה, מחושב פעם אחת לפני המיון.
+class _RankedBiography {
+  final Biography bio;
+  final int rank;
+
+  const _RankedBiography(this.bio, this.rank);
 }

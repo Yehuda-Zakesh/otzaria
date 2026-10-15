@@ -3,12 +3,9 @@ import 'package:otzaria/models/books.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
-/// טסטים ללוגיקה הטהורה של החלטות מצב-רצף ב-bloc. השאר (תופעת לוואי של
-/// `emit` ושל `buildReadingSegments`) נבדק עקיף דרך טסטי integration אחרים
-/// (`reading_segments_test.dart` מבחין שהפונקציה מחזירה ערכים נכונים,
-/// בעוד `text_book_bloc_test.dart` הקיים מאמת זרימת state מלאה).
+/// טסטים ללוגיקה הטהורה של החלטות מצב-רצף ב-bloc. זרימת ה-state המלאה
+/// נבדקת ב-`text_book_bloc_test.dart`, והפריסה ב-`reading_layout_test.dart`.
 void main() {
   group('computeEffectiveContinuousReading', () {
     test('ביקוש לאפשר על ספר שתומך → מחזיר true', () {
@@ -93,6 +90,28 @@ void main() {
       );
     });
 
+    test('הגדרת הספר גוברת על ברירת המחדל, ושימור גובר על שתיהן', () {
+      expect(
+        TextBookBloc.resolvePreservedContinuousReadingMode(
+          supportsContinuous: true,
+          preserveFlag: false,
+          currentState: null,
+          globalDefault: false,
+          perBookValue: true,
+        ),
+        isTrue,
+      );
+      expect(
+        TextBookBloc.resolvePreservedContinuousReadingMode(
+          supportsContinuous: true,
+          preserveFlag: true,
+          currentState: loadedFalse,
+          perBookValue: true,
+        ),
+        isFalse,
+      );
+    });
+
     test('preserveFlag=true + state.continuous=true → מחזיר true', () {
       // מסלול ה-listener על שינוי גופן/ניקוד: אסור לכבות את המצב.
       expect(
@@ -166,7 +185,5 @@ TextBookLoaded _loaded({
     pinLeftPane: false,
     searchText: '',
     searchMode: SearchMode.exact,
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }

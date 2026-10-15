@@ -28,16 +28,12 @@ class SelectedLineLinksView extends StatelessWidget {
   final Function(OpenedTab) openBookCallback;
   final double fontSize;
 
-  /// נשמר לתאימות ה-API של הקוראים; אינו משנה את הרשימה עצמה, שמוזנת
-  /// מ-`visibleLinks` בכל מקרה.
-  final bool showVisibleLinksIfNoSelection;
   final SelectionSyncController? selectionSyncController;
 
   const SelectedLineLinksView({
     super.key,
     required this.openBookCallback,
     required this.fontSize,
-    this.showVisibleLinksIfNoSelection = false,
     this.selectionSyncController,
   });
 

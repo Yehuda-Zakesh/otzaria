@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/animation.dart';
 import 'package:otzaria/history/bloc/history_event.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/navigation/bloc/navigation_event.dart';
@@ -75,7 +78,14 @@ class PluginReaderScrollService {
       pane.bloc.add(
         ApplyMarkHighlight(
           permanentHighlightLine: highlight ? sectionIndex : null,
-          scrollToIndex: sectionIndex,
+        ),
+      );
+      unawaited(
+        pane.lines.scrollToLine(
+          sectionIndex,
+          alignment: 0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
         ),
       );
       return true;

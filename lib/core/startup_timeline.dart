@@ -101,6 +101,22 @@ class StartupTimeline {
     }
   }
 
+  /// Structured copy of the timeline, for developer diagnostics output.
+  Map<String, Object?> toJson() => {
+    'revealMs': _reported ? _clock.elapsedMilliseconds : null,
+    'phases': [
+      for (final phase in _phases)
+        {
+          'name': phase.name,
+          'atMs': phase.startedAtMs,
+          'durationMs': phase.durationMs,
+        },
+    ],
+    'marks': [
+      for (final mark in _marks) {'name': mark.name, 'atMs': mark.atMs},
+    ],
+  };
+
   /// הרשומה כפי שתיכתב ל-errors.txt.
   String format({DateTime? now, String? version}) {
     final buffer = StringBuffer()

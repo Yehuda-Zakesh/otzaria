@@ -1,7 +1,9 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/app_report/models/app_report.dart';
 import 'package:otzaria/settings/panels/app_reports_panel.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 
 void main() {
   AppReport report({AppReportTrigger trigger = AppReportTrigger.manual}) =>
@@ -91,5 +93,27 @@ void main() {
       },
     );
     expect(crash!.validate(), isNull);
+  });
+
+  testWidgets('הסרת תמונה בעריכה מחזירה דיווח בלי התמונה', (tester) async {
+    final withImage = report().copyWith(
+      images: [
+        AppReportImage(
+          bytes: Uint8List(3),
+          fileName: 'shot.png',
+          mimeType: 'image/png',
+        ),
+      ],
+    );
+    final changed = await pumpAndEdit(tester, withImage, () async {
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('app-report-image-remove')),
+      );
+      await tester.tap(find.byKey(const ValueKey('app-report-image-remove')));
+    });
+
+    expect(changed, isNotNull);
+    expect(changed!.images, isEmpty);
+    expect(changed.title, 'כותרת ישנה');
   });
 }

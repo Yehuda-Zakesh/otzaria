@@ -80,7 +80,6 @@ class TikkunKorimState extends Equatable {
     bool clearAliya = false,
     int? scrollToLine,
     int? scrollRequestId,
-    bool clearScroll = false,
     bool? peekSecondColumn,
     double? lineWidthEm,
     List<TikkunBookmark>? bookmarks,
@@ -97,7 +96,7 @@ class TikkunKorimState extends Equatable {
         ? null
         : (headerSubtitle ?? this.headerSubtitle),
     aliyaIdx: clearAliya ? null : (aliyaIdx ?? this.aliyaIdx),
-    scrollToLine: clearScroll ? null : (scrollToLine ?? this.scrollToLine),
+    scrollToLine: scrollToLine ?? this.scrollToLine,
     scrollRequestId: scrollRequestId ?? this.scrollRequestId,
     peekSecondColumn: peekSecondColumn ?? this.peekSecondColumn,
     lineWidthEm: lineWidthEm ?? this.lineWidthEm,

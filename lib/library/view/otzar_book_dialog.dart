@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/theme/app_tokens.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
@@ -6,6 +7,8 @@ import 'package:otzaria/widgets/misc/rtl_icon.dart';
 import '../../models/books.dart';
 import '../../utils/navigation/otzar_utils.dart';
 import '../../core/ui_snack.dart';
+import '../bloc/library_bloc.dart';
+import '../bloc/library_event.dart';
 import 'package:otzaria/core/messages/library_messages.dart';
 import 'package:otzaria/data/data_providers/external_catalog_mapper.dart';
 import 'package:otzaria/library/services/hebrew_books_download_service.dart';
@@ -239,6 +242,8 @@ class _HebrewBookDownloadButtonState extends State<_HebrewBookDownloadButton> {
     final hasFolder = HebrewBooksDownloadService.configuredFolder() != null;
     if (!hasFolder && !await verifySaferModePassword(context)) return;
     if (!mounted) return;
+    // נלכד מראש: ההורדה ממשיכה גם אם הדיאלוג נסגר באמצע.
+    final libraryBloc = context.read<LibraryBloc>();
 
     setState(() {
       _isDownloading = true;
@@ -260,6 +265,9 @@ class _HebrewBookDownloadButtonState extends State<_HebrewBookDownloadButton> {
         widget.bookId,
         result.bytes,
       );
+      if (savedPath != null && !libraryBloc.isClosed) {
+        libraryBloc.add(const ExternalBooksChanged());
+      }
       if (!mounted) return;
       savedPath ??= await saveFileWithExtension(
         fileName: result.fileName,

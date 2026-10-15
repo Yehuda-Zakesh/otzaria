@@ -5,9 +5,10 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
-import 'package:otzaria/app_report/models/crash_signature.dart';
 import 'package:otzaria/app_report/repository/error_log_blocks.dart';
+import 'package:otzaria/app_report/services/minidump_signature.dart';
 import 'package:otzaria/core/error_log_file.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:path/path.dart' as p;
 import 'package:win32/win32.dart';
 
@@ -56,6 +57,7 @@ class CrashCandidate {
     required this.signature,
     required this.hasStartupStall,
     required this.hasMinidump,
+    this.minidump,
   });
 
   final SessionLock previousSession;
@@ -63,10 +65,14 @@ class CrashCandidate {
   /// רשומות errors.txt מאז תחילת ההפעלה הקודמת, מהישנה לחדשה.
   final List<ErrorLogBlock> entries;
 
-  /// מהרשומה החדשה ביותר; null כשהראיה היחידה היא minidump.
+  /// מהרשומה החדשה ביותר, ובלעדיה מה-minidump החדש ביותר; null כשאין
+  /// מאיפה (`last_crash` בלבד, או dump שאינו ניתן לפענוח).
   final CrashSignature? signature;
   final bool hasStartupStall;
   final bool hasMinidump;
+
+  /// ה-dump החדש ביותר מאז תחילת ההפעלה הקודמת, לצירוף בהסכמת המשתמש.
+  final File? minidump;
 }
 
 /// מזהה יציאה לא נקייה של ההפעלה הקודמת. לוגיקה בלבד — הקריאה מהעלייה
@@ -108,18 +114,7 @@ class UncleanExitDetector {
     await file.writeAsString(jsonEncode(lock.toJson()), flush: true);
   }
 
-  /// מוחק את הנעילה ביציאה מסודרת.
-  Future<void> markCleanExit() async {
-    try {
-      final file = File(lockPath);
-      if (!_ownsLock(file)) return;
-      await file.delete();
-    } on FileSystemException {
-      // אין נעילה — אין מה לסמן.
-    }
-  }
-
-  /// גרסה סינכרונית למסלול סגירה שאינו יכול להמתין.
+  /// מוחק את הנעילה ביציאה מסודרת (סינכרוני — מסלול הסגירה אינו ממתין).
   void markCleanExitSync() {
     try {
       final file = File(lockPath);
@@ -160,16 +155,22 @@ class UncleanExitDetector {
 
     final blocks = await _errorBlocksSince(lock.startedAt);
     final hasStall = blocks.any((b) => b.isStartupStall);
-    final hasDump = await _hasMinidumpSince(lock.startedAt);
+    final dump = await _minidumpSince(lock.startedAt);
     final evidence = blocks.where((b) => b.isCrashEvidence).toList();
-    if (evidence.isEmpty && !hasDump) return null;
+    if (evidence.isEmpty && !dump.found) return null;
 
+    final newestDump = dump.newest;
     return CrashCandidate(
       previousSession: lock,
       entries: blocks,
-      signature: evidence.isEmpty ? null : evidence.last.signature,
+      signature: evidence.isNotEmpty
+          ? evidence.last.signature
+          : newestDump == null
+          ? null
+          : await readMinidumpSignature(newestDump),
       hasStartupStall: hasStall,
-      hasMinidump: hasDump,
+      hasMinidump: dump.found,
+      minidump: newestDump,
     );
   }
 
@@ -231,25 +232,35 @@ class UncleanExitDetector {
   }
 
   /// sentry-native כותב `last_crash` ו-minidumps תחת `.sentry-native`.
-  Future<bool> _hasMinidumpSince(DateTime since) async {
+  /// [newest] — ה-dump החדש ביותר מאז [since], לחתימה.
+  Future<({bool found, File? newest})> _minidumpSince(DateTime since) async {
+    var found = false;
+    File? newest;
+    DateTime? newestModified;
     for (final dir in _sentryDirs ?? defaultSentryDatabaseDirs()) {
       try {
         final lastCrash = File(p.join(dir, 'last_crash'));
         if (await lastCrash.exists() &&
             !(await lastCrash.stat()).modified.isBefore(since)) {
-          return true;
+          found = true;
         }
         final reports = Directory(p.join(dir, 'reports'));
         if (!await reports.exists()) continue;
         await for (final entity in reports.list()) {
           if (entity is! File || !entity.path.endsWith('.dmp')) continue;
-          if (!(await entity.stat()).modified.isBefore(since)) return true;
+          final modified = (await entity.stat()).modified;
+          if (modified.isBefore(since)) continue;
+          found = true;
+          if (newestModified == null || modified.isAfter(newestModified)) {
+            newest = entity;
+            newestModified = modified;
+          }
         }
       } catch (_) {
         // תיקייה נעולה/חסרה אינה ראיה.
       }
     }
-    return false;
+    return (found: found, newest: newest);
   }
 
   /// מסד sentry-native יחסי לתיקיית העבודה, שבהתקנה היא תיקיית ה-exe.

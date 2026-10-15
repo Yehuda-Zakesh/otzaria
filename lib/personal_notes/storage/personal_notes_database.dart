@@ -1,14 +1,12 @@
+import 'package:flutter/foundation.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart';
 
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/personal_notes/models/personal_note.dart';
+import 'package:otzaria/personal_notes/storage/personal_notes_changes.dart';
 import 'package:otzaria/migration/database/sqlite3_utils.dart';
 
-/// SQLite database for storing personal notes.
-///
-/// Schema:
-/// - personal_notes table: stores all note metadata and content
-/// - Indexed by book_id and line_number for fast queries
+/// מסד SQLite להערות אישיות, עם אינדקסים לפי ספר ושורה.
 class PersonalNotesDatabase {
   static const _tableNotes = 'personal_notes';
 
@@ -31,26 +29,30 @@ class PersonalNotesDatabase {
   static const _columnCreatedAt = 'created_at';
   static const _columnUpdatedAt = 'updated_at';
 
+  static const _tableUserBookKeys = 'personal_notes_user_book_keys';
+
   PersonalNotesDatabase._();
 
   static final PersonalNotesDatabase instance = PersonalNotesDatabase._();
 
   Database? _database;
 
+  /// עולה בכל הוספה, עדכון או מחיקה של הערה, מכל מסלול שמירה.
+  final ValueNotifier<int> revision = ValueNotifier<int>(0);
+
   /// Get or initialize the database
   Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDatabase();
-    return _database!;
+    final open = _database;
+    if (open != null) return open;
+    final dbPath = await AppPaths.resolveNotesDbPath('personal_notes.db');
+    return _database ??= _initDatabase(dbPath);
   }
 
   /// המסד, רק אם כבר נפתח.
   Database? get openDatabase => _database;
 
   /// Initialize the database
-  Future<Database> _initDatabase() async {
-    final dbPath = await AppPaths.resolveNotesDbPath('personal_notes.db');
-
+  Database _initDatabase(String dbPath) {
     final db = openWritableDatabase(dbPath, 'PersonalNotesDatabase');
     _createSchema(db);
     _migrateSchema(db);
@@ -59,6 +61,14 @@ class PersonalNotesDatabase {
 
   /// Create the database schema
   void _createSchema(Database db) {
+    db.execute('''
+      CREATE TABLE IF NOT EXISTS $_tableUserBookKeys (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        generation INTEGER NOT NULL,
+        completed_generation INTEGER NOT NULL
+      )
+    ''');
+    db.execute('INSERT OR IGNORE INTO $_tableUserBookKeys VALUES (1, 0, -1)');
     db.execute('''
       CREATE TABLE IF NOT EXISTS $_tableNotes (
         $_columnId TEXT PRIMARY KEY,
@@ -131,6 +141,7 @@ class PersonalNotesDatabase {
       'INSERT OR REPLACE INTO $_tableNotes ($cols) VALUES ($placeholders)',
       m.values.toList(),
     );
+    if (db.updatedRows > 0) _notifyChanges([note.bookId]);
   }
 
   /// Update an existing note
@@ -138,16 +149,22 @@ class PersonalNotesDatabase {
     final db = await database;
     final m = _noteToMap(note);
     final setClause = m.keys.map((k) => '$k = ?').join(', ');
-    db.execute(
-      'UPDATE $_tableNotes SET $setClause WHERE $_columnId = ?',
-      [...m.values, note.id],
-    );
+    db.execute('UPDATE $_tableNotes SET $setClause WHERE $_columnId = ?', [
+      ...m.values,
+      note.id,
+    ]);
+    if (db.updatedRows > 0) _notifyChanges([note.bookId]);
   }
 
   /// Delete a note
   Future<void> deleteNote(String noteId) async {
     final db = await database;
+    final rows = db.select(
+      'SELECT $_columnBookId FROM $_tableNotes WHERE $_columnId = ?',
+      [noteId],
+    ).toMapList();
     db.execute('DELETE FROM $_tableNotes WHERE $_columnId = ?', [noteId]);
+    _notifyChanges(rows.map((row) => row[_columnBookId] as String));
   }
 
   /// Get a single note by ID
@@ -182,46 +199,127 @@ class PersonalNotesDatabase {
     }).toList();
   }
 
-  /// Delete all notes for a specific book
-  Future<void> deleteBookNotes(String bookId) async {
+  /// זמני העדכון של כל ההערות, בלי לטעון את התוכן. שורה פגומה מדולגת.
+  Future<List<DateTime>> listNoteUpdateTimes() async {
     final db = await database;
-    db.execute('DELETE FROM $_tableNotes WHERE $_columnBookId = ?', [bookId]);
+    return db
+        .select('SELECT $_columnUpdatedAt FROM $_tableNotes')
+        .map((row) => DateTime.tryParse(row[_columnUpdatedAt] as String))
+        .nonNulls
+        .toList();
   }
 
-  /// Batch update multiple notes (for reconciliation)
+  /// יישוב מיקומים בזמן טעינה אינו מודיע למאזינים, כדי למנוע לולאת טעינות.
   Future<void> batchUpdateNotes(List<PersonalNote> notes) async {
     final db = await database;
     withTransaction(db, () {
       for (final note in notes) {
         final m = _noteToMap(note);
         final setClause = m.keys.map((k) => '$k = ?').join(', ');
-        db.execute(
-          'UPDATE $_tableNotes SET $setClause WHERE $_columnId = ?',
-          [...m.values, note.id],
-        );
+        db.execute('UPDATE $_tableNotes SET $setClause WHERE $_columnId = ?', [
+          ...m.values,
+          note.id,
+        ]);
       }
     });
   }
 
+  /// האם הערות תחת כותרת בלבד עדיין ממתינות לשיוך לספר אישי.
+  Future<bool> userBookKeysPending() async {
+    final db = await database;
+    final row = db.select('SELECT * FROM $_tableUserBookKeys').first;
+    return row['generation'] != row['completed_generation'];
+  }
+
+  /// דור השיוך נשמר במסד כדי לזהות גם ייבוא מחלון אחר.
+  Future<int> userBookKeysGeneration() async {
+    final db = await database;
+    final row = db.select('SELECT generation FROM $_tableUserBookKeys').first;
+    return row['generation'] as int;
+  }
+
+  /// [pending] false אחרי השיוך; true אחרי שחזור או ייבוא של הערות ישנות.
+  /// [ifGeneration] משאיר בקשות ייבוא חדשות ממתינות לריצה הבאה.
+  Future<void> setUserBookKeysPending(bool pending, {int? ifGeneration}) async {
+    final db = await database;
+    db.execute(
+      pending
+          ? 'UPDATE $_tableUserBookKeys SET generation = generation + 1'
+          : 'UPDATE $_tableUserBookKeys SET completed_generation = generation '
+                'WHERE (? IS NULL OR generation = ?)',
+      pending ? const [] : [ifGeneration, ifGeneration],
+    );
+  }
+
+  /// מעביר את [notes] למפתח [bookId] רק אם לא השתנו; מחזיר false אם נדרשת הכרעה מחדש.
+  Future<bool> moveNotesToBook(
+    Iterable<PersonalNote> notes,
+    String bookId,
+  ) async {
+    final expected = {for (final note in notes) note.id: note};
+    if (expected.isEmpty) return true;
+    final db = await database;
+    final changedBooks = <String>{};
+    var complete = true;
+    withTransaction(db, () {
+      for (final note in expected.values) {
+        final rows = db.select(
+          'SELECT * FROM $_tableNotes WHERE $_columnId = ?',
+          [note.id],
+        );
+        if (rows.isEmpty) continue;
+        final current = _noteFromMap(rows.first);
+        if (current.bookId == bookId) continue;
+        if (current != note) {
+          complete = false;
+          continue;
+        }
+        changedBooks.addAll([current.bookId, bookId]);
+        db.execute(
+          'UPDATE $_tableNotes SET $_columnBookId = ? WHERE $_columnId = ?',
+          [bookId, note.id],
+        );
+      }
+    });
+    _notifyChanges(changedBooks);
+    return complete;
+  }
+
   /// Batch insert multiple notes (for bulk restore/import)
-  /// Skips notes that already exist (by ID)
-  Future<int> batchInsertNotes(List<PersonalNote> notes) async {
+  /// Skips notes that already exist (by ID), or overwrites them with [replace]
+  Future<int> batchInsertNotes(
+    List<PersonalNote> notes, {
+    bool replace = false,
+  }) async {
     if (notes.isEmpty) return 0;
     final db = await database;
     int count = 0;
+    final changedBooks = <String>{};
     withTransaction(db, () {
       for (final note in notes) {
         final m = _noteToMap(note);
         final cols = m.keys.join(', ');
         final placeholders = List.filled(m.length, '?').join(', ');
         db.execute(
-          'INSERT OR IGNORE INTO $_tableNotes ($cols) VALUES ($placeholders)',
+          'INSERT OR ${replace ? 'REPLACE' : 'IGNORE'} INTO $_tableNotes ($cols) VALUES ($placeholders)',
           m.values.toList(),
         );
-        count++;
+        if (db.updatedRows > 0) {
+          count++;
+          changedBooks.add(note.bookId);
+        }
       }
     });
+    if (count > 0) await setUserBookKeysPending(true);
+    _notifyChanges(changedBooks);
     return count;
+  }
+
+  void _notifyChanges(Iterable<String> bookIds) {
+    final changedBooks = bookIds.toSet();
+    if (changedBooks.isEmpty) return;
+    revision.value++;
+    changedBooks.forEach(PersonalNotesChanges.notify);
   }
 
   /// Convert PersonalNote to database map

@@ -10,6 +10,7 @@ import 'package:otzaria/plugins/models/plugin_library_book_provider.dart';
 import 'package:otzaria/plugins/models/plugin_manifest.dart';
 import 'package:otzaria/plugins/models/plugin_network_allowlist.dart';
 import 'package:otzaria/plugins/models/plugin_search_dialog_item.dart';
+import 'package:otzaria/plugins/models/plugin_search_field_action.dart';
 import 'package:otzaria/plugins/models/plugin_startup_contributions.dart';
 import 'package:otzaria/plugins/models/plugin_toolbar_item.dart';
 import 'package:otzaria/plugins/models/plugin_valid_permissions.dart';
@@ -18,6 +19,7 @@ import 'package:otzaria/plugins/services/context_menu_registry.dart';
 import 'package:otzaria/plugins/services/plugin_settings_access_policy.dart';
 import 'package:otzaria/plugins/services/plugin_external_editions_registry.dart';
 import 'package:otzaria/plugins/services/plugin_toolbar_registry.dart';
+import 'package:otzaria/plugins/utils/plugin_icon_resolver.dart';
 import 'package:otzaria/plugins/utils/plugin_version_utils.dart';
 import 'package:path/path.dart' as p;
 
@@ -88,10 +90,18 @@ const Set<String> _knownApiMethods = {
   'search.fullText',
   'search.query',
   'search.getOptions',
+  'search.setFieldText',
+  'search.setFieldActionState',
+  'search.endFieldSession',
   'reader.openBook',
   'reader.openBookAtRef',
+  'reader.printRange',
   'reader.openSearchTab',
   'reader.getCurrentState',
+  'reader.getDefaultTextReader',
+  'reader.setDefaultTextReader',
+  'reader.reportTextReaderLocation',
+  'reader.setTextReaderFontSize',
   'reader.getCurrentRef',
   'reader.closeTab',
   'reader.activateTab',
@@ -126,6 +136,7 @@ const Set<String> _knownApiMethods = {
   'workspace.switch',
   'navigation.goTo',
   'plugin.openSelf',
+  'plugin.setNewTabPage',
   'plugin.openOther',
   'plugin.backgroundDone',
   'plugin.listInstalled',
@@ -165,6 +176,7 @@ const Set<String> _knownApiMethods = {
   'fs.deleteEntry',
   'fs.stat',
   'feedback.sendEmail',
+  'feedback.submitBookCorrection',
   'feedback.report',
   'feedback.hasReporterEmail',
   'history.list',
@@ -226,6 +238,8 @@ const Set<String> _knownEvents = {
   'reader.sectionContentChanged',
   'reader.context_menu_item_clicked',
   'reader.toolbar_item_clicked',
+  'reader.textReaderNavigate',
+  'reader.textReaderCommand',
   'reader.inBookSearch.requested',
   'ui.messageClicked',
   'plugin.page_opened',
@@ -245,6 +259,11 @@ const Set<String> _knownEvents = {
   // אירוע ממוקד מ-PluginLibraryBooksRegistry: המשתמש בחר ספר של הספק
   // במסך הספרייה, והתוסף הוא שפותח אותו.
   'library.providerBook.openRequested',
+  // אירועים ממוקדים מ-PluginSearchFieldSessionService: לחיצה על כפתור
+  // התוסף בשדה חיפוש, בקשת עצירה, וסיום הסשן.
+  'search.fieldAction.invoked',
+  'search.fieldAction.stopRequested',
+  'search.fieldAction.ended',
 };
 
 /// מיפוי `method -> permission` נדרשת (תואם METHOD_REQUIRED_PERMISSION ב-JS).
@@ -284,10 +303,18 @@ const Map<String, String> _methodRequiredPermission = {
   'search.fullText': 'search.fulltext.read',
   'search.query': 'search.fulltext.read',
   'search.getOptions': 'search.fulltext.read',
+  'search.setFieldText': pluginSearchFieldActionsPermission,
+  'search.setFieldActionState': pluginSearchFieldActionsPermission,
+  'search.endFieldSession': pluginSearchFieldActionsPermission,
   'reader.openBook': 'reader.open',
   'reader.openBookAtRef': 'reader.open',
+  'reader.printRange': 'reader.open',
   'reader.openSearchTab': 'reader.open',
   'reader.getCurrentState': 'reader.open',
+  'reader.getDefaultTextReader': 'reader.open',
+  'reader.setDefaultTextReader': 'reader.open',
+  'reader.reportTextReaderLocation': 'reader.open',
+  'reader.setTextReaderFontSize': 'reader.open',
   'reader.getCurrentRef': 'reader.open',
   'reader.closeTab': 'reader.open',
   'reader.activateTab': 'reader.open',
@@ -322,6 +349,7 @@ const Map<String, String> _methodRequiredPermission = {
   'workspace.switch': pluginWorkspaceManagePermission,
   'navigation.goTo': 'navigation.write',
   'plugin.openSelf': 'navigation.write',
+  'plugin.setNewTabPage': 'navigation.write',
   'plugin.openOther': pluginOpenOtherPermission,
   'plugin.listInstalled': 'app.info.read',
   'notes.list': 'notes.read',
@@ -351,6 +379,7 @@ const Map<String, String> _methodRequiredPermission = {
   'fs.commitUserFileWrite': 'fs.user_files.write',
   'fs.abortBinaryWrite': 'fs.user_files.write',
   'feedback.sendEmail': 'feedback.send_email',
+  'feedback.submitBookCorrection': 'feedback.send_email',
   'history.list': 'history.read',
   'history.listSearches': 'history.read',
   'history.clear': 'history.write',
@@ -429,8 +458,13 @@ const Map<String, String> _methodMinVersion = {
   'search.getOptions': '0.9.97',
   'reader.openBook': '0.9.89',
   'reader.openBookAtRef': '0.9.89',
+  'reader.printRange': '0.9.99',
   'reader.openSearchTab': '0.9.89',
   'reader.getCurrentState': '0.9.89',
+  'reader.getDefaultTextReader': '0.9.98',
+  'reader.setDefaultTextReader': '0.9.98',
+  'reader.reportTextReaderLocation': '0.9.98',
+  'reader.setTextReaderFontSize': '0.9.98',
   'reader.getCurrentRef': '0.9.89',
   'reader.getSelection': '0.9.89',
   'reader.getActiveCommentators': '0.9.97',
@@ -469,6 +503,7 @@ const Map<String, String> _methodMinVersion = {
   'ui.exportPdf': '0.9.97',
   'ui.setUnsavedChanges': '0.9.97',
   'feedback.sendEmail': '0.9.89',
+  'feedback.submitBookCorrection': '0.9.99',
   'feedback.report': '0.9.97',
   'feedback.hasReporterEmail': '0.9.97',
   'history.list': '0.9.89',
@@ -521,6 +556,7 @@ const Map<String, String> _methodMinVersion = {
   'app.openUrl': '0.9.95',
   // 0.9.96
   'plugin.openSelf': '0.9.96',
+  'plugin.setNewTabPage': '0.9.97',
   'plugin.openOther': '0.9.97',
   'library.listBookAltStructures': '0.9.96',
   'library.getBookAltToc': '0.9.96',
@@ -562,6 +598,10 @@ const Map<String, String> _methodMinVersion = {
   'fs.openFolderFile': '0.9.98',
   'fs.revokeFolder': '0.9.98',
   'library.openBookFile': '0.9.98',
+  // 0.9.99
+  'search.setFieldText': '0.9.99',
+  'search.setFieldActionState': '0.9.99',
+  'search.endFieldSession': '0.9.99',
 };
 
 /// שדות שמורים שאינם API methods (כדי שלא ייתפסו ב-shorthand scanner).
@@ -785,13 +825,16 @@ class PluginExtendedValidator {
   static const Map<String, String> _actionMinVersions = {
     'storage.set': '0.9.97',
     'storage.remove': '0.9.97',
+    'localService.post': '0.9.98',
   };
   static const String _contextMenuActionMinVersion = '0.9.97';
   static const String _searchSubmitRoutingMinVersion = '0.9.97';
   static const String _externalEditionsMinVersion = '0.9.97';
   static const String _libraryBooksMinVersion = '0.9.98';
+  static const String _storageReferenceMinVersion = '0.9.98';
   static const String _whenConditionMinVersion = '0.9.97';
   static const String _headlessMinVersion = '0.9.98';
+  static const String _searchFieldActionsMinVersion = '0.9.99';
 
   /// תוסף ללא ממשק רץ רק כשמנוע הרקע מתעורר, ואין לו דף שאפשר לפתוח במקומו.
   /// לכן תוסף שאין לו דרך להתעורר, או שמפנה לדף שלו, נחסם כבר בהתקנה.
@@ -931,6 +974,65 @@ class PluginExtendedValidator {
     }
   }
 
+  static void _validateSearchFieldActions(
+    PluginManifest manifest,
+    PluginStartupContributions startup,
+    Set<String> declaredPermissions,
+    List<String> errors,
+    List<String> warnings,
+  ) {
+    const field = 'contributes.startup.searchFieldActions';
+    if (!declaredPermissions.contains(pluginSearchFieldActionsPermission)) {
+      errors.add(
+        '$field דורש את ההרשאה "$pluginSearchFieldActionsPermission" '
+        'ב-manifest',
+      );
+    }
+    if (startup.searchFieldActions.length >
+        PluginSearchFieldAction.maxActionsPerPlugin) {
+      errors.add(
+        '$field מוגבל ל-${PluginSearchFieldAction.maxActionsPerPlugin} כפתורים',
+      );
+    }
+    try {
+      if (PluginVersionUtils.compareCoreVersions(
+            _searchFieldActionsMinVersion,
+            manifest.minAppVersion,
+          ) >
+          0) {
+        errors.add(
+          '$field נתמך החל מגרסה $_searchFieldActionsMinVersion, אך '
+          'minAppVersion שהוצהר הוא ${manifest.minAppVersion}',
+        );
+      }
+    } on PluginVersionFormatException {
+      // minAppVersion נבדק ב-PluginManifestValidator.
+    }
+    final ids = <String>{};
+    for (final item in startup.searchFieldActions) {
+      try {
+        final parsed = PluginSearchFieldAction.fromPayload(item);
+        if (!ids.add(parsed.id)) errors.add('$field מכיל מזהה כפול');
+        for (final name in PluginSearchFieldAction.unknownFieldNames(item)) {
+          warnings.add('$field: שדה החיפוש "$name" אינו מוכר ולא יוצג');
+        }
+        for (final icon in [parsed.icon, parsed.activeIcon].nonNulls) {
+          if (pluginIconFromName(icon) == null) {
+            warnings.add('$field: האייקון "$icon" אינו מוכר');
+          }
+        }
+      } on PluginSearchFieldActionException catch (error) {
+        errors.add('$field לא תקין: $error');
+      }
+    }
+    if (!declaredPermissions.contains(pluginRunOnStartupPermission)) {
+      warnings.add(
+        '$field בלי ההרשאה "$pluginRunOnStartupPermission": לחיצה על הכפתור '
+        'תפתח את דף התוסף במקום להעיר את מנוע הרקע',
+      );
+    }
+  }
+
   static void _validateLibraryBooks(
     PluginManifest manifest,
     PluginStartupContributions startup,
@@ -976,8 +1078,51 @@ class PluginExtendedValidator {
         if (!providers.add(parsed.provider)) {
           errors.add('contributes.startup.libraryBooks מכיל ספק כפול');
         }
+        if (parsed.openAction case final action?) {
+          DeclarativeSelectionAction.validateTemplate(
+            action,
+            declaredPermissions: declaredPermissions,
+            source: DeclarativeClickSource.libraryBook,
+          );
+        }
       } on PluginLibraryBooksException catch (error) {
         errors.add('contributes.startup.libraryBooks לא תקין: $error');
+      } on DeclarativeProgramException catch (error) {
+        errors.add('contributes.startup.libraryBooks לא תקין: $error');
+      }
+    }
+  }
+
+  /// גרסת המינימום של מה שחדש מ-action בתפריט עצמו: הפעולה
+  /// `localService.post` וההפניה `$storage`. ב-libraryBooks אין צורך: הם
+  /// עצמם דורשים את אותה גרסה.
+  static void _checkContextMenuActionVersions(
+    PluginManifest manifest,
+    List<Map<String, dynamic>> actions,
+    List<String> errors,
+  ) {
+    final features = {
+      if (actions.any((action) => action['type'] == 'localService.post'))
+        'localService.post': _actionMinVersions['localService.post']!,
+      if (actions.any(
+        (action) => DeclarativeSelectionAction.storageKeys(action).isNotEmpty,
+      ))
+        r'ההפניה $storage': _storageReferenceMinVersion,
+    };
+    for (final MapEntry(key: feature, value: since) in features.entries) {
+      try {
+        if (PluginVersionUtils.compareCoreVersions(
+              since,
+              manifest.minAppVersion,
+            ) >
+            0) {
+          errors.add(
+            '$feature נתמכת החל מגרסה $since, אך minAppVersion שהוצהר הוא '
+            '${manifest.minAppVersion}',
+          );
+        }
+      } on PluginVersionFormatException {
+        // minAppVersion נבדק ב-PluginManifestValidator.
       }
     }
   }
@@ -1033,6 +1178,7 @@ class PluginExtendedValidator {
         errors.add('contributes.startup.contextMenuItems לא תקין: $error');
       }
     }
+    _checkContextMenuActionVersions(manifest, actions, errors);
   }
 
   /// ולידציית contributes.startup: סכימה (דרך אותם parsers של ה-runtime),
@@ -1081,6 +1227,7 @@ class PluginExtendedValidator {
     checkListField('publishedData', (e) => e is Map, 'אובייקט');
     checkListField('programs', (e) => e is Map, 'אובייקט');
     checkListField('searchDialogItems', (e) => e is Map, 'אובייקט');
+    checkListField('searchFieldActions', (e) => e is Map, 'אובייקט');
     checkListField('externalEditions', (e) => e is Map, 'אובייקט');
     checkListField('libraryBooks', (e) => e is Map, 'אובייקט');
     checkListField(
@@ -1278,6 +1425,16 @@ class PluginExtendedValidator {
           errors.add('contributes.startup.searchDialogItems לא תקין: $error');
         }
       }
+    }
+
+    if (startup.searchFieldActions.isNotEmpty) {
+      _validateSearchFieldActions(
+        manifest,
+        startup,
+        declaredPermissions,
+        errors,
+        warnings,
+      );
     }
 
     if (startup.externalEditions.isNotEmpty) {
@@ -1665,12 +1822,13 @@ class PluginExtendedValidator {
     // (3) regex literals — רק אחרי "הקשר רגקס" (תו או מילת מפתח שמרמזים
     // שהבא הוא ביטוי, לא חלוקה). שומרים את ההקשר ב-group(1) וב-group(2),
     // ואת ה-regex עצמו (group(3)) מוחקים (לא נסרק ולא משוחזר). ה-character-class
-    // ‎`\[…\]` בתוך הregex מאפשר `/` בלתי בורח בתוך class (למשל `/[a-z\/]/`).
+    // `\[…\]` בתוך הregex מאפשר `/` בלתי בורח בתוך class (למשל `/[a-z\/]/`).
+    // `[` מוחרג מענף התו הבודד: חפיפה בין הענפים גרמה ל-backtracking מעריכי.
     stripped = stripped.replaceAllMapped(
       RegExp(
         r'(^|[=(,;:!?~&|+\-*/%<>{}\[\]]|=>|\breturn\b|\bthrow\b|\bin\b|\bof\b|\btypeof\b|\bdelete\b|\bvoid\b|\binstanceof\b|\bnew\b)'
         r'(\s*)'
-        r'(/(?:\\.|\[(?:\\.|[^\]\\\n\r])*\]|[^/\\\n\r])+?/[gimsuyd]*)',
+        r'(/(?:\\.|\[(?:\\.|[^\]\\\n\r])*\]|[^/\\\n\r\[])+?/[gimsuyd]*)',
       ),
       (m) {
         // regex literals נמחקים מהסריקה (לא משוחזרים): `//` או הטקסט
@@ -1921,13 +2079,6 @@ class PluginExtendedValidator {
       violations: violations,
     );
   }
-
-  /// הסלקטור של הכלל שבתוכו נמצא ההיסט — לחריגים תלויי-סלקטור בסריקת ה-CSS.
-  /// (סריקה טקסטואלית: נסוגים אל ה-'{' הפותח, והסלקטור הוא מה שלפניו עד סוף
-  ///  הכלל/הבלוק הקודם.)
-  @visibleForTesting
-  static String selectorAtOffset(String css, int index) =>
-      _selectorAtOffset(css, index);
 
   static String _selectorAtOffset(String css, int index) {
     final open = css.lastIndexOf('{', index);

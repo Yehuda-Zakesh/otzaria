@@ -16,12 +16,6 @@ SELECT * FROM book WHERE id = ?;
 selectByCategoryId:
 SELECT * FROM book WHERE categoryId = ? ORDER BY orderIndex, title;
 
--- Select all books whose category is a descendant of the given ancestor category
-selectByAncestorCategory:
-SELECT b.* FROM book b
-WHERE b.categoryId IN (SELECT descendantId FROM category_closure WHERE ancestorId = ?)
-ORDER BY b.orderIndex, b.title;
-
 selectByTitle:
 SELECT * FROM book WHERE title = ? LIMIT 1;
 
@@ -34,69 +28,25 @@ SELECT * FROM book WHERE title = ? AND categoryId = ? AND fileType = ? LIMIT 1;
 selectByTitleAndFileType:
 SELECT * FROM book WHERE title = ? AND fileType = ? LIMIT 1;
 
-selectByTitleLike:
-SELECT * FROM book WHERE title LIKE ? LIMIT 1;
-
-selectManyByTitleLike:
-SELECT * FROM book WHERE title LIKE ? ORDER BY orderIndex, title LIMIT ?;
-
-
-selectByAuthor:
-SELECT b.* FROM book b
-JOIN book_author ba ON b.id = ba.bookId
-JOIN author a ON ba.authorId = a.id
-WHERE a.name LIKE ?
-ORDER BY b.orderIndex, b.title;
-
--- Base-books helpers
-selectBaseIds:
-SELECT id FROM book WHERE isBaseBook = 1 ORDER BY orderIndex, title;
-
 insert:
 INSERT INTO book (categoryId, sourceId, title, heShortDesc, orderIndex, totalLines, isBaseBook,
     hasTargumConnection, hasReferenceConnection, hasSourceConnection, hasCommentaryConnection, hasOtherConnection,
     hasAltStructures, hasTeamim, hasNekudot, isPersonal, filePath, fileType, fileSize, lastModified, pages, volume)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
--- Insert external content book (content stored externally, metadata in DB)
-insertExternalContent:
-INSERT INTO book (categoryId, sourceId, title, heShortDesc, orderIndex, isPersonal, filePath, fileType, fileSize, lastModified)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-
 -- Update external book metadata
 updateExternalMetadata:
 UPDATE book SET fileSize = ?, lastModified = ? WHERE id = ?;
-
--- Select external content books only
-selectExternalContent:
-SELECT * FROM book WHERE filePath IS NOT NULL ORDER BY orderIndex, title;
-
--- Select personal books only
-selectPersonal:
-SELECT * FROM book WHERE isPersonal = 1 ORDER BY orderIndex, title;
 
 -- Select external book by file path
 selectByFilePath:
 SELECT * FROM book WHERE filePath = ? LIMIT 1;
 
--- Select external book by file path and file type
-selectByFilePathAndType:
-SELECT * FROM book WHERE filePath = ? AND fileType = ? LIMIT 1;
-
 updateTotalLines:
 UPDATE book SET totalLines = ? WHERE id = ?;
 
-delete:
-DELETE FROM book WHERE id = ?;
-
-countByCategoryId:
-SELECT COUNT(*) FROM book WHERE categoryId = ?;
-
 countAll:
 SELECT COUNT(*) FROM book;
-
-getMaxId:
-SELECT MAX(id) FROM book;
 
 updateCategoryId:
 UPDATE book SET categoryId = ? WHERE id = ?;
@@ -110,18 +60,3 @@ UPDATE book SET
     hasCommentaryConnection = ?,
     hasOtherConnection = ?
 WHERE id = ?;
-
--- Update alt structures flag
-updateAltStructuresFlag:
-UPDATE book SET hasAltStructures = ? WHERE id = ?;
-
--- Update teamim flag
-updateTeamimFlag:
-UPDATE book SET hasTeamim = ? WHERE id = ?;
-
--- Update nekudot flag
-updateNekudotFlag:
-UPDATE book SET hasNekudot = ? WHERE id = ?;
-
-lastInsertRowId:
-SELECT last_insert_rowid();

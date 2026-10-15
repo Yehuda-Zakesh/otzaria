@@ -34,7 +34,7 @@ void togglePluginPinnedToNavRail(BuildContext context, InstalledPlugin plugin) {
 void togglePluginEnabled(BuildContext context, InstalledPlugin plugin) {
   final bloc = context.read<PluginSystemBloc>();
   bloc.add(
-    plugin.enabled
+    plugin.savedEnabled
         ? DisablePluginRequested(plugin.pluginId)
         : EnablePluginRequested(plugin.pluginId),
   );

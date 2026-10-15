@@ -2,13 +2,13 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:otzaria/plugins/view/safe_mode_controls.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/theme/app_tokens.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
@@ -18,7 +18,6 @@ import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
 import 'package:otzaria/shortcuts/shortcut_helper.dart';
 import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/navigation/bloc/navigation_state.dart';
-import 'package:otzaria/navigation/view/reading_tab_strip.dart';
 import 'package:otzaria/navigation/view/tab_context_menu.dart';
 import 'package:otzaria/navigation/view/tab_search_menu.dart';
 import 'package:otzaria/navigation/view/tab_visuals.dart';
@@ -30,8 +29,6 @@ import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/core/windowing/cross_window_tab_drag.dart';
-import 'package:otzaria/core/windowing/drag_preview_colors.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/tools/tool_catalog_entry.dart';
@@ -45,6 +42,7 @@ import 'package:otzaria/history/bloc/history_event.dart';
 import 'package:otzaria/library/bloc/library_bloc.dart';
 import 'package:otzaria/library/bloc/library_state.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
+import 'package:otzaria/plugins/services/plugin_new_tab_page_registry.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/tour/tour_target_keys.dart';
 import 'package:otzaria/update/my_update_widget.dart';
@@ -102,28 +100,8 @@ const double _kTabContentMinWidth = 12.0;
 /// גובה גוף הכרטיסיה, בלי המפריד שלצדה.
 const double _kTabBodyHeight = 32.0;
 
-/// גובה הסרגל העליון, וגם הגובה שהכרטיסיה **מציירת** בו.
-///
-/// ⚠️ שני הדברים חייבים להיות אותו מספר, וזה תיקון של באג שחזר שלוש
-/// פעמים. גוף הכרטיסיה הוא [_kTabBodyHeight] = 32 והסרגל 40, כלומר בין
-/// הכרטיסיה לתוכן שמתחתיה נשארים ארבעה פיקסלים של צבע הרצועה — הקו הבהיר
-/// שהמשתמש ראה. הפתרון: ה-widget של הכרטיסיה מקבל את כל 40, הצייר ממרכז
-/// בתוכו כרטיסיה בגובה 32 ומושך אותה עד התחתית, והתוכן ממורכז בנפרד.
-///
-/// ### ⚠️ ולמה **לא** ציור מחוץ לגבולות
-///
-/// הגרסה הקודמת פתרה את זה בכך שהצייר יצא ארבעה פיקסלים מתחת ל-widget
-/// שלו. זה עבד — **לפעמים**. הרצועה היא `SingleChildScrollView`, והוא
-/// חותך את הציור ברגע שהתוכן גולש (`_shouldClipAtPaintOffset`): כלומר
-/// בדיוק כשיש הרבה כרטיסיות, או שהחלון על חצי מסך, החריגה נמחקת והקו
-/// חוזר. זה גם ההסבר המלא ל"מופיע רק בחלק מהחלונות ולא הצלחתי לאבחן
-/// מתי כן ומתי לא".
-///
-/// לפני כן נוסה גם להרחיב את הסרגל בחמשה פיקסלים כדי "להזמין מקום";
-/// שם התוצאה הייתה הפוכה — התוכן נדחף למטה והפער גדל.
-///
-/// **המסקנה: ציור שיוצא מגבולות ה-widget שלו תלוי בחסדי כל אב בעץ.**
-/// כאן אין חריגה אנכית בכלל.
+/// הכרטיסייה מציירת בתוך כל גובה הסרגל, כדי שגלילה לא תחתוך את רקעה.
+/// גוף הכרטיסייה ממורכז, והרקע נמשך עד לתוכן שמתחתיה.
 const double _kTopBarHeight = 40.0;
 
 /// רוחבי הטאבים בשורה: הנבחר עשוי להיות רחב מהשאר (ראה [_kTabSelectedMinWidth]).
@@ -157,14 +135,6 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
   // מאפס אותו, וה-X שמוצג רק בריחוף היה נמחק מתחת לסמן לפני שהלחיצה נורית.
   OpenedTab? _hoveredTab;
 
-  /// המקש שמפעיל בחירה מרובה: Ctrl בכל הפלטפורמות, Command במק.
-  bool get _isMultiSelectModifierPressed {
-    final keyboard = HardwareKeyboard.instance;
-    return defaultTargetPlatform == TargetPlatform.macOS
-        ? keyboard.isMetaPressed
-        : keyboard.isControlPressed;
-  }
-
   // רוחב אזור הטאבים שנמדד בפריים הקודם (ע"י LayoutBuilder נפרד). הרשימה
   // נבנית עם הערך הזה ולא תחת ה-LayoutBuilder — אחרת Tooltip/OverlayPortal
   // שבטאב מופעל בזמן layout וזורק "_RenderLayoutBuilder was mutated".
@@ -173,41 +143,32 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
   /// בודק אם הנקודה הגלובלית פוגעת ברכיב של שורת הטאבים — טאב או חץ גלילה
   /// (מסומן ב-[_kTabHitMarker]). משמש כדי לדלג על maximize בלחיצה כפולה עליהם,
   /// בלי להסתמך על gesture arena.
-  bool _hitTestTab(BuildContext context, Offset globalPosition) {
-    final result = HitTestResult();
-    WidgetsBinding.instance.hitTestInView(
-      result,
-      globalPosition,
-      View.of(context).viewId,
-    );
-    for (final entry in result.path) {
-      final target = entry.target;
-      if (target is RenderMetaData && target.metaData == _kTabHitMarker) {
-        return true;
-      }
-    }
-    return false;
-  }
+  bool _hitTestTab(BuildContext context, Offset globalPosition) =>
+      _hitTestMarker(context, globalPosition, _kTabHitMarker);
 
   /// בודק אם הנקודה הגלובלית פוגעת בכפתור הסגירה של טאב (מסומן ב-
   /// [_kTabCloseButtonHitMarker]). משמש כדי שלחיצה על ה-X לא תבחר את הטאב
   /// ב-onPointerDown — בחירה שם גורמת ל-rebuild שמשמיד את ה-IconButton
   /// לפני שה-onPressed שלו יורה, כך שהטאב מתחלף במקום להיסגר.
-  bool _hitTestCloseButton(BuildContext context, Offset globalPosition) {
+  bool _hitTestCloseButton(BuildContext context, Offset globalPosition) =>
+      _hitTestMarker(context, globalPosition, _kTabCloseButtonHitMarker);
+
+  /// האם הנקודה הגלובלית פוגעת ב-[RenderMetaData] שסומן ב-[marker].
+  bool _hitTestMarker(
+    BuildContext context,
+    Offset globalPosition,
+    String marker,
+  ) {
     final result = HitTestResult();
     WidgetsBinding.instance.hitTestInView(
       result,
       globalPosition,
       View.of(context).viewId,
     );
-    for (final entry in result.path) {
-      final target = entry.target;
-      if (target is RenderMetaData &&
-          target.metaData == _kTabCloseButtonHitMarker) {
-        return true;
-      }
-    }
-    return false;
+    return result.path
+        .map((entry) => entry.target)
+        .whereType<RenderMetaData>()
+        .any((target) => target.metaData == marker);
   }
 
   /// maximize/restore בלחיצה כפולה על האזור הריק שבשורת הטאבים (כמו DragToMoveArea).
@@ -248,6 +209,12 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     return BlocBuilder<NavigationBloc, NavigationState>(
       builder: (context, navState) {
         return BlocBuilder<SettingsBloc, SettingsState>(
+          // הכותרת מציגה רק אלה, וגרירת סליידר גופן לא תבנה מחדש כל כרטיסיה.
+          // הקיצורים נקראים מ-Settings ב-build, ולכן נבדקת זהות המפה.
+          buildWhen: (previous, current) =>
+              previous.readingTabsOnSide != current.readingTabsOnSide ||
+              previous.isFullscreen != current.isFullscreen ||
+              !identical(previous.shortcuts, current.shortcuts),
           builder: (context, settingsState) {
             final stackedTabs = _useStackedTabs(context, navState);
             // במסך עיון ללא טאבים פתוחים אין תוכן קריאה אמיתי, ולכן המסגרת
@@ -318,6 +285,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
+                                const SafeModeTitleBarIndicator(),
                                 const ManagedUpdateTitleBarIndicator(),
                                 _buildFullscreenCaptionButton(
                                   context,
@@ -562,25 +530,52 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
   }
 
   Widget _buildScrollableTabsArea(TabsState state) {
-    // LayoutBuilder נפרד מודד רק את הרוחב (ילדו SizedBox ריק) ושומר אותו ב-state;
-    // הרשימה — שמכילה Tooltip/OverlayPortal ומפתחות גלובליים — נבנית כאח שלו,
-    // לא תחתיו. אחרת רינדור-מחדש של טאב בזמן layout מפעיל את ה-OverlayPortal
-    // וזורק "_RenderLayoutBuilder was mutated".
-    return Stack(
-      children: [
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final w = constraints.maxWidth;
-            if (_tabsAreaWidth == null || (_tabsAreaWidth! - w).abs() > 0.5) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) setState(() => _tabsAreaWidth = w);
-              });
-            }
-            return const SizedBox.shrink();
-          },
-        ),
-        _buildTabsContent(state),
-      ],
+    final registry = PluginNewTabPageRegistry.instance;
+    return ListenableBuilder(
+      listenable: registry,
+      builder: (context, _) {
+        final showNewTabButton = registry.hasActiveRegistration;
+        final tabsContent = _buildTabsContent(state);
+        final tabWidths = _pinnedTabWidths ?? _lastComputedTabWidths!;
+        final visibleTabsWidth = state.tabs.isEmpty
+            ? 0.0
+            : tabWidths.selected +
+                  tabWidths.unselected * (state.tabs.length - 1);
+
+        return Stack(
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final reservedForPlus = showNewTabButton ? 32.0 : 0.0;
+                final availableForTabs = math.max(
+                  0.0,
+                  constraints.maxWidth - reservedForPlus,
+                );
+                if (_tabsAreaWidth == null ||
+                    (_tabsAreaWidth! - availableForTabs).abs() > 0.5) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) {
+                      setState(() => _tabsAreaWidth = availableForTabs);
+                    }
+                  });
+                }
+                return const SizedBox.shrink();
+              },
+            ),
+            tabsContent,
+            if (showNewTabButton)
+              PositionedDirectional(
+                start: visibleTabsWidth,
+                top: 4,
+                child: MetaData(
+                  metaData: _kTabHitMarker,
+                  behavior: HitTestBehavior.opaque,
+                  child: _buildOpenLibraryButton(context),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -592,64 +587,20 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     // תחת הסמן; אחרת מתחלקים בשווה במקום הפנוי.
     final tabWidths = _pinnedTabWidths ?? _lastComputedTabWidths!;
 
-    // בדסקטופ גרירת-עכבר על טאב מסדרת אותו מיד (כמו כרום); בנייד נדרשת לחיצה
-    // ארוכה כדי שהחלקה/גלילה במגע לא תזיז טאב בטעות.
-    final platform = Theme.of(context).platform;
-    final isDesktop =
-        platform == TargetPlatform.windows ||
-        platform == TargetPlatform.linux ||
-        platform == TargetPlatform.macOS;
-
     // אותה גרירה מסדרת כרטיסיות ומוציאה אותן לחלונית קריאה.
-    final tabStrip = ReadingTabStrip(
-      stripColor: AppSurfaces.readerBackground(context),
-      tabs: state.tabs,
+    final tabStrip = buildTabsReadingTabStrip(
+      context,
+      state: state,
+      crossWindowDrag: _crossWindowDrag,
       widths: [
         for (var i = 0; i < state.tabs.length; i++)
           i == state.currentTabIndex
               ? tabWidths.selected
               : tabWidths.unselected,
       ],
-      requireLongPressToDrag: !isDesktop,
-      onReorder: (tab, newIndex) =>
-          context.read<TabsBloc>().add(MoveTab(tab, newIndex)),
-      // חלונית של טאב מפוצל שנגררת לרצועה חוזרת לכרטיסייה עצמאית.
-      acceptsExternal: (tab) => context.read<TabsBloc>().state.tabs.any(
-        (t) => t is CombinedTab && t.sibling(tab) != null,
-      ),
-      onExternalDrop: (tab, insertIndex) => context.read<TabsBloc>().add(
-        DetachPane(tab, insertIndex: insertIndex),
-      ),
       // גרירה אינה בוחרת כרטיסיה: התצוגה נשארת על הספר שהמשתמש קורא, ומשתנה
       // רק אם הוא משתהה מעל כרטיסיה אחרת.
-      onDragStarted: (draggedTab, cancelDrag) {
-        _pendingTabSelection = null;
-        _crossWindowDrag.begin(
-          draggedTab,
-          DragPreviewColors.of(context),
-          tabsBloc: context.read<TabsBloc>(),
-          cancelDrag: cancelDrag,
-        );
-      },
-      onTabSnapshot: (_, snapshot, generation) =>
-          _crossWindowDrag.applySnapshot(snapshot, generation),
-      onDragFinishedAnywhere: _crossWindowDrag.end,
-      onDragLeftStrip: _crossWindowDrag.notePointerLeftStrip,
-      onDroppedOutside: MultiWindowService.canDragTabsOut
-          ? (tab) => _crossWindowDrag.handleDroppedOutside(
-              tab,
-              context.read<TabsBloc>(),
-            )
-          : null,
-      onSpringOpen: (tab) {
-        // ה-state שנתפס ב-build עלול להיות מיושן באמצע גרירה, ורק קריאה
-        // ישירה מה-bloc משקפת מה מוצג עכשיו.
-        final bloc = context.read<TabsBloc>();
-        final index = bloc.state.tabs.indexOf(tab);
-        if (index != -1 && index != bloc.state.currentTabIndex) {
-          bloc.add(SetCurrentTab(index));
-        }
-      },
+      onDragStarted: () => _pendingTabSelection = null,
       // סימון שטח הטאב ל-hit-test, כדי שה-double-tap-to-maximize שבמסגרת
       // ידלג עליו (ראה _EmptyAreaDoubleTapRecognizer).
       tabBuilder: (tab, index, tabWidth) => MetaData(
@@ -705,6 +656,15 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     );
   }
 
+  Widget _buildOpenLibraryButton(BuildContext context) {
+    return IconButton(
+      icon: const Icon(FluentIcons.add_24_regular, size: 18),
+      tooltip: context.settingsText('כרטיסייה חדשה'),
+      onPressed: PluginNewTabPageRegistry.instance.open,
+      style: _kIconButtonStyle,
+    );
+  }
+
   Widget _buildReadingSettingsButton(BuildContext context) {
     return DragToMoveArea(
       child: Padding(
@@ -734,7 +694,11 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
         return Container(
           color: AppSurfaces.readerBackground(context),
           height: _kTopBarHeight,
-          child: _buildScrollableTabsArea(state),
+          child: Row(
+            children: [
+              Expanded(child: _buildScrollableTabsArea(state)),
+            ],
+          ),
         );
       },
     );
@@ -974,6 +938,12 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     final isSelected = index == state.currentTabIndex;
     final closeTabShortcut =
         Settings.getValue<String>('key-shortcut-close-tab') ?? 'ctrl+w';
+    final closeTabLabel = context.settingsText('סגור כרטיסיה');
+    // קיצור הסגירה פועל רק על הכרטיסיה הפעילה.
+    final closeTabTooltip = isSelected
+        ? '$closeTabLabel '
+              '(${ShortcutHelper.formatShortcutForDisplay(closeTabShortcut)})'
+        : closeTabLabel;
 
     final isTabHovered = identical(_hoveredTab, tab);
 
@@ -1138,7 +1108,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                                       end: 4,
                                     ),
                                     child: Icon(
-                                      OtzariaIcons.book_pdf_24_regular,
+                                      OtzariaIcons.document_pdf_24_regular,
                                       size: 14,
                                       color: colorScheme.onSurface,
                                     ),
@@ -1159,10 +1129,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                                 ),
                                 if (showClose)
                                   _tabCloseButton(
-                                    tooltip:
-                                        ShortcutHelper.formatShortcutForDisplay(
-                                          closeTabShortcut,
-                                        ),
+                                    tooltip: closeTabTooltip,
                                     width: closeExtent,
                                     onPressed: () => closeTab(tab, context),
                                   ),
@@ -1313,19 +1280,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
             _hitTestCloseButton(context, event.position)) {
           return;
         }
-        // Ctrl/Cmd/Shift+לחיצה בונים בחירה מרובה לסגירה קבוצתית (כמו בדפדפן)
-        // בלי להחליף את הטאב הפעיל.
-        if (_isMultiSelectModifierPressed) {
-          context.read<TabsBloc>().add(ToggleTabSelection(tab));
-          return;
-        }
-        if (HardwareKeyboard.instance.isShiftPressed) {
-          context.read<TabsBloc>().add(SelectTabRange(tab));
-          return;
-        }
-        if (state.selectedTabs.isNotEmpty) {
-          context.read<TabsBloc>().add(const ClearTabSelection());
-        }
+        if (applyTabSelectionClick(context, tab, state)) return;
         if (index != state.currentTabIndex) {
           _pendingTabSelection = tab;
         }

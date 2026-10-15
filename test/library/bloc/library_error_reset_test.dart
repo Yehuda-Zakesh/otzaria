@@ -2,6 +2,7 @@ import 'dart:collection';
 
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
@@ -109,6 +110,36 @@ void main() {
       final navigated = bloc.stream.first;
       bloc.add(NavigateToCategory(library.subCategories.first));
       expect((await navigated).error, isNull);
+    });
+  });
+
+  group('כשל בספרייה נרשם ב-errors.txt', () {
+    String errorLog() {
+      final file = ErrorLogFile.resolveFile();
+      return file.existsSync() ? file.readAsStringSync() : '';
+    }
+
+    test('טעינה ראשונית שנכשלה', () async {
+      repository.invalidateLibraryCache();
+      files.results.add(() => Future.error(StateError('logged load failure')));
+      final failed = bloc.stream.firstWhere(
+        (s) => !s.isLoading && s.error != null,
+      );
+      bloc.add(LoadLibrary());
+      await failed;
+
+      expect(errorLog(), contains('כשל טעינת הספרייה'));
+      expect(errorLog(), contains('logged load failure'));
+    });
+
+    test('רענון שנכשל', () async {
+      files.results.add(
+        () => Future.error(StateError('logged refresh failure')),
+      );
+      expect((await refresh(1)).error, isNotNull);
+
+      expect(errorLog(), contains('כשל רענון הספרייה'));
+      expect(errorLog(), contains('logged refresh failure'));
     });
   });
 }

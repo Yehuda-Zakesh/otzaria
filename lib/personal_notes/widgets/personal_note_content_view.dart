@@ -34,7 +34,6 @@ class PersonalNoteContentView extends StatefulWidget {
   final PersonalNote note;
   final TextStyle? textStyle;
   final TextAlign textAlign;
-  final bool allowSelection;
   final void Function(String url)? onLinkTap;
 
   /// כשמוגדר, מקצר את התוכן ל-N התווים הראשונים. נועד לתצוגות מקדימות
@@ -47,7 +46,6 @@ class PersonalNoteContentView extends StatefulWidget {
     required this.note,
     this.textStyle,
     this.textAlign = TextAlign.justify,
-    this.allowSelection = true,
     this.onLinkTap,
     this.maxPreviewChars,
   });

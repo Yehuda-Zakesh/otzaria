@@ -118,7 +118,7 @@ Future<String> convertHtmlWithCache(
     title,
     kHtmlConverterVersion,
     // הפורמט המדויק עובר לממיר: הוא זה שנרשם בחריגה, ובלעדיו כל כשל של
-    // קובץ ‎.htm‎ מדווח כ-‎.html‎.
+    // קובץ .htm מדווח כ-.html.
     (bytes, t) => htmlToText(
       bytes,
       t,
@@ -143,7 +143,7 @@ Future<String> convertWordXmlWithCache(
   cacheVariant: embedImages ? 'word-xml' : 'word-xml-without-images',
 );
 
-/// ממיר מסמך Word בינארי ישן (‎.doc‎/‎.dot‎) דרך אותו מטמון.
+/// ממיר מסמך Word בינארי ישן (.doc/.dot) דרך אותו מטמון.
 Future<String> convertLegacyWordWithCache(
   File file,
   String title,

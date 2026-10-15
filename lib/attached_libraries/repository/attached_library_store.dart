@@ -10,8 +10,6 @@ import 'package:otzaria/settings/engine/settings_repository.dart';
 class AttachedLibraryStore {
   const AttachedLibraryStore();
 
-  List<AttachedLibrary> loadLibraries() => loadLibrariesOrNull() ?? [];
-
   /// null כשהערך השמור פגום — "לא ידוע", ולא "אין מסדים": ניקוי יתומים אינו
   /// רשאי למחוק על סמך רשימה ריקה שנולדה מכשל פענוח.
   List<AttachedLibrary>? loadLibrariesOrNull() {

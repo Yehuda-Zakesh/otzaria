@@ -4,10 +4,16 @@ import 'dart:io';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:otzaria/attached_libraries/models/attached_library.dart';
+import 'package:otzaria/attached_libraries/repository/attached_libraries_repository.dart';
+import 'package:otzaria/attached_libraries/repository/attached_library_probe.dart';
+import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/portable_paths.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:path/path.dart' as p;
+
+import '../helpers/seforim_fixture_db.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -206,6 +212,46 @@ void main() {
         p.join(dataRoot, 'my_books'),
       );
       expect((decoded.first as Map)['addToDatabase'], isTrue);
+    });
+
+    test('כונן נייד שהחליף אות — מסד אישי מתיקיית מסדים נשאר זמין '
+        '(issue #2479)', () async {
+      await PortablePaths.migrateIfMoved();
+      final folder = Directory(p.join(dataRoot, 'מסדים'))..createSync();
+      final created = SeforimFixtureDb.create(
+        folder,
+        SeforimFixtureVariant.full,
+      );
+      File(created).renameSync(p.join(folder.path, 'ספרים.db'));
+      Future<AttachedLibraryProbeResult> probe(String path) async =>
+          AttachedLibraryProbe.probeSync(path);
+      final before = AttachedLibraryRegistry(idleTimeout: null);
+      await AttachedLibrariesRepository(
+        registry: before,
+        probe: probe,
+      ).addFolder(folder.path);
+      expect(before.libraries.single.isOk, isTrue);
+      await before.closeAll();
+
+      // אותה תיקייה ניידת, במחשב שבו הכונן קיבל אות אחרת.
+      exeRoot = exeRoot.renameSync('${exeRoot.path}_E');
+      AppPaths.debugOverrideDataRootPath(null);
+      AppPaths.debugOverrideResolvedExecutable(
+        p.join(exeRoot.path, 'otzaria.exe'),
+      );
+      dataRoot = await AppPaths.getDataRootPath();
+      await PortablePaths.migrateIfMoved();
+
+      final after = AttachedLibraryRegistry(idleTimeout: null);
+      addTearDown(after.closeAll);
+      final repository = AttachedLibrariesRepository(
+        registry: after,
+        probe: probe,
+      );
+      await repository.rescan();
+      expect(after.libraries.single.status, AttachedLibraryStatus.ok);
+      await repository.removeFolder(p.join(dataRoot, 'מסדים'));
+      expect(after.libraries, isEmpty);
     });
 
     test('Windows: שינוי אות כונן באותיות שונות (case) עדיין מזוהה', () async {

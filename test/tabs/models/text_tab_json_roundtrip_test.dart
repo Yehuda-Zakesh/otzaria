@@ -8,7 +8,6 @@ import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../helpers/memory_settings_cache.dart';
 
@@ -212,8 +211,6 @@ TextBookLoaded _loadedState({
   selectedIndex: 12,
   pinLeftPane: false,
   searchText: '',
-  scrollController: ItemScrollController(),
-  positionsListener: ItemPositionsListener.create(),
   highlightText: highlightText,
   permanentHighlightLine: permanentHighlightLine,
   searchResultLines: searchResultLines,

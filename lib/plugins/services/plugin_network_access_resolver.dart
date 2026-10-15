@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:otzaria/plugins/models/plugin_manifest.dart';
 import 'package:otzaria/plugins/models/plugin_network_allowlist.dart';
+import 'package:otzaria/plugins/services/plugin_network_policy.dart';
 
 /// בודק האם URL מותר לגישת רשת של תוסף לפי שכבות האמון של אוצריא.
 ///
@@ -91,6 +92,12 @@ class PluginNetworkAccessResolver {
     return isUriAllowedForPluginNetwork(uri);
   }
 
+  /// הרשימה הרשמית החיה אם כבר נטענה בהצלחה, בלי להמתין לרשת.
+  List<String>? get cachedOfficialAllowlist => _officialAllowlistCache;
+
+  /// טוען את הרשימה הרשמית החיה (או מחזיר אותה מהזיכרון); `null` בכשל.
+  Future<List<String>?> loadOfficialAllowlist() => _loadOfficialAllowlist();
+
   Future<List<String>?> _loadOfficialAllowlist() async {
     final cached = _officialAllowlistCache;
     if (cached != null) return cached;
@@ -110,6 +117,8 @@ class PluginNetworkAccessResolver {
       if (result != null) {
         _officialAllowlistCache = result;
         _officialAllowlistFailureUntil = null;
+        // שערי המנוע נבנו עד עכשיו מהעותק המקומפל.
+        PluginNetworkPolicy.notifyChanged();
       } else {
         _officialAllowlistFailureUntil = _nowProvider().add(
           _officialFailureCacheTtl,

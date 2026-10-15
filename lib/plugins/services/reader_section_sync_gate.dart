@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 class ReaderSectionSyncGate {
   /// חייב להישאר קטן מ-`ReaderSectionContentTracker.maxSnapshots`: אם הטראקר
   /// יאבד קו-בסיס בעוד השער עוד מסמן "מסונכרן", השינוי האמיתי הבא ייבלע.
-  static const int defaultMaxEntries = 256;
+  static const int defaultMaxEntries = 1024;
 
   static final ReaderSectionSyncGate instance = ReaderSectionSyncGate._();
 
@@ -54,6 +54,8 @@ class ReaderSectionSyncGate {
         previous.rawSourceHtml == rawSourceHtml &&
         previous.processedHtml == processedHtml &&
         previous.renderingSignature == renderingSignature) {
+      // LRU: פגיעה מקדמת את הקטע, כדי שפסקה ארוכה לא תפנה את עצמה בכל בנייה.
+      _synced[key] = _synced.remove(key)!;
       return false;
     }
     _synced.remove(key);

@@ -117,11 +117,6 @@ class _MeasurementConverterScreenState
     }
   }
 
-  void requestKeyboardFocus() {
-    if (!_screenFocusNode.canRequestFocus) return;
-    _screenFocusNode.requestFocus();
-  }
-
   @override
   void dispose() {
     _inputController.dispose();
@@ -596,7 +591,7 @@ class _MeasurementConverterScreenState
                                     child: child,
                                   ),
                                 ),
-                            // ‏panel_right_expand הוא ה"Pane Open" של
+                            // panel_right_expand הוא ה"Pane Open" של
                             // פלואנט — הפאנל עם חץ שפותח אותו, ולא פאנל
                             // סתום שאינו אומר מה הלחיצה תעשה. הוא קיים
                             // בחבילה רק בגודל 20; הגליף נמתח ל-24 כמו כל
@@ -990,24 +985,26 @@ class _MeasurementConverterScreenState
     );
   }
 
+  Widget _swapUnitsButton() => IconButton(
+    iconSize: 32,
+    icon: const Icon(FluentIcons.arrow_swap_24_regular),
+    onPressed: () {
+      setState(() {
+        final temp = _selectedFromUnit;
+        _selectedFromUnit = _selectedToUnit;
+        _selectedToUnit = temp;
+        _convert();
+      });
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _screenFocusNode.requestFocus(),
+      );
+    },
+    tooltip: 'החלף יחידות',
+  );
+
   // ── עמודות יחידות ────────────────────────────────────────────────────────────
   Widget _buildUnitColumns() {
-    final swapButton = IconButton(
-      iconSize: 32,
-      icon: const Icon(FluentIcons.arrow_swap_24_regular),
-      onPressed: () {
-        setState(() {
-          final temp = _selectedFromUnit;
-          _selectedFromUnit = _selectedToUnit;
-          _selectedToUnit = temp;
-          _convert();
-        });
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _screenFocusNode.requestFocus(),
-        );
-      },
-      tooltip: 'החלף יחידות',
-    );
+    final swapButton = _swapUnitsButton();
 
     final fromCard = _buildUnitCard(
       title: 'המר מ:',
@@ -1076,23 +1073,6 @@ class _MeasurementConverterScreenState
 
   // ── חלק סרגל (narrow) ──────────────────────────────────────────────────────
   Widget _buildUnitSectionNarrow() {
-    final swapButton = IconButton(
-      iconSize: 32,
-      icon: const Icon(FluentIcons.arrow_swap_24_regular),
-      onPressed: () {
-        setState(() {
-          final temp = _selectedFromUnit;
-          _selectedFromUnit = _selectedToUnit;
-          _selectedToUnit = temp;
-          _convert();
-        });
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _screenFocusNode.requestFocus(),
-        );
-      },
-      tooltip: 'החלף יחידות',
-    );
-
     final fromCard = _buildUnitCard(
       title: 'המר מ:',
       icon: FluentIcons.arrow_up_24_regular,
@@ -1126,7 +1106,7 @@ class _MeasurementConverterScreenState
         fromCard,
         Padding(
           padding: const EdgeInsets.symmetric(vertical: AppTokens.spaceSM),
-          child: Center(child: swapButton),
+          child: Center(child: _swapUnitsButton()),
         ),
         toCard,
       ],

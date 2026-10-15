@@ -5,7 +5,6 @@ import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:otzaria/app_report/bloc/app_report_bloc.dart';
 import 'package:otzaria/app_report/bloc/app_report_event.dart';
 import 'package:otzaria/app_report/bloc/app_report_state.dart';
-import 'package:otzaria/app_report/models/app_report.dart';
 import 'package:otzaria/app_report/services/app_report_service.dart';
 import 'package:otzaria/app_report/services/crash_report_decision.dart';
 import 'package:otzaria/app_report/services/unclean_exit_detector.dart';
@@ -17,6 +16,7 @@ import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/widgets/controls/action_buttons.dart';
 import 'package:otzaria/widgets/controls/segmented_control.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 
 /// מציג את ההצעה לדווח על קריסה של ההפעלה הקודמת.
 Future<AppReportDeliveryResult?> showCrashPromptDialog(
@@ -72,6 +72,7 @@ class _CrashPromptDialogState extends State<CrashPromptDialog> {
                 initialType: AppReportType.crash,
                 initialTitle: CrashReportDecision.titleFor(widget.candidate),
                 signature: widget.candidate.signature,
+                minidumpFile: widget.candidate.minidump,
               ))
           ..add(const AppReportAttachmentsRequested());
   }
@@ -215,6 +216,10 @@ class _CrashPromptDialogState extends State<CrashPromptDialog> {
             errorLog: state.errorLog,
             includeDiagnostics: state.includeDiagnostics,
             includeErrorLog: state.includeErrorLog,
+            minidump: state.minidump,
+            includeMinidump: state.includeMinidump,
+            onMinidumpChanged: (include) =>
+                bloc.add(AppReportMinidumpToggled(include)),
             enabled: enabled,
             onDiagnosticsChanged: (include) =>
                 bloc.add(AppReportDiagnosticsToggled(include)),
@@ -238,7 +243,6 @@ class _CrashPromptDialogState extends State<CrashPromptDialog> {
           ],
           currentValue: _nextTime,
           expandToFillWidth: true,
-          showSelectedIcon: false,
           onChanged: (mode) => setState(() => _nextTime = mode),
         ),
         const SizedBox(height: 8),

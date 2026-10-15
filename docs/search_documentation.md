@@ -52,7 +52,7 @@
 - `advanced`: מוצא תוצאות שבהן ייתכן מרווח בין מילים, ומאפשר שימוש בכל אפשרויות העריכה המתקדמת.  
 - `fuzzy`: מפעיל בנייה אוטומטית של וריאציות חיפוש לכל מילה, עם ברירת מחדל של מרווח `2`, כתיב מלא/חסר, שגיאות כתיב נפוצות, והחלפת סדר אותיות סמוכות.
 
-**קובץ:** `lib/search/view/full_text_settings_widgets.dart` — `SearchModeToggle`  
+**קובץ:** `lib/search/view/search_dialog.dart` — `SetSearchMode`  
 **שמירה:** `'key-last-search-mode'` (נשמר בין הפעלות)
 
 ---
@@ -134,7 +134,7 @@
 1. **"חפש בכל הקטגוריות"** (ברירת מחדל) — חיפוש על פני כל הספרייה.
 2. **בחירה ידנית** — עץ קטגוריות שממנו המשתמש בוחר תתי-קטגוריות או ספרים ספציפיים.
 
-**קובץ:** `lib/search/view/category_tree_selector.dart` — `SearchScopeSelector`  
+**קובץ:** `lib/search/view/search_scope_menu.dart` — `SearchScopeMenuButton`  
 **קובץ נתונים:** `lib/search/search_scope_preferences.dart`  
 **שמירה:** נשמר בין הפעלות (`'key-search-all-categories-enabled'`, `'key-search-manual-category-facets'`)
 
@@ -482,7 +482,7 @@
    • במצב fuzzy: גם כתיב מלא/חסר אוטומטי
         ↓
 3. ה-query נשלח דרך אותו מסלול חיפוש רגיל
-   • searchTexts / searchTextsStream
+   • searchTexts / searchTextsStreamWithCounts
    • עם facets, streaming ו-pagination רגילים
 ```
 

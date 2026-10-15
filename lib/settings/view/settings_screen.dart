@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
@@ -49,9 +50,12 @@ class SettingsScreenController extends ChangeNotifier {
 }
 
 class MySettingsScreen extends StatefulWidget {
-  const MySettingsScreen({super.key, this.controller});
+  const MySettingsScreen({super.key, this.controller, this.onDesktopBack});
 
   final SettingsScreenController? controller;
+
+  /// ESC בתצוגת דסקטופ (כשהחיפוש ריק) — חזרה למסך הקודם.
+  final VoidCallback? onDesktopBack;
 
   @override
   State<MySettingsScreen> createState() => _MySettingsScreenState();
@@ -125,6 +129,14 @@ class _MySettingsScreenState extends State<MySettingsScreen> {
     });
   }
 
+  void _handleDesktopEscape() {
+    if (_searchQuery.trim().isNotEmpty) {
+      setState(_clearSearch);
+    } else {
+      widget.onDesktopBack?.call();
+    }
+  }
+
   // ── חיפוש: לחיצה על תוצאה — נווט לטאב + גלול והבזק ───────────────────────
   void _onSearchResultTap(SettingsSearchEntry entry) {
     SettingsSearchRegistry.instance.navigateToEntry(entry);
@@ -189,7 +201,10 @@ class _MySettingsScreenState extends State<MySettingsScreen> {
     if (cardId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         await Future.delayed(const Duration(milliseconds: 80));
-        await SettingsSearchRegistry.instance.scrollAndHighlight(cardId);
+        await SettingsSearchRegistry.instance.scrollAndHighlight(
+          cardId,
+          section: request.expandSection,
+        );
       });
     }
   }
@@ -520,7 +535,7 @@ class _MySettingsScreenState extends State<MySettingsScreen> {
           }
 
           // ── מצב דסקטופ: KeyboardNavigator + sidebar + תוכן ──────────
-          return KeyboardNavigator(
+          final desktopLayout = KeyboardNavigator(
             currentTabIndex: currentTabPosition,
             totalTabs: availableTabIndexes.length,
             onTabChange: (i) => _changeTab(availableTabIndexes[i]),
@@ -623,6 +638,15 @@ class _MySettingsScreenState extends State<MySettingsScreen> {
                 ),
               ),
             ),
+          );
+          // ESC בלבד: onBack של KeyboardNavigator היה מפעיל גם Backspace.
+          return CallbackShortcuts(
+            bindings: {
+              if (isSearching || widget.onDesktopBack != null)
+                const SingleActivator(LogicalKeyboardKey.escape):
+                    _handleDesktopEscape,
+            },
+            child: desktopLayout,
           );
         },
       ),

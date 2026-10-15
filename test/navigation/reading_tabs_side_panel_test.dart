@@ -116,6 +116,21 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('header buttons still occupy both edges without plugins', (
+    tester,
+  ) async {
+    await pumpPanel(tester, width: 220);
+    final button = find.byType(TabSearchButton);
+    final row = tester.element(button).findAncestorWidgetOfExactType<Row>()!;
+    final delta =
+        tester.getRect(button).left - tester.getRect(find.byWidget(row)).left;
+    expect(
+      delta,
+      moreOrLessEquals(0, epsilon: 0.5),
+      reason: 'A hidden new-tab button must not reserve a spaceBetween slot',
+    );
+  });
+
   testWidgets('העמודה מציגה את כל הכרטיסיות בזו אחר זו', (tester) async {
     await pumpPanel(tester);
 
@@ -607,13 +622,14 @@ void main() {
   });
 
   testWidgets('השהיית גרירה מעל כרטיסיה אחרת פותחת אותה', (tester) async {
-    // דסקטופ בלבד: במגע הגרירה מתחילה רק בלחיצה ארוכה.
+    // בדסקטופ גרירת עכבר מתחילה ללא השהיה.
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     await pumpPanel(tester);
 
     final target = tester.getCenter(find.text('ספר ג'));
     final gesture = await tester.startGesture(
       tester.getCenter(find.text('ספר א')),
+      kind: PointerDeviceKind.mouse,
     );
     await tester.pump(const Duration(milliseconds: 20));
     await gesture.moveTo(target);
@@ -630,6 +646,103 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
     expect(springOpened, contains(2));
   });
+
+  for (final collapsed in [false, true]) {
+    for (final kind in [
+      PointerDeviceKind.touch,
+      PointerDeviceKind.stylus,
+      PointerDeviceKind.invertedStylus,
+    ]) {
+      testWidgets(
+        'משיכה לרוחב ואז לאורך מסדרת כרטיסיה: collapsed=$collapsed, $kind',
+        (tester) async {
+          await pumpPanel(tester, collapsed: collapsed);
+          final first = collapsed
+              ? find.byTooltip('ספר א')
+              : find.text('ספר א');
+          final third = collapsed
+              ? find.byTooltip('ספר ג')
+              : find.text('ספר ג');
+          final start = tester.getCenter(first);
+          final target = tester.getCenter(third);
+          final gesture = await tester.startGesture(start, kind: kind);
+          await gesture.moveBy(const Offset(-30, 0));
+          await tester.pump();
+          await gesture.moveTo(Offset(start.dx - 30, target.dy));
+          await tester.pump();
+          await gesture.moveTo(target);
+          await tester.pump();
+          await gesture.up();
+          await tester.pumpAndSettle();
+          final moves = tabsBloc.addedEvents.whereType<MoveTab>().toList();
+          expect(moves, hasLength(1));
+          expect(moves.single.tab, same(tabs[0]));
+          expect(moves.single.newIndex, 2);
+          expect(find.text('הצמד כרטיסיה'), findsNothing);
+        },
+        variant: TargetPlatformVariant.only(TargetPlatform.windows),
+      );
+
+      testWidgets(
+        'החלקה אנכית ואלכסונית גוללות כרטיסיות: collapsed=$collapsed, $kind',
+        (tester) async {
+          final books = [for (var i = 0; i < 24; i++) _StubTab('ספר $i')];
+          await pumpPanel(tester, collapsed: collapsed, withTabs: books);
+          final strip = find.byType(ReadingTabStrip);
+          final scrollable = tester.state<ScrollableState>(
+            find.descendant(of: strip, matching: find.byType(Scrollable)),
+          );
+          for (final delta in [const Offset(0, -60), const Offset(-25, -60)]) {
+            final first = collapsed
+                ? find.byTooltip('ספר 5')
+                : find.text('ספר 5');
+            final before = scrollable.position.pixels;
+            final gesture = await tester.startGesture(
+              tester.getCenter(first),
+              kind: kind,
+            );
+            await gesture.moveBy(delta);
+            await tester.pump();
+            await gesture.moveBy(const Offset(0, -30));
+            await tester.pump();
+            await gesture.up();
+            await tester.pumpAndSettle();
+            expect(scrollable.position.pixels, greaterThan(before));
+            expect(tabsBloc.addedEvents.whereType<MoveTab>(), isEmpty);
+            expect(find.text('הצמד כרטיסיה'), findsNothing);
+          }
+        },
+        variant: TargetPlatformVariant.only(TargetPlatform.windows),
+      );
+    }
+  }
+
+  testWidgets('בדסקטופ לחיצה ארוכה במגע שומרת את תפריט ההקשר', (tester) async {
+    await pumpPanel(tester);
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.text('ספר א')),
+    );
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.text('הצמד כרטיסיה'), findsOneWidget);
+    expect(tabsBloc.addedEvents.whereType<MoveTab>(), isEmpty);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('בדסקטופ לחיצה ארוכה בעמודה מכווצת שומרת את ה־Tooltip', (
+    tester,
+  ) async {
+    await pumpPanel(tester, collapsed: true);
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byTooltip('ספר א')),
+    );
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+    await gesture.up();
+    await tester.pump();
+    expect(find.text('ספר א'), findsOneWidget);
+    expect(tabsBloc.addedEvents.whereType<MoveTab>(), isEmpty);
+    await tester.pumpAndSettle(const Duration(seconds: 3));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
   testWidgets('כרטיסיה מפוצלת מוצגת עם אייקון הפיצול ושם משולב', (
     tester,

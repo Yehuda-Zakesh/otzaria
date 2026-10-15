@@ -42,18 +42,6 @@ class Author {
     };
   }
 
-  Author copyWith({
-    int? id,
-    String? name,
-    int? generationId,
-  }) {
-    return Author(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      generationId: generationId ?? this.generationId,
-    );
-  }
-
   @override
   String toString() => 'Author(id: $id, name: $name)';
 

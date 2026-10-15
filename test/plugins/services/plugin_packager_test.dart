@@ -165,7 +165,7 @@ void main() {
       // הקובץ נדרס: כעת זה ZIP תקין ולא הטקסט "stale".
       final bytes = File(outPath).readAsBytesSync();
       expect(bytes.length, greaterThan(5));
-      // ZIP header אמור להתחיל ב-‎PK
+      // ZIP header אמור להתחיל ב-PK
       expect(bytes[0], 0x50);
       expect(bytes[1], 0x4B);
     });

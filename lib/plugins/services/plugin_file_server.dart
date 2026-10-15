@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:otzaria/plugins/services/plugin_asset_scheme.dart';
 import 'package:path/path.dart' as p;
 
 /// רשומת קובץ אישי שהמשתמש אישר לתוסף, כפי שהיא מוחזקת בזיכרון השרת.
@@ -95,6 +96,7 @@ class PluginFileServer {
   final int maxUploadBytes;
 
   HttpServer? _server;
+  Future<void>? _starting;
   final Map<String, PluginFileGrant> _grants = {};
   final Map<String, _UploadSession> _uploads = {};
   final Random _random = Random.secure();
@@ -118,14 +120,33 @@ class PluginFileServer {
 
   static const String _uploadDirName = 'otzaria_plugin_uploads';
 
+  /// טיפוסים שהדפדפן מריץ בהם סקריפט כשהם נפתחים כמסמך.
+  static const Set<String> _activeDocumentTypes = {
+    'text/html',
+    'image/svg+xml',
+  };
+
   /// ה-origin של השרת (`http://127.0.0.1:<port>`), או `null` אם טרם הופעל.
   String? get origin {
     final server = _server;
     return server == null ? null : 'http://127.0.0.1:${server.port}';
   }
 
-  Future<void> _ensureStarted() async {
-    if (_server != null) return;
+  /// הפורט של השרת, שמופעל לפי הצורך. קבוע עד [close] — שערי ה-WebView
+  /// מתירים רק אותו.
+  Future<int> ensurePort() async {
+    await _ensureStarted();
+    return _server!.port;
+  }
+
+  // שתי קריאות במקביל היו מפעילות שני שרתים, והראשון היה נזנח עם פורט אחר.
+  Future<void> _ensureStarted() =>
+      _starting ??= _start().catchError((Object error, StackTrace stack) {
+        _starting = null;
+        Error.throwWithStackTrace(error, stack);
+      });
+
+  Future<void> _start() async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _server = server;
     server.listen(_handleRequest);
@@ -335,6 +356,7 @@ class PluginFileServer {
     }
     await _server?.close(force: true);
     _server = null;
+    _starting = null;
   }
 
   void revoke(String token) => _grants.remove(token);
@@ -421,11 +443,14 @@ class PluginFileServer {
   }
 
   /// `null` הוא ה-origin של דף file:// (ה-WebView הארוז); loopback הוא שרת
-  /// הפיתוח המקומי של תוסף development.
+  /// הפיתוח המקומי של תוסף development; [pluginAssetScheme] הוא ה-origin של
+  /// תוסף שמוגש דרך הסכימה הייעודית (במק) — בלעדיו fetch מהדף נחסם ב-CORS
+  /// ("Load failed") וכל שמירה בינארית נכשלת.
   bool _isAllowedOrigin(String origin) {
     if (origin == 'null') return true;
     final uri = Uri.tryParse(origin);
     if (uri == null) return false;
+    if (uri.scheme == pluginAssetScheme) return true;
     const loopbacks = {'127.0.0.1', 'localhost', '::1'};
     return loopbacks.contains(uri.host.toLowerCase());
   }
@@ -490,7 +515,18 @@ class PluginFileServer {
 
       final length = await file.length();
       response.headers.set('Accept-Ranges', 'bytes');
-      response.headers.contentType = _contentTypeForPath(grant.canonicalPath);
+      final contentType = _contentTypeForPath(grant.canonicalPath);
+      response.headers.contentType = contentType;
+      response.headers.set('X-Content-Type-Options', 'nosniff');
+      // תוסף שמנווט למסמך כזה יוצא מה-CSP של הדף שלו; בלי סקריפט ורשת הוא
+      // אינו יכול להוציא דרכו נתונים.
+      if (_activeDocumentTypes.contains(contentType.mimeType)) {
+        response.headers.set(
+          'Content-Security-Policy',
+          "sandbox; default-src 'none'; img-src data: blob:; "
+              "media-src data: blob:; font-src data:; style-src 'unsafe-inline'",
+        );
+      }
 
       final rangeHeader = request.headers.value('range');
       if (rangeHeader == null) {

@@ -8,26 +8,28 @@ import 'package:otzaria/tools/tikkun_korim/engine/official_pages_builder.dart';
 import 'package:otzaria/tools/tikkun_korim/models/tikkun_models.dart';
 import 'package:otzaria/utils/text/numeral_formats.dart';
 
-final RegExp _kqMarks = RegExp('[\u{E010}-\u{E012}]');
-final RegExp _nikudAndMaqaf = RegExp('[֑-ׇ־]');
-final RegExp _zeiraRabati = RegExp('[\u{E020}-\u{E023}]');
-final RegExp _maskedName = RegExp('יקוק');
-
 /// תוויות שלוש ההפסקות של קריאת שני וחמישי, לפי סדרן.
 const List<String> kWeekdayAliyaLabels = ['כהן', 'לוי', 'ישראל'];
 
 /// נרמול מילה לצורך השוואה: בלי ניקוד, מקף וסימוני PUA; שם השם המוסתר
 /// מוחזר לצורתו כדי שהתאמת מילות הפתיחה תעבוד בשני הכיוונים.
-String normalizeForMatch(String s) => s
-    .replaceAll(_kqMarks, '')
-    .replaceAll(_nikudAndMaqaf, '')
-    .replaceAll(_zeiraRabati, '')
-    .replaceAll(_maskedName, 'יהוה');
+String normalizeForMatch(String s) {
+  final kept = <int>[];
+  for (final code in s.codeUnits) {
+    final dropped =
+        (code >= 0x0591 && code <= 0x05C7) ||
+        (code >= kKetivQereStart && code <= kKetivQereEnd) ||
+        (code >= kZeiraStart && code <= kRabatiEnd);
+    if (!dropped) kept.add(code);
+  }
+  final stripped = kept.length == s.length ? s : String.fromCharCodes(kept);
+  return stripped.replaceAll('יקוק', 'יהוה');
+}
 
 String normalizeParashaName(String uiName) =>
     TikkunData.normalizeParashaName(uiName);
 
-/// אינדקס האסימון שבו מתחילה [parashaName], או ‎-1.
+/// אינדקס האסימון שבו מתחילה [parashaName], או -1.
 int findParashaStart(
   List<TikkunToken> tokens,
   String parashaName, [
@@ -61,64 +63,6 @@ int findParashaStart(
       tIdx++;
     }
     if (matched && opIdx == normOpening.length) return i;
-  }
-  return -1;
-}
-
-/// אינדקס האסימון שממנו מתחיל רצף [words], או ‎-1. מילת חיפוש יכולה
-/// להתפרס על כמה אסימונים שהיו מחוברים במקף במקור.
-int findWordSequence(
-  List<TikkunToken> tokens,
-  List<String> words,
-  int fromIdx,
-) {
-  final normWords = words.map(normalizeForMatch).toList(growable: false);
-  for (var i = fromIdx; i < tokens.length - words.length; i++) {
-    if (tokens[i].type != TikkunTokenType.word) continue;
-    var wIdx = 0;
-    var tIdx = i;
-    var ok = true;
-    while (wIdx < normWords.length && tIdx < tokens.length) {
-      final tok = tokens[tIdx];
-      if (tok.type != TikkunTokenType.word) {
-        tIdx++;
-        continue;
-      }
-      final searchWord = normWords[wIdx];
-      final tokenWord = normalizeForMatch(tok.value!);
-      if (tokenWord.isEmpty) {
-        tIdx++;
-        continue;
-      }
-      if (tokenWord == searchWord) {
-        wIdx++;
-        tIdx++;
-      } else if (searchWord.startsWith(tokenWord)) {
-        var built = tokenWord;
-        tIdx++;
-        while (built.length < searchWord.length && tIdx < tokens.length) {
-          final next = tokens[tIdx];
-          if (next.type != TikkunTokenType.word) {
-            tIdx++;
-            continue;
-          }
-          built += normalizeForMatch(next.value!);
-          tIdx++;
-          if (built == searchWord) break;
-          if (!searchWord.startsWith(built)) break;
-        }
-        if (built == searchWord) {
-          wIdx++;
-        } else {
-          ok = false;
-          break;
-        }
-      } else {
-        ok = false;
-        break;
-      }
-    }
-    if (ok && wIdx == normWords.length) return i;
   }
   return -1;
 }
@@ -157,7 +101,7 @@ class BookVerseIndex {
     return BookVerseIndex._(byKey);
   }
 
-  /// אינדקס האסימון של המילה הראשונה בפסוק, או ‎-1.
+  /// אינדקס האסימון של המילה הראשונה בפסוק, או -1.
   int wordIdx(int ch, int vs) => _byKey[_key(ch, vs)] ?? -1;
 }
 

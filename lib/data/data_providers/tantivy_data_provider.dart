@@ -6,6 +6,8 @@ import 'package:path/path.dart' as p;
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 import 'package:otzaria/data/data_providers/catalogue_order_revision.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
+import 'package:otzaria/data/constants/database_constants.dart';
+import 'package:otzaria/search/library_line_source.dart';
 import 'package:otzaria/search/search_engine_gateway.dart';
 import 'package:otzaria/search/magic_dictionary_downloader.dart';
 import 'package:otzaria/core/app_paths.dart';
@@ -36,18 +38,9 @@ class TantivyDataProvider {
 
   /// Track if index is being reopened to prevent concurrent reopens
   final ReopenGate _reopenGate = ReopenGate();
-  Future<bool>? _magicDictionaryDownload;
 
   static final TantivyDataProvider _singleton = TantivyDataProvider._internal();
   static TantivyDataProvider instance = _singleton;
-
-  // Global cache for facet counts
-  static final Map<String, int> _globalFacetCache = {};
-  static String _lastCachedQuery = '';
-
-  // ספירות שכבר רצות: קריאה חוזרת לאותו מפתח ממתינה על אותו Future במקום
-  // לרוץ שוב (מחליף את לולאת ה-polling הישנה של 50ms).
-  static final Map<String, Future<int>> _inflightCounts = {};
 
   /// תוצאת בדיקת התאימות של האינדקס, כפי שנקראה מהאינדקס עצמו
   /// (otzaria_index_meta.json או meta.json של Tantivy) דרך מנוע החיפוש.
@@ -59,16 +52,6 @@ class TantivyDataProvider {
 
   /// תיקיית האינדקס שחתימת הסדר הקטלוגי עליה נכשלה באתחול, אם נכשלה.
   String? _pendingCatalogueOrderStampPath;
-
-  /// Clear global cache when starting new search
-  static void clearGlobalCache() {
-    debugPrint(
-      '🧹 Clearing global facet cache (${_globalFacetCache.length} entries)',
-    );
-    _globalFacetCache.clear();
-    _inflightCounts.clear();
-    _lastCachedQuery = '';
-  }
 
   /// Indicates whether the indexing process is currently running
   ValueNotifier<bool> isIndexing = ValueNotifier(false);
@@ -106,6 +89,7 @@ class TantivyDataProvider {
     activeIndexPath = null;
 
     final indexPath = await AppPaths.getIndexPath();
+    await _prepareLibraryLineSource();
     _indexCompatibility = await _checkIndexCompatibility(indexPath);
 
     // אינדקס בסכמה לא תואמת אינו נפתח כלל: המנוע נכנס לפאניקה בפתיחתו,
@@ -127,6 +111,13 @@ class TantivyDataProvider {
     // "אין אינדקס" מתוך הקבוצה צריכים לחכות לסימן הזה כדי לא להציג שגוי בהפעלה.
     isInitialized.value = true;
     return engine;
+  }
+
+  /// מוסר למנוע את ה-SQLite של Dart ואת נתיב seforim.db — לפני כל שימוש שלו
+  /// ב-SQLite (המילון המורפולוגי וקריאת שורות התוצאה). כשל אינו עוצר אתחול.
+  Future<void> _prepareLibraryLineSource() async {
+    await LibraryLineSource.ensureHostSqlite();
+    await LibraryLineSource.configure(DatabaseConstants.getDatabasePath());
   }
 
   /// קורא את תוצאת בדיקת התאימות מהאינדקס עצמו. כשל בבדיקה אינו עוצר את
@@ -236,9 +227,24 @@ class TantivyDataProvider {
     }
   }
 
-  /// האם החיפוש המקורב משתמש כרגע בהרחבה מורפולוגית (מילון טעון).
-  Future<bool> get hasMagicDictionary async =>
-      (await engine).hasMagicDictionary();
+  /// מריץ את [replace] כשהמנוע אינו מחזיק את המילון — Windows חוסם החלפת
+  /// קובץ פתוח — ואחריו טוען אותו מחדש, כדי שגם ב-POSIX ייקרא הקובץ החדש.
+  Future<void> replaceMagicDictionaryDetached(
+    Future<void> Function() replace,
+  ) async {
+    // אינדוקס נועל את המנוע לכתיבה והקריאה הסינכרונית הייתה מקפיאה את הממשק;
+    // ב-Windows ההחלפה תיכשל אז, והעותק הממתין יותקן בפתיחת המנוע הבאה.
+    if (isIndexing.value) return replace();
+    final searchEngine = await engine;
+    final dictPath = await AppPaths.getMagicDictionaryPath();
+    // פתיחת נתיב שאינו קיים נכשלת, והמנוע משחרר את המילון הקודם.
+    searchEngine.setMagicDictionaryPath(path: '$dictPath.detached');
+    try {
+      await replace();
+    } finally {
+      await _attachMagicDictionary(searchEngine);
+    }
+  }
 
   /// טוען אל המנוע את מילוני ההרחבה של החיפוש המתקדם — מילון התרגום
   /// הארמי-עברי (אפשרות "תרגום ארמי") ומילון ראשי-התיבות (אפשרות
@@ -311,49 +317,6 @@ class TantivyDataProvider {
       if (a[i] != b[i]) return false;
     }
     return true;
-  }
-
-  /// מוריד את מילון המורפולוגיה האחרון (אם חסר/ישן) וטוען אותו אל המנוע
-  /// החי, כך שהחיפוש המקורב יתחיל להשתמש בו מיד — בלי הפעלה מחדש.
-  ///
-  /// מחזיר `true` אם בסיום קיים מילון טעון. best-effort: כשל הורדה אינו
-  /// משפיע על שאר המנוע.
-  Future<bool> downloadMagicDictionary({
-    void Function(double progress)? onProgress,
-    bool force = false,
-  }) async {
-    final currentDownload = _magicDictionaryDownload;
-    if (currentDownload != null) return currentDownload;
-
-    final download = _downloadMagicDictionary(
-      onProgress: onProgress,
-      force: force,
-    );
-    _magicDictionaryDownload = download;
-    try {
-      return await download;
-    } finally {
-      if (identical(_magicDictionaryDownload, download)) {
-        _magicDictionaryDownload = null;
-      }
-    }
-  }
-
-  Future<bool> _downloadMagicDictionary({
-    void Function(double progress)? onProgress,
-    required bool force,
-  }) async {
-    final downloader = MagicDictionaryDownloader();
-    try {
-      final ok = await downloader.ensureLatest(
-        onProgress: onProgress,
-        force: force,
-      );
-      if (!ok) return false;
-      return await _attachMagicDictionary(await engine);
-    } finally {
-      downloader.dispose();
-    }
   }
 
   /// מספר ניסיונות הפתיחה שנכשלו לפי תוכן קובץ הסנטינל. תוכן לא-מספרי
@@ -445,7 +408,11 @@ class TantivyDataProvider {
         ),
       );
 
-      // טעינת מילון מורפולוגי לחיפוש המקורב (best-effort, לא חוסם).
+      // טעינת מילון מורפולוגי לחיפוש המקורב (best-effort, לא חוסם). עותק
+      // ממתין מותקן לפני הטעינה, כשהקובץ עוד אינו פתוח.
+      await MagicDictionaryDownloader.installStagedBeforeAttach(
+        await AppPaths.getMagicDictionaryPath(),
+      );
       await _attachMagicDictionary(engine);
 
       // מילוני החיפוש המתקדם: תרגום ארמי + ראשי-תיבות (best-effort).
@@ -548,88 +515,6 @@ class TantivyDataProvider {
     }
   }
 
-  Future<int> countTexts(
-    String query,
-    List<String> books,
-    List<String> facets, {
-    bool fuzzy = false,
-    int distance = 0,
-    String negativeQuery = '',
-    int? negativeDistance,
-    SearchScope scope = SearchScope.wordDistance,
-    SearchScope? negativeScope,
-    SearchMode searchMode = SearchMode.exact,
-    Map<String, String>? customSpacing,
-    Map<String, String>? negativeCustomSpacing,
-    Map<int, List<String>>? alternativeWords,
-    Map<int, List<String>>? negativeAlternativeWords,
-    Map<String, Map<String, bool>>? searchOptions,
-    Map<String, Map<String, bool>>? negativeSearchOptions,
-    bool matchNikud = false,
-    bool matchTaamim = false,
-    WordMatchMode wordMatchMode = WordMatchMode.all,
-    int? wordMatchCount,
-  }) async {
-    // Global cache check
-    final cacheKey =
-        '$query|not=$negativeQuery|${facets.join(',')}|$fuzzy|$searchMode|$distance|${negativeDistance ?? distance}|$scope|${negativeScope ?? scope}|${customSpacing.toString()}|${negativeCustomSpacing.toString()}|${alternativeWords.toString()}|${negativeAlternativeWords.toString()}|${searchOptions.toString()}|${negativeSearchOptions.toString()}|$matchNikud|$matchTaamim|$wordMatchMode|$wordMatchCount';
-
-    if (_lastCachedQuery == query && _globalFacetCache.containsKey(cacheKey)) {
-      debugPrint(
-        '🎯 GLOBAL CACHE HIT for $facets: ${_globalFacetCache[cacheKey]}',
-      );
-      return _globalFacetCache[cacheKey]!;
-    }
-
-    // ספירה זהה שכבר רצה: ממתינים על אותו Future במקום להריץ שוב
-    // (ובלי לולאת ה-polling של 50ms שהייתה כאן).
-    final inflight = _inflightCounts[cacheKey];
-    if (inflight != null) {
-      debugPrint('⏳ Count already in progress for $facets, awaiting...');
-      return inflight;
-    }
-
-    final future = () async {
-      final count = await _searchGateway.count(
-        RustSearchEngineOperations(await engine),
-        SearchEngineRequest(
-          query: query,
-          facets: facets,
-          searchMode: fuzzy ? SearchMode.fuzzy : searchMode,
-          distance: distance,
-          negativeQuery: negativeQuery,
-          negativeDistance: negativeDistance ?? distance,
-          scope: scope,
-          negativeScope: negativeScope ?? scope,
-          customSpacing: customSpacing ?? const {},
-          negativeCustomSpacing: negativeCustomSpacing ?? const {},
-          alternativeWords: alternativeWords ?? const {},
-          negativeAlternativeWords: negativeAlternativeWords ?? const {},
-          searchOptions: searchOptions ?? const {},
-          negativeSearchOptions: negativeSearchOptions ?? const {},
-          matchNikud: matchNikud,
-          matchTaamim: matchTaamim,
-          wordMatchMode: wordMatchMode,
-          wordMatchCount: wordMatchCount,
-        ),
-      );
-
-      // Save to global cache
-      _lastCachedQuery = query;
-      _globalFacetCache[cacheKey] = count;
-      debugPrint('💾 GLOBAL CACHE SAVE for $facets: $count');
-
-      return count;
-    }();
-
-    _inflightCounts[cacheKey] = future;
-    try {
-      return await future;
-    } finally {
-      _inflightCounts.remove(cacheKey);
-    }
-  }
-
   Future<void> resetIndex(String indexPath) async {
     debugPrint('🔄 Resetting index at: $indexPath');
 
@@ -706,32 +591,6 @@ class TantivyDataProvider {
     );
 
     return Map<String, int>.from(results);
-  }
-
-  /// Performs an asynchronous stream-based search operation across indexed texts.
-  ///
-  /// [query] The search query string
-  /// [books] List of book identifiers to search within
-  /// [limit] Maximum number of results to return
-  /// [fuzzy] Whether to perform fuzzy matching
-  ///
-  /// Returns a Stream of search results that can be listened to for real-time updates
-  Stream<List<SearchResult>> searchTextsStream(
-    String query,
-    List<String> facets,
-    int limit,
-    bool fuzzy,
-  ) async* {
-    yield* _searchGateway.searchStream(
-      RustSearchEngineOperations(await engine),
-      SearchEngineRequest(
-        query: query,
-        facets: facets,
-        limit: limit,
-        searchMode: fuzzy ? SearchMode.fuzzy : SearchMode.exact,
-      ),
-      chunkSize: 50,
-    );
   }
 
   /// ספירה מקבצת של תוצאות עבור מספר facets בבת אחת - לשיפור ביצועים.

@@ -50,6 +50,66 @@ void main() {
     );
   });
 
+  test('user book key is separate from the official title key', () {
+    final official = TextBook(id: 1, title: 'ביצה');
+    final user = TextBook(id: 1, title: 'ביצה', source: BookSource.user);
+
+    expect(personalNotesBookKey(official), 'ביצה');
+    expect(personalNotesBookKey(user), 'ביצה|user');
+    final parsed = parsePersonalNotesBookKey(personalNotesBookKey(user));
+    expect(parsed.title, 'ביצה');
+    expect(parsed.source, BookSource.user);
+  });
+
+  test('title key resolves only the official book, user key only the user', () {
+    final user = TextBook(id: 1, title: 'ביצה', source: BookSource.user);
+    final official = TextBook(id: 2, title: 'ביצה');
+    final library = _library([user, official]);
+
+    expect(findBookForPersonalNotesKey(library, 'ביצה'), same(official));
+    expect(findTextBookForPersonalNotesKey(library, 'ביצה'), same(official));
+    expect(findBookForPersonalNotesKey(library, 'ביצה|user'), same(user));
+    expect(findTextBookForPersonalNotesKey(library, 'ביצה|user'), same(user));
+  });
+
+  test('title key never resolves to a user book of the same title', () {
+    final library = _library([
+      TextBook(id: 1, title: 'יומן', source: BookSource.user),
+    ]);
+
+    expect(findBookForPersonalNotesKey(library, 'יומן'), isNull);
+    expect(findTextBookForPersonalNotesKey(library, 'יומן'), isNull);
+  });
+
+  test(
+    'source keys find secondary text versions outside the category tree',
+    () {
+      final official = TextBook(id: 1, title: 'ביצה', categoryId: 1);
+      final user = TextBook(
+        id: 2,
+        title: 'ביצה',
+        categoryId: 7,
+        source: BookSource.user,
+      );
+      final attached = TextBook(
+        id: 3,
+        title: 'ביצה',
+        categoryId: 8,
+        source: attachedSource,
+      );
+      final library = _library([official])..offTreeBooks = [user, attached];
+
+      expect(findBookForPersonalNotesKey(library, 'ביצה'), same(official));
+      expect(findBookForPersonalNotesKey(library, 'ביצה|user'), same(user));
+      expect(findTextBookForPersonalNotesKey(library, 'ביצה|user'), same(user));
+      expect(
+        findBookForPersonalNotesKey(library, 'ביצה|db:lib-a'),
+        same(attached),
+      );
+      expect(findBookForPersonalNotesKey(library, 'ביצה|db:lib-b'), isNull);
+    },
+  );
+
   test('attached PDF resolves as a book but not as a text book', () {
     final pdf = PdfBook(
       id: 2,
@@ -62,5 +122,88 @@ void main() {
 
     expect(findBookForPersonalNotesKey(library, key), same(pdf));
     expect(findTextBookForPersonalNotesKey(library, key), isNull);
+  });
+
+  test('category keys cover nested books as a set for O(1) lookup', () {
+    final attached = TextBook(id: 3, title: 'deep', source: attachedSource);
+    final child = Category(
+      title: 'child',
+      description: '',
+      shortDescription: '',
+      order: 0,
+      subCategories: [],
+      books: [
+        attached,
+        TextBook(id: 4, title: 'shared'),
+      ],
+      parent: null,
+    );
+    final root = Category(
+      title: 'root',
+      description: '',
+      shortDescription: '',
+      order: 0,
+      subCategories: [child],
+      books: [
+        TextBook(id: 5, title: 'top'),
+        PdfBook(title: 'shared', path: '/s.pdf'),
+      ],
+      parent: null,
+    );
+
+    final keys = personalNotesBookKeysInCategory(root);
+
+    expect(keys, isA<Set<String>>());
+    expect(keys, {'top', 'shared', personalNotesBookKey(attached)});
+  });
+
+  group('personalNotesCategoryCounts', () {
+    Category cat(String title, List<Category> subs, List<Book> books) =>
+        Category(
+          title: title,
+          description: '',
+          shortDescription: '',
+          order: 0,
+          subCategories: subs,
+          books: books,
+          parent: null,
+        );
+
+    test('counts each category once, deduping books within a category', () {
+      final leaf = cat('leaf', [], [
+        TextBook(title: 'a'),
+        PdfBook(title: 'a', path: '/a.pdf'),
+        TextBook(title: 'b'),
+      ]);
+      final mid = cat('mid', [leaf], [TextBook(title: 'a')]);
+      final empty = cat('empty', [], [TextBook(title: 'none')]);
+      final root = cat('root', [mid, empty], [TextBook(title: 'c')]);
+      final perBook = {'a': 2, 'b': 1, 'c': 4};
+
+      final counts = personalNotesCategoryCounts(
+        root,
+        (key) => perBook[key] ?? 0,
+      );
+
+      expect(counts[leaf], 3);
+      expect(counts[mid], 5);
+      expect(counts[empty], 0);
+      expect(counts[root], 9);
+    });
+
+    test('looks up each category book once regardless of depth', () {
+      final deep = cat('d', [], [TextBook(title: 'x')]);
+      final c = cat('c', [deep], [TextBook(title: 'y')]);
+      final b = cat('b', [c], []);
+      final root = cat('root', [b], []);
+      final lookups = <String>[];
+
+      personalNotesCategoryCounts(root, (key) {
+        lookups.add(key);
+        return 1;
+      });
+
+      expect(lookups..sort(), ['x', 'y']);
+    });
   });
 }

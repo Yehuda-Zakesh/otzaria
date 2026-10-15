@@ -10,27 +10,48 @@ import 'package:otzaria/shortcuts/shortcut_helper.dart';
 import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/tools/acronyms_dictionary/widgets/acronym_result_card.dart';
 import 'package:otzaria/tools/dictionary/repository/dictionary_lookup_repository.dart';
+import 'package:otzaria/tools/tool_query.dart';
 import 'package:otzaria/widgets/navigation/app_top_bar.dart';
 import 'package:otzaria/widgets/text/otzaria_search_field.dart';
 import 'package:otzaria/widgets/feedback/tool_empty_state.dart';
 import 'package:otzaria/widgets/misc/tool_ui_helpers.dart';
 
 class AcronymsDictionaryScreen extends StatefulWidget {
-  const AcronymsDictionaryScreen({super.key});
+  const AcronymsDictionaryScreen({
+    super.key,
+    this.repository,
+    this.queryInbox,
+  });
+
+  final DictionaryLookupRepository? repository;
+  final ToolQueryInbox? queryInbox;
 
   @override
   State<AcronymsDictionaryScreen> createState() =>
       _AcronymsDictionaryScreenState();
 }
 
-class _AcronymsDictionaryScreenState extends State<AcronymsDictionaryScreen> {
+class _AcronymsDictionaryScreenState extends State<AcronymsDictionaryScreen>
+    with ToolQueryConsumer {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
-  final DictionaryLookupRepository _dictionaryRepository =
-      DictionaryLookupRepository.instance;
-  Map<String, List<String>> _dictionaryData = {};
-  List<MapEntry<String, List<String>>> _filteredResults = [];
+  late final DictionaryLookupRepository _dictionaryRepository =
+      widget.repository ?? DictionaryLookupRepository.instance;
+  List<AcronymCatalogEntry> _catalog = [];
+  List<AcronymCatalogEntry> _filteredResults = [];
   bool _isLoading = true;
+
+  @override
+  ToolQueryInbox? get toolQueryInbox => widget.queryInbox;
+
+  @override
+  bool get canApplyToolQuery => !_isLoading;
+
+  @override
+  void applyToolQuery(ToolQuery query) {
+    fillSearchField(_searchController, query.text);
+    _performSearch(query.text);
+  }
 
   @override
   void initState() {
@@ -60,7 +81,7 @@ class _AcronymsDictionaryScreenState extends State<AcronymsDictionaryScreen> {
       if (!mounted) return;
 
       setState(() {
-        _dictionaryData = _dictionaryRepository.getAllAcronyms();
+        _catalog = _dictionaryRepository.getAcronymSearchCatalog();
         _isLoading = false;
       });
     } catch (e) {
@@ -71,6 +92,7 @@ class _AcronymsDictionaryScreenState extends State<AcronymsDictionaryScreen> {
       });
       UiSnack.showError(ToolsMessages.dictionaryLoadError(e));
     }
+    consumeToolQuery();
   }
 
   void _performSearch(String query) {
@@ -83,42 +105,48 @@ class _AcronymsDictionaryScreenState extends State<AcronymsDictionaryScreen> {
       return;
     }
 
+    final normalizedQuery = _dictionaryRepository.normalizeAcronymQuery(query);
+
     setState(() {
       _filteredResults =
-          _dictionaryData.entries
+          _catalog
               .where(
                 (entry) =>
-                    entry.key.contains(query) ||
-                    _dictionaryRepository.acronymMatchesQuery(
-                      acronym: entry.key,
-                      query: query,
-                    ) ||
-                    entry.value.any((meaning) => meaning.contains(query)),
+                    entry.displayAcronym.contains(query) ||
+                    (normalizedQuery.isNotEmpty &&
+                        entry.normalizedKey.contains(normalizedQuery)) ||
+                    entry.meanings.any((meaning) => meaning.contains(query)),
               )
               .toList()
             ..sort((a, b) {
               final rankCompare = _matchRank(
-                a.key,
+                a,
                 query,
-              ).compareTo(_matchRank(b.key, query));
+                normalizedQuery,
+              ).compareTo(_matchRank(b, query, normalizedQuery));
               if (rankCompare != 0) return rankCompare;
-              final lengthCompare = a.key.length.compareTo(b.key.length);
+              final lengthCompare = a.displayAcronym.length.compareTo(
+                b.displayAcronym.length,
+              );
               if (lengthCompare != 0) return lengthCompare;
-              return a.key.compareTo(b.key);
+              return a.displayAcronym.compareTo(b.displayAcronym);
             });
     });
   }
 
   /// דירוג התאמת מפתח לשאילתה: נמוך = דומה יותר.
   /// התאמה מדויקת < מתחיל ב- < מכיל < התאמה בפירוש בלבד.
-  int _matchRank(String key, String query) {
+  int _matchRank(
+    AcronymCatalogEntry entry,
+    String query,
+    String normalizedQuery,
+  ) {
+    final key = entry.displayAcronym;
     if (key == query) return 0;
     if (key.startsWith(query)) return 1;
     if (key.contains(query)) return 2;
-    if (_dictionaryRepository.acronymMatchesQuery(
-      acronym: key,
-      query: query,
-    )) {
+    if (normalizedQuery.isNotEmpty &&
+        entry.normalizedKey.contains(normalizedQuery)) {
       return 3;
     }
     return 4;
@@ -151,7 +179,7 @@ class _AcronymsDictionaryScreenState extends State<AcronymsDictionaryScreen> {
             center: OtzariaSearchField(
               controller: _searchController,
               focusNode: _searchFocusNode,
-              icon: OtzariaIcons.search_in_the_quote_24_regular,
+              icon: OtzariaIcons.search_in_quote_24_regular,
               hintText: 'חפש ראשי תיבות...',
               autofocus: true,
               onChanged: _performSearch,
@@ -189,8 +217,8 @@ class _AcronymsDictionaryScreenState extends State<AcronymsDictionaryScreen> {
       itemBuilder: (context, index) {
         final entry = _filteredResults[index];
         return AcronymResultCard(
-          acronym: entry.key,
-          meanings: entry.value,
+          acronym: entry.displayAcronym,
+          meanings: entry.meanings,
         );
       },
     );

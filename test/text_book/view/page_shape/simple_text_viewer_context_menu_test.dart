@@ -15,12 +15,11 @@ import 'package:otzaria/settings/engine/settings_state.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/models/commentator_group.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
+import 'package:otzaria/book_common/models/commentator_group.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/text_book/view/page_shape/simple_text_viewer.dart';
 import 'package:otzaria/text_book/view/tabbed_commentary_panel.dart';
 import 'package:otzaria/widgets/misc/app_context_menu.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../test_helpers/memory_cache_provider.dart';
 
@@ -229,7 +228,7 @@ void main() {
             CommentatorGroup(title: 'ראשונים', commentators: ['רש"י']),
           ],
           linksByLine: _commentaryLinks(const ['רש"י'], lines: 3),
-        ),
+        ).copyWith(content: const ['שורה א', 'שורה ב', 'שורה ג']),
       );
       addTearDown(bloc.close);
 
@@ -255,7 +254,9 @@ void main() {
       expect(selected.index, 2);
     });
 
-    testWidgets('"פתח חלונית קישורים" פותח את לשונית הקישורים', (tester) async {
+    testWidgets('"פתח קישורים בחלונית צד" פותח את לשונית הקישורים', (
+      tester,
+    ) async {
       final bloc = _RecordingTextBookBloc(
         _loadedState(
           linksByLine: {
@@ -289,10 +290,50 @@ void main() {
       await openContextMenu(tester);
       await tester.tap(find.text('קישורים'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('פתח חלונית קישורים'));
+      await tester.tap(find.text('פתח קישורים בחלונית צד'));
       await tester.pumpAndSettle();
 
       expect(openedTab, kLinksTabIndex);
+    });
+
+    testWidgets('the links pane entry is hidden while the links tab is open', (
+      tester,
+    ) async {
+      final bloc = _RecordingTextBookBloc(
+        _loadedState(
+          linksByLine: {
+            1: [
+              Link(
+                heRef: 'בראשית א א',
+                index1: 1,
+                path2: 'בראשית',
+                index2: 1,
+                connectionType: 'reference',
+              ),
+            ],
+          },
+        ),
+      );
+      addTearDown(bloc.close);
+
+      await pumpViewer(
+        tester,
+        textBookBloc: bloc,
+        viewer: SimpleTextViewer(
+          content: const ['שורה א'],
+          fontSize: 18,
+          openBookCallback: (_) {},
+          isMainText: true,
+          onOpenSidebarTab: (_) {},
+          isLinksTabActive: true,
+        ),
+      );
+
+      await openContextMenu(tester);
+      await tester.tap(find.text('קישורים'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('פתח קישורים בחלונית צד'), findsNothing);
     });
 
     testWidgets('כשלשונית המפרשים פתוחה — פריטי הפתיחה מוסתרים', (
@@ -494,8 +535,6 @@ TextBookLoaded _loadedState({
   selectedIndex: 0,
   pinLeftPane: false,
   searchText: '',
-  scrollController: ItemScrollController(),
-  positionsListener: ItemPositionsListener.create(),
 );
 
 class _RecordingTextBookBloc extends Bloc<TextBookEvent, TextBookState>

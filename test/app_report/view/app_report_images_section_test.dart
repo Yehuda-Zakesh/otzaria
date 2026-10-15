@@ -1,11 +1,13 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/app_report/models/app_report_image.dart';
 import 'package:otzaria/app_report/services/app_report_image_sources.dart';
 import 'package:otzaria/app_report/view/widgets/app_report_images_section.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/plugins/services/plugin_file_drop_service.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 
 AppReportImage _image(String name, {int size = 4}) => AppReportImage(
   bytes: Uint8List(size),
@@ -57,7 +59,8 @@ void main() {
     test('סוג התוכן לפי הסיומת', () {
       expect(AppReportImage.mimeTypeForPath(r'C:\a\b.PNG'), 'image/png');
       expect(AppReportImage.mimeTypeForPath('x.jpeg'), 'image/jpeg');
-      expect(AppReportImage.mimeTypeForPath('x.gif'), isNull);
+      expect(AppReportImage.mimeTypeForPath('x.GIF'), 'image/gif');
+      expect(AppReportImage.mimeTypeForPath('x.webp'), isNull);
       expect(AppReportImage.mimeTypeForPath('noext'), isNull);
     });
   });
@@ -93,10 +96,13 @@ void main() {
       await tester.pump();
     }
 
-    Future<void> pressCtrlV(WidgetTester tester) async {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    Future<void> pressPaste(WidgetTester tester) async {
+      final modifier = Platform.isMacOS
+          ? LogicalKeyboardKey.metaLeft
+          : LogicalKeyboardKey.controlLeft;
+      await tester.sendKeyDownEvent(modifier);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyUpEvent(modifier);
       await tester.pump();
     }
 
@@ -120,11 +126,11 @@ void main() {
       expect(find.byKey(const ValueKey('app-report-image-0')), findsOneWidget);
     });
 
-    testWidgets('Ctrl+V מצרף את התמונה שבלוח', (tester) async {
+    testWidgets('קיצור הדבקה מצרף את התמונה שבלוח', (tester) async {
       final sources = _FakeSources(clipboard: [_image('screenshot-1.png')]);
       await pump(tester, sources);
 
-      await pressCtrlV(tester);
+      await pressPaste(tester);
 
       expect(images.map((i) => i.fileName), ['screenshot-1.png']);
       expect(sources.clipboardReads, [false]);
@@ -136,7 +142,7 @@ void main() {
       final sources = _FakeSources(clipboard: [_image('shot.png')]);
       await pump(tester, sources, withTextField: true);
 
-      await pressCtrlV(tester);
+      await pressPaste(tester);
 
       expect(sources.clipboardReads, [true]);
       expect(images, hasLength(1));

@@ -2,11 +2,13 @@
 // יחסי הזמנים נכונים, וזמנים תלויי-יום (תענית) מופיעים רק כשרלוונטי.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:kosher_dart/kosher_dart.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
 import 'package:otzaria/tools/calendar/helpers/zmanim_helpers.dart';
 import 'package:otzaria/tools/calendar/models/calendar_location.dart';
+import 'package:otzaria/tools/calendar/models/zman_definition.dart';
 
 void main() {
   setUpAll(() {
@@ -18,6 +20,63 @@ void main() {
   // שעות), ולכן קצה טוב להבחנה בין שיטות החישוב.
   final summerDate = DateTime(2026, 6, 15);
   const city = 'ירושלים';
+
+  group('מנחה קטנה 90 במעלות', () {
+    final definition = kZmanimRegistry.singleWhere(
+      (definition) => definition.id == 'minchaKetana90Degrees',
+    );
+
+    test('מחושבת לפי 9.5 שעות זמניות בין קצוות 19.8 מעלות', () {
+      final date = DateTime(2026, 10, 9);
+      final context = buildZmanimCalendarContext(date, city)!;
+      final cal = context.zmanimCalendar;
+      final dawn = cal.getAlos19Point8Degrees()!;
+      final dusk = cal.getTzais19Point8Degrees()!;
+      final expected = dawn.add(
+        Duration(
+          milliseconds: (dusk.difference(dawn).inMilliseconds / 12 * 9.5)
+              .toInt(),
+        ),
+      );
+      final computed = definition.compute(
+        ZmanComputeContext(
+          cal: cal,
+          jewishCalendar: JewishCalendar.fromDateTime(date),
+          city: city,
+          date: date,
+        ),
+      );
+
+      expect(computed, expected);
+      expect(computed, isNot(cal.getMinchaKetana16Point1Degrees()));
+      expect(
+        calculateDailyTimes(date, city)[definition.id],
+        formatZmanTime(expected, context.tzLocation),
+      );
+      expect(definition.defaultEnabled, isFalse);
+      expect(
+        kZmanimRegistry
+            .singleWhere((d) => d.id == 'minchaKetana16point1')
+            .subtitle,
+        '72 דק׳ (מעלות)',
+      );
+    });
+
+    for (final date in [DateTime(2026, 5, 21), DateTime(2026, 6, 21)]) {
+      test('מושמט בלונדון כשאין צאת 19.8 מעלות ב-$date', () {
+        final context = buildZmanimCalendarContext(date, 'לונדון')!;
+        expect(context.zmanimCalendar.getTzais19Point8Degrees(), isNull);
+
+        final times = calculateDailyTimes(date, 'לונדון');
+        expect(times['minchaKetanaGRA'], isNotNull);
+        expect(times, isNot(contains(definition.id)));
+        expect(
+          calculateDailyTimes(date, 'לונדון', only: {definition.id}),
+          isEmpty,
+        );
+      });
+    }
+  });
 
   group('הדלקת נרות — דקות לפי עיר', () {
     test('קורא את מספר הדקות מטבלת הערים המקומית', () {
@@ -373,6 +432,164 @@ void main() {
             'חצות לילה בקיץ בין 00:00 ל-02:00 '
             '(התקבל: ${times['chatzosLayla']})',
       );
+    });
+  });
+  group('calculateDailyTimes — חישוב חלקי (only)', () {
+    // ערב שבת, יום בספירת העומר ויום רגיל — מכסים isRelevant ואת זמן העומר.
+    final dates = [
+      DateTime(2026, 5, 1),
+      DateTime(2026, 4, 20),
+      summerDate,
+      DateTime(2026, 12, 21),
+    ];
+
+    test('מחשב רק את הזמנים שהתבקשו', () {
+      for (final date in dates) {
+        final times = calculateDailyTimes(
+          date,
+          city,
+          only: const {'sunrise', 'sunset'},
+        );
+        expect(times.keys.toSet(), {'sunrise', 'sunset'}, reason: '$date');
+      }
+    });
+
+    test('הערכים זהים לחישוב המלא', () {
+      for (final date in dates) {
+        final full = calculateDailyTimes(date, city);
+        for (final only in const [
+          {'sunrise', 'sunset'},
+          {'omerCounting', 'candleLighting', 'sunset'},
+        ]) {
+          final partial = calculateDailyTimes(date, city, only: only);
+          expect(partial, {
+            for (final id in only)
+              if (full[id] != null) id: full[id],
+          }, reason: '$date $only');
+        }
+      }
+    });
+  });
+
+  group('מוצאי שבת ויום טוב — רלוונטיות', () {
+    ZmanDefinition byId(String id) =>
+        kZmanimRegistry.singleWhere((d) => d.id == id);
+    final motzei = byId('motzeiShabbos');
+    final candleLighting = byId('candleLighting');
+
+    JewishCalendar day(
+      int year,
+      int month,
+      int dayOfMonth,
+      int dayOfWeek, {
+      bool inIsrael = true,
+    }) {
+      final jc = JewishCalendar.initDate(year, month, dayOfMonth)
+        ..inIsrael = inIsrael;
+      expect(jc.getDayOfWeek(), dayOfWeek, reason: '$year/$month/$dayOfMonth');
+      return jc;
+    }
+
+    bool isMotzei(JewishCalendar jc) =>
+        motzei.isRelevant!(jc) || byId('motzeiYomTov').isRelevant!(jc);
+    bool hasCandles(JewishCalendar jc) => candleLighting.isRelevant!(jc);
+
+    const nissan = JewishDate.NISSAN;
+    const sivan = JewishDate.SIVAN;
+    const tishrei = JewishDate.TISHREI;
+
+    test('מזהי שבת ויו״ט נשמרים ומופיעים בימים נפרדים', () {
+      for (final suffix in ['', 'ChazonIsh']) {
+        final shabbos = byId('motzeiShabbos$suffix');
+        final yomTov = byId('motzeiYomTov$suffix');
+        final saturday = day(5786, sivan, 7, 7);
+        final festival = day(5786, nissan, 21, 4);
+        expect(shabbos.isRelevant!(saturday), isTrue);
+        expect(yomTov.isRelevant!(saturday), isFalse);
+        expect(shabbos.isRelevant!(festival), isFalse);
+        expect(yomTov.isRelevant!(festival), isTrue);
+        expect(kDefaultEnabledZmanim, containsAll([shabbos.id, yomTov.id]));
+      }
+    });
+
+    test('ברירת המחדל כוללת נץ גם בערים בחו״ל', () {
+      for (final city in ['ניו יורק', 'לונדון', 'ברוקלין']) {
+        final times = calculateDailyTimes(
+          DateTime(2026, 10, 15),
+          city,
+          only: kDefaultEnabledZmanim,
+        );
+        expect(times['sunrise'], isNotNull, reason: city);
+      }
+    });
+
+    test('יום טוב ביום שישי — המוצאי רק במוצאי השבת שאחריו', () {
+      expect(isMotzei(day(5786, sivan, 6, 6)), isFalse);
+      expect(isMotzei(day(5786, sivan, 7, 7)), isTrue);
+    });
+
+    test('ראש השנה — רק ביום השני', () {
+      expect(isMotzei(day(5786, tishrei, 1, 3)), isFalse);
+      expect(isMotzei(day(5786, tishrei, 2, 4)), isTrue);
+      // ראש השנה שחל בשבת
+      expect(isMotzei(day(5787, tishrei, 1, 7)), isFalse);
+      expect(isMotzei(day(5787, tishrei, 2, 1)), isTrue);
+    });
+
+    test('יום טוב ראשון בחו"ל — לא מוצאי', () {
+      expect(isMotzei(day(5786, nissan, 15, 5)), isTrue);
+      expect(isMotzei(day(5786, nissan, 15, 5, inIsrael: false)), isFalse);
+      expect(isMotzei(day(5786, nissan, 16, 6, inIsrael: false)), isFalse);
+      expect(isMotzei(day(5786, nissan, 17, 7, inIsrael: false)), isTrue);
+    });
+
+    test('שבת שאחריה יום טוב — לא מוצאי', () {
+      expect(isMotzei(day(5785, nissan, 14, 7)), isFalse);
+      // שביעי של פסח בשבת: בארץ מוצאי, בחו"ל רק אחרי אחרון של פסח
+      expect(isMotzei(day(5785, nissan, 21, 7)), isTrue);
+      expect(isMotzei(day(5785, nissan, 21, 7, inIsrael: false)), isFalse);
+      expect(isMotzei(day(5785, nissan, 22, 1, inIsrael: false)), isTrue);
+    });
+
+    test('יום כיפור', () {
+      expect(isMotzei(day(5786, tishrei, 10, 5)), isTrue);
+      expect(isMotzei(day(5785, tishrei, 10, 7)), isTrue);
+    });
+
+    test('שמיני עצרת ושמחת תורה', () {
+      expect(isMotzei(day(5786, tishrei, 22, 3)), isTrue);
+      expect(isMotzei(day(5786, tishrei, 22, 3, inIsrael: false)), isFalse);
+      expect(isMotzei(day(5786, tishrei, 23, 4, inIsrael: false)), isTrue);
+      // שמחת תורה בחו"ל ביום שישי
+      expect(isMotzei(day(5785, tishrei, 23, 6, inIsrael: false)), isFalse);
+      expect(isMotzei(day(5785, tishrei, 24, 7, inIsrael: false)), isTrue);
+    });
+
+    test('בשלוש שנים: מוצאי בדיוק כשמחר מותר במלאכה', () {
+      for (final inIsrael in [true, false]) {
+        for (int i = 0; i < 3 * 366; i++) {
+          JewishCalendar at(int offset) =>
+              JewishCalendar.fromDateTime(DateTime(2024, 9, 1 + i + offset))
+                ..inIsrael = inIsrael;
+          final today = at(0);
+          expect(
+            isMotzei(today),
+            today.isAssurBemelacha() && !at(1).isAssurBemelacha(),
+            reason:
+                '${today.getJewishYear()}/${today.getJewishMonth()}/'
+                '${today.getJewishDayOfMonth()} inIsrael=$inIsrael',
+          );
+        }
+      }
+    });
+
+    test('הדלקת נרות — לא לפני השקיעה בשבת שלפני יום טוב', () {
+      expect(hasCandles(day(5786, nissan, 14, 4)), isTrue);
+      expect(hasCandles(day(5785, nissan, 14, 7)), isFalse);
+      // יום טוב ביום שישי: מדליקים לשבת מאש קיימת לפני השקיעה
+      expect(hasCandles(day(5786, sivan, 6, 6)), isTrue);
+      // לפני יום טוב שני מדליקים אחרי צאת הכוכבים, לא בזמן ההדלקה
+      expect(hasCandles(day(5786, tishrei, 1, 3)), isFalse);
     });
   });
 }

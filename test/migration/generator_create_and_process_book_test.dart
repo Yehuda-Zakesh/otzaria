@@ -391,5 +391,40 @@ void main() {
       expect(detectHeaderLevel('<h3 data-toc="none">עיצובית</h3>'), 0);
       expect(detectHeaderLevel('טקסט רגיל'), 0);
     });
+
+    test('אותיות גדולות, רווח מוביל ושורות קצרות — כמו הורדת אותיות מלאה', () {
+      const cases = {
+        '<H2>פרק</H2>': 2,
+        '<h6>ו</h6>': 6,
+        '<h2 DATA-TOC="NONE">עיצובית</h2>': 0,
+        '<h7>לא</h7>': 0,
+        ' <h2>רווח</h2>': 0,
+        '<b>מודגש</b>': 0,
+        'İ<h2>': 0,
+        '<h': 0,
+        '<': 0,
+        '': 0,
+      };
+      cases.forEach((line, level) {
+        expect(detectHeaderLevel(line), level, reason: line);
+      });
+    });
+
+    test('שורת טקסט ארוכה אינה מועתקת לאותיות קטנות', () {
+      final lines = List.filled(
+        200,
+        'ואמר רבי יוחנן <b>משום</b> רשב"י ' * 2000,
+      );
+      int elapsed(void Function(String) work) {
+        final sw = Stopwatch()..start();
+        lines.forEach(work);
+        return sw.elapsedMicroseconds;
+      }
+
+      // סף יחסי: המסלול הישן עושה לפחות את העבודה של toLowerCase.
+      final lowercase = elapsed((l) => l.toLowerCase());
+      final detect = elapsed(detectHeaderLevel);
+      expect(detect, lessThan(lowercase ~/ 5));
+    });
   });
 }

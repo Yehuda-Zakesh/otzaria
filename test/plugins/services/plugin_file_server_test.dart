@@ -35,6 +35,21 @@ void main() {
     return request.close();
   }
 
+  test('הפעלות במקביל מקבלות שרת אחד ופורט אחד', () async {
+    final file = await writeFile('doc.txt', 'x');
+    final results = await Future.wait([
+      server.ensurePort(),
+      server.register(pluginId: 'p', canonicalPath: file.path),
+      server.ensurePort(),
+    ]);
+    final port = results.first as int;
+    final url = (results[1] as PluginFileRegistration).url;
+
+    expect(results.last, port);
+    expect(Uri.parse(url).port, port);
+    expect((await get(url)).statusCode, 200);
+  });
+
   test('מגיש קובץ מלא עם 200 ו-Content-Type נכון', () async {
     final file = await writeFile('doc.txt', 'hello world');
     final reg = await server.register(
@@ -160,7 +175,7 @@ void main() {
     });
   });
 
-  test('CORS מוחזר ל-origin של file:// בלבד', () async {
+  test('CORS מוחזר רק ל-origin של file:// ושל סכימת התוסף', () async {
     final file = await writeFile('doc.txt', 'x');
     final reg = await server.register(pluginId: 'p1', canonicalPath: file.path);
 
@@ -169,6 +184,17 @@ void main() {
     final allowed = await fileOrigin.close();
     expect(allowed.headers.value('access-control-allow-origin'), 'null');
     await allowed.drain();
+
+    // במק התוסף מוגש מהסכימה otzaria-plugin://, ו-fetch ממנה דורש CORS.
+    const pluginOrigin = 'otzaria-plugin://com.example-plugin';
+    final assetOrigin = await client.getUrl(Uri.parse(reg.url));
+    assetOrigin.headers.set('origin', pluginOrigin);
+    final assetAllowed = await assetOrigin.close();
+    expect(
+      assetAllowed.headers.value('access-control-allow-origin'),
+      pluginOrigin,
+    );
+    await assetAllowed.drain();
 
     final webOrigin = await client.getUrl(Uri.parse(reg.url));
     webOrigin.headers.set('origin', 'https://evil.example.com');
@@ -239,6 +265,28 @@ void main() {
 
     final response = await get(reg.url);
     expect(response.headers.contentType?.mimeType, 'application/pdf');
+    await response.drain();
+  });
+
+  test('HTML ו-SVG מוגשים בלי סקריפט ובלי רשת; PDF בלי CSP', () async {
+    for (final name in ['page.html', 'image.svg']) {
+      final file = await writeFile(name, '<script></script>');
+      final reg = await server.register(
+        pluginId: 'p1',
+        canonicalPath: file.path,
+      );
+      final response = await get(reg.url);
+      final csp = response.headers.value('content-security-policy');
+      expect(csp, startsWith('sandbox;'), reason: name);
+      expect(csp, contains("default-src 'none'"), reason: name);
+      expect(response.headers.value('x-content-type-options'), 'nosniff');
+      await response.drain();
+    }
+
+    final pdf = await writeFile('book.pdf', '%PDF-1.4 fake');
+    final reg = await server.register(pluginId: 'p1', canonicalPath: pdf.path);
+    final response = await get(reg.url);
+    expect(response.headers.value('content-security-policy'), isNull);
     await response.drain();
   });
 

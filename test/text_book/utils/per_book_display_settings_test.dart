@@ -11,7 +11,6 @@ import 'package:otzaria/settings/engine/settings_state.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/utils/per_book_display_settings.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../../helpers/memory_settings_cache.dart';
 
 class _FakeSettingsBloc extends Fake implements SettingsBloc {
@@ -61,8 +60,6 @@ void main() {
     visibleIndices: const [0],
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 
   /// מריץ את השמירה בתוך עץ ווידג'טים ומחזיר את מה שנכתב לקובץ.

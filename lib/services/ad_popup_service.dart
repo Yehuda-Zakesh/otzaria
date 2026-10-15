@@ -43,10 +43,4 @@ class AdPopupService {
       remindDate.millisecondsSinceEpoch,
     );
   }
-
-  /// איפוס ההגדרות (לצורך בדיקה)
-  static Future<void> reset() async {
-    await Settings.setValue<bool?>(_keyDontShowAgain, null);
-    await Settings.setValue<int?>(_keyRemindLater, null);
-  }
 }

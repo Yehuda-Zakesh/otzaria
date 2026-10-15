@@ -1,15 +1,16 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:otzaria/app_report/bloc/app_report_event.dart';
 import 'package:otzaria/app_report/bloc/app_report_state.dart';
-import 'package:otzaria/app_report/models/app_report.dart';
-import 'package:otzaria/app_report/models/crash_signature.dart';
+import 'package:otzaria/app_report/models/app_report_draft.dart';
 import 'package:otzaria/app_report/repository/app_report_collector.dart';
-import 'package:otzaria/app_report/repository/app_report_redactor.dart';
 import 'package:otzaria/app_report/services/app_report_service.dart';
 import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 
 /// טופס הדיווח על התוכנה: איסוף הצרופות, עריכה ושליחה.
 class AppReportBloc extends Bloc<AppReportEvent, AppReportState> {
@@ -22,6 +23,7 @@ class AppReportBloc extends Bloc<AppReportEvent, AppReportState> {
     this.initialTitle = '',
     String? initialEmail,
     this.signature,
+    this.minidumpFile,
     this.appVersion,
     DateTime Function()? clock,
   }) : _service = service ?? AppReportService(),
@@ -38,12 +40,18 @@ class AppReportBloc extends Bloc<AppReportEvent, AppReportState> {
     on<AppReportEmailChanged>(_onFieldChanged);
     on<AppReportDiagnosticsToggled>(_onFieldChanged);
     on<AppReportErrorLogToggled>(_onFieldChanged);
+    on<AppReportMinidumpToggled>(_onFieldChanged);
     on<AppReportImagesChanged>(_onFieldChanged);
     on<AppReportSubmitted>(_onSubmitted);
+    on<AppReportDraftSaved>(_onDraftSaved);
+    on<AppReportDraftDiscarded>(_onDraftDiscarded);
   }
 
   final AppReportTrigger trigger;
   final CrashSignature? signature;
+
+  /// ה-dump של הקריסה, כשההצעה נפתחה אחרי קריסה נייטיבית.
+  final File? minidumpFile;
   final String? appVersion;
 
   final AppReportService _service;
@@ -53,6 +61,9 @@ class AppReportBloc extends Bloc<AppReportEvent, AppReportState> {
   final AppReportType initialType;
   final String initialTitle;
   final String _initialEmail;
+
+  /// טיוטה נשמרת רק לטופס הידני; דיווח קריסה קשור לקריסה מסוימת.
+  bool get supportsDraft => trigger == AppReportTrigger.manual;
 
   /// כתובת הזיהוי השמורה בהגדרות, המשותפת לדיווחי הטעויות.
   static String savedSenderEmail() {
@@ -74,15 +85,78 @@ class AppReportBloc extends Bloc<AppReportEvent, AppReportState> {
     } catch (error, stackTrace) {
       debugPrint('App report collection failed: $error\n$stackTrace');
     }
+    final dumpFile = minidumpFile;
+    final minidump = dumpFile == null
+        ? null
+        : await AppReportMinidump.fromFile(dumpFile);
+    final draft = await _loadDraft();
+    final draftEmail = draft?.email.trim() ?? '';
+    emit(
+      AppReportEditing(
+        type: draft?.type ?? initialType,
+        title: draft?.title ?? initialTitle,
+        description: draft?.description ?? '',
+        steps: draft?.steps ?? '',
+        email: draftEmail.isEmpty ? _initialEmail : draftEmail,
+        diagnostics: attachments?.diagnostics,
+        errorLog: attachments?.errorLog,
+        includeDiagnostics: draft?.includeDiagnostics ?? true,
+        includeErrorLog: draft?.includeErrorLog ?? true,
+        images: draft?.images ?? const [],
+        minidump: minidump,
+        hasDraft: draft != null,
+      ),
+    );
+  }
+
+  Future<AppReportDraft?> _loadDraft() async {
+    if (!supportsDraft) return null;
+    try {
+      return await _service.loadDraft();
+    } catch (error, stackTrace) {
+      debugPrint('App report draft load failed: $error\n$stackTrace');
+      return null;
+    }
+  }
+
+  Future<void> _onDraftSaved(
+    AppReportDraftSaved event,
+    Emitter<AppReportState> emit,
+  ) async {
+    final current = state;
+    if (current is! AppReportEditing || current.isSending) return;
+    await _service.saveDraft(
+      AppReportDraft(
+        type: current.type,
+        title: current.title,
+        description: current.description,
+        steps: current.steps,
+        email: current.email.trim(),
+        includeDiagnostics: current.includeDiagnostics,
+        includeErrorLog: current.includeErrorLog,
+        images: current.images,
+      ),
+    );
+    emit(current.copyWith(hasDraft: true, draftSaved: true));
+  }
+
+  Future<void> _onDraftDiscarded(
+    AppReportDraftDiscarded event,
+    Emitter<AppReportState> emit,
+  ) async {
+    final current = state;
+    if (current is! AppReportEditing || current.isSending) return;
+    await _service.deleteDraft();
     emit(
       AppReportEditing(
         type: initialType,
         title: initialTitle,
         description: '',
         steps: '',
-        email: _initialEmail,
-        diagnostics: attachments?.diagnostics,
-        errorLog: attachments?.errorLog,
+        email: current.email,
+        diagnostics: current.diagnostics,
+        errorLog: current.errorLog,
+        minidump: current.minidump,
       ),
     );
   }
@@ -111,6 +185,9 @@ class AppReportBloc extends Bloc<AppReportEvent, AppReportState> {
       AppReportErrorLogToggled(:final include) => current.copyWith(
         includeErrorLog: include,
       ),
+      AppReportMinidumpToggled(:final include) => current.copyWith(
+        includeMinidump: include,
+      ),
       AppReportImagesChanged(:final images) => current.copyWith(
         images: List.unmodifiable(images),
       ),
@@ -135,6 +212,10 @@ class AppReportBloc extends Bloc<AppReportEvent, AppReportState> {
     emit(current.copyWith(submission: AppReportSubmission.sending));
     await _saveSenderEmail(report.reporterEmail);
     final result = await _service.send(report);
+    // דיווח שנדחה סופית לא נשמר בשום מקום — הטיוטה נשארת כדי לא לאבד אותו.
+    if (current.hasDraft && result.status != AppReportDeliveryStatus.failed) {
+      await _service.deleteDraft();
+    }
     emit(
       current.copyWith(
         submission: AppReportSubmission.finished,
@@ -163,6 +244,7 @@ class AppReportBloc extends Bloc<AppReportEvent, AppReportState> {
       diagnostics: form.includeDiagnostics ? form.diagnostics : null,
       errorLog: form.includeErrorLog ? form.errorLog : null,
       images: form.images,
+      minidump: form.includeMinidump ? form.minidump : null,
     ).redactedWith(_redactor);
   }
 

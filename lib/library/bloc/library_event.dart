@@ -38,6 +38,11 @@ class HiddenBooksChanged extends LibraryEvent {
   List<Object?> get props => [];
 }
 
+/// קובץ ספר חיצוני נוסף לתיקייה: הקטלוג נסרק מחדש והאיתור המוצג רץ שוב.
+class ExternalBooksChanged extends LibraryEvent {
+  const ExternalBooksChanged();
+}
+
 class RefreshLibrary extends LibraryEvent {
   /// מפתחות catalogueOrderKey של ספרים שתוכנם השתנה ודורשים אינדוקס מחדש.
   final Set<String> changedBookKeys;

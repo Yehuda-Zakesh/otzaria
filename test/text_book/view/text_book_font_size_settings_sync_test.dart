@@ -26,14 +26,13 @@ import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/text_book/view/combined_view/combined_book_screen.dart';
 import 'package:otzaria/text_book/view/text_book_screen.dart';
 import 'package:otzaria/tools/shamor_zachor/providers/shamor_zachor_data_provider.dart';
 import 'package:otzaria/tools/shamor_zachor/providers/shamor_zachor_progress_provider.dart';
 import 'package:otzaria/tour/bloc/tour_cubit.dart';
 import 'package:provider/provider.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -155,8 +154,6 @@ void main() {
         searchMode: SearchMode.exact,
         showPageShapeView: false,
       ),
-      scrollController: ItemScrollController(),
-      positionsListener: ItemPositionsListener.create(),
     );
     addTearDown(bloc.close);
 
@@ -208,8 +205,6 @@ TextBookLoaded _loadedState(TextBook book, {required double fontSize}) {
     pinLeftPane: false,
     searchText: '',
     currentTitle: 'סימן א',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
     searchMode: SearchMode.exact,
   );
 }

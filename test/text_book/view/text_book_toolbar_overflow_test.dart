@@ -29,7 +29,6 @@ import 'package:otzaria/tools/shamor_zachor/providers/shamor_zachor_data_provide
 import 'package:otzaria/tools/shamor_zachor/providers/shamor_zachor_progress_provider.dart';
 import 'package:otzaria/tour/bloc/tour_cubit.dart';
 import 'package:provider/provider.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 /// רגרסיה ל-issue #891: "Right overflowed by" בשורת הכפתורים במסך צר.
 /// סורק רוחבי חלון ומוודא שאף רוחב לא זורק שגיאת RenderFlex overflow.
@@ -214,8 +213,6 @@ TextBookLoaded _loadedState(TextBook book, {bool showPageShapeView = false}) {
     pinLeftPane: false,
     searchText: '',
     currentTitle: 'סימן א',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
     searchMode: SearchMode.exact,
   );
 }

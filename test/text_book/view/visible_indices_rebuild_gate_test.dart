@@ -6,10 +6,8 @@ import 'package:otzaria/models/links.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/utils/reader_build_policy.dart';
-import 'package:otzaria/text_book/utils/reading_segments.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart'
     show SearchScope;
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 /// שער הבנייה מחדש של עץ תצוגת הספר.
 ///
@@ -29,6 +27,30 @@ void main() {
       final after = before.copyWith(visibleIndices: [...before.visibleIndices]);
 
       expect(shouldRebuildReader(before, after), isFalse);
+    });
+
+    test('קישורי החלון שחושבו מחדש בגלילה אינם מצדיקים בנייה', () {
+      // עם חלונית צד פתוחה כל צעד גלילה מחשב visibleLinks מחדש; הקורא נגזר
+      // מ-linksByLine, וחלונית הקישורים נבנית מ-BlocBuilder משלה.
+      final before = _loaded();
+      final after = before.copyWith(
+        visibleIndices: const [7, 8, 9],
+        visibleLinks: [_link(1, 1), _link(1, 2)],
+      );
+
+      expect(shouldRebuildReader(before, after), isFalse);
+    });
+
+    test('קישורים שנטענו מחדש מצדיקים בנייה גם כשמספרם זהה', () {
+      final before = _loaded();
+      final after = before.copyWith(
+        linksByLine: {
+          1: [_link(1, 2)],
+        },
+        visibleLinks: [_link(1, 2), _link(1, 3)],
+      );
+
+      expect(shouldRebuildReader(before, after), isTrue);
     });
 
     test('כותרת שהשתנתה עם הגלילה כן מצדיקה בנייה מחדש', () {
@@ -159,7 +181,7 @@ void main() {
       expect(state.permanentHighlightLine, isNotNull);
       expect(state.selectedIndices, isNotEmpty);
       expect(state.selectedLinkTypes, isNotEmpty);
-      expect(state.readingSegments, isNotEmpty);
+      expect(state.loadedLineFlags, isNotNull);
       expect(state.visibleLinks, isNotEmpty);
     });
   });
@@ -195,6 +217,38 @@ void main() {
         baseline,
         reason: 'תזוזת גלילה אינה בונה מחדש את העלה',
       );
+
+      await cubit.close();
+    });
+
+    testWidgets('גלילה עם חלונית קישורים פתוחה אינה בונה את העלה', (
+      tester,
+    ) async {
+      final cubit = _StateCubit(_loaded());
+      var leafBuilds = 0;
+
+      await tester.pumpWidget(
+        _tree(
+          cubit,
+          guardRoot: true,
+          onLeaf: (_) {
+            leafBuilds++;
+          },
+        ),
+      );
+
+      final baseline = leafBuilds;
+      for (var i = 0; i < 5; i++) {
+        cubit.scrollWithLinks(
+          [i, i + 1],
+          [
+            for (var k = 0; k <= i; k++) _link(1, k),
+          ],
+        );
+        await tester.pump();
+      }
+
+      expect(leafBuilds, baseline);
 
       await cubit.close();
     });
@@ -357,6 +411,15 @@ class _StateCubit extends Cubit<TextBookState> {
     emit((state as TextBookLoaded).copyWith(visibleIndices: visibleIndices));
   }
 
+  void scrollWithLinks(List<int> visibleIndices, List<Link> visibleLinks) {
+    emit(
+      (state as TextBookLoaded).copyWith(
+        visibleIndices: visibleIndices,
+        visibleLinks: visibleLinks,
+      ),
+    );
+  }
+
   void retitle(String title) {
     emit((state as TextBookLoaded).copyWith(currentTitle: title));
   }
@@ -411,14 +474,7 @@ TextBookLoaded _loaded() => TextBookLoaded(
   commentaryRemovePunctuationOverride: true,
   supportsContinuousReadingMode: true,
   continuousReadingMode: true,
-  readingSegments: const [
-    ReadingSegment(
-      text: 'שורה א',
-      sourceLineIndices: [0],
-      lineRanges: [ReadingLineRange(lineIndex: 0, start: 0, end: 6)],
-      isHeader: false,
-    ),
-  ],
+  loadedLineFlags: const [true, false, true],
   visibleIndices: const [1, 2],
   selectedIndex: 1,
   selectedIndices: const {1},
@@ -437,8 +493,6 @@ TextBookLoaded _loaded() => TextBookLoaded(
     proximityScope: SearchScope.sameParagraph,
   ),
   searchResultLines: const {2},
-  scrollController: ItemScrollController(),
-  positionsListener: ItemPositionsListener.create(),
   currentTitle: 'סימן א',
   selectedTextForNote: 'טקסט',
   selectedTextSectionIndex: 1,

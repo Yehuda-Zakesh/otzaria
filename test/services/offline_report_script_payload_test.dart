@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/models/direct_error_report.dart';
 import 'package:otzaria/services/direct_error_report_service.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/direct_error_report_text_correction_test.dart'
@@ -118,7 +118,8 @@ void main() {
             // Process.run ב-macOS (osascript), ולכן מחליפים אותו בפלט למסוף.
             .replaceFirst(
               RegExp(r'if command -v zenity[\s\S]*?\nfi\n'),
-              r'cat "$tmp"' '\n',
+              r'cat "$tmp"'
+              '\n',
             );
         final file = File('${dir.path}/send.sh');
         await file.writeAsString(script);

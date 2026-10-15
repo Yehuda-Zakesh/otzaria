@@ -34,7 +34,7 @@ const double kTikkunLineGapLetters = 1.75;
 /// גופן הבסיס של השורה, שממנו נגזרות כל מידות ה-em.
 const double kTikkunRowBaseFontSize = 16;
 
-/// רוחב עמודת המסמנים (‎flex: 0 0 4.5em‎), ואיתה שני המרווחים שלצדיה.
+/// רוחב עמודת המסמנים (flex: 0 0 4.5em), ואיתה שני המרווחים שלצדיה.
 const double kTikkunMarkersWidthEm = 4.5;
 const double kTikkunMarkersAreaEm = kTikkunMarkersWidthEm + 2;
 
@@ -167,7 +167,7 @@ class TikkunRenderMetrics {
 
   double get markersWidth => em(kTikkunMarkersWidthEm);
 
-  /// המרווח בין הטורים (‎gap: 1em‎ ב-.reader-row).
+  /// המרווח בין הטורים (gap: 1em ב-.reader-row).
   double get columnGap => em(1);
 
   // ריווח-אותיות מפורש: אחרת הווידג'ט יורש 0.25 מערכת הנושא והמדידה ב-TextPainter לא.

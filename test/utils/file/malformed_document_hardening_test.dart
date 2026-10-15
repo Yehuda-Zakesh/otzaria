@@ -468,7 +468,7 @@ void main() {
         Uint8List.fromList(utf8.encode('<html><body>$body</body></html>'));
 
     test('מכולה בינארית בסיומת HTML נכשלת ואינה נקראת כטקסט', () {
-      // ‏ZIP שפוענח כ-Windows-1255 מייצר ג'יבריש עברי שנראה כספר תקין.
+      // ZIP שפוענח כ-Windows-1255 מייצר ג'יבריש עברי שנראה כספר תקין.
       expect(
         () => htmlToText(
           Uint8List.fromList([0x50, 0x4B, 0x03, 0x04, 0xE0, 0xE1, 0xE2]),

@@ -6,6 +6,8 @@ import 'package:otzaria/text_book/utils/reading_segment_navigation.dart';
 import 'package:otzaria/text_book/utils/reading_segments.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
+import '../../test_helpers/reading_toc.dart';
+
 void main() {
   group('isRemnantAbovePositionAnchor', () {
     test('קטע שנגמר בקו העוגן ומתחיל מעליו - שייר', () {
@@ -206,6 +208,116 @@ void main() {
       );
       await expectLater(scrollFuture, completes);
       expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'scrollToSourceLine: טעינת תוכן לפני היעד באמצע הגלילה — היעד נוחת',
+    (tester) async {
+      // issue #1973: טעינת רקע ממלאת פסקאות לפני היעד תוך כדי הגלילה אליו;
+      // מספור הפריטים יציב, והיעד נמדד מול התוכן העדכני.
+      final itemScrollController = ItemScrollController();
+      final scrollOffsetController = ScrollOffsetController();
+      final positionsListener = ItemPositionsListener.create();
+
+      final lines = [
+        '<h2>פרק א</h2>',
+        'פסוק א בפרק א',
+        'פסוק ב בפרק א',
+        '<h2>פרק ב</h2>',
+        'פסוק א בפרק ב',
+        'פסוק ב בפרק ב',
+        'פסוק ג בפרק ב',
+        // פרק נוסף אחרי היעד, כדי שיהיה לאן לגלול כשמיישרים שורה בסוף פסקה.
+        '<h2>פרק ג</h2>',
+        'פסוק א בפרק ג',
+      ];
+      final partialFlags = [
+        false,
+        false,
+        false,
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+      ];
+      // [כותרת 0, פסקה 1..2, כותרת 3, פסקה 4..6, כותרת 7, פסקה 8]; בהתחלה
+      // רק הפרק הראשון אינו טעון.
+      final partial = buildReadingSegments(
+        [
+          for (var i = 0; i < lines.length; i++)
+            partialFlags[i] ? lines[i] : '',
+        ],
+        continuous: true,
+        loadedLineFlags: partialFlags,
+        breakLines: readingBreakLines(headerToc(lines)),
+      );
+      final full = buildReadingSegments(lines, continuous: true);
+      expect(full.length, partial.length);
+      var segments = partial;
+      late StateSetter setListState;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 400,
+              child: StatefulBuilder(
+                builder: (context, setState) {
+                  setListState = setState;
+                  return ScrollablePositionedList.builder(
+                    itemScrollController: itemScrollController,
+                    scrollOffsetController: scrollOffsetController,
+                    itemPositionsListener: positionsListener,
+                    itemCount: segments.length,
+                    // פריט גבוה מה-viewport כדי שדיוק תוך-סגמנטי אכן יגלול.
+                    itemBuilder: (context, index) => SizedBox(
+                      height: 600,
+                      child: Text(segments[index].text),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      const targetLine = 6;
+      final scrollFuture = scrollToSourceLine(
+        scrollController: itemScrollController,
+        scrollOffsetController: scrollOffsetController,
+        positionsListener: positionsListener,
+        segments: partial,
+        latestSegments: () => segments,
+        lineIndex: targetLine,
+        viewportExtent: 400,
+        duration: const Duration(milliseconds: 250),
+      );
+      // באמצע האנימציה הפרק הראשון נטען.
+      await tester.pump(const Duration(milliseconds: 60));
+      setListState(() => segments = full);
+      await tester.pumpAndSettle();
+      await scrollFuture;
+
+      expect(tester.takeException(), isNull);
+      final targetIndex = segmentIndexForLine(full, targetLine);
+      expect(targetIndex, 3);
+      final position = positionsListener.itemPositions.value.singleWhere(
+        (item) => item.index == targetIndex,
+      );
+      final fraction = lineFractionWithinSegment(full[targetIndex], targetLine);
+      final targetEdge =
+          position.itemLeadingEdge +
+          fraction * (position.itemTrailingEdge - position.itemLeadingEdge);
+      expect(
+        targetEdge,
+        closeTo(kReadingAnchorAlignment, kAnchorLandingEpsilon),
+        reason: 'השורה חייבת לנחות על קו העוגן גם אחרי טעינת התוכן',
+      );
     },
   );
 

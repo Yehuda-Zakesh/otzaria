@@ -211,6 +211,83 @@ void main() {
     );
   });
 
+  test('הוספה אחרי עריכת DOCX משתמשת בטקסט ובעוגן המעודכנים', () async {
+    const title = 'ספר מתעדכן בהוספה';
+    final file = await writeDocx('$title.docx', bookLines);
+    await registerBook(title, file, 'docx');
+    await notesRepository.loadNotes(title, categoryId: categoryId);
+    await writeDocx('$title.docx', ['הקדמה חדשה', ...bookLines]);
+
+    final notes = await notesRepository.addNote(
+      bookId: title,
+      lineNumber: firstBookLine,
+      content: 'הערה',
+      contentPlain: 'הערה',
+      contentFormat: PersonalNoteContentFormat.plain,
+      selectedText: 'הקדמה',
+      categoryId: categoryId,
+    );
+
+    expect(notes.single.anchorText, 'הקדמה');
+    expect(notes.single.anchorSuffix, contains('חדשה'));
+  });
+
+  test('עריכת הערה אחרי שינוי DOCX מיישבת את העוגן מול הקובץ החדש', () async {
+    const title = 'ספר מתעדכן בעריכה';
+    final file = await writeDocx('$title.docx', bookLines);
+    await registerBook(title, file, 'docx');
+    final added = await notesRepository.addNote(
+      bookId: title,
+      lineNumber: firstBookLine + 2,
+      content: 'הערה',
+      contentPlain: 'הערה',
+      contentFormat: PersonalNoteContentFormat.plain,
+      selectedText: 'יהי אור',
+      categoryId: categoryId,
+    );
+    await notesRepository.loadNotes(title, categoryId: categoryId);
+    await writeDocx('$title.docx', ['הקדמה חדשה', ...bookLines]);
+
+    final updated = await notesRepository.updateNote(
+      bookId: title,
+      noteId: added.single.id,
+      content: 'עריכה',
+      contentPlain: 'עריכה',
+      contentFormat: PersonalNoteContentFormat.plain,
+      categoryId: categoryId,
+    );
+
+    expect(updated.single.status, PersonalNoteStatus.located);
+    expect(updated.single.lineNumber, firstBookLine + 3);
+    expect(updated.single.anchorText, 'יהי אור');
+  });
+
+  test('שינוי מיקום אחרי עריכת DOCX קורא את השורה החדשה', () async {
+    const title = 'ספר מתעדכן במיקום';
+    final file = await writeDocx('$title.docx', bookLines);
+    await registerBook(title, file, 'docx');
+    final added = await notesRepository.addNote(
+      bookId: title,
+      lineNumber: firstBookLine,
+      content: 'הערה',
+      contentPlain: 'הערה',
+      contentFormat: PersonalNoteContentFormat.plain,
+      categoryId: categoryId,
+    );
+    await notesRepository.loadNotes(title, categoryId: categoryId);
+    await writeDocx('$title.docx', ['הקדמה חדשה', ...bookLines]);
+
+    final moved = await notesRepository.repositionNote(
+      bookId: title,
+      noteId: added.single.id,
+      lineNumber: firstBookLine,
+      categoryId: categoryId,
+    );
+
+    expect(moved.single.displayTitle, 'הקדמה חדשה');
+    expect(moved.single.anchorText, isNull);
+  });
+
   test('ספר טקסט רגיל ממשיך לעבוד', () async {
     const title = 'ספר טקסט';
     final file = File(p.join(tempDir.path, '$title.txt'));

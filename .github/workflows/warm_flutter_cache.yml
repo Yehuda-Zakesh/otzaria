@@ -9,7 +9,20 @@ on:
     branches:
       - main
       - dev
+    # מפתח ה-cache נגזר מגרסת Flutter ומ-pubspec.lock; push אחר מוצא hit ולא שומר.
+    paths:
+      - '**/pubspec.lock'
+      - '**/pubspec.yaml'
+      - .github/workflows/warm_flutter_cache.yml
+      - .github/workflows/flutter_tests.yml
+  # משחזר cache שנמחק (פינוי לפי מקום) גם בלי שינוי בתלויות.
+  schedule:
+    - cron: '0 3 * * 0'
   workflow_dispatch:
+
+concurrency:
+  group: warm-flutter-cache-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   warm:
@@ -29,7 +42,7 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
   # ב-Windows שחזור ה-SDK איטי מהתקנה, אבל ה-pub cache מקצר את pub get
   # מ-~100 ל-~10 שניות, כך שבסך הכל ה-cache משתלם.
@@ -52,7 +65,7 @@ jobs:
         shell: pwsh
         run: |
           git config --global core.longpaths true
-          flutter pub get
+          flutter pub get --enforce-lockfile
 
   # תואם ל-build_linux ב-flutter_tests.yml: אותו ראנר, קונטיינר וכלים.
   # בלי zstd ה-cache נדחס אחרת ולא יימצא.
@@ -84,4 +97,4 @@ jobs:
           cache: true
 
       - name: Install dependencies
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile

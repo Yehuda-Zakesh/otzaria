@@ -209,7 +209,7 @@ void main() {
     });
 
     test('מכולת OLE שאינה Word אינה מזוהה', () {
-      // הבחנה שחתימת ה-OLE לבדה אינה יכולה לעשות: ‎.xls‎ נושא אותה חתימה.
+      // הבחנה שחתימת ה-OLE לבדה אינה יכולה לעשות: .xls נושא אותה חתימה.
       final bytes = CfbBuilder({'Workbook': _bytesOf('גיליון')}).build();
 
       expect(CfbFile.hasSignature(bytes), isTrue);

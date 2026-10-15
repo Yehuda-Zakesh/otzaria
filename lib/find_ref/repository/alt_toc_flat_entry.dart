@@ -61,16 +61,6 @@ bool altTocFlatMatches(
   return true;
 }
 
-/// ביט לכל טוקן לפי ה-hash שלו: ערך שחסר בו ביט של טוקן בשאילתה אינו מכיל
-/// את הטוקן, וכך רוב הספרייה נפסלת בלי השוואת מחרוזות.
-int altTocTokenMask(Iterable<String> tokens) {
-  var mask = 0;
-  for (final token in tokens) {
-    mask |= 1 << (token.hashCode & 63);
-  }
-  return mask;
-}
-
 /// מפתח תוצאה לצמצום ה-fallback הגלובלי; [reference] כפי שהוא מוצג (עם שם הספר).
 typedef AltTocResultKey = ({
   int bookId,

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/core/external_uri_router.dart';
@@ -618,6 +620,25 @@ void main() {
         expect(action.mode, SearchMode.advanced);
       });
 
+      test('mode=smart — חיפוש חכם, בלי מצב מילולי', () {
+        final action =
+            ExternalUriRouter.parseUri(
+                  Uri.parse('otzaria://open/search?q=abc&mode=Smart'),
+                )
+                as RunSearchAction;
+
+        expect(action.smart, isTrue);
+        expect(action.mode, isNull);
+        expect(
+          (ExternalUriRouter.parseUri(
+                    Uri.parse('otzaria://open/search?q=abc&mode=fuzzy'),
+                  )
+                  as RunSearchAction)
+              .smart,
+          isFalse,
+        );
+      });
+
       test('mode אינו רגיש לאותיות גדולות/קטנות', () {
         final action =
             ExternalUriRouter.parseUri(
@@ -1153,6 +1174,32 @@ void main() {
         );
       });
 
+      test('נתיב שנדחה מדווח עם הנתיב שהתקבל והסיבה', () {
+        final unc = r'\\attacker\share\evil.otzplugin';
+        final rejected = ExternalUriRouter.rejectedLocalInstall(
+          Uri.parse(
+            'otzaria://plugin/install-local?path='
+            '${Uri.encodeQueryComponent(unc)}',
+          ),
+        );
+        expect(rejected?.path, unc);
+        expect(rejected?.reason, isNotEmpty);
+
+        final valid = Uri.encodeQueryComponent(r'C:\plugins\ok.otzplugin');
+        expect(
+          ExternalUriRouter.rejectedLocalInstall(
+            Uri.parse('otzaria://plugin/install-local?path=$valid'),
+          ),
+          isNull,
+        );
+        expect(
+          ExternalUriRouter.rejectedLocalInstall(
+            Uri.parse('otzaria://plugin/install-local'),
+          ),
+          isNull,
+        );
+      });
+
       test('דוחה נתיב התקן (\\\\.\\ ו-\\\\?\\)', () {
         final device = Uri.encodeQueryComponent(r'\\.\C:\evil.otzplugin');
         final extended = Uri.encodeQueryComponent(
@@ -1516,6 +1563,123 @@ void main() {
       });
     });
 
+    group('open/report', () {
+      test('report → OpenAppReportAction', () {
+        expect(
+          ExternalUriRouter.parseUri(Uri.parse('otzaria://open/report')),
+          isA<OpenAppReportAction>(),
+        );
+      });
+
+      test('אינו רגיש לאותיות גדולות/קטנות', () {
+        expect(
+          ExternalUriRouter.parseUri(Uri.parse('otzaria://open/REPORT')),
+          isA<OpenAppReportAction>(),
+        );
+      });
+
+      test('נתיב עמוק מתעלם', () {
+        expect(
+          ExternalUriRouter.parseUri(Uri.parse('otzaria://open/report/bug')),
+          isNull,
+        );
+      });
+    });
+
+    group('open/<tool>?q= — חיפוש מיידי בכלי', () {
+      OpenToolAction parse(String uri) =>
+          ExternalUriRouter.parseUri(Uri.parse(uri)) as OpenToolAction;
+
+      test('biographies → builtin.biographies', () {
+        final action = parse('otzaria://open/biographies');
+        expect(action.toolId, 'builtin.biographies');
+        expect(action.query, isNull);
+      });
+
+      test('tikkun_korim → builtin.tikkun_korim', () {
+        expect(
+          parse('otzaria://open/tikkun_korim').toolId,
+          'builtin.tikkun_korim',
+        );
+      });
+
+      for (final (alias, toolId) in const [
+        ('biographies', 'builtin.biographies'),
+        ('acronyms_dictionary', 'builtin.acronyms_dictionary'),
+        ('aramaic_dictionary', 'builtin.aramaic_dictionary'),
+        ('gematria', 'builtin.gematria'),
+      ]) {
+        test('$alias?q= מצרף את הטקסט, מקוצץ', () {
+          final action = parse(
+            'otzaria://open/$alias?q=${Uri.encodeQueryComponent(' רמב"ם ')}',
+          );
+          expect(action.toolId, toolId);
+          expect(action.query!.text, 'רמב"ם');
+          expect(action.query!.hebrewToAramaic, isFalse);
+        });
+      }
+
+      test('tool/<id>?q= מצרף את הטקסט לכלי שתומך בו', () {
+        final action = parse('otzaria://open/tool/builtin.gematria?q=26');
+        expect(action.toolId, 'builtin.gematria');
+        expect(action.query!.text, '26');
+      });
+
+      test('q= לכלי שאינו תומך בו — מתעלם, הכלי עדיין נפתח', () {
+        for (final uri in const [
+          'otzaria://open/calendar?q=x',
+          'otzaria://open/tikkun_korim?q=x',
+          'otzaria://open/tool/com.example.plugin?q=x',
+        ]) {
+          expect(parse(uri).query, isNull, reason: uri);
+        }
+      });
+
+      test('q= ריק או רווחים בלבד — מתעלם', () {
+        expect(parse('otzaria://open/gematria?q=').query, isNull);
+        expect(parse('otzaria://open/gematria?q=%20%20').query, isNull);
+      });
+
+      test('from=hebrew הופך את כיוון המילון הארמי', () {
+        final action = parse(
+          'otzaria://open/aramaic_dictionary?q=%D7%99%D7%A9&from=hebrew',
+        );
+        expect(action.query!.text, 'יש');
+        expect(action.query!.hebrewToAramaic, isTrue);
+      });
+
+      test('from=aramaic, ערך לא מוכר או חסר — מארמית לעברית', () {
+        for (final from in const ['&from=aramaic', '&from=xyz', '']) {
+          final action = parse('otzaria://open/aramaic_dictionary?q=a$from');
+          expect(action.query!.hebrewToAramaic, isFalse, reason: from);
+        }
+      });
+
+      test('from=hebrew בכלי אחר מתעלם', () {
+        final action = parse('otzaria://open/gematria?q=26&from=hebrew');
+        expect(action.query!.hebrewToAramaic, isFalse);
+      });
+
+      test('tool/builtin.aramaic_dictionary מקבל גם from=', () {
+        final action = parse(
+          'otzaria://open/tool/builtin.aramaic_dictionary?q=a&from=hebrew',
+        );
+        expect(action.query!.hebrewToAramaic, isTrue);
+      });
+
+      test('from= אינו רגיש לאותיות גדולות/קטנות', () {
+        final action = parse(
+          'otzaria://open/ARAMAIC_DICTIONARY?q=a&from=HEBREW',
+        );
+        expect(action.query!.hebrewToAramaic, isTrue);
+      });
+
+      test('q= בקידוד Windows-1255 מפוענח', () {
+        final action = parse('otzaria://open/biographies?q=%F9%EC%E5%ED');
+        expect(action.query!.text, 'שלום');
+      });
+    });
+
     group('library/reindex', () {
       test('reindex → ReindexLibraryAction', () {
         final action = ExternalUriRouter.parseUri(
@@ -1727,6 +1891,25 @@ void main() {
           isNull,
         );
       });
+    });
+
+    test('כל קישור פנימי קבוע ב-lib מזוהה בנתב (issue #2029)', () {
+      final literal = RegExp(r"handleInternalDeepLink\(\s*'([^'$]+)'");
+      final uris = [
+        for (final file in Directory('lib').listSync(recursive: true))
+          if (file is File && file.path.endsWith('.dart'))
+            for (final match in literal.allMatches(file.readAsStringSync()))
+              match.group(1)!,
+      ];
+
+      expect(uris, isNotEmpty);
+      for (final uri in uris) {
+        expect(
+          ExternalUriRouter.parseUri(Uri.parse(uri)),
+          isNotNull,
+          reason: uri,
+        );
+      }
     });
   });
 }

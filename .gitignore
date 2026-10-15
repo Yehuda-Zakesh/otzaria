@@ -24,6 +24,7 @@ migrate_working_dir/
 #.vscode/
 
 # Flutter/Dart/Pub related
+packages/*/pubspec.lock
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
@@ -47,6 +48,8 @@ windows/runner/*
 !windows/runner/startup_watchdog.h
 !windows/runner/phantom_mouse_button_filter.cpp
 !windows/runner/phantom_mouse_button_filter.h
+!windows/runner/shift_key_normalizer.cpp
+!windows/runner/shift_key_normalizer.h
 # ⚠️ `windows/runner/*` מעל מסנן **הכול**, וכל קובץ מקור חדש חייב חריגה
 # מפורשת כאן. קבצים שכבר tracked ממשיכים להיות tracked ולכן הבעיה אינה
 # נראית — אבל קובץ **חדש** נבלע בשקט: `git add -A` מדלג עליו בלי מילה,
@@ -103,18 +106,16 @@ build/
 fonts/
 external/
 # Generated Windows installers
-installer/otzaria-0.9.97-windows.exe
-installer/otzaria-0.9.97-windows-full.exe
+installer/otzaria-0.9.98-windows.exe
+installer/otzaria-0.9.98-windows-full.exe
 # End generated Windows installers
 
 flutter/
 
 seforim.db
 LOG.txt
-pubspec.lock
 macos/Podfile.lock
 macos/Flutter/GeneratedPluginRegistrant.swift
-isolate.pdf
 
 sentry.properties
 .sentry-native/
@@ -135,7 +136,6 @@ seforim.db-shm
 .gitignore
 seforim.db-wal
 .gstack/
-pubspec.lock
 
 # נתוני הביוגרפיות מוזרקים בזמן בנייה מה-release של ta-shma-to-otzaria
 assets/bio/biographies.tsb

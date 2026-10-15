@@ -14,7 +14,6 @@ import 'package:otzaria/tools/tikkun_korim/export/tikkun_export_dialog.dart';
 import 'package:otzaria/tools/tikkun_korim/export/tikkun_pdf_exporter.dart';
 import 'package:otzaria/tools/tikkun_korim/models/tikkun_models.dart';
 import 'package:otzaria/tools/tikkun_korim/repository/tikkun_contracts.dart';
-import 'package:otzaria/tools/tikkun_korim/repository/tikkun_dependencies.dart';
 import 'package:otzaria/tools/tikkun_korim/repository/tikkun_korim_repository.dart';
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_settings.dart';
 import 'package:otzaria/settings/settings_exports.dart';
@@ -58,8 +57,8 @@ class TikkunKorimScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final engine = this.engine ?? TikkunDependencies.engine;
-    final data = this.data ?? TikkunDependencies.data;
+    final engine = this.engine;
+    final data = this.data;
     if (engine == null || data == null) {
       return const ToolEmptyState(
         icon: FluentIcons.book_open_24_regular,
@@ -99,6 +98,10 @@ class _TikkunKorimViewState extends State<TikkunKorimView> {
   int _lastReportedLine = -1;
   Timer? _syncTimer;
 
+  /// מפתח הרשימה המוצגת ושורת הפתיחה שלה.
+  Key? _pageKey;
+  int _openingLine = 0;
+
   /// בניות ה-PDF שמסך ההדפסה ביקש ועדיין רצות.
   final Set<TikkunPdfExporter> _activeExports = {};
 
@@ -137,13 +140,14 @@ class _TikkunKorimViewState extends State<TikkunKorimView> {
   }
 
   void _handleScrollRequest(TikkunKorimState state) {
-    if (!mounted || state.scrollRequestId == _handledScrollRequest) return;
+    // קריאה ממצב ישן יכולה להגיע אחרי שרשימה חדשה כבר בלעה בקשה חדשה ממנה.
+    if (!mounted || state.scrollRequestId <= _handledScrollRequest) return;
     final line = state.scrollToLine;
     _handledScrollRequest = state.scrollRequestId;
     if (line == null || !_scrollController.isAttached) return;
     _syncTimer?.cancel();
     _lastReportedLine = line;
-    // רשימה חדשה כבר בראש; רשימה קיימת חייבת לגלול גם אל הפרק הראשון.
+    // כבר בראש הרשימה — אין לאן לגלול; רשימה שנגללה חוזרת גם אל הפרק הראשון.
     if (line == 0 &&
         _positions.itemPositions.value.any(
           (p) => p.index == 0 && p.itemLeadingEdge >= 0,
@@ -157,13 +161,26 @@ class _TikkunKorimViewState extends State<TikkunKorimView> {
     );
   }
 
+  /// רשימה חדשה נפתחת ישר בשורת היעד ובולעת את בקשת הגלילה: ל-scrollTo עליה
+  /// אין עדיין מיקומים, והחבילה עוברת למעבר-דהייה שמראה שורות רחוקות.
+  int _consumeOpeningLine(TikkunKorimState state) {
+    final line = state.scrollToLine;
+    if (state.scrollRequestId <= _handledScrollRequest || line == null) {
+      return 0;
+    }
+    _handledScrollRequest = state.scrollRequestId;
+    _syncTimer?.cancel();
+    _lastReportedLine = line.clamp(0, state.currentLines.length - 1);
+    return _lastReportedLine;
+  }
+
   // ── הדפסה ─────────────────────────────────────────────────────────────
 
   /// בוחר את התוכן בדיאלוג של התיקון, ופותח את מסך ההדפסה של התוכנה —
   /// עם תצוגה מקדימה, הדפסה או שמירה ל-PDF.
   Future<void> _print(BuildContext context, TikkunKorimState state) async {
     final allColumns = [for (final page in state.pages) page.lines];
-    // בתורה העמודים מכסים את כל החומשים — "הכל" וטווח הפסוקים מוגבלים
+    // בתורה העמודים מכסים את כל החומשים — "החומש" וטווח הפסוקים מוגבלים
     // לחומש הנוכחי, כמו בתוסף.
     final bookColumns = _currentBookColumns(state, allColumns);
     // "עמודים מקוריים" קיים רק כשהטורים הם עמודי שיטה בני 42/51 שורות.
@@ -184,6 +201,7 @@ class _TikkunKorimViewState extends State<TikkunKorimView> {
       allowOriginalPages: hasOriginalPages,
       verseDomain: hasVerseRange ? tikkunVerseDomain(bookColumns) : null,
       parashaName: parasha,
+      isTorah: state.nav.section == TikkunSection.torah,
       parashaRange: parasha == null
           ? null
           : tikkunParashaColumnRange(allColumns, parasha),
@@ -264,6 +282,8 @@ class _TikkunKorimViewState extends State<TikkunKorimView> {
     var title = (state.headerTitle ?? _currentBookTitle(state)).trim();
     if (options.scope == TikkunExportScope.parasha) {
       title = 'תיקון קוראים פרשת ${state.nav.parashaName}';
+    } else if (options.scope == TikkunExportScope.wholeTorah) {
+      title = 'תיקון קוראים חמשה חומשי תורה';
     } else if (options.scope == TikkunExportScope.verseRange) {
       title +=
           ' ${toHebrewNumeral(options.fromChapter)},'
@@ -851,6 +871,8 @@ class _TikkunKorimViewState extends State<TikkunKorimView> {
     TikkunKorimState state,
     _TikkunColumns columns,
   ) {
+    final lines = state.currentLines;
+    if (state.error != null || lines.isEmpty) _pageKey = null;
     if (state.error != null) {
       return ToolEmptyState(
         icon: FluentIcons.error_circle_24_regular,
@@ -860,7 +882,6 @@ class _TikkunKorimViewState extends State<TikkunKorimView> {
     if (state.isLoading && state.pages.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
-    final lines = state.currentLines;
     if (lines.isEmpty) {
       // ה-BLoC מנסח הודעה מדויקת (למשל "אין הפטרה במנהג זה"); בלעדיה נופלים
       // להודעה הגנרית.
@@ -869,11 +890,15 @@ class _TikkunKorimViewState extends State<TikkunKorimView> {
         message: state.headerSubtitle ?? ToolsMessages.tikkunNoData,
       );
     }
+    final pageKey = ValueKey(
+      'tikkun-page-${state.nav.currentColumnIndex}-${identityHashCode(lines)}',
+    );
+    if (pageKey != _pageKey) {
+      _pageKey = pageKey;
+      _openingLine = _consumeOpeningLine(state);
+    }
     return ReaderPage(
-      key: ValueKey(
-        'tikkun-page-${state.nav.currentColumnIndex}-'
-        '${identityHashCode(lines)}',
-      ),
+      key: pageKey,
       lines: lines,
       settings: columns.settings,
       lineWidthEm: state.lineWidthEm,
@@ -883,6 +908,7 @@ class _TikkunKorimViewState extends State<TikkunKorimView> {
       headerSubtitle: state.headerSubtitle,
       scrollController: _scrollController,
       positionsListener: _positions,
+      initialLine: _openingLine,
       onZoomChanged: _setZoom,
     );
   }

@@ -31,6 +31,13 @@ class PortablePaths {
     SettingsRepository.keyDbEffectivePath,
   ];
 
+  /// מפתחות settings שמכילים JSON עם נתיבים.
+  static const List<String> _jsonPathSettingsKeys = [
+    SettingsRepository.keyCustomFolders,
+    SettingsRepository.keyAttachedLibraries,
+    SettingsRepository.keyAttachedLibraryFolders,
+  ];
+
   /// Hive boxes שעלולים להכיל נתיבים בתוך מבני JSON (למשל path של PdfBook).
   static const List<String> _hiveBoxNames = [
     'tabs',
@@ -81,32 +88,21 @@ class PortablePaths {
       'rewriting stored paths',
     );
 
-    for (final key in _pathSettingsKeys) {
+    for (final key in [..._pathSettingsKeys, ..._jsonPathSettingsKeys]) {
       final value = Settings.getValue<String>(key);
       if (value == null || value.isEmpty) continue;
-      final rewritten = _rewritePath(value, oldRoot, newRoot);
-      if (rewritten != value) {
-        await Settings.setValue(key, rewritten);
-      }
-    }
-
-    // תיקיות מותאמות אישית נשמרות כ-JSON עם שדות path.
-    final foldersJson = Settings.getValue<String>(
-      SettingsRepository.keyCustomFolders,
-    );
-    if (foldersJson != null && foldersJson.isNotEmpty) {
+      final isJson = _jsonPathSettingsKeys.contains(key);
       try {
-        final result = _rewriteDeep(jsonDecode(foldersJson), oldRoot, newRoot);
+        final decoded = isJson ? jsonDecode(value) : value;
+        final result = _rewriteDeep(decoded, oldRoot, newRoot);
         if (result.changed) {
-          await Settings.setValue(
-            SettingsRepository.keyCustomFolders,
-            jsonEncode(result.value),
+          await Settings.setValue<String>(
+            key,
+            isJson ? jsonEncode(result.value) : result.value as String,
           );
         }
       } catch (e, stackTrace) {
-        debugPrint(
-          'PortablePaths: failed rewriting custom folders: $e\n$stackTrace',
-        );
+        debugPrint('PortablePaths: failed rewriting $key: $e\n$stackTrace');
       }
     }
 
@@ -165,14 +161,17 @@ class PortablePaths {
   /// ההשוואה דרך [p.equals] — לא רגישה לאותיות ב-Windows (אות כונן D: מול
   /// d:) ומיישרת הבדלי מפרידים.
   static String _rewritePath(String value, String oldRoot, String newRoot) {
-    if (value.length < oldRoot.length) return value;
-    if (!p.equals(value.substring(0, oldRoot.length), oldRoot)) return value;
-    if (value.length > oldRoot.length) {
-      final next = value[oldRoot.length];
+    // מקור של מסד מצורף נשמר כ-"folder:<נתיב>".
+    final start = value.startsWith('folder:') ? 'folder:'.length : 0;
+    final end = start + oldRoot.length;
+    if (value.length < end) return value;
+    if (!p.equals(value.substring(start, end), oldRoot)) return value;
+    if (value.length > end) {
+      final next = value[end];
       // התאמת prefix בלבד אינה מספיקה: D:\otzaria_data2 מתחיל ב-D:\otzaria_data
       // אבל אינו יושב תחתיו.
       if (next != '\\' && next != '/') return value;
     }
-    return newRoot + value.substring(oldRoot.length);
+    return value.substring(0, start) + newRoot + value.substring(end);
   }
 }

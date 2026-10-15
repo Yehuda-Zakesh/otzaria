@@ -18,6 +18,7 @@ void dispatchOpenBookAction({
     action.searchQuery ?? '',
     markSection: action.markSection,
     markText: action.markText,
+    explicitIndex: action.hasExplicitPosition,
     navigateToPositionIfReused: action.hasExplicitPosition,
   );
 }
@@ -34,6 +35,7 @@ void dispatchOpenPdfBookAction({
     action.page ?? 1,
     '',
     requiresStableLayout: true,
+    explicitIndex: action.hasExplicitPosition,
     navigateToPositionIfReused: action.hasExplicitPosition,
   );
 }

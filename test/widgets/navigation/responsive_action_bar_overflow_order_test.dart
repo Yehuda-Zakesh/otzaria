@@ -352,7 +352,10 @@ void main() {
 
       final hiddenTooltips = result.hidden.map((e) => e.tooltip).toList();
       // plugin מופיע לפני search ברשימת hidden (הוסר ראשון)
-      expect(hiddenTooltips.indexOf('plugin'), lessThan(hiddenTooltips.indexOf('search')));
+      expect(
+        hiddenTooltips.indexOf('plugin'),
+        lessThan(hiddenTooltips.indexOf('search')),
+      );
     });
 
     // ── טסט 2: search יורד לפני קבוצת zoom ──────────────────────────────────
@@ -436,9 +439,14 @@ void main() {
       );
 
       // search חוזר (LIFO: נבדק בצעד הסרת zoom); zoom נשאר hidden.
-      expect(result.hidden.map((e) => e.actionId).toSet(),
-          containsAll([ToolbarActionId.zoomOut, ToolbarActionId.zoomIn]));
-      expect(result.hidden.map((e) => e.actionId), isNot(contains(ToolbarActionId.search)));
+      expect(
+        result.hidden.map((e) => e.actionId).toSet(),
+        containsAll([ToolbarActionId.zoomOut, ToolbarActionId.zoomIn]),
+      );
+      expect(
+        result.hidden.map((e) => e.actionId),
+        isNot(contains(ToolbarActionId.search)),
+      );
       expect(result.visible.map((e) => e.tooltip), contains('search'));
     });
 
@@ -554,7 +562,10 @@ void main() {
       final visibleIds = result.visible.map((e) => e.actionId).toSet();
 
       // zoom נשאר hidden שלם
-      expect(hiddenIds, containsAll([ToolbarActionId.zoomOut, ToolbarActionId.zoomIn]));
+      expect(
+        hiddenIds,
+        containsAll([ToolbarActionId.zoomOut, ToolbarActionId.zoomIn]),
+      );
       // search חזר (לא zoom)
       expect(visibleIds, contains(ToolbarActionId.search));
       expect(visibleIds, isNot(contains(ToolbarActionId.zoomOut)));

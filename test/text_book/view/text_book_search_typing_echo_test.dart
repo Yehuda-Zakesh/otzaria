@@ -18,9 +18,9 @@ import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/text_book_search_screen.dart';
 import 'package:otzaria/widgets/navigation/search_pane_base.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -65,7 +65,7 @@ void main() {
             body: BlocBuilder<TextBookBloc, TextBookState>(
               builder: (context, state) => TextBookSearchView(
                 contentLoader: () async => const ['שורה א'],
-                scrollControler: ItemScrollController(),
+                lines: LineScrollController(),
                 focusNode: focusNode,
                 closeLeftPaneCallback: () {},
                 initialQuery: (state as TextBookLoaded).searchText,
@@ -150,8 +150,6 @@ TextBookLoaded _loadedState(String searchText) {
     selectedIndex: 0,
     pinLeftPane: false,
     searchText: searchText,
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }
 

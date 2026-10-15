@@ -7,8 +7,7 @@ import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 
 /// `UpdateVisibleIndecies` מצלם את ה-state בכניסה למטפל. כל `await` בדרך
 /// ל-emit מאפשר לאירוע אחר לפלוט מצב חדש, וה-emit של הצילום המיושן דורס אותו —
@@ -75,6 +74,33 @@ void main() {
 
     await bloc.close();
   });
+
+  test(
+    'בלי בחירה וחלונית הניווט סגורה, הקישורים עוקבים אחרי הגלילה (issue #2036)',
+    () async {
+      final bloc = await _loadedBloc(showLeftPane: false);
+      await _waitFor(
+        () => (bloc.state as TextBookLoaded).links.isNotEmpty,
+        description: 'טעינת קישורים',
+      );
+
+      bloc.add(const UpdateVisibleIndecies([12, 13, 14]));
+      await _waitFor(
+        () => (bloc.state as TextBookLoaded).visibleIndices.first == 12,
+        description: 'visibleIndices התעדכנו ל-12',
+      );
+
+      final state = bloc.state as TextBookLoaded;
+      expect(
+        state.visibleLinks.map((link) => link.index1).toSet(),
+        {13, 14, 15},
+        reason:
+            'הרשימה חייבת להציג את קישורי השורות שעל המסך, לא של מיקום קודם',
+      );
+
+      await bloc.close();
+    },
+  );
 }
 
 Future<TextBookBloc> _loadedBloc({required bool showLeftPane}) async {
@@ -88,8 +114,6 @@ Future<TextBookBloc> _loadedBloc({required bool showLeftPane}) async {
       searchMode: SearchMode.exact,
       showPageShapeView: false,
     ),
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 
   bloc.add(
@@ -162,7 +186,17 @@ class _TwoSectionRepository extends TextBookRepository {
     required int startIndex,
     required int endIndex,
     Iterable<String>? targetBookTitles,
-  }) async => const [];
+  }) async => [
+    // קישור "reference" לכל שורה (index1 הוא 1-based).
+    for (var i = startIndex; i <= endIndex; i++)
+      Link(
+        heRef: 'מקור $i',
+        index1: i + 1,
+        path2: 'ספר $i.txt',
+        index2: 1,
+        connectionType: 'reference',
+      ),
+  ];
 
   @override
   Future<List<String>> getAvailableCommentators(TextBook book) async =>

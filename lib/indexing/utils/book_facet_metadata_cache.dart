@@ -108,15 +108,6 @@ class BookFacetMetadataCache {
     }
   }
 
-  void clear() {
-    _isLoaded = false;
-    _loadingFuture = null;
-    _authorsByBookId.clear();
-    _authorsByUserBookId.clear();
-    _baseBookIds.clear();
-    _baseUserBookIds.clear();
-  }
-
   /// נתיבי ה-facet הממדיים של הספר, לפרמטר `extraFacets` של המנוע.
   /// [isFoundational] — סיווג ספרי-היסוד לפי נתיב הקטגוריה
   /// (FoundationalBookClassifier), שמשלים את דגל ה-DB.

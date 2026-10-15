@@ -17,7 +17,7 @@ class PluginPackageResult {
   /// מספר הקבצים שהוחרגו ע"י `.otzignore` (0 אם אין קובץ כזה).
   final int excludedCount;
 
-  /// קבצי המטא-דאטה שהוחרגו (‎*.md‎, LICENSE, dotfiles, ‎screenshots/‎...) ולא
+  /// קבצי המטא-דאטה שהוחרגו (*.md, LICENSE, dotfiles, screenshots/...) ולא
   /// הוחזרו ע"י שורת `!` ב-`.otzignore`.
   final List<String> excludedMetadata;
   final int bytes;
@@ -121,7 +121,7 @@ class PluginPackager {
     }
 
     // תיקיות פיתוח שאין צורך לארוז — שומרות על חבילה רזה ומונעות הדלפת
-    // היסטוריית git/הגדרות IDE לתוך ה-‎.otzplugin שמופץ.
+    // היסטוריית git/הגדרות IDE לתוך ה-.otzplugin שמופץ.
     const skipDirs = <String>{
       '.git',
       '.svn',

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:window_manager/window_manager.dart';
@@ -20,6 +21,8 @@ import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
 import 'package:otzaria/navigation/bloc/navigation_event.dart';
 import 'package:otzaria/navigation/bloc/navigation_state.dart';
 import 'package:otzaria/navigation/view/custom_title_bar.dart';
+import 'package:otzaria/plugins/services/plugin_new_tab_page_registry.dart';
+import 'package:otzaria/plugins/services/plugin_page_launcher.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/shortcuts/shortcut_helper.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
@@ -35,15 +38,184 @@ import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../helpers/memory_settings_cache.dart';
+
+class _NewTabRegistryRepo extends Fake implements PluginRegistryRepository {
+  @override
+  Future<String?> getNewTabPageOwner() async =>
+      PluginNewTabPageRegistry.instance.activePluginId;
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.stylus]) {
+    testWidgets('גרירה קצרה מסדרת כרטיסיות אופקיות ב־$kind', (
+      tester,
+    ) async {
+      final tabs = [
+        _makeTextTab('ספר א'),
+        _makeTextTab('ספר ב'),
+        _makeTextTab('ספר ג'),
+      ];
+      final tabsBloc = _TestTabsBloc(
+        TabsState(tabs: tabs, currentTabIndex: 0),
+      );
+      final navigationBloc = _TestNavigationBloc(
+        const NavigationState(currentScreen: Screen.reading),
+      );
+      final settingsBloc = _TestSettingsBloc(SettingsState.initial());
+      addTearDown(() async {
+        for (final tab in tabs) {
+          tab.dispose();
+        }
+        await tabsBloc.close();
+        await navigationBloc.close();
+        await settingsBloc.close();
+      });
+      await _setSurfaceSize(tester, const Size(1200, 800));
+      await _pumpTitleBar(
+        tester,
+        tabsBloc: tabsBloc,
+        navigationBloc: navigationBloc,
+        settingsBloc: settingsBloc,
+      );
+      await tester.pumpAndSettle();
+      final target = tester.getCenter(find.text('ספר ג'));
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text('ספר א')),
+        kind: kind,
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+      await gesture.moveTo(target);
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+      final moves = tabsBloc.addedEvents.whereType<MoveTab>().length;
+      expect(moves, 1);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+  }
+
   setUp(() async {
     await Settings.init(cacheProvider: MemorySettingsCache());
   });
+
+  testWidgets(
+    'adding a tab without plugins keeps correct width on its first frame',
+    (tester) async {
+      final first = _makeTextTab('ספר א');
+      final second = _makeTextTab('ספר ב');
+      final tabsBloc = _TestTabsBloc(
+        TabsState(tabs: [first], currentTabIndex: 0),
+      );
+      final navigationBloc = _TestNavigationBloc(
+        const NavigationState(currentScreen: Screen.reading),
+      );
+      final settingsBloc = _TestSettingsBloc(SettingsState.initial());
+      addTearDown(() async {
+        first.dispose();
+        second.dispose();
+        await tabsBloc.close();
+        await navigationBloc.close();
+        await settingsBloc.close();
+      });
+      await _setSurfaceSize(tester, const Size(1200, 800));
+      await _pumpTitleBar(
+        tester,
+        tabsBloc: tabsBloc,
+        navigationBloc: navigationBloc,
+        settingsBloc: settingsBloc,
+      );
+      await tester.pumpAndSettle();
+      expect(PluginNewTabPageRegistry.instance.hasActiveRegistration, isFalse);
+      expect(
+        tester.widget<ReadingTabStrip>(find.byType(ReadingTabStrip)).widths,
+        [140],
+      );
+      tabsBloc.emitState(TabsState(tabs: [first, second], currentTabIndex: 0));
+      await tester.idle();
+      await tester.pump();
+      final firstFrame = tester
+          .widget<ReadingTabStrip>(find.byType(ReadingTabStrip))
+          .widths;
+      await tester.pumpAndSettle();
+      final finalFrame = tester
+          .widget<ReadingTabStrip>(find.byType(ReadingTabStrip))
+          .widths;
+      expect(
+        firstFrame,
+        finalFrame,
+        reason:
+            'Changing count without resizing must not need a corrective frame',
+      );
+    },
+  );
+
+  for (final size in [const Size(1200, 800), const Size(600, 900)]) {
+    testWidgets('new tab keeps first plugin as exclusive owner at $size', (
+      tester,
+    ) async {
+      final registry = PluginNewTabPageRegistry.instance;
+      registry.repositoryForTesting = _NewTabRegistryRepo();
+      final launcher = PluginPageLauncher.instance;
+      final oldNavigator = launcher.navigator;
+      final opened = <String>[];
+      launcher.navigator = opened.add;
+      final tabs = List.generate(20, (i) => _makeTextTab('ספר מספר $i'));
+      final tabsBloc = _TestTabsBloc(TabsState(tabs: tabs, currentTabIndex: 0));
+      final navigationBloc = _TestNavigationBloc(
+        const NavigationState(currentScreen: Screen.reading),
+      );
+      final settingsBloc = _TestSettingsBloc(SettingsState.initial());
+      addTearDown(() async {
+        registry.repositoryForTesting = null;
+        registry.remove('review.first');
+        registry.remove('review.second');
+        launcher.markPageClosed('review.first');
+        launcher.markPageClosed('review.second');
+        launcher.navigator = oldNavigator;
+        for (final tab in tabs) {
+          tab.dispose();
+        }
+        await tabsBloc.close();
+        await navigationBloc.close();
+        await settingsBloc.close();
+      });
+      await _setSurfaceSize(tester, size);
+      await _pumpTitleBar(
+        tester,
+        tabsBloc: tabsBloc,
+        navigationBloc: navigationBloc,
+        settingsBloc: settingsBloc,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('כרטיסייה חדשה'), findsNothing);
+      expect(registry.register('review.first'), isTrue);
+      expect(registry.register('review.second'), isFalse);
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('כרטיסייה חדשה'), findsOneWidget);
+      await tester.tap(find.byTooltip('כרטיסייה חדשה'));
+      await tester.pump();
+      expect(opened, ['review.first']);
+      registry.remove('review.second');
+      expect(registry.activePluginId, 'review.first');
+      registry.remove('review.first');
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('כרטיסייה חדשה'), findsNothing);
+      // A rejected registration cannot silently take over after release.
+      expect(registry.activePluginId, isNull);
+      expect(registry.register('review.second'), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('כרטיסייה חדשה'), findsOneWidget);
+      await tester.tap(find.byTooltip('כרטיסייה חדשה'));
+      await tester.pump();
+      expect(opened, ['review.first', 'review.second']);
+      registry.remove('review.second');
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('כרטיסייה חדשה'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('tooltip של TextBookTab כולל את כותרת המיקום בפועל', (
     tester,
@@ -318,6 +490,93 @@ void main() {
     );
   });
 
+  group('שינוי הגדרות', () {
+    late _TestSettingsBloc settingsBloc;
+
+    Future<void> pumpBar(WidgetTester tester) async {
+      final tabs = [for (var i = 0; i < 5; i++) _makeTextTab('ספר $i')];
+      final tabsBloc = _TestTabsBloc(TabsState(tabs: tabs, currentTabIndex: 0));
+      final navigationBloc = _TestNavigationBloc(
+        const NavigationState(currentScreen: Screen.reading),
+      );
+      settingsBloc = _TestSettingsBloc(SettingsState.initial());
+      addTearDown(() async {
+        for (final tab in tabs) {
+          tab.dispose();
+        }
+        await tabsBloc.close();
+        await navigationBloc.close();
+        await settingsBloc.close();
+      });
+      await _setSurfaceSize(tester, const Size(1200, 800));
+      await _pumpTitleBar(
+        tester,
+        tabsBloc: tabsBloc,
+        navigationBloc: navigationBloc,
+        settingsBloc: settingsBloc,
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> emitSettings(WidgetTester tester, SettingsState state) async {
+      settingsBloc.emitState(state);
+      await tester.pump();
+      await tester.pump();
+    }
+
+    ReadingTabStrip strip(WidgetTester tester) =>
+        tester.widget<ReadingTabStrip>(find.byType(ReadingTabStrip));
+
+    testWidgets('הגדרה שהכותרת אינה מציגה אינה בונה מחדש את הרצועה', (
+      tester,
+    ) async {
+      await pumpBar(tester);
+      final before = strip(tester);
+
+      await emitSettings(tester, settingsBloc.state.copyWith(fontSize: 30));
+
+      expect(identical(strip(tester), before), isTrue);
+    });
+
+    testWidgets('מיקום, מסך מלא וקיצורים עדיין מתעדכנים בכותרת', (
+      tester,
+    ) async {
+      ShortcutHelper.isMacForTesting = false;
+      addTearDown(() => ShortcutHelper.isMacForTesting = null);
+      await pumpBar(tester);
+      await emitSettings(
+        tester,
+        settingsBloc.state.copyWith(
+          readingTabsPlacement: SettingsRepository.readingTabsPlacementSide,
+        ),
+      );
+      expect(find.byType(ReadingTabStrip), findsNothing);
+      await emitSettings(
+        tester,
+        settingsBloc.state.copyWith(
+          readingTabsPlacement: SettingsRepository.readingTabsPlacementTop,
+        ),
+      );
+      expect(find.byType(ReadingTabStrip), findsOneWidget);
+      expect(find.byTooltip('מסך מלא'), findsOneWidget);
+
+      await emitSettings(
+        tester,
+        settingsBloc.state.copyWith(isFullscreen: true),
+      );
+      expect(find.byTooltip('צא ממסך מלא'), findsOneWidget);
+
+      await Settings.setValue<String>('key-shortcut-open-history', 'ctrl+j');
+      await emitSettings(
+        tester,
+        settingsBloc.state.copyWith(
+          shortcuts: const {'key-shortcut-open-history': 'ctrl+j'},
+        ),
+      );
+      expect(find.byTooltip('הצג היסטוריה (CTRL + J)'), findsOneWidget);
+    });
+  });
+
   testWidgets('כרטיסיות מקבלות רוחב קבוע שווה, חסום בתקרה (~140px)', (
     tester,
   ) async {
@@ -453,7 +712,7 @@ void main() {
     expect(tester.takeException(), isNull);
     // רק טאב-PDF מקבל אייקון-סוג; בטאב מפרשים אין אייקון מוביל.
     expect(find.byIcon(OtzariaIcons.book_24_regular), findsNothing);
-    expect(find.byIcon(OtzariaIcons.book_pdf_24_regular), findsNothing);
+    expect(find.byIcon(OtzariaIcons.document_pdf_24_regular), findsNothing);
   });
 
   testWidgets('טאב PDF רחב מציג אייקון PDF ליד שם הספר', (tester) async {
@@ -481,7 +740,7 @@ void main() {
       settingsBloc: settingsBloc,
     );
 
-    expect(find.byIcon(OtzariaIcons.book_pdf_24_regular), findsOneWidget);
+    expect(find.byIcon(OtzariaIcons.document_pdf_24_regular), findsOneWidget);
   });
 
   testWidgets('טאב PDF צר (רוחב < 100) מסתיר את אייקון ה-PDF', (tester) async {
@@ -512,7 +771,7 @@ void main() {
       settingsBloc: settingsBloc,
     );
 
-    expect(find.byIcon(OtzariaIcons.book_pdf_24_regular), findsNothing);
+    expect(find.byIcon(OtzariaIcons.document_pdf_24_regular), findsNothing);
   });
 
   testWidgets('CombinedTab מציג את התחלת שני הספרים, כל אחד בחצי', (
@@ -1045,12 +1304,9 @@ void main() {
           settingsBloc: settingsBloc,
         );
 
-        // LongPressDraggable יורש מ-Draggable, לכן בודקים את runtimeType
-        // בדיוק: בדסקטופ הגרירה מיידית, ללא השהיית לחיצה ארוכה.
+        // בדסקטופ הגרירה מיידית בעכבר, ללא LongPressDraggable.
         expect(
-          find.byWidgetPredicate(
-            (w) => w.runtimeType == Draggable<OpenedTab>,
-          ),
+          find.byWidgetPredicate((w) => w is Draggable<OpenedTab>),
           findsOneWidget,
         );
         expect(
@@ -1818,6 +2074,58 @@ void main() {
         reason: 'הטאב שנסגר הוא הטאב שעל ה-X שלו נלחץ',
       );
     });
+
+    testWidgets('קיצור הסגירה מוצג רק ב-tooltip של ה-X בטאב הפעיל '
+        '(issue #2000)', (tester) async {
+      final first = _makeTextTab('ספר א');
+      final second = _makeTextTab('ספר ב');
+      final tabsBloc = _TestTabsBloc(
+        TabsState(tabs: [first, second], currentTabIndex: 0),
+      );
+      final navigationBloc = _TestNavigationBloc(
+        const NavigationState(currentScreen: Screen.reading),
+      );
+      final settingsBloc = _TestSettingsBloc(SettingsState.initial());
+
+      addTearDown(() async {
+        first.dispose();
+        second.dispose();
+        await tabsBloc.close();
+        await navigationBloc.close();
+        await settingsBloc.close();
+      });
+
+      await _setSurfaceSize(tester, const Size(1200, 800));
+      await _pumpTitleBar(
+        tester,
+        tabsBloc: tabsBloc,
+        navigationBloc: navigationBloc,
+        settingsBloc: settingsBloc,
+      );
+
+      String closeTooltipOf(String title) => tester
+          .widget<IconButton>(
+            find.ancestor(
+              of: find.descendant(
+                of: find.ancestor(
+                  of: find.text(title),
+                  matching: find.byType(Tab),
+                ),
+                matching: find.byIcon(FluentIcons.dismiss_24_regular),
+              ),
+              matching: find.byType(IconButton),
+            ),
+          )
+          .tooltip!;
+
+      final shortcut = ShortcutHelper.formatShortcutForDisplay('ctrl+w');
+      expect(closeTooltipOf('ספר א'), 'סגור כרטיסיה ($shortcut)');
+      expect(
+        closeTooltipOf('ספר ב'),
+        'סגור כרטיסיה',
+        reason: 'הקיצור סוגר רק את הטאב הפעיל',
+      );
+    });
   });
 
   testWidgets('סגירת טאב כשהעכבר בשורה שומרת על רוחב הטאבים (לא מתרחבים)', (
@@ -2422,8 +2730,6 @@ TextBookTab _makeTextTab(String title, {String currentTitle = ''}) {
       pinLeftPane: false,
       searchText: '',
       currentTitle: currentTitle,
-      scrollController: ItemScrollController(),
-      positionsListener: ItemPositionsListener.create(),
     ),
   );
 
@@ -2517,6 +2823,8 @@ class _TestSettingsBloc extends Bloc<SettingsEvent, SettingsState>
   _TestSettingsBloc(super.initialState) {
     on<SettingsEvent>((event, emit) {});
   }
+
+  void emitState(SettingsState state) => emit(state);
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

@@ -35,7 +35,6 @@ import 'package:otzaria/widgets/navigation/app_top_bar.dart';
 import 'package:otzaria/widgets/navigation/reader_nav_center.dart';
 import 'package:otzaria/widgets/navigation/responsive_action_bar.dart';
 import 'package:provider/provider.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 /// כותרת ארוכה כמו שנוצרת מספר Word אישי: פסקת גוף שלמה שסומנה ב-Word
 /// בסגנון "heading 3", ולכן הפכה לערך בתוכן העניינים.
@@ -389,8 +388,6 @@ TextBookLoaded _loadedState(TextBook book, String currentTitle) {
     pinLeftPane: false,
     searchText: '',
     currentTitle: currentTitle,
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
     searchMode: SearchMode.exact,
   );
 }

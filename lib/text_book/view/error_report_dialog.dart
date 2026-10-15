@@ -16,7 +16,6 @@ import 'package:otzaria/core/messages/report_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/theme/theme_exports.dart';
 import 'package:otzaria/models/books.dart';
-import 'package:otzaria/models/direct_error_report.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/shortcuts/shortcut_helper.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
@@ -30,10 +29,10 @@ import 'package:otzaria/widgets/dialogs/dialogs_exports.dart';
 import 'package:otzaria/widgets/dialogs/error_report_sender_email_dialog.dart';
 import 'package:otzaria/widgets/misc/app_selection_area.dart';
 import 'package:otzaria/widgets/misc/phone_report_tab.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
 import 'package:otzaria/utils/text/ref_helper.dart';
-import 'package:otzaria/utils/canonical_json.dart';
 
 /// נתוני הדיווח שנאספו מתיבת סימון הטקסט + פירוט הטעות שהמשתמש הקליד.
 class ReportedErrorData {
@@ -131,12 +130,21 @@ class _DirectReportDetails extends StatelessWidget {
                 label: 'פירוט הטעות',
                 value: report.errorDetails,
               ),
-              if (report.correction != null)
+              if (report.correction case final correction?)
                 _ReportDetailRow(
                   label: report.serverAcceptedCorrection == false
                       ? 'הצעת תיקון (נקלטה כטקסט בלבד)'
                       : 'הצעת תיקון',
-                  value: report.correction!.fallbackBlock,
+                  value: correction.fallbackBlock,
+                  child: correction.proposedText == null
+                      ? null
+                      : TextCorrectionDiffView(
+                          before: correction.target,
+                          after: correction.proposedText!,
+                          style:
+                              Theme.of(context).textTheme.bodyMedium ??
+                              const TextStyle(),
+                        ),
                 ),
               _ReportDetailRow(label: 'הקשר', value: report.contextText),
               _ReportDetailRow(label: 'נתיב קובץ', value: report.filePath),
@@ -160,9 +168,13 @@ class _ReportDetailRow extends StatelessWidget {
   final String label;
   final String value;
 
+  /// מוצג במקום [value] כשיש תצוגה עשירה יותר לערך.
+  final Widget? child;
+
   const _ReportDetailRow({
     required this.label,
     required this.value,
+    this.child,
   });
 
   @override
@@ -178,10 +190,11 @@ class _ReportDetailRow extends StatelessWidget {
             style: Theme.of(context).textTheme.labelMedium,
           ),
           const SizedBox(height: 3),
-          Text(
-            displayValue,
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
+          child ??
+              Text(
+                displayValue,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
         ],
       ),
     );
@@ -343,6 +356,7 @@ class ErrorReportHelper {
       'wikiSource': '$_fallbackMail,novartza@gmail.com',
       'Pninim': '$_fallbackMail,contact@pninim.org',
       'Tashma': '$_fallbackMail,jewishoffice@gmail.com',
+      'Dicta': '$_fallbackMail,jewishoffice@gmail.com',
       'Ben-Yehuda': '$_fallbackMail,editor@benyehuda.org',
       // רישיון "ים החכמה" מחייב שדיווח על ספר משלהם יגיע גם אליהם.
       'yam-HaHachma': '$_fallbackMail,y025837086@gmail.com',
@@ -634,21 +648,6 @@ $detailsSection
         .join('&');
   }
 
-  /// Launch mailto URL
-  static Future<void> launchMail(String email, BuildContext context) async {
-    final emailUri = Uri(
-      scheme: 'mailto',
-      path: email,
-    );
-    try {
-      await launchUrl(emailUri, mode: LaunchMode.externalApplication);
-    } catch (e) {
-      if (context.mounted) {
-        UiSnack.show(ReportMessages.cannotOpenMailApp);
-      }
-    }
-  }
-
   /// Show simple snackbar message
   static void showSimpleSnack(BuildContext context, String message) {
     if (!context.mounted) return;
@@ -696,7 +695,11 @@ $detailsSection
     final normalizedLibraryVersion = libraryVersion.trim().isEmpty
         ? 'unknown'
         : libraryVersion.trim();
-    final correction = source == null ? null : reportData.correction;
+    // הצעת תיקון בלי הצעה (null, מדיווח שמור מגרסה קודמת) נשלחת כדיווח חופשי.
+    final correction =
+        source == null || reportData.correction?.proposedText == null
+        ? null
+        : reportData.correction;
     const fit = DirectErrorReport.fitDisplayField;
     return DirectErrorReport(
       schemaVersion: DirectErrorReport.currentSchemaVersion,
@@ -740,35 +743,6 @@ $detailsSection
       sourceFolder: bookDetails['תיקיית המקור'] ?? '',
       libraryVersion: normalizedLibraryVersion,
       createdAt: DateTime.now().toUtc(),
-    );
-  }
-
-  /// Show success dialog for phone report
-  static void showPhoneReportSuccessDialog(
-    BuildContext context,
-    VoidCallback onReportAgain,
-  ) {
-    if (!context.mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('דיווח נשלח בהצלחה'),
-        content: const Text(ReportMessages.phoneSentThanks),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('סגור'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(dialogContext).pop();
-              onReportAgain();
-            },
-            child: const Text('פתח דוח שגיאות אחר'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -1076,6 +1050,7 @@ $detailsSection
     // פתיחת הדיאלוג. בספר דיקטה מוצג בתוכו קישור בולט לתיקון עצמי.
     final ReportDialogResult? result = await showDialog<ReportDialogResult>(
       context: context,
+      barrierDismissible: false,
       builder: (BuildContext dialogContext) {
         return TabbedReportDialog(
           selectedText: resolvedSelectedText,
@@ -1453,7 +1428,7 @@ class _RegularReportTabState extends State<RegularReportTab> {
   bool get _canSubmit {
     if (!_isCorrection) return _hasDetails;
     final draft = _draft;
-    return draft != null && draft.isValid && (draft.hasProposal || _hasDetails);
+    return draft != null && draft.isValid && draft.hasProposal;
   }
 
   @override
@@ -1627,9 +1602,10 @@ class _RegularReportTabState extends State<RegularReportTab> {
                           widget.selectedText,
                           style: TextStyle(
                             fontSize: widget.fontSize,
-                            fontFamily:
-                                Settings.getValue('key-font-family') ??
-                                AppFonts.defaultFont,
+                            fontFamily: AppFonts.renderFontFamily(
+                              Settings.getValue('key-font-family') ??
+                                  AppFonts.defaultFont,
+                            ),
                           ),
                           textAlign: TextAlign.right,
                         ),
@@ -1651,15 +1627,9 @@ class _RegularReportTabState extends State<RegularReportTab> {
                       isDense: true,
                       border: const OutlineInputBorder(),
                       labelText: _isCorrection
-                          ? 'הסבר לתיקון (חובה אם אין הצעה)'
+                          ? 'הסבר לתיקון (רשות)'
                           : 'פירוט הטעות (חובה)',
                       hintText: 'מה לא תקין כאן? בלא פירוט לא נוכל לטפל',
-                      helperText:
-                          _isCorrection &&
-                              _draft?.hasProposal == false &&
-                              !_hasDetails
-                          ? ReportMessages.proposalNeedsDetailsOrChange
-                          : null,
                     ),
                   ),
                 ],

@@ -1,8 +1,25 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
+import 'package:otzaria/data/repository/data_repository.dart';
+import 'package:otzaria/library/bloc/library_bloc.dart';
+import 'package:otzaria/library/bloc/library_event.dart';
+import 'package:otzaria/library/bloc/library_state.dart';
+import 'package:otzaria/library/hidden/hidden_library_selection.dart';
+import 'package:otzaria/library/hidden/hidden_library_store.dart';
+import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/library/services/hebrew_books_download_service.dart';
 import 'package:otzaria/library/view/otzar_book_dialog.dart';
 import 'package:otzaria/models/books.dart';
+import 'package:otzaria/settings/engine/settings_repository.dart';
+
+import '../../helpers/memory_settings_cache.dart';
 
 Widget _wrap(Widget child) => MaterialApp(
   locale: const Locale('he', 'IL'),
@@ -24,6 +41,26 @@ ExternalLibraryBook _otzarBook() => ExternalLibraryBook(
   externalLibraryId: 'oh:555',
   topics: '',
 );
+
+class _NoFiles extends Fake implements FileSystemData {}
+
+class _EmptyHiddenStore extends HiddenLibraryStore {
+  const _EmptyHiddenStore();
+  @override
+  HiddenLibrarySelection load() => const HiddenLibrarySelection();
+}
+
+/// קטלוג היברובוקס של ספר אחד, ממופה לפי סריקה אמיתית של [folder].
+class _CatalogRepository extends DataRepository {
+  _CatalogRepository(this.folder) : super(fileSystemData: _NoFiles());
+  final String folder;
+
+  @override
+  Future<List<Book>> getHebrewBooks() async =>
+      FileSystemData.mapHebrewBooksToLocal([
+        _hebrewBook(),
+      ], await FileSystemData.scanHebrewBooksPdfFilesAtPath(folder));
+}
 
 void main() {
   group('כתובת ההורדה', () {
@@ -65,4 +102,68 @@ void main() {
       expect(find.text('הורדת הקובץ'), findsNothing);
     });
   });
+
+  testWidgets(
+    'ספר שירד לתיקיית היברובוקס מוצג בתוצאות כספר מקומי בלי רענון (issue #2385)',
+    (tester) async {
+      await Settings.init(cacheProvider: MemorySettingsCache());
+      final folder = Directory.systemTemp.createTempSync('hb_2385_');
+      addTearDown(() => folder.deleteSync(recursive: true));
+      await Settings.setValue<String>(
+        SettingsRepository.keyHebrewBooksPath,
+        folder.path,
+      );
+      final library = Library(categories: []);
+      late LibraryBloc bloc;
+
+      // הבלוק נוצר בתוך runAsync: הסריקה והחיפוש ניגשים לדיסק.
+      await tester.runAsync(
+        () => http.runWithClient(() async {
+          bloc = LibraryBloc(
+            hiddenStore: const _EmptyHiddenStore(),
+            repository: _CatalogRepository(folder.path)
+              ..library = Future.value(library),
+          );
+          bloc.emit(
+            LibraryState(
+              library: library,
+              currentCategory: library,
+              isLoading: false,
+            ),
+          );
+          final searched = bloc.stream.firstWhere(
+            (s) => !s.isSearching && s.searchResults != null,
+          );
+          bloc
+            ..add(const UpdateSearchQuery('היברובוקס'))
+            ..add(const SearchBooks(showHebrewBooks: true));
+          expect(
+            (await searched).searchResults!.single,
+            isA<ExternalLibraryBook>(),
+          );
+
+          await tester.pumpWidget(
+            BlocProvider.value(
+              value: bloc,
+              child: _wrap(OtzarBookDialog(book: _hebrewBook())),
+            ),
+          );
+          await tester.pump();
+          final local = bloc.stream.firstWhere(
+            (s) => s.searchResults?.any((b) => b is PdfBook) ?? false,
+          );
+          await tester.tap(find.text('הורדת הקובץ'));
+          await local.timeout(
+            const Duration(seconds: 5),
+            onTimeout: () => bloc.state,
+          );
+        }, () => MockClient((_) async => http.Response('%PDF-1.4', 200))),
+      );
+      await tester.pump();
+
+      expect(File('${folder.path}/10022.pdf').existsSync(), isTrue);
+      expect(bloc.state.searchResults!.single, isA<PdfBook>());
+      await tester.runAsync(bloc.close);
+    },
+  );
 }

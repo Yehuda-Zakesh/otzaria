@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
+import 'package:otzaria/app_report/view/app_report_dialog.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/core/startup_timeline.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
@@ -23,6 +24,8 @@ import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/indexing/bloc/indexing_bloc.dart';
 import 'package:otzaria/indexing/bloc/indexing_event.dart';
 import 'package:otzaria/indexing/bloc/indexing_state.dart';
+import 'package:otzaria/attached_libraries/external_link_work_status.dart';
+import 'package:otzaria/attached_libraries/repository/external_link_repository.dart';
 import 'package:otzaria/indexing/indexing_work_status.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/core/windowing/window_title_sync.dart';
@@ -42,8 +45,10 @@ import 'package:otzaria/find_ref/bloc/find_ref_state.dart';
 import 'package:otzaria/library/models/library.dart' as library_model;
 import 'package:otzaria/library/hidden/hidden_library_store.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
-import 'package:otzaria/search/search_defaults.dart';
 import 'package:otzaria/search/view/search_dialog.dart';
+import 'package:otzaria/semantic_search/models/semantic_result_item.dart';
+import 'package:otzaria/semantic_search/repository/semantic_search_repository.dart';
+import 'package:otzaria/semantic_search/semantic_work_status.dart';
 import 'package:otzaria/library/view/library_browser.dart';
 import 'package:otzaria/tabs/reading_screen.dart';
 import 'package:otzaria/text_book/view/text_book_screen.dart';
@@ -51,6 +56,7 @@ import 'package:otzaria/text_book/view/widgets/nav_panel_tour_target.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
+import 'package:otzaria/personal_notes/services/personal_notes_user_book_keys.dart';
 import 'package:otzaria/pdf_book/view/pdf_book_screen.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/tools/open_tool_tab.dart';
@@ -87,6 +93,9 @@ import 'package:otzaria/core/update_check_frequency.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/library_update/bloc/library_update_bloc.dart';
 import 'package:otzaria/library_update/library_update_work_status.dart';
+import 'package:otzaria/library_update/changes_notes/library_changes_notes.dart';
+import 'package:otzaria/plugins/services/plugin_install_results_log.dart';
+import 'package:otzaria/plugins/services/plugin_install_report_service.dart';
 import 'package:otzaria/theme/app_surfaces.dart';
 import 'package:otzaria/utils/ui/fullscreen_helper.dart';
 import 'package:otzaria/widgets/dialogs/app_dialogs.dart';
@@ -100,6 +109,7 @@ import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/bloc/tabs_state.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/searching_tab.dart';
+import 'package:otzaria/tabs/models/semantic_search_tab.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
@@ -134,6 +144,7 @@ import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 import 'package:otzaria/utils/navigation/external_action_dispatcher.dart';
 import 'package:otzaria/utils/navigation/external_book_link_resolver.dart';
 import 'package:otzaria/utils/navigation/open_book.dart';
+import 'package:otzaria/utils/file/open_in_file_manager.dart';
 import 'package:kosher_dart/kosher_dart.dart' show Daf;
 import 'package:otzaria/tools/calendar/helpers/calendar_date_helpers.dart'
     show getDafYomi, formatAmud;
@@ -393,6 +404,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
   bool _tourOverlayInsertScheduled = false;
   bool _tourOpenedOverflowMenu = false;
   late Screen _lastScreen;
+  Screen _screenBeforeSettings = Screen.library;
   // עוקב אחר מצב ההגדרות הקודם לצורך dispatch ספציפי
   SettingsState? _prevSettingsState;
   // עוקב אחר מצב הלוח הקודם לצורך dispatch ספציפי
@@ -404,10 +416,12 @@ class MainWindowScreenState extends State<MainWindowScreen>
   _pluginInstallDialogQueue = SequentialDialogQueue(_showPluginInstallDialog);
 
   bool _hasInitializedPageController = false;
-  bool _isProcessingExternalActivations = false;
+  late final CoalescingDrainRunner _externalActivationDrainRunner =
+      CoalescingDrainRunner(_drainPendingExternalActivations);
 
   /// מונע הערמת פופאפים כשמגיעים כמה קישורי `info` בזה אחר זה.
   bool _isShowingInfoReport = false;
+  bool _isShowingAppReport = false;
   StreamSubscription<FileSystemEvent>? _externalActivationWatchSub;
   StreamSubscription<String>? _externalActivationChannelSub;
 
@@ -622,13 +636,44 @@ class MainWindowScreenState extends State<MainWindowScreen>
   bool get _skipsEagerLibraryLoad =>
       WindowRole.isSecondary && WindowRole.openedWithTab;
 
+  StreamSubscription<Object?>? _semanticWorkStatusSub;
+  SemanticWorkStatusReporter? _semanticWorkStatus;
+  ExternalLinkWorkStatusReporter? _externalLinkWorkStatus;
+
+  SemanticWorkStatusReporter _createSemanticWorkStatus() {
+    final cubit = context.read<WorkStatusCubit>();
+    return SemanticWorkStatusReporter(
+      upsert: cubit.upsert,
+      remove: cubit.remove,
+      onCancel: () =>
+          unawaited(SemanticSearchRepository.instance.cancelDownload()),
+      onRetry: () =>
+          unawaited(SemanticSearchRepository.instance.enableAndDownload()),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     StartupTimeline.instance.markOnce('mainScreenInit');
+    // מאזין לזרם סטטי בלבד: המאגר הסמנטי לא נוצר עד שמשתמשים בו.
+    _semanticWorkStatusSub = SemanticSearchRepository.sharedAvailabilityChanges
+        .listen((availability) {
+          if (!mounted) return;
+          (_semanticWorkStatus ??= _createSemanticWorkStatus()).update(
+            availability,
+          );
+        });
+    final workStatus = context.read<WorkStatusCubit>();
+    _externalLinkWorkStatus = ExternalLinkWorkStatusReporter(
+      repository: ExternalLinkRepository.instance,
+      upsert: workStatus.upsert,
+      remove: workStatus.remove,
+    );
     _calendarCubit = CalendarCubit();
     _settingsScreenController = SettingsScreenController();
     _tourCubit = TourCubit();
+    LibraryChangesNotes.instance.beforeAutoShow = _tourFinished;
     _lastScreen = context.read<NavigationBloc>().state.currentScreen;
 
     // כשהמסך ההתחלתי אינו קריאה (אין טאבים שמורים) אין ספר להמתין לו, ולכן
@@ -743,10 +788,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
     });
   }
 
-  /// מתזמן את חשיפת החלון המלא, תוך מתן עדיפות לטעינת הספר הפעיל: אם נפתח ספר
-  /// טקסט שעדיין נטען — ממתינים שה-[TextBookBloc] שלו יגיע ל-[TextBookLoaded]/
-  /// [TextBookError] (או ייסגר) לפני שחושפים. בכל מקרה אחר (מסך שאינו קריאה /
-  /// PDF / ספר שכבר נטען) — חושפים מיד. אין timeout שרירותי בנתיב הזה.
+  /// ספר מצורף נטען אחרי החשיפה כדי לא לפתוח SQLite סינכרוני לפני הציור.
+  /// בספרי טקסט אחרים ממתינים לטעינה או לשגיאה לפני החשיפה.
   void _scheduleSplashReveal() {
     // _revealStarted (ולא _initialContentReady) כשומר: במסך שאינו קריאה
     // התוכן כבר נצבע מהפריים הראשון (_initialContentReady=true מ-initState),
@@ -773,6 +816,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
     final shouldWaitForBook =
         navigationState.currentScreen == Screen.reading &&
         pendingPane is TextBookTab &&
+        !pendingPane.book.source.isAttached &&
         pendingPane.bloc.state is! TextBookLoaded &&
         pendingPane.bloc.state is! TextBookError;
 
@@ -1278,12 +1322,11 @@ class MainWindowScreenState extends State<MainWindowScreen>
     });
   }
 
-  Future<void> _processPendingExternalActivations() async {
-    if (!mounted || _isProcessingExternalActivations) {
-      return;
-    }
+  Future<void> _processPendingExternalActivations() =>
+      _externalActivationDrainRunner.run();
 
-    _isProcessingExternalActivations = true;
+  Future<void> _drainPendingExternalActivations() async {
+    if (!mounted) return;
     try {
       final pendingUris = await _externalActivationQueue.drainUriStrings();
       for (final uriString in pendingUris) {
@@ -1291,8 +1334,6 @@ class MainWindowScreenState extends State<MainWindowScreen>
       }
     } catch (e, stackTrace) {
       debugPrint('External activation polling failed: $e\n$stackTrace');
-    } finally {
-      _isProcessingExternalActivations = false;
     }
   }
 
@@ -1373,7 +1414,18 @@ class MainWindowScreenState extends State<MainWindowScreen>
       if (uri == null) return false;
 
       final action = ExternalUriRouter.parseUri(uri);
-      if (action == null) return false;
+      if (action == null) {
+        // מי שמסר את התוסף (המעדכן הלא-מקוון) ממתין לתוצאה גם כשהנתיב נדחה.
+        final rejected = ExternalUriRouter.rejectedLocalInstall(uri);
+        if (rejected != null) {
+          await PluginInstallResultsLog.instance.append(
+            path: rejected.path,
+            outcome: PluginInstallOutcome.failed,
+            message: rejected.reason,
+          );
+        }
+        return false;
+      }
 
       // "חלון חדש" לא ביקש חלון קיים — הרמת חלון שרירותי (אולי מוסתר) מפתיעה.
       if (action is! OpenNewWindowAction) await _bringWindowToFront();
@@ -1502,7 +1554,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
           ),
         );
       } else {
-        bloc.add(LoadPlugins());
+        bloc.add(PluginOverwriteDeclined(state.archivePath));
       }
     } else if (state is PluginSystemDuplicateNameDetected) {
       final versions = state.duplicates.map((p) => p.version).join(', ');
@@ -1537,8 +1589,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
       case OpenScreenAction(:final screen):
         context.read<NavigationBloc>().add(NavigateToScreen(screen));
         return true;
-      case OpenToolAction(:final toolId):
-        openToolTabById(context, toolId);
+      case OpenToolAction(:final toolId, :final query):
+        openToolTabById(context, toolId, query: query);
         return true;
       case OpenPluginAction(:final pluginId):
         openToolTabById(context, pluginId);
@@ -1561,6 +1613,20 @@ class MainWindowScreenState extends State<MainWindowScreen>
       case OpenPdfBookAction():
         return await _openPdfBookByExternalId(action);
       case InstallPluginAction(:final request):
+        if (!await verifySaferModePassword(context)) {
+          final report = request.reportContext;
+          if (report != null) {
+            unawaited(
+              PluginInstallReportService.report(
+                report,
+                success: false,
+                errorMessage: 'ההתקנה נחסמה במצב סייפר',
+              ),
+            );
+          }
+          return false;
+        }
+        if (!mounted) return false;
         context.read<PluginSystemBloc>().add(
           InstallRemotePluginRequested(
             request.downloadUri.toString(),
@@ -1570,9 +1636,22 @@ class MainWindowScreenState extends State<MainWindowScreen>
         );
         return true;
       case InstallLocalPluginAction(:final archivePath):
+        if (!await verifySaferModePassword(context)) {
+          // מי שמסר את הקובץ (המעדכן הלא-מקוון) ממתין לתוצאה.
+          await PluginInstallResultsLog.instance.append(
+            path: archivePath,
+            outcome: PluginInstallOutcome.cancelled,
+            message: 'ההתקנה נחסמה במצב סייפר',
+          );
+          return false;
+        }
+        if (!mounted) return false;
         context.read<PluginSystemBloc>().add(
-          InstallPluginRequested(archivePath),
+          InstallPluginRequested(archivePath, recordsResult: true),
         );
+        return true;
+      case RunSearchAction(:final query, smart: true):
+        _runExternalSemanticSearch(query);
         return true;
       case RunSearchAction(:final query, :final mode):
         _runExternalSearch(query, mode: mode);
@@ -1631,6 +1710,9 @@ class MainWindowScreenState extends State<MainWindowScreen>
         return true;
       case ShowInfoAction():
         return await _showInfoReport(action);
+      case OpenAppReportAction():
+        _showAppReport();
+        return true;
       case OpenSettingsTabAction(:final tab):
         context.read<NavigationBloc>().add(
           const NavigateToScreen(Screen.settings),
@@ -1683,26 +1765,43 @@ class MainWindowScreenState extends State<MainWindowScreen>
     return true;
   }
 
+  /// נדחה לפוסט-פריים מאותה סיבה כמו [_showInfoReport], וטופס אחד בכל פעם.
+  void _showAppReport() {
+    if (_isShowingAppReport) return;
+    _isShowingAppReport = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        if (mounted) await showAppReportDialog(context);
+      } finally {
+        _isShowingAppReport = false;
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
   void _runExternalSearch(String query, {SearchMode? mode}) {
     // ה-configuration מועברת בבנייה ולא ב-event — מניעת race עם
     // ה-UpdateSearchQuery ש-TantivyFullTextSearch שולח ב-initState.
-    final tab = SearchingTab(
+    final tab = SearchingTab.newSearch(
       SearchingTab.titleForQuery(query),
       query,
-      initialConfiguration: mode == null
-          ? null
-          : SearchDefaults.withResultPreferences(
-              SearchConfiguration(
-                searchMode: mode,
-                distance: mode == SearchMode.fuzzy ? kMaxFuzzyDistance : 0,
-              ),
-            ),
+      mode: mode,
     );
     context.read<HistoryBloc>().add(AddHistory(tab));
     context.read<TabsBloc>().add(AddTab(tab));
     context.read<NavigationBloc>().add(const NavigateToScreen(Screen.search));
     // ה-UpdateSearchQuery נשלח אוטומטית מ-TantivyFullTextSearch.initState
     // ברגע שהלשונית מוצגת לראשונה. ראה tantivy_full_text_search.dart:130-134.
+  }
+
+  /// הכרטיסייה עצמה מציגה הסכמה או הורדה חסרות, כמו חיפוש חכם מהדיאלוג.
+  void _runExternalSemanticSearch(String query) {
+    final tab = SemanticSearchTab(
+      runOnFirstShow: true,
+      options: SemanticQueryOptions(query: query),
+    );
+    context.read<TabsBloc>().add(AddTab(tab));
+    context.read<NavigationBloc>().add(const NavigateToScreen(Screen.search));
   }
 
   Future<bool> _openBookByExternalId(OpenBookAction action) async {
@@ -1773,8 +1872,13 @@ class MainWindowScreenState extends State<MainWindowScreen>
     _externalActivationChannel.dispose();
     _calendarCubit.close();
     _removeTourOverlay();
+    if (LibraryChangesNotes.instance.beforeAutoShow == _tourFinished) {
+      LibraryChangesNotes.instance.beforeAutoShow = null;
+    }
     _tourCubit.close();
     _readerLocationTracker?.dispose();
+    _semanticWorkStatusSub?.cancel();
+    _externalLinkWorkStatus?.dispose();
     pageController.dispose();
     super.dispose();
   }
@@ -1954,6 +2058,14 @@ class MainWindowScreenState extends State<MainWindowScreen>
       ),
   ];
 
+  /// מסתיים כשעמוד היעד כבר נוכחי — אחרי [transition] ו-frame נוסף. עד אז
+  /// [excludeOffscreenPagesFromFocus] חוסם בו פוקוס, ובקשה נדחית בשקט.
+  @visibleForTesting
+  static Future<void> afterPageBecomesCurrent(Future<void> transition) async {
+    await transition;
+    await WidgetsBinding.instance.endOfFrame;
+  }
+
   @visibleForTesting
   static List<Widget> buildTransitionPages(
     List<Widget> canonical, {
@@ -2061,9 +2173,13 @@ class MainWindowScreenState extends State<MainWindowScreen>
         context.read<FocusRepository>().cancelPendingTabContentFocus();
         PluginRuntimeDispatcher.instance.cancelPendingKeyboardFocus();
       }
+      if (state.currentScreen == Screen.settings) {
+        _screenBeforeSettings = _lastScreen;
+      }
       _lastScreen = state.currentScreen;
     }
 
+    var pageTransition = Future<void>.value();
     final targetPage = _pageIndexForScreen(state.currentScreen);
     if (targetPage != null && _currentPageIndex != targetPage) {
       if (_isCrossSliding) {
@@ -2104,7 +2220,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
               curve: Curves.easeInOut,
             );
           case PageTransitionKind.crossSlide:
-            unawaited(_slideToDistantPage(currentPage, targetPage));
+            pageTransition = _slideToDistantPage(currentPage, targetPage);
         }
       } else {
         setState(() {
@@ -2115,8 +2231,13 @@ class MainWindowScreenState extends State<MainWindowScreen>
 
     if (state.currentScreen == Screen.library) {
       if (shouldAutofocusLibrarySearch(defaultTargetPlatform)) {
-        context.read<FocusRepository>().requestLibrarySearchFocus(
-          selectAll: true,
+        unawaited(
+          afterPageBecomesCurrent(pageTransition).then((_) {
+            if (!mounted || _lastScreen != Screen.library) return;
+            this.context.read<FocusRepository>().requestLibrarySearchFocus(
+              selectAll: true,
+            );
+          }),
         );
       }
     } else if (state.currentScreen == Screen.reading) {
@@ -2838,6 +2959,13 @@ class MainWindowScreenState extends State<MainWindowScreen>
                     requestIds: {requestId},
                   ),
                 );
+                if (state.appliedReleaseTags.isNotEmpty) {
+                  unawaited(
+                    LibraryChangesNotes.instance.afterLibraryUpdate(
+                      state.appliedReleaseTags,
+                    ),
+                  );
+                }
               } else if (state.status ==
                   LibraryUpdateStatus.needsFullConfirmation) {
                 _promptFullDownload(context, state);
@@ -2849,9 +2977,9 @@ class MainWindowScreenState extends State<MainWindowScreen>
             listener: (context, state) {
               _startupWorkGate.markLibraryLoaded();
               _tryStartDeferredStartupWork();
-              // החלטת האינדוקס צורכת את הקטלוג שזה עתה נטען — כך אין קריאה
-              // עצמאית ל-getLibrary שתתחרה בטעינת הספר הפעיל בעלייה.
-              if (state.library != null) {
+              // צורכת את הקטלוג שנטען, בלי getLibrary שמתחרה בספר הפעיל בעלייה.
+              // בכשל, קריאה ל-library בונה את הקטלוג שוב ונכשלת בלי מאזין.
+              if (state.error == null) {
                 unawaited(
                   DataRepository.instance.library.then((library) {
                     if (!mounted || !context.mounted) return;
@@ -2863,6 +2991,17 @@ class MainWindowScreenState extends State<MainWindowScreen>
                     context.read<IndexingBloc>().add(
                       DropOrphanedIndexEntries(library),
                     );
+                    if (state.error == null) {
+                      unawaited(
+                        PersonalNotesUserBookKeys()
+                            .assignPending(library)
+                            .catchError(
+                              (Object e) => debugPrint(
+                                'Personal notes user-book keys failed: $e',
+                              ),
+                            ),
+                      );
+                    }
                   }),
                 );
               }
@@ -2895,7 +3034,10 @@ class MainWindowScreenState extends State<MainWindowScreen>
                     _pendingIndexRequests.remove(id);
                   }
                 }
-                if (state.library == null || !mounted || !context.mounted) {
+                if (state.error != null ||
+                    state.library == null ||
+                    !mounted ||
+                    !context.mounted) {
                   return;
                 }
                 if (startupRefreshId != null &&
@@ -3364,7 +3506,10 @@ class MainWindowScreenState extends State<MainWindowScreen>
           // מסכים, ולכן מגיבים לרשימה המעודכנת ולא לאירוע ההסרה עצמו.
           BlocListener<PluginSystemBloc, PluginSystemState>(
             listenWhen: (_, current) => current is PluginSystemLoaded,
-            listener: (context, _) => closeUninstalledPluginTabs(context),
+            listener: (context, _) {
+              closeUninstalledPluginTabs(context);
+              retitleFallbackPluginTabs(context);
+            },
           ),
           // אותו ניקוי בכיוון ההפוך: כרטיסיה של תוסף שהוסר יכולה להגיע
           // מסביבת עבודה שלא הייתה פעילה בזמן המחיקה, או משחזור הכרטיסיות
@@ -3372,7 +3517,10 @@ class MainWindowScreenState extends State<MainWindowScreen>
           BlocListener<TabsBloc, TabsState>(
             listenWhen: (previous, current) =>
                 !listEquals(previous.tabs, current.tabs),
-            listener: (context, _) => closeUninstalledPluginTabs(context),
+            listener: (context, _) {
+              closeUninstalledPluginTabs(context);
+              retitleFallbackPluginTabs(context);
+            },
           ),
           BlocListener<PluginSystemBloc, PluginSystemState>(
             listenWhen: (_, current) => current is PluginSystemLoaded,
@@ -3447,6 +3595,9 @@ class MainWindowScreenState extends State<MainWindowScreen>
               child: MySettingsScreen(
                 key: _settingsScreenKey,
                 controller: _settingsScreenController,
+                onDesktopBack: () => this.context.read<NavigationBloc>().add(
+                  NavigateToScreen(_screenBeforeSettings),
+                ),
               ),
             );
 
@@ -3926,14 +4077,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
   Future<void> _openErrorLogFile() async {
     if (!await verifySaferModePassword(context)) return;
     ErrorLogFile.ensureExists();
-    final path = ErrorLogFile.resolvePath();
-    if (Platform.isWindows) {
-      unawaited(Process.run('explorer', [path]));
-    } else if (Platform.isMacOS) {
-      unawaited(Process.run('open', [path]));
-    } else if (Platform.isLinux) {
-      unawaited(Process.run('xdg-open', [path]));
-    }
+    unawaited(openInFileManager(ErrorLogFile.resolvePath()));
   }
 
   int? _pageIndexForScreen(Screen screen) {
@@ -3951,11 +4095,18 @@ class MainWindowScreenState extends State<MainWindowScreen>
   }
 
   /// סוגר כל דיאלוג/תפריט פתוח מעל מסך הבית, כדי שחלוניות לא ייערמו זו על זו.
-  void _closeRootOverlayRoutes(BuildContext context) {
+  bool _closeRootOverlayRoutes(BuildContext context) {
+    var blocked = false;
     final navigator = Navigator.of(context, rootNavigator: true);
     if (navigator.canPop()) {
-      navigator.popUntil((route) => route.isFirst);
+      navigator.popUntil((route) {
+        blocked =
+            !route.isFirst &&
+            route.popDisposition == RoutePopDisposition.doNotPop;
+        return route.isFirst || blocked;
+      });
     }
+    return !blocked;
   }
 
   /// פותח את דיאלוג החיפוש במסלול שעוקב אחרי `_isSearchOpen`, כדי שקיצור
@@ -3978,7 +4129,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
       return;
     }
 
-    _closeRootOverlayRoutes(context);
+    if (!_closeRootOverlayRoutes(context)) return;
     final navigationBloc = context.read<NavigationBloc>();
     setState(() => _isSearchOpen = true);
 
@@ -4012,7 +4163,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
       return;
     }
 
-    _closeRootOverlayRoutes(context);
+    if (!_closeRootOverlayRoutes(context)) return;
     final navigationBloc = context.read<NavigationBloc>();
     setState(() => _isFindRefOpen = true);
 
@@ -4156,13 +4307,6 @@ class MainWindowScreenState extends State<MainWindowScreen>
     } else {
       context.read<NavigationBloc>().add(
         NavigateToScreen(screen),
-      );
-    }
-
-    if (screen == Screen.library &&
-        shouldAutofocusLibrarySearch(defaultTargetPlatform)) {
-      context.read<FocusRepository>().requestLibrarySearchFocus(
-        selectAll: true,
       );
     }
   }

@@ -5,16 +5,11 @@ import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:otzaria/data/data_providers/book_composite_key.dart';
 import 'package:otzaria/data/data_providers/hive_data_provider.dart';
 import 'package:otzaria/data/data_providers/library_provider_manager.dart';
-import 'package:otzaria/data/data_providers/file_system_library_provider.dart';
-import 'package:otzaria/data/data_providers/database_library_provider.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:otzaria/models/book_source.dart';
-import 'package:otzaria/utils/text/text_manipulation.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/library/models/library.dart';
-import 'package:otzaria/models/links.dart';
 import 'package:otzaria/utils/file/document_converter.dart';
-import 'package:otzaria/utils/file/document_format.dart';
 import 'package:otzaria/utils/file/toc_parser.dart';
 import 'package:otzaria/external_catalog/repository/external_catalog_repository.dart';
 import 'package:otzaria/settings/settings_exports.dart';
@@ -139,36 +134,6 @@ class FileSystemData {
     return null;
   }
 
-  /// Checks if a book is stored in the database
-  Future<bool> isBookInDatabase(
-    String title, {
-    int? categoryId,
-    String? fileType,
-  }) async {
-    if (categoryId != null && fileType != null) {
-      return await _providerManager.databaseProvider.hasBook(
-        title,
-        categoryId,
-        fileType,
-      );
-    }
-    return await _providerManager.databaseProvider.hasBookWithTitle(title);
-  }
-
-  /// Gets the data source for a book (DB, File, or Personal)
-  /// Returns: 'DB' for database, 'ק' for file, 'א' for personal
-  Future<String> getBookDataSource(
-    String title, {
-    int? categoryId,
-    String? fileType = 'txt',
-  }) async {
-    return await _providerManager.getBookDataSource(
-      title,
-      categoryId: categoryId,
-      fileType: fileType ?? 'txt',
-    );
-  }
-
   /// מחזיר האם מותר למחוק את הספר דרך הספרייה.
   ///
   /// מותר רק לספרי משתמש מסוג "עותק עצמאי" (תוכנם שמור בתוכנה). ספר
@@ -189,35 +154,6 @@ class FileSystemData {
     _providerManager.clearCaches();
     _titleToPath = null;
     debugPrint('Book cache cleared');
-  }
-
-  /// Gets the library provider manager for advanced operations
-  LibraryProviderManager get providerManager => _providerManager;
-
-  /// Gets the file system provider
-  FileSystemLibraryProvider get fileSystemProvider =>
-      _providerManager.fileSystemProvider;
-
-  /// Gets the database provider
-  DatabaseLibraryProvider get databaseProvider =>
-      _providerManager.databaseProvider;
-
-  /// Checks if a book is in the personal folder
-  Future<bool> isPersonalBook(
-    String title, {
-    String? category,
-    String? fileType,
-  }) async {
-    return await _providerManager.fileSystemProvider.isPersonalBook(
-      title,
-      category: category,
-      fileType: fileType,
-    );
-  }
-
-  /// Gets the path to the personal books folder
-  String getPersonalBooksPath() {
-    return _providerManager.fileSystemProvider.getPersonalBooksPath();
   }
 
   /// Retrieves the complete library structure from the file system.
@@ -440,107 +376,6 @@ class FileSystemData {
     }).toList();
   }
 
-  /// Retrieves all links associated with a specific book.
-  ///
-  /// Links are stored in JSON files named '[book_title]_links.json' in the links directory.
-  ///
-  /// For commentary books whose title starts with "הערות על", this function will also
-  /// retrieve reverse links from the source book, creating bidirectional navigation.
-  Future<List<Link>> getAllLinksForBook(String title) async {
-    try {
-      // First, try to load direct links for this book
-      File file = File(_getLinksPath(title));
-      List<Link> directLinks = [];
-
-      if (await file.exists()) {
-        final jsonString = await file.readAsString();
-        final jsonList = await Isolate.run(
-          () async => jsonDecode(jsonString) as List,
-        );
-        directLinks = jsonList.map((json) => Link.fromJson(json)).toList();
-      }
-
-      // Check if this is a commentary book (starts with "הערות על")
-      final sourceBookTitle = _getSourceBookFromCommentary(title);
-      if (sourceBookTitle != null) {
-        // Load the source book's links and create reverse links
-        final reverseLinks = await _getReverseLinksFromSourceBook(
-          title,
-          sourceBookTitle,
-        );
-        directLinks.addAll(reverseLinks);
-      }
-
-      return directLinks;
-    } on Exception {
-      return [];
-    }
-  }
-
-  /// Checks if a book title starts with "הערות על" and extracts the source book name.
-  ///
-  /// For example, "הערות על סוכה" returns "סוכה".
-  /// Returns null if the title doesn't start with "הערות על".
-  String? _getSourceBookFromCommentary(String title) {
-    const commentaryPrefix = 'הערות על ';
-    if (title.startsWith(commentaryPrefix)) {
-      return title.substring(commentaryPrefix.length);
-    }
-    return null;
-  }
-
-  /// Creates reverse links from a source book to its commentary.
-  ///
-  /// When the source book has links pointing to the commentary, this function
-  /// creates the opposite links so readers of the commentary can navigate back
-  /// to the source text.
-  Future<List<Link>> _getReverseLinksFromSourceBook(
-    String commentaryTitle,
-    String sourceBookTitle,
-  ) async {
-    try {
-      // Load links from the source book
-      File sourceLinksFile = File(_getLinksPath(sourceBookTitle));
-      if (!await sourceLinksFile.exists()) {
-        return [];
-      }
-
-      final jsonString = await sourceLinksFile.readAsString();
-      final jsonList = await Isolate.run(
-        () async => jsonDecode(jsonString) as List,
-      );
-      final sourceLinks = jsonList.map((json) => Link.fromJson(json)).toList();
-
-      // Filter links that point to the commentary and create reverse links
-      final reverseLinks = <Link>[];
-      for (final link in sourceLinks) {
-        final linkTargetTitle = getTitleFromPath(link.path2);
-
-        // Check if this link points to the commentary book
-        if (linkTargetTitle == commentaryTitle) {
-          // Create a reverse link: from commentary back to source
-          reverseLinks.add(
-            Link(
-              heRef: sourceBookTitle, // Reference to the source book
-              index1:
-                  link.index2, // The commentary line that's being referenced
-              path2: sourceBookTitle, // Path to the source book
-              index2: link.index1, // The source book line that references it
-              connectionType: link.connectionType,
-              start: link.start,
-              end: link.end,
-            ),
-          );
-        }
-      }
-
-      return reverseLinks;
-    } on Exception catch (e) {
-      debugPrint('Error creating reverse links for $commentaryTitle: $e');
-      return [];
-    }
-  }
-
   /// Retrieves the text content of a book.
   ///
   /// Uses LibraryProviderManager to get text from the appropriate provider.
@@ -585,69 +420,6 @@ class FileSystemData {
     await _providerManager.fileSystemProvider.saveBookText(title, content);
   }
 
-  /// Retrieves the content of a specific link within a book.
-  ///
-  /// Reads the file line by line and returns the content at the specified index.
-  Future<String> getLinkContent(Link link) async {
-    try {
-      // Validate link data first
-      if (link.path2.isEmpty) {
-        debugPrint('⚠️ Empty path in link');
-        return 'שגיאה: נתיב ריק';
-      }
-
-      if (link.index2 <= 0) {
-        debugPrint('⚠️ Invalid index in link: ${link.index2}');
-        return 'שגיאה: אינדקס לא תקין';
-      }
-
-      String path = await _getBookPath(getTitleFromPath(link.path2));
-      if (path.startsWith('error:')) {
-        debugPrint('⚠️ Book path not found for: ${link.path2}');
-        return 'שגיאה בטעינת קובץ: ${link.path2}';
-      }
-
-      // Check if file exists before trying to read it
-      final file = File(path);
-      if (!await file.exists()) {
-        debugPrint('⚠️ File does not exist: $path');
-        return 'שגיאה: הקובץ לא נמצא';
-      }
-
-      return await getLineFromFile(
-        path,
-        link.index2,
-        title: getTitleFromPath(link.path2),
-      ).timeout(
-        const Duration(seconds: 3),
-        onTimeout: () {
-          debugPrint('⚠️ Timeout reading line from file: $path');
-          return 'שגיאה: פג זמן קריאת הקובץ';
-        },
-      );
-    } catch (e) {
-      debugPrint('⚠️ Error loading link content: $e');
-      return 'שגיאה בטעינת תוכן המפרש: $e';
-    }
-  }
-
-  /// Returns a list of all book paths in the library directory.
-  ///
-  /// This operation is performed in an isolate to prevent blocking the main thread.
-  static Future<List<String>> getAllBooksPathsFromDirecctory(
-    String path,
-  ) async {
-    return Isolate.run(() async {
-      List<String> paths = [];
-      await for (final file in Directory(path).list(recursive: true)) {
-        if (file is File && !file.path.toLowerCase().endsWith('.pdf')) {
-          paths.add(file.path);
-        }
-      }
-      return paths;
-    });
-  }
-
   /// Retrieves the table of contents for a book.
   ///
   /// Uses LibraryProviderManager to get TOC from the appropriate provider.
@@ -672,91 +444,6 @@ class FileSystemData {
     return _parseToc(
       getBookText(title, categoryId: categoryId, fileType: fileType),
     );
-  }
-
-  /// Reads a specific line (1-based) from a book file.
-  ///
-  /// [title] הוא כותרת הספר בקטלוג: בפורמט שדורש המרה היא שורה 1 של הפלט,
-  /// ולכן היא חלק מהמיקום שהקישור מפנה אליו. הניתוב לפי פורמט הוא גם מה
-  /// שמונע קריאת מכולה בינארית כטקסט — שמחזירה ג'יבריש שנראה כתוכן.
-  Future<String> getLineFromFile(
-    String path,
-    int index, {
-    String? title,
-  }) async {
-    try {
-      final file = File(path);
-
-      if (!await file.exists()) {
-        debugPrint('⚠️ File does not exist: $path');
-        return 'שגיאה: הקובץ לא נמצא';
-      }
-
-      if (index <= 0) {
-        debugPrint('⚠️ Invalid line index: $index for file: $path');
-        return 'שגיאה: אינדקס שורה לא תקין';
-      }
-
-      final isPlainText =
-          documentFormatFromExtension(path)?.isPlainText ?? false;
-      final textHead = isPlainText
-          ? await file
-                .openRead(0, 4)
-                .fold<List<int>>(
-                  [],
-                  (bytes, chunk) => bytes..addAll(chunk),
-                )
-          : const <int>[];
-      final hasUnicodeBom =
-          (textHead.length >= 2 &&
-              ((textHead[0] == 0xff && textHead[1] == 0xfe) ||
-                  (textHead[0] == 0xfe && textHead[1] == 0xff))) ||
-          (textHead.length >= 4 &&
-              ((textHead[0] == 0 && textHead[1] == 0 && textHead[2] == 0xfe) ||
-                  (textHead[0] == 0xff &&
-                      textHead[1] == 0xfe &&
-                      textHead[2] == 0 &&
-                      textHead[3] == 0)));
-      if (isPlainText && !hasUnicodeBom && !textHead.contains(0)) {
-        try {
-          return await file
-              .openRead()
-              .transform(utf8.decoder)
-              .transform(const LineSplitter())
-              .skip(index - 1)
-              .first;
-        } on FormatException {
-          // קידוד שאינו UTF-8 ממשיך למסלול הזיהוי המלא שמתחת.
-        } on StateError {
-          return 'שגיאה: אינדקס השורה חורג מגודל הקובץ';
-        }
-      }
-
-      final text = await readFileBackedBookText(
-        file,
-        null,
-        title ?? getTitleFromPath(path),
-      );
-      if (text == null) return 'שגיאה: לפורמט הקובץ אין תוכן טקסטואלי';
-
-      final lines = const LineSplitter().convert(text);
-      if (lines.isEmpty) {
-        debugPrint('⚠️ No lines found in file: $path');
-        return 'שגיאה: הקובץ ריק';
-      }
-
-      if (lines.length < index) {
-        debugPrint(
-          '⚠️ Line index $index exceeds file length ${lines.length} in: $path',
-        );
-        return 'שגיאה: אינדקס השורה חורג מגודל הקובץ';
-      }
-
-      return lines[index - 1];
-    } catch (e) {
-      debugPrint('⚠️ Error reading line from file $path: $e');
-      return 'שגיאה בקריאת הקובץ: $e';
-    }
   }
 
   /// Updates the mapping of book titles to their file system paths.
@@ -869,11 +556,6 @@ class FileSystemData {
 
     // Build the hierarchy using the shared parser in an isolate
     return Isolate.run(() => TocParser.parseEntriesFromContent(bookContent));
-  }
-
-  /// Gets the path to the JSON file containing links for a specific book.
-  String _getLinksPath(String title) {
-    return '${Settings.getValue<String>(SettingsRepository.keyLibraryPath) ?? '.'}${Platform.pathSeparator}links${Platform.pathSeparator}${title}_links.json';
   }
 
   /// Checks if a book with the given title exists in the library.

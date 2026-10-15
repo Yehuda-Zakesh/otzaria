@@ -10,7 +10,9 @@ import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/utils/file/file_picker_dialog_options.dart';
 import 'package:otzaria/widgets/dialogs/input_dialog.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/plugins/plugin_constants.dart';
 import 'package:otzaria/theme/app_fonts.dart';
@@ -18,6 +20,7 @@ import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:kosher_dart/kosher_dart.dart';
 import 'package:http/http.dart' as http;
+import 'package:otzaria/update/app_release_version.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
@@ -27,7 +30,7 @@ import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/data/data_providers/database_library_provider.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/migration/models/alt_toc_structure.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/personal_notes/repository/personal_notes_repository.dart';
 import 'package:otzaria/personal_notes/models/personal_note.dart';
 import 'package:otzaria/personal_notes/utils/personal_notes_book_key.dart';
@@ -37,8 +40,8 @@ import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/models/link_types.dart';
-import 'package:otzaria/text_book/models/commentator_group.dart';
-import 'package:otzaria/text_book/utils/commentator_group_builder.dart';
+import 'package:otzaria/book_common/models/commentator_group.dart';
+import 'package:otzaria/book_common/utils/commentator_group_builder.dart';
 import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/search/search_repository.dart';
 import 'package:otzaria/plugins/bridge/plugin_search_api.dart';
@@ -54,12 +57,13 @@ import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/utils/confirm_close_tabs.dart';
 import 'package:otzaria/plugins/services/plugin_external_search_service.dart';
 import 'package:otzaria/plugins/services/plugin_in_book_search_service.dart';
+import 'package:otzaria/plugins/services/plugin_search_field_session_service.dart';
 import 'package:otzaria/plugins/models/plugin_library_book_provider.dart';
 import 'package:otzaria/plugins/services/plugin_library_books_registry.dart';
 import 'package:otzaria/plugins/services/plugin_reader_actions.dart';
 import 'package:otzaria/bookmarks/bloc/bookmark_bloc.dart';
 import 'package:otzaria/services/book_details_service.dart';
-import 'package:otzaria/text_book/view/book_source_dialog.dart'
+import 'package:otzaria/book_common/view/book_source_dialog.dart'
     show getSourceDisplayInfo, libraryDisplayPath;
 import 'package:otzaria/tools/biographies/models/biography.dart';
 import 'package:otzaria/tools/biographies/repository/biographies_repository.dart';
@@ -71,9 +75,10 @@ import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/tools/tools_launcher_controller.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
+import 'package:otzaria/plugins/services/plugin_text_reader_registry.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_display/models/text_display_slot.dart';
+import 'package:otzaria/text_display/text_display_exports.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';
 import 'package:otzaria/settings/services/custom_folders/bloc/custom_folders_bloc.dart';
@@ -104,8 +109,11 @@ import 'package:otzaria/plugins/services/context_menu_registry.dart';
 import 'package:otzaria/plugins/services/plugin_toolbar_registry.dart';
 import 'package:otzaria/plugins/services/plugin_unsaved_changes_registry.dart';
 import 'package:otzaria/plugins/services/plugin_page_launcher.dart';
+import 'package:otzaria/plugins/services/plugin_new_tab_page_service.dart';
+import 'package:otzaria/plugins/view/plugin_new_tab_page_choice.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:otzaria/plugins/services/plugin_print_service.dart';
+import 'package:otzaria/printing/view/printing_screen.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 import 'package:otzaria/plugins/models/plugin_network_allowlist.dart';
 import 'package:otzaria/plugins/services/plugin_network_access_resolver.dart';
@@ -114,6 +122,12 @@ import 'package:otzaria/plugins/services/plugin_file_download_service.dart';
 import 'package:otzaria/plugins/services/plugin_install_report_service.dart';
 import 'package:otzaria/plugins/services/plugin_store_link_parser.dart';
 import 'package:otzaria/plugins/services/plugin_report_service.dart';
+import 'package:otzaria/plugins/services/plugin_book_correction_service.dart';
+import 'package:otzaria/services/direct_error_report_service.dart';
+import 'package:otzaria/services/data_collection_service.dart';
+import 'package:otzaria/data/data_providers/book_database_resolver.dart';
+import 'package:otzaria/data/data_providers/db_read_worker.dart';
+import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/plugins/services/plugin_fs_service.dart';
 import 'package:otzaria/plugins/services/plugin_file_server.dart';
@@ -137,6 +151,7 @@ import 'package:otzaria/plugins/services/plugin_text_occurrence_service.dart';
 import 'package:otzaria/plugins/services/text_source_map_service.dart';
 import 'package:otzaria/search/utils/facet_helper.dart';
 import 'package:otzaria/widgets/smart_text/render_settings.dart';
+import 'package:otzaria/utils/calendar_days.dart';
 
 /// גופן הממשק שאוצריא מוסרת לתוספים: sans מובנה שנשאר חד ב-11-12px.
 /// גופן הקריאה (`fontFamily`) אינו תחליף לו — הוא מצויר ל-25px,
@@ -444,7 +459,7 @@ class PluginBridgeDependencies {
   /// למיקום, דרך מנוע `find_ref` המודע-להקשר. מחזיר התאמות עם מיקום ה-index.
   /// אופציונלי — אם לא סופק, `openBookAtRef` נופל להתאמת TOC מקומית בלבד.
   ///
-  /// `bookId` הוא ה-id המספרי ב-DB (‎-1 ל-PDF ממערכת הקבצים), ותקף רק במקור
+  /// `bookId` הוא ה-id המספרי ב-DB (-1 ל-PDF ממערכת הקבצים), ותקף רק במקור
   /// רשמי: שאר המסדים מקצים מזהים באותו טווח, ולכן id שלהם אינו חד-משמעי.
   final Future<
     List<
@@ -523,6 +538,18 @@ class PluginBridgeDependencies {
   })?
   printPluginPage;
 
+  /// פותח את מסך ההדפסה של אוצריא על טווח שורות בספר (`reader.printRange`)
+  /// ומחזיר אם המשתמש הדפיס או ייצא. אופציונלי — ברירת המחדל מציגה את
+  /// [PrintingScreen] כדיאלוג; קיים להזרקה בבדיקות.
+  final Future<bool> Function(
+    TextBook book, {
+    required int startLine,
+    int? endLine,
+    required List<String> activeCommentators,
+    required List<String> availableCommentators,
+  })?
+  printBookRange;
+
   /// מייצר PDF מהדף של מופע התוסף (`ui.exportPdf`). אופציונלי — ברירת המחדל
   /// היא [PluginPrintService] מעל ה-WebView הרשום; קיים להזרקה בבדיקות.
   final Future<Uint8List> Function(
@@ -575,6 +602,7 @@ class PluginBridgeDependencies {
     this.onBackgroundInstanceDone,
     this.dispatchEventToPlugin,
     this.printPluginPage,
+    this.printBookRange,
     this.capturePluginPagePdf,
     this.hasUserActivation,
     this.customFoldersBloc,
@@ -616,8 +644,20 @@ class _PluginNetworkRequest {
 // ===================================================================
 // Bridge Adapter - strict 1:1 with plugin_system_plan.md
 // ===================================================================
+String _transformTextReaderContent((String, TextDisplayProfile) input) {
+  final (rawText, profile) = input;
+  return rawText
+      .split('\n')
+      .map(
+        (line) =>
+            applyTextDisplayProfile(line, profile).replaceAll('\n', '<br>'),
+      )
+      .join('\n');
+}
+
 class PluginBridgeAdapter {
   final InstalledPlugin plugin;
+  final TextBookTab? readerTab;
 
   /// מזהה מופע הריצה שה-adapter משרת (טאב או 'background') — רישומי ה-UI
   /// וההדגשות ממופתחים לפיו, וניקויים ב-dispose מסיר רק אותם.
@@ -627,11 +667,13 @@ class PluginBridgeAdapter {
   final NotificationService _notificationService;
   final PluginDatabaseService _databaseService;
   final PluginHighlightRegistry _highlightRegistry;
+  final PluginSearchFieldSessionService _searchFieldSessions;
 
   PluginBridgeAdapter(
     this.plugin, {
     required this._dependencies,
     this.instanceId = PluginInstanceIds.defaultForeground,
+    this.readerTab,
     PluginRegistryRepository? pluginRepository,
     NotificationService? notificationService,
     PluginDatabaseService? databaseService,
@@ -642,15 +684,20 @@ class PluginBridgeAdapter {
     PluginFileServer? fileServer,
     PluginHighlightRegistry? highlightRegistry,
     PluginReportService? reportService,
+    PluginBookCorrectionService? bookCorrectionService,
+    PluginSearchFieldSessionService? searchFieldSessions,
   }) : _pluginRepo = pluginRepository ?? PluginRegistryRepository(),
        _pluginReportService = reportService,
+       _pluginBookCorrectionService = bookCorrectionService,
        _notificationService = notificationService ?? NotificationService(),
        _databaseService = databaseService ?? PluginDatabaseService(),
        _highlightRegistry =
            highlightRegistry ?? PluginHighlightRegistry.instance,
        _pluginFsService = fsService,
        _pluginShortcutService = shortcutService,
-       _fileServer = fileServer ?? PluginFileServer.instance {
+       _fileServer = fileServer ?? PluginFileServer.instance,
+       _searchFieldSessions =
+           searchFieldSessions ?? PluginSearchFieldSessionService.instance {
     _stopFolderRevocationListener = PluginUserFolderGrants.onRevoke(
       plugin.pluginId,
       _removeTemporaryFolderGrant,
@@ -678,6 +725,17 @@ class PluginBridgeAdapter {
   PluginReportService get _reportService =>
       _pluginReportService ??= PluginReportService();
 
+  DirectErrorReportService? _directBookReportService;
+  PluginBookCorrectionService? _pluginBookCorrectionService;
+  PluginBookCorrectionService get _bookCorrectionService {
+    if (_pluginBookCorrectionService case final service?) return service;
+    final direct = _directBookReportService ??= DirectErrorReportService();
+    return _pluginBookCorrectionService = PluginBookCorrectionService(
+      senderEmail: () => direct.senderEmail,
+      deliver: direct.submitReport,
+    );
+  }
+
   // שירות יצירת קיצורי דרך (shortcut.create) — מופע יחיד לכל adapter.
   PluginShortcutService? _pluginShortcutService;
   PluginShortcutService get _shortcutService =>
@@ -704,9 +762,11 @@ class PluginBridgeAdapter {
   PluginNetworkFetchService get _fetchService =>
       _networkFetchService ??= PluginNetworkFetchService();
 
-  // bookId → טקסט מלא של הספר (מטמון LRU קצר, per adapter instance) עבור
-  // getBookContent. ראה _loadBookRawText.
-  final Map<PluginBookIdentityKey, String> _bookContentCache = {};
+  // LRU קצר לכל תוסף; bookUid מפריד ספרים זהים ממסדים מצורפים שונים.
+  final Map<String, String> _bookContentCache = {};
+  String? _textReaderRawContent;
+  Future<String>? _textReaderDisplayContent;
+  TextDisplayProfile? _textReaderProfile;
   static const int _bookContentCacheMaxEntries = 4;
   static int _bookContentRevision = 0;
   int _seenBookContentRevision = 0;
@@ -773,6 +833,11 @@ class PluginBridgeAdapter {
     _pendingNetworkFetchCancellations.clear();
     _networkFetchService?.dispose();
     _fileDownloadService?.dispose();
+    _bookContentCache.clear();
+    _textReaderRawContent = null;
+    _textReaderProfile = null;
+    _textReaderDisplayContent = null;
+    unawaited(_directBookReportService?.closeHttpClient());
     _bookIndexLibrary = null;
     _booksById = const {};
     _booksByTitle = const {};
@@ -780,38 +845,27 @@ class PluginBridgeAdapter {
     _booksByIndexedPath = const {};
   }
 
-  /// טוען את הטקסט המלא של ספר עבור `getBookContent`, עם מטמון LRU קצר
-  /// (per adapter instance).
-  ///
-  /// `getBookContent` מחזירה מקטע באמצעות `substring`, והתוסף טוען ספר מלא
-  /// ב-chunks של 5000 תווים — כך שטעינה אחת מחייבת עשרות קריאות RPC רצופות.
-  /// בלי מטמון כל קריאה טוענת מחדש את כל הספר מה-DB (O(n²)), בזבוז שמתחדד
-  /// כשתוסף מבצע polling/prefetch אגרסיבי. המטמון מצמצם זאת ל-O(n) לספר
-  /// ומנטרל את עלות ה-IO החוזרת.
-  ///
-  /// המטמון מוגבל ל-[_bookContentCacheMaxEntries] ספרים ומתאפס עם dispose של
-  /// ה-adapter (טעינה/השבתה מחדש של התוסף). לכן ייתכן חלון קצר של תוכן
-  /// לא-מעודכן אם המשתמש עורך ספר בזמן שתוסף קורא אותו — מקרה קצה נדיר
-  /// בנתיב קריאה-בלבד.
+  /// LRU מונע טעינה חוזרת של ספר בקריאות מקוטעות; UID שומר על הפרדת המקורות.
   Future<String> _loadBookRawText(Book book) async {
     if (_seenBookContentRevision != _bookContentRevision) {
       _bookContentCache.clear();
       _seenBookContentRevision = _bookContentRevision;
     }
-    final key = PluginBookIdentity.keyOf(book);
+    final key = PluginBookIdentity.uidOf(book);
     final cached = _bookContentCache.remove(key);
     if (cached != null) {
       _bookContentCache[key] = cached; // רענון מיקום ב-LRU
       return cached;
     }
-    // איתור ה-TextBook מהקטלוג כדי לקבל categoryId/fileType נכונים מה-metadata.
-    // בלי זה, השכבה התחתונה מקבעת fileType='txt' ונכשלת לגבי ספרים בפורמט אחר
-    // אצל משתמשים שאין להם קבצי טקסט נפרדים בדיסק (רק seforim.db).
+    // ה-TextBook מהקטלוג שומר categoryId/fileType נכונים גם בספרים השמורים רק ב-DB.
     final String rawText;
     if (book is TextBook) {
-      rawText = await TextBookRepository(
-        fileSystem: FileSystemData.instance,
-      ).getBookContent(book);
+      rawText =
+          await (_dependencies.textBookRepository ??
+                  TextBookRepository(
+                    fileSystem: FileSystemData.instance,
+                  ))
+              .getBookContent(book);
     } else {
       rawText = await DataRepository.instance.getBookText(book.title);
     }
@@ -908,7 +962,7 @@ class PluginBridgeAdapter {
       case 'getInfo':
         final packageInfo = await PackageInfo.fromPlatform();
         return {
-          'version': packageInfo.version,
+          'version': canonicalAppVersion(packageInfo),
           'buildNumber': packageInfo.buildNumber,
           'platform': Platform.operatingSystem,
         };
@@ -944,6 +998,15 @@ class PluginBridgeAdapter {
         if (uri.scheme != 'http' && uri.scheme != 'https') {
           throw Exception('error.forbidden: only http/https URLs are allowed');
         }
+        // הכתובת עצמה נושאת מידע לאתר. בלי אישור — רק יעד שהתוסף רשאי
+        // לפנות אליו ממילא ברשת, אחרת זה ערוץ שליחה שעוקף את רשימת ההיתר.
+        final allowed = await isPluginNetworkAccessAllowed(
+          uri: uri,
+          pluginId: plugin.pluginId,
+          manifest: plugin.manifest,
+          registry: _pluginRepo,
+        );
+        if (!allowed && !await _confirmOpenUrl(uri)) return false;
         final launched = await launchUrl(
           uri,
           mode: LaunchMode.externalApplication,
@@ -1289,9 +1352,44 @@ class PluginBridgeAdapter {
         if (book == null && bookId == null) {
           throw Exception('error.not_found: book not found');
         }
-        final rawText = book == null
+        var rawText = book == null
             ? await DataRepository.instance.getBookText(bookId!)
             : await _loadBookRawText(book);
+        if (args['textReaderDisplay'] == true) {
+          final tab = readerTab;
+          final state = tab?.bloc.state;
+          if (tab == null ||
+              state is! TextBookLoaded ||
+              book == null ||
+              PluginBookIdentity.uidOf(book) !=
+                  PluginBookIdentity.uidOf(tab.book)) {
+            throw Exception(
+              'error.unavailable: Display content requires the bound reader',
+            );
+          }
+          final profile = state.bodyDisplayProfile;
+          if (!identical(_textReaderRawContent, rawText) ||
+              _textReaderProfile != profile) {
+            _textReaderRawContent = rawText;
+            _textReaderProfile = profile;
+            // המרת הספר כולו מתבצעת מחוץ ל-UI; בקשות מקבילות חולקות אותה.
+            _textReaderDisplayContent = compute(
+              _transformTextReaderContent,
+              (rawText, profile),
+            );
+          }
+          final displayContent = _textReaderDisplayContent!;
+          try {
+            rawText = await displayContent;
+          } catch (_) {
+            if (identical(_textReaderDisplayContent, displayContent)) {
+              _textReaderRawContent = null;
+              _textReaderProfile = null;
+              _textReaderDisplayContent = null;
+            }
+            rethrow;
+          }
+        }
         final limit = args['limit'] as int? ?? 1000;
         final offset = args['offset'] as int? ?? 0;
         final section = args['section'] as String?;
@@ -1796,7 +1894,7 @@ class PluginBridgeAdapter {
               'linkCount': target.linkCount,
             },
       ],
-      // maxSourceLine מגיע 1-based מהמסד; ‎-1‎ = לספר אין קישורים כלל.
+      // maxSourceLine מגיע 1-based מהמסד; -1 = לספר אין קישורים כלל.
       'maxSourceLine': summary.maxSourceLine - 1,
     };
   }
@@ -2021,6 +2119,22 @@ class PluginBridgeAdapter {
 
   /// מחזיר את סוג הספר כמחרוזת עבור ה-Plugin SDK.
   Book? _findPluginBook(Library library, Map<String, dynamic> args) {
+    final bound = readerTab?.book;
+    final uid = args['bookUid'] as String?;
+    if (bound != null &&
+        ((uid != null && uid == PluginBookIdentity.uidOf(bound)) ||
+            (uid == null &&
+                PluginBookIdentity.parseId(args['id']) == bound.id &&
+                bound.id != null)) &&
+        PluginBookIdentity.matches(
+          bound,
+          id: PluginBookIdentity.parseId(args['id']),
+          bookId: (args['bookId'] ?? args['title']) as String?,
+          type: args['type'] as String?,
+          source: args['source'] as String?,
+        )) {
+      return bound;
+    }
     _ensureBookIndex(library);
     // `bookUid` הוא מזהה יציב וחד-משמעי — אם סופק, פותר ישירות בלי ניחוש.
     final bookUid = (args['bookUid'] as String?)?.trim();
@@ -2104,9 +2218,7 @@ class PluginBridgeAdapter {
         final limit = args['limit'] as int? ?? 50;
         if (query == null || query.isEmpty) return [];
         final results = await _dependencies.searchRepository.searchTexts(
-          query,
-          [],
-          limit,
+          SearchEngineRequest(query: query, facets: [], limit: limit),
         );
         return results
             .map(
@@ -2114,12 +2226,18 @@ class PluginBridgeAdapter {
                 'type': r.isPdf ? 'pdf' : 'text',
                 'book': r.title,
                 'text': r.text,
+                'textStatus': r.textStatus.name,
+                'continuesToNextLine': r.continuesToNextLine,
                 'index': r.segment.toInt(),
               },
             )
             .toList();
       case 'getOptions':
         return PluginSearchApi.describeOptions();
+      case 'setFieldText':
+      case 'setFieldActionState':
+      case 'endFieldSession':
+        return _handleSearchFieldSession(action, args);
       case 'query':
         if (args[_cancelStreamIdKey] case final String streamId) {
           return _cancelPluginSearch(streamId);
@@ -2130,6 +2248,48 @@ class PluginBridgeAdapter {
           "error.unknown_method: Unknown action in search: $action",
         );
     }
+  }
+
+  /// `search.setFieldText` / `setFieldActionState` / `endFieldSession`.
+  bool _handleSearchFieldSession(String action, Map<String, dynamic> args) {
+    final sessionId = args['sessionId'];
+    if (sessionId is! String || sessionId.isEmpty) {
+      throw Exception('error.invalid_params: sessionId required');
+    }
+    final sessions = _searchFieldSessions;
+    try {
+      switch (action) {
+        case 'setFieldText':
+          sessions.setFieldText(
+            plugin.pluginId,
+            sessionId,
+            args['text'],
+            instanceId: instanceId,
+          );
+        case 'setFieldActionState':
+          sessions.setActionState(
+            plugin.pluginId,
+            sessionId,
+            args['state'],
+            tooltip: args['tooltip'],
+            instanceId: instanceId,
+          );
+        default:
+          final submit = args['submit'];
+          if (submit != null && submit is! bool) {
+            throw Exception('error.invalid_params: submit must be boolean');
+          }
+          sessions.endSession(
+            plugin.pluginId,
+            sessionId,
+            submit: submit == true,
+            instanceId: instanceId,
+          );
+      }
+    } on PluginSearchFieldSessionException catch (error) {
+      throw Exception(error.toString());
+    }
+    return true;
   }
 
   /// מזרים את `search.query` באותו מסלול chunks של מסך החיפוש.
@@ -2163,27 +2323,29 @@ class PluginBridgeAdapter {
       findBook: (identity) => _findPluginBook(library, identity),
     );
     final stream = _dependencies.searchRepository.searchTextsStreamWithCounts(
-      request.sanitizedQuery,
-      facets,
-      request.limit,
-      offset: request.offset,
+      SearchEngineRequest(
+        query: request.sanitizedQuery,
+        facets: facets,
+        limit: request.limit,
+        offset: request.offset,
+        order: request.order,
+        searchMode: request.searchMode,
+        distance: request.distance,
+        negativeQuery: request.sanitizedNegativeQuery,
+        negativeDistance: request.negativeDistance,
+        scope: request.proximityScope,
+        negativeScope: request.negativeProximityScope,
+        customSpacing: request.effectiveCustomSpacing,
+        negativeCustomSpacing: request.effectiveNegativeCustomSpacing,
+        alternativeWords: request.effectiveAlternativeWords,
+        negativeAlternativeWords: request.effectiveNegativeAlternativeWords,
+        searchOptions: request.effectiveSearchOptions,
+        negativeSearchOptions: request.effectiveNegativeSearchOptions,
+        grouping: request.grouping,
+        wordMatchMode: request.wordMatchMode,
+        wordMatchCount: request.wordMatchCount,
+      ),
       chunkSize: 50,
-      order: request.order,
-      searchMode: request.searchMode,
-      distance: request.distance,
-      negativeQuery: request.sanitizedNegativeQuery,
-      negativeDistance: request.negativeDistance,
-      scope: request.proximityScope,
-      negativeScope: request.negativeProximityScope,
-      customSpacing: request.effectiveCustomSpacing,
-      negativeCustomSpacing: request.effectiveNegativeCustomSpacing,
-      alternativeWords: request.effectiveAlternativeWords,
-      negativeAlternativeWords: request.effectiveNegativeAlternativeWords,
-      searchOptions: request.effectiveSearchOptions,
-      negativeSearchOptions: request.effectiveNegativeSearchOptions,
-      grouping: request.grouping,
-      wordMatchMode: request.wordMatchMode,
-      wordMatchCount: request.wordMatchCount,
     );
     final iterator = StreamIterator<SearchStreamUpdate>(stream);
     var cancelled = false;
@@ -2285,6 +2447,77 @@ class PluginBridgeAdapter {
     Map<String, dynamic> args,
   ) async {
     switch (action) {
+      case 'getDefaultTextReader':
+        final registry = PluginTextReaderRegistry.instance;
+        return {
+          'pluginId': registry.selectedPluginId,
+          'enabled': registry.selectedPluginId == plugin.pluginId,
+          'available': registry.activePlugin != null,
+        };
+      case 'setDefaultTextReader':
+        final enabled = args['enabled'];
+        if (enabled is! bool) {
+          throw Exception('error.invalid_params: enabled must be boolean');
+        }
+        final check =
+            _dependencies.hasUserActivation ?? _defaultHasUserActivation;
+        if (instanceId == PluginInstanceIds.background ||
+            !await check(plugin.pluginId, instanceId)) {
+          throw Exception('error.forbidden: Requires a user gesture');
+        }
+        final granted = await _getGrantedPermissions();
+        if (!plugin.enabled ||
+            !plugin.hasToolPage ||
+            !PluginTextReaderRegistry.requiredPermissions.every(
+              granted.contains,
+            )) {
+          throw Exception(
+            'error.forbidden: Reader and library permissions required',
+          );
+        }
+        await PluginTextReaderRegistry.instance.select(plugin, enabled);
+        return {'enabled': enabled};
+      case 'setTextReaderFontSize':
+        final tab = readerTab;
+        final registry = PluginTextReaderRegistry.instance;
+        final size = args['fontSize'];
+        if (tab == null ||
+            instanceId == PluginInstanceIds.background ||
+            !registry.usesPlugin(tab) ||
+            registry.activePlugin?.pluginId != plugin.pluginId ||
+            tab.bloc.isClosed) {
+          throw Exception(
+            'error.unavailable: Not an active embedded text reader',
+          );
+        }
+        if (size is! num || !size.isFinite || size < 14 || size > 60) {
+          throw Exception(
+            'error.invalid_params: fontSize must be between 14 and 60',
+          );
+        }
+        tab.bloc.add(UpdateFontSize(size.toDouble()));
+        return true;
+      case 'reportTextReaderLocation':
+        final tab = readerTab;
+        final registry = PluginTextReaderRegistry.instance;
+        if (tab == null ||
+            instanceId == PluginInstanceIds.background ||
+            !registry.usesPlugin(tab) ||
+            registry.activePlugin?.pluginId != plugin.pluginId ||
+            tab.bloc.isClosed) {
+          throw Exception(
+            'error.unavailable: Not an active embedded text reader',
+          );
+        }
+        final index = args['index'];
+        if (index is! int || index < 0) {
+          throw Exception('error.invalid_params: index must be nonnegative');
+        }
+        tab.lines.reportExternalLine(index);
+        final ref = args['ref'];
+        if (ref is String && ref.length <= 500) tab.currentTitle.value = ref;
+        _dependencies.tabsBloc.add(const SaveTabs());
+        return true;
       case 'openBook':
         // spec: openBook({ id?, bookId?, type?, index?, searchQuery?,
         //   navigateToPositionIfReused?, matchPages?, matchedTerms? })
@@ -2305,7 +2538,7 @@ class PluginBridgeAdapter {
               'error.invalid_params: id, bookUid or bookId required',
             );
           }
-          if (args['external'] != null) {
+          if (args['external'] != null && args['reader'] != 'native') {
             final access = DeclarativeLibraryBookAccess.otzaria(
               _dependencies.bookOpenCoordinator,
             );
@@ -2318,11 +2551,41 @@ class PluginBridgeAdapter {
               externalMatches: externalMatches,
             );
           }
-          final book = _findPluginBook(
-            await DataRepository.instance.library,
-            args,
-          );
+          final book = args['external'] != null
+              ? (await DeclarativeLibraryBookAccess.otzaria(
+                  _dependencies.bookOpenCoordinator,
+                ).findUniqueBooks([_identityFields(args)])).single
+              : _findPluginBook(
+                  await DataRepository.instance.library,
+                  args,
+                );
           if (book == null) return false;
+          if (args['reader'] == 'native' && book is TextBook) {
+            final registry = PluginTextReaderRegistry.instance;
+            final coordinator = _dependencies.bookOpenCoordinator;
+            final tab = coordinator.buildTab(
+              book,
+              index,
+              searchQuery,
+              ignoreHistory: true,
+            );
+            if (tab is TextBookTab) registry.useNative(tab);
+            for (final existing
+                in _dependencies.tabsBloc.state.tabs
+                    .expand(leafPanes)
+                    .whereType<TextBookTab>()) {
+              if (PluginBookIdentity.uidOf(existing.book) ==
+                  PluginBookIdentity.uidOf(book)) {
+                registry.useNative(existing);
+              }
+            }
+            coordinator.openTab(
+              tab,
+              navigateToPositionIfReused: true,
+              inSidePane: openInSidePane,
+            );
+            return true;
+          }
           _dependencies.bookOpenCoordinator.openBook(
             book,
             index,
@@ -2556,6 +2819,95 @@ class PluginBridgeAdapter {
             requiresStableLayout: book is PdfBook,
           );
           return true;
+        }
+      case 'printRange':
+        // spec: printRange({ id?, bookUid?, bookId?, type?, startIndex, endIndex?, commentators? })
+        // התוסף אינו מקבל טקסט; המסך נפתח רק מתוך מחוות משתמש.
+        {
+          final startIndex = _nonNegativeIntArg(args['startIndex']);
+          if (startIndex == null) {
+            throw Exception(
+              'error.invalid_params: startIndex must be a non-negative integer',
+            );
+          }
+          final rawEnd = args['endIndex'];
+          final endIndex = rawEnd == null ? null : _nonNegativeIntArg(rawEnd);
+          if (rawEnd != null && (endIndex == null || endIndex <= startIndex)) {
+            throw Exception(
+              'error.invalid_params: endIndex must be an integer greater than '
+              'startIndex',
+            );
+          }
+          if (PluginBookIdentity.parseId(args['id']) == null &&
+              (args['bookId'] ?? args['title']) == null &&
+              (args['bookUid'] as String?)?.trim().isNotEmpty != true) {
+            throw Exception(
+              'error.invalid_params: id, bookUid or bookId required',
+            );
+          }
+          final rawCommentators = args['commentators'];
+          if (args.containsKey('commentators') &&
+              (rawCommentators is! List ||
+                  rawCommentators.length > 256 ||
+                  rawCommentators.any(
+                    (name) => name is! String || name.trim().isEmpty,
+                  ))) {
+            throw Exception(
+              'error.invalid_params: commentators must be an array of non-empty names',
+            );
+          }
+          final requestedCommentators = rawCommentators == null
+              ? null
+              : (rawCommentators as List)
+                    .cast<String>()
+                    .map((name) => name.trim())
+                    .toSet()
+                    .toList();
+          return await _runUserGatedDialog(() async {
+            final book = _findPluginBook(
+              await DataRepository.instance.library,
+              args,
+            );
+            if (book == null) {
+              throw Exception('error.not_found: book not found');
+            }
+            if (book is! TextBook) {
+              throw Exception(
+                'error.unsupported: printRange supports text books only',
+              );
+            }
+            final available =
+                await (_dependencies.textBookRepository ??
+                        TextBookRepository(fileSystem: FileSystemData.instance))
+                    .getAvailableCommentators(book);
+            final pane = _dependencies.tabsBloc.state.readingPane;
+            final state =
+                pane is TextBookTab &&
+                    PluginBookIdentity.uidOf(pane.book) ==
+                        PluginBookIdentity.uidOf(book)
+                ? pane.bloc.state
+                : null;
+            final active =
+                requestedCommentators ??
+                (state is TextBookLoaded
+                    ? state.activeCommentators
+                          .where(available.contains)
+                          .toList()
+                    : available);
+            if (requestedCommentators != null &&
+                active.any((name) => !available.contains(name))) {
+              throw Exception('error.not_found: unknown commentators');
+            }
+            final show = _dependencies.printBookRange ?? _defaultPrintBookRange;
+            final printed = await show(
+              book,
+              startLine: startIndex,
+              endLine: endIndex,
+              activeCommentators: active,
+              availableCommentators: available,
+            );
+            return {'printed': printed};
+          });
         }
       case 'getCurrentState':
         final tabsState = _dependencies.tabsBloc.state;
@@ -3240,11 +3592,9 @@ class PluginBridgeAdapter {
                 'id': workspace.id,
                 'name': workspace.name,
                 'isActive': workspace.id == activeId,
-                // בשולחן הפעיל הטאבים חיים ב-TabsBloc ונשמרים אליו רק במעבר,
-                // ולכן הספירה שלו חייבת לבוא משם ולא מהעותק השמור.
-                'tabCount': workspace.id == activeId
-                    ? _dependencies.tabsBloc.state.tabs.length
-                    : workspace.tabs.length,
+                'tabCount': bloc.state
+                    .tabsOf(workspace, _dependencies.tabsBloc.state.tabs)
+                    .length,
               },
             )
             .toList();
@@ -3690,6 +4040,26 @@ class PluginBridgeAdapter {
     }
   }
 
+  /// דיאלוג אישור לפתיחת [uri] בדפדפן. אחד בכל רגע, כמו דיאלוגי המערכת.
+  Future<bool> _confirmOpenUrl(Uri uri) async {
+    if (_userDialogOpen) {
+      throw Exception('error.forbidden: A system dialog is already open');
+    }
+    _userDialogOpen = true;
+    try {
+      final url = uri.toString();
+      final shown = url.length > 300 ? '${url.substring(0, 300)}…' : url;
+      return await _dependencies.showConfirmDialog(
+        title: 'פתיחת קישור חיצוני',
+        content:
+            'התוסף "${plugin.name}" מבקש לפתוח בדפדפן כתובת באתר '
+            '${uri.host}:\n$shown\n\nהכתובת יכולה להעביר לאתר מידע מתוך התוסף.',
+      );
+    } finally {
+      _userDialogOpen = false;
+    }
+  }
+
   /// ה-WebView של המופע, או חריגה אם אינו חי (טאב שנסגר באמצע).
   InAppWebViewController _requireController(
     String pluginId,
@@ -3719,6 +4089,42 @@ class PluginBridgeAdapter {
         );
     // WKWebView אינו מממש את navigator.userActivation; שם אין מה לאכוף.
     return result != 'inactive';
+  }
+
+  /// מסך ההדפסה של הקורא, כדיאלוג מעל החלון הראשי (`reader.printRange`).
+  Future<bool> _defaultPrintBookRange(
+    TextBook book, {
+    required int startLine,
+    int? endLine,
+    required List<String> activeCommentators,
+    required List<String> availableCommentators,
+  }) async {
+    final toc = await book.tableOfContents;
+    final context = navigatorKey.currentContext;
+    if (context == null || !context.mounted) {
+      throw Exception('error.unavailable: No window to show the print screen');
+    }
+    final printed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PrintingScreen(
+        data: _loadBookRawText(book),
+        bookId: book.title,
+        book: book,
+        startLine: startLine,
+        endLine: endLine,
+        tableOfContents: toc,
+        activeCommentators: activeCommentators,
+        availableCommentators: availableCommentators,
+      ),
+    );
+    return printed ?? false;
+  }
+
+  /// מספר שלם אי-שלילי מפרמטר JSON (גם 3.0), או null.
+  static int? _nonNegativeIntArg(Object? value) {
+    if (value is! num || value < 0 || value != value.truncate()) return null;
+    return value.toInt();
   }
 
   Future<bool> _defaultPrintPage(
@@ -5204,6 +5610,8 @@ class PluginBridgeAdapter {
     Map<String, dynamic> args,
   ) async {
     switch (action) {
+      case 'submitBookCorrection':
+        return _submitBookCorrection(args);
       case 'sendEmail':
         final to = args['to'] as String?;
         final subject = args['subject'] as String?;
@@ -5218,7 +5626,7 @@ class PluginBridgeAdapter {
         if (includeSystemInfo) {
           final packageInfo = await PackageInfo.fromPlatform();
           finalBody += '\n\n---\n';
-          finalBody += 'גרסה: ${packageInfo.version}\n';
+          finalBody += 'גרסה: ${canonicalAppVersion(packageInfo)}\n';
           finalBody += 'פלטפורמה: ${Platform.operatingSystem}\n';
           finalBody += 'תוסף: ${plugin.name} (${plugin.pluginId})\n';
         }
@@ -5309,6 +5717,82 @@ class PluginBridgeAdapter {
           'error.unknown_method: Unknown action in feedback: $action',
         );
     }
+  }
+
+  Future<Map<String, dynamic>> _submitBookCorrection(
+    Map<String, dynamic> args,
+  ) async {
+    final bookId = args['bookId'];
+    final bookUid = args['bookUid'];
+    if (bookId is! String ||
+        bookId.trim().isEmpty ||
+        (bookUid != null && (bookUid is! String || bookUid.trim().isEmpty))) {
+      throw Exception('error.invalid_params: זהות הספר אינה תקינה.');
+    }
+    final library = await DataRepository.instance.library;
+    _ensureBookIndex(library);
+    final book = bookUid is String
+        ? _booksByUid[bookUid.trim()]
+        : switch (_booksByTitle[bookId]) {
+            [final book] => book,
+            _ => null,
+          };
+    if (book == null) {
+      throw Exception('error.not_found: הספר לא נמצא באופן חד־משמעי.');
+    }
+    if (book is! TextBook ||
+        !book.isOfficialLibraryBook ||
+        book.id == null ||
+        book.versionTitle != null) {
+      throw Exception(
+        'error.unsupported_context: ניתן לדווח רק על ספר טקסט רשמי.',
+      );
+    }
+    final resolved = await BookDatabaseResolver.resolveBookById(book.id!);
+    if (resolved == null ||
+        !resolved.source.isOfficial ||
+        resolved.book.isFileBacked) {
+      throw Exception(
+        'error.unsupported_context: מקור הספר אינו במסד הספרייה הרשמי.',
+      );
+    }
+    final information = await BookDetailsService().getBookInformation(book);
+    final package = await PackageInfo.fromPlatform();
+    final version = await DataCollectionService().readLibraryVersion();
+    return _bookCorrectionService.submit(
+      pluginId: plugin.pluginId,
+      args: args,
+      metadata: PluginBookReportMetadata(
+        bookId: resolved.book.id,
+        title: book.title,
+        sourceFolder: information.source ?? '',
+        filePath:
+            libraryDisplayPath(
+              information.fileDetails['נתיב הקובץ'] ?? '',
+            ) ??
+            '',
+        libraryVersion: version,
+        client: ReportClientInfo(
+          appVersion: '${package.version}+${package.buildNumber}',
+          platform: Platform.operatingSystem,
+        ),
+      ),
+      loadSource: (index) async {
+        final lines = await DbReadWorker.lines(
+          SqliteDataProvider.instance.dbPath,
+          resolved.book.id,
+          index,
+          index,
+        );
+        if (lines.length != 1) {
+          throw Exception('error.not_found: פסקת המקור אינה קיימת.');
+        }
+        return PluginBookReportSource(
+          lines.single.content,
+          heRef: lines.single.heRef,
+        );
+      },
+    );
   }
 
   // ----------------------------------------------------------------
@@ -5675,7 +6159,7 @@ class PluginBridgeAdapter {
         }
 
         // שליחת התראה מיידית
-        final notificationId = id ?? DateTime.now().millisecondsSinceEpoch;
+        final notificationId = id ?? _newNotificationId();
 
         await _notificationService.flutterLocalNotificationsPlugin.show(
           id: notificationId,
@@ -5727,7 +6211,7 @@ class PluginBridgeAdapter {
           );
         }
 
-        final notificationId = id ?? DateTime.now().millisecondsSinceEpoch;
+        final notificationId = id ?? _newNotificationId();
 
         await _notificationService.scheduleNotification(
           id: notificationId,
@@ -5845,6 +6329,9 @@ class PluginBridgeAdapter {
     );
   }
 
+  // flutter_local_notifications דוחה מזהה שאינו נכנס ב-32 ביט.
+  static int _newNotificationId() => math.Random().nextInt(0x7FFFFFFF);
+
   /// Track notification ID for this plugin (internal namespace)
   Future<void> _trackNotificationId(int id) async {
     final ids = await _getTrackedNotificationIds();
@@ -5916,8 +6403,20 @@ class PluginBridgeAdapter {
       'isLeapYear': jewishCalendar.isJewishLeapYear(),
       'isShabbat': jewishCalendar.getDayOfWeek() == 7,
       'parasha': _upcomingParasha(date, inIsrael, formatter),
+      'dafYomi': _buildDafYomiPayload(jewishCalendar),
       'holidays': _buildHolidayPayloads(jewishCalendar, formatter),
     };
+  }
+
+  /// דף היומי (בבלי) לתאריך העברי הנתון. `null` עבור תאריכים שקדמו לתחילת
+  /// המחזור הראשון (י"ח באלול תרפ"ג / 11.9.1923), שלגביהם הספרייה זורקת.
+  Map<String, dynamic>? _buildDafYomiPayload(JewishCalendar jewishCalendar) {
+    try {
+      final daf = jewishCalendar.getDafYomiBavli();
+      return {'masechet': daf.getMasechta(), 'daf': daf.getDaf()};
+    } on ArgumentError {
+      return null;
+    }
   }
 
   String _upcomingParasha(
@@ -5928,7 +6427,7 @@ class PluginBridgeAdapter {
     final dayOfWeek = date.weekday; // 1=Mon … 6=Sat, 7=Sun in Dart
     // Dart weekday: Mon=1 … Sat=6, Sun=7. Shabbat = Saturday = 6.
     final daysUntilShabbat = dayOfWeek == 6 ? 0 : (6 - dayOfWeek) % 7;
-    final shabbatDate = date.add(Duration(days: daysUntilShabbat));
+    final shabbatDate = addCalendarDays(date, daysUntilShabbat);
     final shabbatCalendar = JewishCalendar.fromDateTime(shabbatDate)
       ..inIsrael = inIsrael;
     return formatter.formatParsha(shabbatCalendar);
@@ -6379,6 +6878,26 @@ class PluginBridgeAdapter {
               },
             )
             .toList();
+      case 'setNewTabPage':
+        final enabled = args['enabled'];
+        if (enabled != null && enabled is! bool) {
+          throw Exception('error.invalid_params: enabled must be boolean');
+        }
+        if (enabled == false) {
+          await PluginNewTabPageService.instance.release(
+            plugin.pluginId,
+            _pluginRepo,
+          );
+        } else {
+          return PluginNewTabPageService.instance.request(
+            plugin.pluginId,
+            _pluginRepo,
+            onConflict: (ownerId) => unawaited(
+              notifyPluginNewTabPageConflict(plugin, ownerId, _pluginRepo),
+            ),
+          );
+        }
+        return true;
       case 'openSelf':
         PluginPageLauncher.instance.open(
           plugin.pluginId,

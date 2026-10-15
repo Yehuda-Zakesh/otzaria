@@ -57,9 +57,14 @@ void main() {
       SettingsRepository.keyBackupPath,
       p.join(tempDir.path, 'backups'),
     );
+    await Settings.setValue<String>(
+      SettingsRepository.keyDatabasesPath,
+      p.join(tempDir.path, 'databases'),
+    );
   });
 
   tearDown(() async {
+    await PersonalNotesDatabase.instance.close();
     await Hive.close();
     // סוגר את חיבורי ה-DB כדי שמחיקת התיקייה תצליח (Windows נועל קבצים
     // פתוחים), ומאפס את ה-override של נתיב הנתונים.
@@ -1605,4 +1610,95 @@ void main() {
       expect(restored.updateSourceProbed, isFalse);
     });
   });
+
+  group('analyzeBackupStatus', () {
+    void writeOldBackup(Map<String, dynamic> data, {String? raw}) {
+      final dir = Directory(p.join(tempDir.path, 'backups'))
+        ..createSync(recursive: true);
+      File(p.join(dir.path, 'otzaria_backup_2026-01-01T00-00-00.000.json'))
+        ..writeAsStringSync(raw ?? jsonEncode(data))
+        ..setLastModifiedSync(DateTime.now().subtract(const Duration(days: 3)));
+    }
+
+    test('קובץ הגיבוי אינו נקרא ב-UI isolate', () async {
+      writeOldBackup({
+        'settings': {'key-analyze-probe': 'changed'},
+      });
+      final spy = _BackupReadSpy();
+
+      final status = await IOOverrides.runWithIOOverrides(
+        BackupService.analyzeBackupStatus,
+        spy,
+      );
+
+      expect(status.hasSignificantChanges, isTrue);
+      expect(spy.mainIsolateReads, isEmpty);
+    });
+
+    test('שינוי בהגדרות מסומן, והגדרות זהות אינן מסומנות', () async {
+      await Settings.setValue<String>('key-analyze-probe', 'same');
+      writeOldBackup({
+        'settings': {'key-analyze-probe': 'same'},
+      });
+      expect(
+        (await BackupService.analyzeBackupStatus()).hasSignificantChanges,
+        isFalse,
+      );
+
+      writeOldBackup({
+        'settings': {'key-analyze-probe': 'other'},
+      });
+      final status = await BackupService.analyzeBackupStatus();
+      expect(status.hasSignificantChanges, isTrue);
+      expect(status.lastBackupDate, isNotNull);
+    });
+
+    test('קובץ גיבוי פגום אינו ממליץ על גיבוי', () async {
+      writeOldBackup(const {}, raw: '{not json');
+      final status = await BackupService.analyzeBackupStatus();
+      expect(status.hasSignificantChanges, isFalse);
+      expect(status.lastBackupDate, isNotNull);
+    });
+  });
+}
+
+/// IOOverrides חלים רק על ה-isolate הנוכחי, ולכן קריאה מתוך Isolate.run אינה נרשמת.
+final class _BackupReadSpy extends IOOverrides {
+  final mainIsolateReads = <String>[];
+
+  @override
+  File createFile(String path) {
+    final file = super.createFile(path);
+    return p.basename(path).startsWith('otzaria_backup_')
+        ? _SpyFile(file, mainIsolateReads)
+        : file;
+  }
+}
+
+class _SpyFile implements File {
+  _SpyFile(this._file, this._reads);
+  final File _file;
+  final List<String> _reads;
+
+  @override
+  String get path => _file.path;
+
+  @override
+  Future<FileStat> stat() => _file.stat();
+
+  @override
+  Future<String> readAsString({Encoding encoding = utf8}) {
+    _reads.add(path);
+    return _file.readAsString(encoding: encoding);
+  }
+
+  @override
+  String readAsStringSync({Encoding encoding = utf8}) {
+    _reads.add(path);
+    return _file.readAsStringSync(encoding: encoding);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnsupportedError('$invocation');
 }

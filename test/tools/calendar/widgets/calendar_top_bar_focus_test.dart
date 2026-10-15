@@ -57,7 +57,6 @@ void main() {
               onToggleEventsPanel: () {},
               onToggleSettingsPanel: () {},
               onPrint: () {},
-              onToggleSidebar: () {},
               isJumpToDateSearchOpen: true,
               onToggleJumpToDateSearch: () {},
               onCloseJumpToDateSearch: () => closeCount++,

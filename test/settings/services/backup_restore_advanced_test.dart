@@ -21,6 +21,7 @@ import 'package:otzaria/plugins/services/plugin_report_service.dart';
 import 'package:otzaria/plugins/storage/plugin_system_database.dart';
 import 'package:otzaria/services/direct_error_report_service.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
+import 'package:otzaria/settings/services/backup/backup_import_merge.dart';
 import 'package:otzaria/settings/services/backup/backup_maintenance.dart';
 import 'package:otzaria/settings/services/backup/backup_merge.dart';
 import 'package:otzaria/settings/services/backup/backup_rotation.dart';
@@ -391,6 +392,182 @@ void main() {
       expect(restored.first.content, 'תוכן ההערה');
     });
 
+    test('הערות רבות משוחזרות בכתיבה מרוכזת אחת', () async {
+      final db = PersonalNotesDatabase.instance;
+      for (var i = 0; i < 3; i++) {
+        await db.insertNote(buildNote(id: 'note-$i', bookId: 'ספר-${i % 2}'));
+      }
+      final backup = await createBackup(notes: true);
+      for (var i = 0; i < 3; i++) {
+        await db.deleteNote('note-$i');
+      }
+
+      final before = db.revision.value;
+      await BackupService.restoreFromBackup(backup.path);
+
+      expect(db.revision.value - before, 1, reason: 'כתיבה אחת לכל ההערות');
+      expect((await db.loadNotes('ספר-0')).map((n) => n.id), [
+        'note-0',
+        'note-2',
+      ]);
+      expect((await db.loadNotes('ספר-1')).map((n) => n.id), ['note-1']);
+    });
+
+    group('מזהה הערה כפול', () {
+      Future<String> backupWithNotes(List<Map<String, dynamic>> notes) async {
+        final backup = await createBackup(notes: true);
+        final manifest = await readManifest(backup.path);
+        manifest['notes'] = [
+          {'bookId': 'ספר-הערות', 'notes': notes},
+        ];
+        await File(backup.path).writeAsString(jsonEncode(manifest));
+        return backup.path;
+      }
+
+      final older = buildNote(id: 'duplicate').copyWith(
+        content: 'ישנה',
+        updatedAt: DateTime(2026, 1),
+      );
+      final newer = older.copyWith(
+        content: 'חדשה',
+        updatedAt: DateTime(2026, 5),
+      );
+      for (final newestFirst in [true, false]) {
+        final incoming = newestFirst ? [newer, older] : [older, newer];
+        for (final localDate in [
+          null,
+          DateTime(2025, 12),
+          DateTime(2026, 5),
+          DateTime(2026, 7),
+        ]) {
+          test('מיזוג: חדשה ראשונה=$newestFirst, מקומית=$localDate', () async {
+            final db = PersonalNotesDatabase.instance;
+            if (localDate != null) {
+              await db.insertNote(
+                older.copyWith(
+                  content: 'מקומית',
+                  updatedAt: localDate,
+                ),
+              );
+            }
+            final path = await backupWithNotes(
+              incoming.map((note) => note.toJson()).toList(),
+            );
+            final shouldWrite =
+                localDate == null || newer.updatedAt.isAfter(localDate);
+            final before = db.revision.value;
+
+            final result = await BackupService.restoreFromBackup(
+              path,
+              mode: BackupImportMode.merge,
+            );
+
+            final restored = await db.getNote('duplicate');
+            expect(restored?.content, shouldWrite ? 'חדשה' : 'מקומית');
+            expect(
+              restored?.updatedAt,
+              shouldWrite ? newer.updatedAt : localDate,
+            );
+            expect(await db.loadNotes('ספר-הערות'), hasLength(1));
+            expect(result.added?.notes, localDate == null ? 1 : 0);
+            expect(
+              result.added?.notesUpdated,
+              localDate != null && shouldWrite ? 1 : 0,
+            );
+            expect(db.revision.value - before, shouldWrite ? 1 : 0);
+          });
+        }
+
+        test('שחזור: המופע האחרון גובר, חדשה ראשונה=$newestFirst', () async {
+          final db = PersonalNotesDatabase.instance;
+          final path = await backupWithNotes(
+            incoming.map((note) => note.toJson()).toList(),
+          );
+          final before = db.revision.value;
+
+          await BackupService.restoreFromBackup(path);
+
+          expect(
+            (await db.getNote('duplicate'))?.content,
+            incoming.last.content,
+          );
+          expect(
+            (await db.getNote('duplicate'))?.updatedAt,
+            incoming.last.updatedAt,
+          );
+          expect(db.revision.value - before, 1);
+        });
+      }
+
+      for (final mode in BackupImportMode.values) {
+        test('הסרת עוגן מפורשת נשמרת גם לפני מופע legacy: $mode', () async {
+          final db = PersonalNotesDatabase.instance;
+          await db.insertNote(older.copyWith(anchorText: 'מקומי'));
+          final cleared = newer.copyWith(clearAnchor: true);
+          final legacy =
+              cleared
+                  .copyWith(
+                    content: 'עדכנית ללא עוגן',
+                    updatedAt: DateTime(2026, 6),
+                  )
+                  .toJson()
+                ..remove('anchorText');
+          final path = await backupWithNotes([cleared.toJson(), legacy]);
+          final before = db.revision.value;
+
+          final result = await BackupService.restoreFromBackup(
+            path,
+            mode: mode,
+          );
+
+          final restored = await db.getNote('duplicate');
+          expect(restored?.content, 'עדכנית ללא עוגן');
+          expect(restored?.updatedAt, DateTime(2026, 6));
+          expect(restored?.isWordAnchored, isFalse);
+          expect(restored?.anchorText, isNull);
+          expect(result.notesWithoutAnchor, 1);
+          expect(db.revision.value - before, 1);
+        });
+      }
+
+      for (final mode in BackupImportMode.values) {
+        test('עוגן מהמופע הראשון נשמר בגיבוי ישן: $mode', () async {
+          final db = PersonalNotesDatabase.instance;
+          final anchored = older.copyWith(
+            anchorText: 'בְּרֵאשִׁית',
+            anchorPrefix: 'לפני',
+            anchorSuffix: 'אחרי',
+            anchorStart: 10,
+            anchorEnd: 20,
+          );
+          final legacy = newer.toJson()
+            ..remove('anchorText')
+            ..remove('anchorPrefix')
+            ..remove('anchorSuffix')
+            ..remove('anchorStart')
+            ..remove('anchorEnd');
+          final path = await backupWithNotes([anchored.toJson(), legacy]);
+          final before = db.revision.value;
+
+          final result = await BackupService.restoreFromBackup(
+            path,
+            mode: mode,
+          );
+
+          final restored = await db.getNote('duplicate');
+          expect(restored?.content, 'חדשה');
+          expect(restored?.updatedAt, newer.updatedAt);
+          expect(restored?.anchorText, anchored.anchorText);
+          expect(restored?.anchorPrefix, anchored.anchorPrefix);
+          expect(restored?.anchorSuffix, anchored.anchorSuffix);
+          expect(restored?.anchorStart, anchored.anchorStart);
+          expect(restored?.anchorEnd, anchored.anchorEnd);
+          expect(result.notesWithoutAnchor, 0);
+          expect(db.revision.value - before, 1);
+        });
+      }
+    });
+
     test('"שמור וזכור": מפתחות sz משוחזרים', () async {
       await box.put('sz:progress_by_id', '{"1":{"1":{"learn":true}}}');
       final backup = await createBackup(shamorZachor: true);
@@ -655,6 +832,70 @@ void main() {
 
       expect(status.lastBackupDate, isNotNull);
       expect(status.hasSignificantChanges, isFalse);
+    });
+
+    group('סף ההערות בגיבוי ישן', () {
+      Future<DateTime> writeOldNotesBackup(int noteCount) async {
+        final path = await writeBackupFile(
+          timestamp: agedTimestamp(3),
+          data: {
+            'notes': [
+              {'bookId': 'ספר', 'notes': List.generate(noteCount, (_) => {})},
+            ],
+          },
+        );
+        final backupDate = DateTime.now().subtract(const Duration(days: 3));
+        await File(path).setLastModified(backupDate);
+        return backupDate;
+      }
+
+      Future<void> insertNotes(int count, DateTime updatedAt, {int from = 0}) =>
+          PersonalNotesDatabase.instance.batchInsertNotes([
+            for (var i = from; i < from + count; i++)
+              buildNote(
+                id: 'note-$i',
+                bookId: 'ספר ${i % 3}',
+              ).copyWith(updatedAt: updatedAt),
+          ]);
+
+      test('5 הערות חדשות בכמה ספרים מעוררות המלצה, 4 לא', () async {
+        final backupDate = await writeOldNotesBackup(2);
+        final before = backupDate.subtract(const Duration(hours: 1));
+
+        await insertNotes(6, before);
+        expect(
+          (await BackupService.analyzeBackupStatus()).hasSignificantChanges,
+          isFalse,
+        );
+
+        await insertNotes(1, before, from: 6);
+        expect(
+          (await BackupService.analyzeBackupStatus()).hasSignificantChanges,
+          isTrue,
+        );
+      });
+
+      test('30% מההערות נערכו אחרי הגיבוי מעוררות המלצה', () async {
+        final backupDate = await writeOldNotesBackup(10);
+
+        await insertNotes(8, backupDate.subtract(const Duration(hours: 1)));
+        await insertNotes(2, backupDate.add(const Duration(hours: 1)), from: 8);
+        expect(
+          (await BackupService.analyzeBackupStatus()).hasSignificantChanges,
+          isFalse,
+        );
+
+        await PersonalNotesDatabase.instance.batchInsertNotes([
+          buildNote(
+            id: 'note-0',
+            bookId: 'ספר 0',
+          ).copyWith(updatedAt: backupDate.add(const Duration(hours: 1))),
+        ], replace: true);
+        expect(
+          (await BackupService.analyzeBackupStatus()).hasSignificantChanges,
+          isTrue,
+        );
+      });
     });
 
     test('קובץ גיבוי פגום אינו מפיל את הניתוח', () async {

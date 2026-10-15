@@ -314,13 +314,6 @@ class UpdateSearchShowPreview extends SettingsEvent {
   List<Object?> get props => [searchShowPreview];
 }
 
-class RefreshShortcuts extends SettingsEvent {
-  const RefreshShortcuts();
-
-  @override
-  List<Object?> get props => [];
-}
-
 class ResetShortcuts extends SettingsEvent {}
 
 class UpdateShortcut extends SettingsEvent {
@@ -376,15 +369,6 @@ class UpdateSoftwareAndBookUpdatesEnabled extends SettingsEvent {
 
   @override
   List<Object?> get props => [enabled];
-}
-
-class UpdateEnableHtmlLinks extends SettingsEvent {
-  final bool enableHtmlLinks;
-
-  const UpdateEnableHtmlLinks(this.enableHtmlLinks);
-
-  @override
-  List<Object?> get props => [enableHtmlLinks];
 }
 
 class UpdatePersonalNotesCollapsedByDefault extends SettingsEvent {

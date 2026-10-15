@@ -226,6 +226,7 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
 
     final totalCandidates = _repository.eligibleBookCount(
       event.library,
+      books: event.books,
       includePdfBooks: false,
     );
     if (totalCandidates == 0) {
@@ -241,9 +242,13 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
       ),
     );
 
-    try {
-      final result = await _repository.reconcileIndexWithLibrary(
+    await _runIndexing(
+      emit,
+      workId,
+      runClock,
+      () => _repository.reconcileIndexWithLibrary(
         event.library,
+        onlyBooks: event.books,
         // שלב הסריקה מדווח דרך emit ישיר (ולא UpdateIndexingProgress) כדי
         // ש-processed==total בסוף הסריקה לא ייתפס כ"אינדוקס הושלם" לפני
         // שלב האינדוקס-מחדש.
@@ -258,43 +263,20 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
             ),
           );
         },
-        onActualIndexingStarted: () {
-          add(ActualIndexingStarted(workId));
-        },
-        onProgress: (processed, total) {
-          add(
-            UpdateIndexingProgress(
-              workId: workId,
-              processed: processed,
-              total: total,
-            ),
-          );
-        },
-      );
-      if (_activeWorkId != workId) {
-        return;
-      }
-      _activeWorkId = null;
-      _reportRunFailures(result, runClock.elapsed);
-      if (result.completed) {
-        emit(IndexingComplete(failures: result.failures));
-      } else {
-        emit(IndexingInitial());
-      }
-    } catch (e) {
-      if (_activeWorkId != workId) {
-        return;
-      }
-      _activeWorkId = null;
-      emit(
-        IndexingError(
-          e.toString(),
-          booksProcessed: state.booksProcessed,
-          totalBooks: state.totalBooks,
+        onActualIndexingStarted: () => add(ActualIndexingStarted(workId)),
+        onProgress: _progressOf(workId),
+      ),
+    );
+  }
+
+  void Function(int processed, int total) _progressOf(int workId) =>
+      (processed, total) => add(
+        UpdateIndexingProgress(
+          workId: workId,
+          processed: processed,
+          total: total,
         ),
       );
-    }
-  }
 
   /// Handles the StartIndexing event
   Future<void> _onStartIndexing(
@@ -314,49 +296,17 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
     }
     emit(_inProgress(booksProcessed: 0, totalBooks: totalBooks));
 
-    try {
-      final result = await _repository.indexAllBooks(
+    await _runIndexing(
+      emit,
+      workId,
+      runClock,
+      () => _repository.indexAllBooks(
         event.library,
-        onActualIndexingStarted: () {
-          add(ActualIndexingStarted(workId));
-        },
-        onFinalizing: () {
-          add(IndexingFinalizing(workId));
-        },
-        onProgress: (processed, total) {
-          // Update progress through event
-          add(
-            UpdateIndexingProgress(
-              workId: workId,
-              processed: processed,
-              total: total,
-            ),
-          );
-        },
-      );
-      if (_activeWorkId != workId) {
-        return;
-      }
-      _activeWorkId = null;
-      _reportRunFailures(result, runClock.elapsed);
-      if (result.completed && totalBooks > 0) {
-        emit(IndexingComplete(failures: result.failures));
-      } else {
-        emit(IndexingInitial());
-      }
-    } catch (e) {
-      if (_activeWorkId != workId) {
-        return;
-      }
-      _activeWorkId = null;
-      emit(
-        IndexingError(
-          e.toString(),
-          booksProcessed: state.booksProcessed,
-          totalBooks: state.totalBooks,
-        ),
-      );
-    }
+        onActualIndexingStarted: () => add(ActualIndexingStarted(workId)),
+        onFinalizing: () => add(IndexingFinalizing(workId)),
+        onProgress: _progressOf(workId),
+      ),
+    );
   }
 
   void _onActualIndexingStarted(
@@ -415,28 +365,37 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
     final totalBooks = _repository.eligibleBookCount(library, books: books);
     emit(_inProgress(booksProcessed: 0, totalBooks: totalBooks));
 
-    try {
-      onActualIndexingStarted() => add(ActualIndexingStarted(workId));
-      onProgress(int processed, int total) => add(
-        UpdateIndexingProgress(
-          workId: workId,
-          processed: processed,
-          total: total,
-        ),
-      );
-      final result = reindex
-          ? await _repository.reindexChangedBooks(
+    onActualIndexingStarted() => add(ActualIndexingStarted(workId));
+    final onProgress = _progressOf(workId);
+    await _runIndexing(
+      emit,
+      workId,
+      runClock,
+      () => reindex
+          ? _repository.reindexChangedBooks(
               books,
               library,
               onActualIndexingStarted: onActualIndexingStarted,
               onProgress: onProgress,
             )
-          : await _repository.indexBooks(
+          : _repository.indexBooks(
               books,
               library,
               onActualIndexingStarted: onActualIndexingStarted,
               onProgress: onProgress,
-            );
+            ),
+    );
+  }
+
+  /// מריץ את [run] ומסיים את המצב — רק אם [workId] עדיין הריצה הפעילה.
+  Future<void> _runIndexing(
+    Emitter<IndexingState> emit,
+    int workId,
+    Stopwatch runClock,
+    Future<IndexingRunResult> Function() run,
+  ) async {
+    try {
+      final result = await run();
       if (_activeWorkId != workId) {
         return;
       }

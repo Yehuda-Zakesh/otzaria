@@ -41,7 +41,7 @@ class HtmlLimits {
   static const int maxAnchorIdLength = 128;
 }
 
-/// ממיר מסמך HTML עצמאי (‎.html‎/‎.htm‎) לפורמט הטקסט של אוצריא: שורת `<h1>`
+/// ממיר מסמך HTML עצמאי (.html/.htm) לפורמט הטקסט של אוצריא: שורת `<h1>`
 /// עם שם הספר, ואחריה שורה לכל בלוק (פסקה/כותרת/טבלה/תמונה).
 ///
 /// **חוזה האבטחה — הפלט נבנה מאפס ולעולם אינו מעתיק markup מהמקור.** אין
@@ -65,7 +65,7 @@ class HtmlLimits {
 /// וההערות האישיות היו זזים מול מה שהקורא רואה.
 /// [baseDirectory] היא תיקיית קובץ ה-HTML, שרק בתוכה נפתרות תמונות יחסיות.
 /// [format] היא הסיומת שזוהתה בפועל, והיא זו שנרשמת בחריגות. בלעדיה כל כשל
-/// של קובץ ‎.htm‎ היה מדווח כ-‎.html‎ — בניגוד לעיקרון ש-`fileType` הוא זהות
+/// של קובץ .htm היה מדווח כ-.html — בניגוד לעיקרון ש-`fileType` הוא זהות
 /// ולא תווית.
 String htmlToText(
   Uint8List bytes,
@@ -75,7 +75,7 @@ String htmlToText(
   DocumentFormat format = DocumentFormat.html,
   int maxTotalEmbeddedImageBytes = EmbeddedMediaLimits.maxTotalImageBytes,
 }) {
-  // מכולה בינארית שהוסוותה בסיומת ‎.html‎: פענוח הבייטים שלה כטקסט מייצר
+  // מכולה בינארית שהוסוותה בסיומת .html: פענוח הבייטים שלה כטקסט מייצר
   // ג'יבריש עברי שנראה כספר תקין לגמרי — והוא נשמר במטמון ונכנס לאינדקס.
   if (isBinaryContainerHeader(bytes)) {
     throw UnsupportedDocumentFormatException(
@@ -90,7 +90,7 @@ String htmlToText(
     );
   }
 
-  // ‏`otzariaInlineText` על הכותרת: שם קובץ יכול להכיל שורה חדשה, והיא
+  // `otzariaInlineText` על הכותרת: שם קובץ יכול להכיל שורה חדשה, והיא
   // הייתה מפצלת את שורה 0 לשתיים — ואז שכבת המטמון, שמזהה את שורת הכותרת
   // לפי הקידומת `<h1>`, מחליפה חצי שורה.
   final output = <String>[
@@ -127,7 +127,7 @@ String htmlToText(
       ctx,
       output,
       depth: 0,
-      // ‏`dir` יושב לרוב על ‎`<html>`‎, שאינו אחד הצמתים שעוברים כאן — בלי
+      // `dir` יושב לרוב על `<html>`, שאינו אחד הצמתים שעוברים כאן — בלי
       // הזריעה מסמך שכולו LTR היה נקרא בכיווניות ברירת המחדל של הקורא.
       inherited: _rootStyle(document.documentElement),
     );
@@ -514,7 +514,7 @@ const Set<String> _droppedTags = {
 
 /// אלמנטים שנחשבים בלוק — כלומר שוברים שורת ספר.
 ///
-/// ‏`<img>` **אינו** ברשימה: הוא inline בטבעו, ומהרגע שהיה נחשב בלוק הוא
+/// `<img>` **אינו** ברשימה: הוא inline בטבעו, ומהרגע שהיה נחשב בלוק הוא
 /// נעלם מכל מקום שאוסף תוכן כ-inline (פריט רשימה, תא בטבלה) — כי אין לו
 /// ילדים לרדת אליהם. תמונה שעומדת לבדה בעטיפה הופכת ממילא לשורה משלה.
 const Set<String> _blockTags = {
@@ -974,7 +974,7 @@ class _BlockStyle {
 
   /// הכיווניות שיש לכתוב בפועל.
   ///
-  /// `rtl` **אינו** נכתב לעולם: הקורא כולו RTL (locale ‎he_IL‎), ולכן ההצהרה
+  /// `rtl` **אינו** נכתב לעולם: הקורא כולו RTL (locale he_IL), ולכן ההצהרה
   /// היא no-op — ומסמך עברי מצהיר עליה כמעט על כל אלמנט, כך שכתיבתה הייתה
   /// עוטפת כל שורה בספר ב-`<div>` מיותר.
   String? get emittedDirection => direction == 'ltr' ? 'ltr' : null;
@@ -992,7 +992,7 @@ class _BlockStyle {
   }
 }
 
-/// הכיווניות של ‎`<html>`‎ בלבד — היישור שלו אינו רלוונטי (הוא חל על כל
+/// הכיווניות של `<html>` בלבד — היישור שלו אינו רלוונטי (הוא חל על כל
 /// המסמך ואינו הצהרה על בלוק מסוים).
 _BlockStyle? _rootStyle(dom.Element? root) {
   if (root == null) return null;
@@ -1160,7 +1160,7 @@ class _ListMarker {
   final String? _format;
 
   static _ListMarker of(dom.Element list, {required bool ordered}) {
-    // ‏`list-style-type` הוא מילת מפתח של CSS וחסר רגישות לרישיות; המאפיין
+    // `list-style-type` הוא מילת מפתח של CSS וחסר רגישות לרישיות; המאפיין
     // `type` דווקא **רגיש** לה — `type="i"` ו-`type="I"` הם פורמטים שונים.
     final declared =
         _parseStyleAttribute(list.attributes['style'])['list-style-type'] ??
@@ -1635,7 +1635,7 @@ String? _imgHtml(dom.Element e, _HtmlContext ctx) {
     wrap(highlightTags('yellow'));
   }
 
-  // ‏`<b>`/`<i>`/`<u>` מועדפים על ההצהרה המקבילה: הם נתמכים גם במצב הקריאה
+  // `<b>`/`<i>`/`<u>` מועדפים על ההצהרה המקבילה: הם נתמכים גם במצב הקריאה
   // הרציפה, שבו התכונות המקבילות אינן מוצגות.
   if (_isBoldDeclaration(_lowerDeclaration(declarations, 'font-weight'))) {
     opens.add('<b>');
@@ -1665,7 +1665,7 @@ String? _imgHtml(dom.Element e, _HtmlContext ctx) {
       'text-decoration-style',
       'text-decoration-color',
     ]);
-    // ‏CSS מחיל סגנון וצבע אחד על **כל** הקווים של ההצהרה, ולכן `double`
+    // CSS מחיל סגנון וצבע אחד על **כל** הקווים של ההצהרה, ולכן `double`
     // שנקרא כאן חל גם על הקו התחתי וגם על הקו החוצה.
     final kind = _underlineKindOf(
       _lowerDeclaration(declarations, 'text-decoration-style') ?? decoration,

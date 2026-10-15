@@ -118,6 +118,35 @@ void main() {
         ),
       );
     });
+
+    test('זהה למימוש הקודם בכל יחידת קוד ובכל מספר מילים (perf)', () {
+      // המימוש הקודם כלשונו: trim() של Dart כולל U+0085, ו-\s של RegExp לא.
+      String old(String text, int maxWords) {
+        final words = text.trim().split(RegExp(r'\s+'));
+        if (words.length <= maxWords) return text.trim();
+        return '${words.take(maxWords).join(' ')}…';
+      }
+
+      for (var c = 0; c <= 0xFFFF; c++) {
+        final ch = String.fromCharCode(c);
+        for (final text in [
+          ch,
+          '$chא$ch',
+          'א$chב ג ד ה',
+          'א ב$ch$chג ד ה ו',
+          '$ch א ב ג ד$ch',
+          'א ב ג ד$chה',
+        ]) {
+          for (var maxWords = 0; maxWords <= 6; maxWords++) {
+            expect(
+              truncateDibbur(text, maxWords: maxWords),
+              old(text, maxWords),
+              reason: '${c.toRadixString(16)} $maxWords',
+            );
+          }
+        }
+      }
+    });
   });
 
   group('buildDibburimEntries', () {

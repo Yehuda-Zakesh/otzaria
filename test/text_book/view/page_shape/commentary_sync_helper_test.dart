@@ -269,7 +269,7 @@ void main() {
 
   group('shouldMoveCommentary', () {
     test('בחירת טקסט על אותה שורה נבחרת אינה מזיזה את המפרש', () {
-      // ‏UpdateSelectedTextForNote נפלט בכל תזוזת עכבר בזמן גרירת סימון. תזוזה
+      // UpdateSelectedTextForNote נפלט בכל תזוזת עכבר בזמן גרירת סימון. תזוזה
       // בכל אחת מהן הרעידה את המפרשים בצורת הדף (issue #976).
       expect(
         CommentarySyncHelper.shouldMoveCommentary(

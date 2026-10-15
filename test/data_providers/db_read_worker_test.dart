@@ -5,20 +5,28 @@ import 'dart:isolate';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/data/data_providers/book_text_reader.dart';
 import 'package:otzaria/data/data_providers/database_library_provider.dart';
 import 'package:otzaria/data/data_providers/db_read_worker.dart';
+import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
 import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
 import 'package:otzaria/migration/database/db_capabilities.dart';
 import 'package:otzaria/migration/database/journal_mode.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
 import 'package:otzaria/migration/database/untrusted_database.dart';
+import 'package:otzaria/migration/models/book.dart' as db_models;
+import 'package:otzaria/migration/models/category.dart' as db_models;
+import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/links.dart';
+import 'package:otzaria/search/library_line_source.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:path/path.dart' as path;
 import 'package:sqlite3/sqlite3.dart' as sqlite3;
 
+import '../support/fake_line_source_engine.dart';
 import '../test_helpers/memory_cache_provider.dart';
 
 Future<int> Function() _pausedFallback(SendPort checkpoint) => () async {
@@ -109,6 +117,23 @@ void main() {
     // להתנגש ב-recovery (SQLITE_BUSY_RECOVERY).
     await normalizeJournalModeForReadOnly(dbPath);
     return dbPath;
+  }
+
+  void addCommentaryLink(String dbPath) {
+    final db = sqlite3.sqlite3.open(dbPath);
+    try {
+      db.execute(
+        "INSERT INTO connection_type (name) SELECT 'COMMENTARY' WHERE NOT "
+        "EXISTS (SELECT 1 FROM connection_type WHERE name = 'COMMENTARY')",
+      );
+      db.execute(
+        'INSERT INTO link (sourceBookId, sourceLineId, targetLineId, '
+        'targetBookId, connectionTypeId) SELECT 1, 101, 201, 2, id '
+        "FROM connection_type WHERE name = 'COMMENTARY'",
+      );
+    } finally {
+      db.close();
+    }
   }
 
   Future<T> onDirectConnection<T>(
@@ -213,6 +238,74 @@ void main() {
       for (final r in viaWorker.take(3)) (r! as Map)['content'],
       ...viaWorker.skip(3),
     ], direct);
+  });
+
+  test('מפרשי ספר מה-worker זהים לשאילתה הישירה', () async {
+    final dbPath = await seedDb('seforim');
+    addCommentaryLink(dbPath);
+    final direct = await onDirectConnection(
+      dbPath,
+      (repo) => repo.database.linkDao.selectCommentatorsByBook(1),
+    );
+    expect([for (final row in direct) row['targetBookTitle']], ['מפרש']);
+
+    expect(
+      await DbReadWorker.request('commentatorsByBook', {
+        'dbPath': dbPath,
+        'bookId': 1,
+      }),
+      direct,
+    );
+  });
+
+  test('קטלוג הספרים מה-worker זהה לשאילתה הישירה', () async {
+    final dbPath = await seedDb('seforim');
+    final direct = await onDirectConnection(
+      dbPath,
+      (repo) async => (
+        books: await repo.getAllBooksLean(),
+        categories: await repo.getAllCategories(),
+      ),
+    );
+    expect(direct.books.map((b) => b.title), ['בראשית', 'מפרש', 'ספר גדול']);
+
+    final viaWorker =
+        await DbReadWorker.request('bookCatalog', {'dbPath': dbPath})
+            as ({
+              List<db_models.Book> books,
+              List<db_models.Category> categories,
+            });
+    expect(viaWorker.books, direct.books);
+    expect(viaWorker.categories, direct.categories);
+  });
+
+  test('מפרשים נוספים על שורה מה-worker זהים לשאילתה הישירה', () async {
+    final dbPath = await seedDb('seforim');
+    addCommentaryLink(dbPath);
+    final args = {
+      'bookId': 1,
+      'bookTitle': 'בראשית',
+      'lineIndex': 2,
+      'excludeBookId': -1,
+    };
+    final direct = await onDirectConnection(
+      dbPath,
+      (repo) => repo.getSiblingCommentaryLinkRowsForLine(
+        bookId: 1,
+        bookTitle: 'בראשית',
+        lineIndex: 2,
+        excludeBookId: -1,
+      ),
+    );
+    expect([for (final row in direct) row['targetBookTitle']], ['מפרש']);
+
+    expect(
+      await DbReadWorker.request('siblingCommentaryRows', {
+        ...args,
+        'dbPath': dbPath,
+      }),
+      direct,
+    );
   });
 
   test('ספר שאינו ברשמי מוחזר למסלול הישיר ולא כשגיאה', () async {
@@ -347,7 +440,7 @@ void main() {
     } finally {
       full.release.send(null);
     }
-    expect(await result, isA<TransferableTypedData>());
+    expect(await result, isA<TransferableBookContent>());
   });
 
   test('השהיה קוטעת ספר שלם וסוגרת את שני החיבורים לפני החלפת DB', () async {
@@ -842,6 +935,47 @@ void main() {
       expect(await provider.getLinkContent(link('מפרש', 2)), 'פירוש 1');
     });
 
+    test('רשימת המפרשים בפתיחת ספר נשלפת ב-worker', () async {
+      addCommentaryLink(dbPath);
+      final repository = TextBookRepository(
+        fileSystem: FileSystemData.instance,
+      );
+      final before = DbReadWorker.sentMessageCount;
+      final detailed = await repository.getCommentatorsDetailed(
+        TextBook(id: 1, title: 'בראשית', categoryId: 7),
+      );
+      expect([for (final c in detailed.commentators) c.title], ['מפרש']);
+      expect(detailed.commentators.single.linkCount, 1);
+      expect(DbReadWorker.sentMessageCount - before, 1);
+    });
+
+    test('כותרות ספרי המסד נטענות ב-worker', () async {
+      final provider = DatabaseLibraryProvider.instance..clearCache();
+      final before = DbReadWorker.sentMessageCount;
+      final keys = await provider.getDatabaseOnlyBookTitles();
+      expect(keys, hasLength(3));
+      expect(keys.any((key) => key.contains('בראשית')), isTrue);
+      expect(DbReadWorker.sentMessageCount - before, 1);
+    });
+
+    test('המפרשים הנוספים על שורה נשלפים ב-worker', () async {
+      addCommentaryLink(dbPath);
+      final repository = TextBookRepository(
+        fileSystem: FileSystemData.instance,
+      );
+      final before = DbReadWorker.sentMessageCount;
+      final links = await repository.getSiblingCommentaries(
+        sourceBookTitle: 'בראשית',
+        sourceCategoryId: 7,
+        sourceLineIndex: 1,
+        currentBookTitle: 'אחר',
+        currentCategoryId: 7,
+      );
+      expect([for (final link in links) link.path2], ['מפרש']);
+      expect(links.single.index2, 2);
+      expect(DbReadWorker.sentMessageCount - before, 1);
+    });
+
     test('טווחי טקסט וקישורים נטענים דרך ה-worker', () async {
       final provider = DatabaseLibraryProvider.instance;
       final before = DbReadWorker.sentMessageCount;
@@ -882,6 +1016,9 @@ void main() {
     test(
       'an unreleased worker stays suspended when releaseOnFailure is false',
       () async {
+        final lineSource = FakeLineSourceEngine();
+        LibraryLineSource.debugReset(engine: lineSource);
+        addTearDown(LibraryLineSource.debugReset);
         final provider = DatabaseLibraryProvider.instance;
         expect(await provider.getLinkContent(link('מפרש', 2)), isNotEmpty);
 
@@ -900,6 +1037,7 @@ void main() {
           DbReadWorker.request('textRange', textRangeArgs(dbPath, 'בראשית')),
           throwsA(isA<DbReadWorkerSuspended>()),
         );
+        expect(lineSource.depth, 1, reason: 'גם מקור השורות נשאר מושהה');
 
         await SqliteDataProvider.instance.reopenAfterExternalWrite();
         expect(
@@ -909,6 +1047,37 @@ void main() {
           ),
           isNotNull,
         );
+        expect(lineSource.depth, 0);
+        expect(lineSource.resumes, 1);
+      },
+    );
+
+    test(
+      'a failed close releases the line source exactly once by default',
+      () async {
+        final lineSource = FakeLineSourceEngine();
+        LibraryLineSource.debugReset(engine: lineSource);
+        addTearDown(LibraryLineSource.debugReset);
+        final provider = DatabaseLibraryProvider.instance;
+        expect(await provider.getLinkContent(link('מפרש', 2)), isNotEmpty);
+
+        DbReadWorker.lifecycleCommandTimeout = Duration.zero;
+        try {
+          await expectLater(
+            SqliteDataProvider.instance.closeForExternalWrite(),
+            throwsA(isA<DbReadWorkerNotReleased>()),
+          );
+        } finally {
+          DbReadWorker.lifecycleCommandTimeout = const Duration(seconds: 4);
+        }
+        expect(lineSource.suspends, 1);
+        expect(lineSource.resumes, 1);
+        expect(lineSource.depth, 0);
+
+        // reopen עודף אינו מחדש בלי השעיה תואמת.
+        await SqliteDataProvider.instance.reopenAfterExternalWrite();
+        expect(lineSource.resumes, 1);
+        expect(lineSource.depth, 0);
       },
     );
   });

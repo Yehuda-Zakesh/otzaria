@@ -8,9 +8,6 @@ import 'package:otzaria/text_book/view/page_shape/page_shape_screen.dart';
 /// positioned around the main text
 class PageShapeStrategyImpl extends TextBookViewStrategy {
   @override
-  String get displayName => 'צורת הדף';
-
-  @override
   Widget buildView(BuildContext context, TextBookViewConfig config) {
     final page = PageShapeScreen(
       key: config.pageShapeKey,
@@ -18,7 +15,6 @@ class PageShapeStrategyImpl extends TextBookViewStrategy {
       sidebarTabNotifier: config.pageShapeSidebarTabNotifier,
       openSettingsNotifier: config.pageShapeOpenSettingsNotifier,
       onOpenSearch: config.openSearch,
-      scrollOffsetController: config.tab.mainOffsetController,
       tab: config.tab,
     );
 

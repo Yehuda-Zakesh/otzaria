@@ -17,9 +17,11 @@ import 'package:window_manager/window_manager.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:otzaria/plugins/view/safe_mode_controls.dart';
+import 'package:otzaria/plugins/services/startup_crash_counter.dart';
 import 'package:otzaria/attached_libraries/bloc/attached_libraries_bloc.dart';
-import 'package:otzaria/attached_libraries/repository/attached_libraries_repository.dart';
 import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
+import 'package:otzaria/attached_libraries/repository/attached_libraries_repository.dart';
 import 'package:otzaria/attached_libraries/repository/external_link_repository.dart';
 import 'package:otzaria/app_report/services/app_crash_session.dart';
 import 'package:otzaria/app_report/services/app_report_service.dart';
@@ -65,10 +67,12 @@ import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/empty_library/bloc/empty_library_bloc.dart';
 import 'package:otzaria/library_update/bloc/library_update_bloc.dart';
+import 'package:otzaria/library_update/changes_notes/library_changes_notes.dart';
 import 'package:otzaria/library_update/services/library_access_gate.dart';
 import 'package:otzaria/library_update/repository/library_update_repository.dart';
 import 'package:otzaria/library_update/services/streaming_patch_downloader.dart';
 import 'package:otzaria/library_update/services/companion_assets_service.dart';
+import 'package:otzaria/semantic_search/repository/semantic_search_repository.dart';
 import 'package:otzaria/library_update/services/startup_recovery_check.dart';
 import 'package:otzaria/library_update/services/github_rate_limit.dart';
 import 'package:seforim_library_updater/seforim_library_updater.dart';
@@ -84,6 +88,7 @@ import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/core/otzaria_capabilities.dart';
 import 'package:otzaria/core/data_root_writability_warning.dart';
 import 'package:otzaria/core/cli_command.dart';
 import 'package:otzaria/core/ui_snack.dart';
@@ -96,10 +101,10 @@ import 'package:otzaria/core/info/app_install_timeline.dart';
 import 'package:otzaria/core/external_activation_queue.dart';
 import 'package:otzaria/core/portable_paths.dart';
 import 'package:otzaria/core/startup_timeline.dart';
+import 'package:otzaria/core/diagnostics/developer_diagnostics.dart';
 import 'package:otzaria/core/window_listener.dart';
 import 'package:otzaria/core/window_persistence.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
-import 'package:otzaria/core/user_state/hive_to_user_state_migration.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/window_bounds.dart';
 import 'package:otzaria/core/user_state/window_session_store.dart';
@@ -123,6 +128,7 @@ import 'package:pdfrx/pdfrx.dart';
 import 'package:otzaria/tools/calendar/services/notification_service.dart';
 import 'package:otzaria/plugins/database/plugin_database_bootstrap.dart';
 import 'package:logging/logging.dart';
+import 'package:otzaria/update/app_release_version.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:otzaria/theme/app_fonts.dart';
 import 'package:otzaria/widgets/misc/app_cursors.dart';
@@ -134,11 +140,12 @@ import 'package:otzaria/plugins/services/plugin_packager_cli.dart';
 import 'package:otzaria/plugins/services/plugin_store_link_parser.dart';
 import 'package:otzaria/plugins/services/plugin_protocol_registration_service.dart';
 import 'package:otzaria/plugins/utils/plugin_dev_tools_mode.dart';
+import 'package:otzaria/plugins/utils/plugin_safe_mode.dart';
 import 'package:otzaria/core/sentry_event_filter.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
 // Updated automatically by version update scripts - do not edit manually
-const int _latestReleasedBuildNumber = 99702;
+const int _latestReleasedBuildNumber = 99800;
 
 /// החלון של ה-isolate הזה. מקור אמת אחד לכל מי שצריך אותו כאן: ה-listener,
 /// [WindowPersistence] ו-[AppWindowScope] מקבלים את אותו מופע.
@@ -223,7 +230,7 @@ Map<String, String?> _flutterErrorDetailsForLog(FlutterErrorDetails details) {
 }
 
 String _formatAppVersion(PackageInfo packageInfo) {
-  final version = packageInfo.version.trim();
+  final version = canonicalAppVersion(packageInfo);
   final buildNumber = packageInfo.buildNumber.trim();
 
   if (version.isEmpty) {
@@ -340,11 +347,12 @@ void main(List<String> args) async {
     return;
   }
   StartupTimeline.instance.start();
-  AttachedLibraryRegistry.startupGate = () => _mainWindowRevealedCompleter
-      .future
-      .timeout(const Duration(seconds: 20), onTimeout: () {});
+  // SQLite סינכרוני יכול לחסום גם טיימרים: אין לעקוף את החשיפה עם timeout.
+  AttachedLibraryRegistry.startupGate = () =>
+      _mainWindowRevealedCompleter.future;
 
   PluginDevToolsMode.initFromArgs(args);
+  PluginSafeMode.initFromArgs(args);
   // שכבות טקסט של ספרים סרוקים שומרות עברית בסדר ויזואלי; בלי זה חיפוש,
   // העתקה ואינדוקס מקבלים את המילים הפוכות.
   Pdfrx.normalizeHebrewText = true;
@@ -366,6 +374,7 @@ void main(List<String> args) async {
   await StartupTimeline.instance.phase('earlyInit', () async {
     await _initializeDataRootForEarlyLogging();
     await _initializeLogMetadata();
+    DeveloperDiagnostics.instance.initFromLaunch(args);
     hierarchicalLoggingEnabled = true;
     await _enqueueExternalActivationArgs(args);
   });
@@ -479,7 +488,8 @@ Future<void> _initializeSentry() async {
           defaultValue:
               'https://79d3003f822fa62bce0c928656308121@o4510914530902016.ingest.us.sentry.io/4510914532868096',
         );
-        options.release = '${info.appName}@${info.version}+${info.buildNumber}';
+        options.release =
+            '${info.appName}@${canonicalAppVersion(info)}+${info.buildNumber}';
         // Privacy: Do not collect IP addresses and request headers
         options.sendDefaultPii = false;
         // Sentry משמש לדיווח שגיאות בלבד; עסקאות ביצועים אינן נשלחות.
@@ -507,14 +517,9 @@ Future<void> _initializeSentry() async {
 Future<void> _runAppBootstrap() async {
   // Check for single instance - skip on Apple platforms (macOS/iOS) due to sandbox restrictions
   if (!Platform.isMacOS && !Platform.isIOS) {
-    // שם התהליך משמש רק לשם קובץ ה-pid. בלעדיו החבילה מריצה tasklist/ps
-    // באופן חוסם לפני runApp — במחשב שסוכן סינון מאט בו יצירת תהליכים זה
-    // עיכב את העלייה בעשרות שניות (issue #989). חייב לגזור אותו כמו החבילה
-    // (שם ה-EXE בלי סיומת), אחרת מופע ישן וחדש לא יזהו זה את זה.
-    FlutterSingleInstance.processName ??= Platform.resolvedExecutable
-        .split(Platform.pathSeparator)
-        .last
-        .replaceAll(RegExp(r'\.exe$', caseSensitive: false), '');
+    // שם התהליך משמש רק לשם קובץ ה-pid; בלעדיו החבילה מריצה tasklist/ps
+    // חוסם (issue #989). לעותק מותקן הוא שם ה-EXE, כדי שמופע ישן וחדש יזהו זה את זה.
+    FlutterSingleInstance.processName ??= AppPaths.singleInstanceKey();
     FlutterSingleInstance flutterSingleInstance = FlutterSingleInstance();
     bool isFirstInstance = await StartupTimeline.instance.phase(
       'singleInstance',
@@ -904,10 +909,13 @@ Future<void> _initializeRestartableRuntime() async {
       );
     }),
   );
+  final previousPluginDecision = PluginSafeMode.ready;
+  PluginSafeMode.ready = _runDeferredPluginSafeMode(previousPluginDecision);
 
   // אינם נחוצים להצגת ה-UI הראשי. unawaited לבדו אינו דוחה: הקוד שעד ה-await
   // הראשון בכל אחד מהם רץ כאן, ולכן עבודה סינכרונית חייבת לחכות לחשיפה בעצמה.
   unawaited(_runDeferredAutoBackup());
+  unawaited(_runDeferredStartupStability());
   unawaited(_runDeferredRestoreWindows());
   unawaited(_runDeferredProtocolRegistration());
   unawaited(_runDeferredSwapRecovery());
@@ -915,6 +923,8 @@ Future<void> _initializeRestartableRuntime() async {
   unawaited(_runDeferredDataRootWritabilityWarning());
   unawaited(_runDeferredCrashCheck());
   unawaited(_runDeferredAttachedLibraries());
+  unawaited(_runDeferredLibraryChangesNotes());
+  unawaited(_runDeferredCapabilitiesWrite());
 }
 
 /// כשקונטיינמנט ה-Job Object לא הוקם, תהליכי msedgewebview2.exe שורדים את
@@ -1099,6 +1109,99 @@ Future<void> _runDeferredCrashCheck() async {
   }
 }
 
+Future<void> _runDeferredPluginSafeMode(Future<void> previousDecision) async {
+  try {
+    await _mainWindowRevealedCompleter.future.timeout(
+      const Duration(seconds: 20),
+    );
+  } on TimeoutException {
+    // טעינת התוספים אינה תלויה בהצלחת חשיפת החלון.
+  }
+  try {
+    await previousDecision;
+    await _timedPhase(
+      'pluginSafeMode',
+      () => PluginSafeMode.initializeSession(
+        isSecondary: WindowRole.isSecondary,
+        onError: (error, stackTrace) => _logNonFatalInitializationError(
+          'Plugin safe mode',
+          error,
+          stackTrace,
+        ),
+        waitForPrimary: () async {
+          final owner = WindowBus.instance.ownerPort;
+          if (owner == null) throw StateError('Main window unavailable');
+          final decision = await WindowBus.instance.requestPort(
+            owner,
+            {'type': PluginSafeMode.readyRequest},
+            timeout: const Duration(seconds: 20),
+          );
+          if (decision is! bool) {
+            throw StateError('Main window safe-mode decision unavailable');
+          }
+          return decision;
+        },
+      ),
+    );
+  } catch (error, stackTrace) {
+    PluginSafeMode.active.value = true;
+    _logNonFatalInitializationError('Plugin safe mode', error, stackTrace);
+  }
+}
+
+/// Clears the startup crash count once the app has run stably, and explains
+/// a safe mode that was entered because of it.
+Future<void> _runDeferredStartupStability() async {
+  // Per process: the count belongs to the main window's launch.
+  if (WindowRole.isSecondary) return;
+  try {
+    await _mainWindowRevealedCompleter.future.timeout(
+      const Duration(seconds: 20),
+    );
+  } on TimeoutException {
+    // Continue anyway, or a slow reveal would count as a crash.
+  }
+  try {
+    await PluginSafeMode.ready;
+    if (PluginSafeMode.enteredAfterCrashes) {
+      final context = navigatorKey.currentContext;
+      // Not awaited: a dialog left open must not keep the run from counting
+      // as stable.
+      if (context != null && context.mounted) {
+        unawaited(showSafeModeAfterCrashesDialog(context));
+      }
+    }
+    // Mobile has no window close event; leaving the app shows it ran fine.
+    final lifecycle = AppLifecycleListener(
+      onPause: () => unawaited(StartupCrashCounter.markStable()),
+    );
+    await Future<void>.delayed(StartupCrashCounter.stableAfter);
+    lifecycle.dispose();
+    await StartupCrashCounter.markStable();
+  } catch (error, stackTrace) {
+    _logNonFatalInitializationError('Startup stability', error, stackTrace);
+  }
+}
+
+/// "מה חדש בספרים" שממתין מעדכון קודם (גם מהמעדכן הלא-מקוון), וניסיון חוזר
+/// להערות שעוד לא פורסמו.
+Future<void> _runDeferredLibraryChangesNotes() async {
+  // פר-תהליך: ההערות מוצגות פעם אחת, בחלון הראשי.
+  if (WindowRole.isSecondary) return;
+  try {
+    await _mainWindowRevealedCompleter.future.timeout(
+      const Duration(seconds: 20),
+    );
+  } on TimeoutException {
+    // ממשיכים בכל זאת — בלי Navigator ההערות פשוט נשארות לפעם הבאה.
+  }
+  try {
+    await LibraryChangesNotes.instance.onStartup();
+  } catch (error, stackTrace) {
+    _logNonFatalInitializationError('Library changes notes', error, stackTrace);
+  }
+}
+
 /// סריקת תיקיות המסדים ובדיקת המסדים המצורפים (קובץ שנעלם, שהשתנה או
 /// שנוסף). שינוי משודר ל-AttachedLibrariesBloc, שמרענן את עץ הספרייה.
 Future<void> _runDeferredAttachedLibraries() async {
@@ -1121,11 +1224,30 @@ Future<void> _runDeferredAttachedLibraries() async {
       stackTrace,
     );
   }
-  await _syncExternalLinkIndex();
+  // ללא await: בנייה ארוכה (או מושהית) אינה חוסמת את עדכוני המסדים וההאזנה.
+  // המשך אוטומטי של בנייה שנקטעה — רק כאן, בהפעלה, ולא באירועי שינוי.
+  unawaited(_syncExternalLinkIndex(autoResume: true));
   unawaited(_runDeferredAttachedLibraryUpdates());
   AttachedLibrariesRepository.instance.changes.listen(
     (_) => unawaited(_syncExternalLinkIndex()),
   );
+}
+
+Future<void> _runDeferredCapabilitiesWrite() async {
+  // פר-תהליך: קובץ אחד לשורש הנתונים, וחלון משני היה כותב אותו שוב.
+  if (WindowRole.isSecondary) return;
+  try {
+    await _mainWindowRevealedCompleter.future.timeout(
+      const Duration(seconds: 20),
+    );
+  } on TimeoutException {
+    // ממשיכים בכל זאת — אחרת המעדכן הלא-מקוון לא יראה את היכולות.
+  }
+  try {
+    await OtzariaCapabilities.writeForCurrentProcess();
+  } catch (error, stackTrace) {
+    _logNonFatalInitializationError('Capabilities file', error, stackTrace);
+  }
 }
 
 /// Runs after the attached-library scan so every pinned source is known. The
@@ -1152,9 +1274,9 @@ Future<void> _runDeferredAttachedLibraryUpdates() async {
 }
 
 /// אינדקס הקישורים ההפוכים של מסדים מצורפים (cache.db) — נבנה רק למסד שהשתנה.
-Future<void> _syncExternalLinkIndex() async {
+Future<void> _syncExternalLinkIndex({bool autoResume = false}) async {
   try {
-    await ExternalLinkRepository.instance.sync();
+    await ExternalLinkRepository.instance.sync(autoResume: autoResume);
   } catch (error, stackTrace) {
     _logNonFatalInitializationError('External link index', error, stackTrace);
   }
@@ -1332,8 +1454,8 @@ Future<void> _enqueueExternalActivationArgs(List<String> args) async {
     }
 
     // לחיצה כפולה על קובץ `.otzplugin` משויך — המערכת מעבירה את הנתיב כארגומנט.
-    // ב-Linux/macOS, ה-desktop entry משתמש ב-‎%u (URL), כך שהמערכת מעבירה
-    // ‎file:///abs/path. ממירים ל-נתיב מקומי לפני שמירה בתור.
+    // ב-Linux/macOS, ה-desktop entry משתמש ב-%u (URL), כך שהמערכת מעבירה
+    // file:///abs/path. ממירים ל-נתיב מקומי לפני שמירה בתור.
     final localPath = _resolveLocalPluginPath(arg);
     if (localPath != null) {
       activationUris.add(_buildLocalPluginInstallUri(localPath));
@@ -1689,7 +1811,12 @@ class _AppBootstrapState extends State<AppBootstrap> {
                 // זורם לדיסק: patch גדול נפרס בלי לשבת ב-RAM (ראו את המחלקה).
                 downloader: StreamingPatchDownloader(),
               ),
-              companionAssets: CompanionAssetsService(),
+              companionAssets: CompanionAssetsService(
+                // רק אחרי שהמשתמש הוריד את נתוני החיפוש הסמנטי; אחרת לא עושה דבר.
+                scheduleSemanticVectorsUpdate: (tag) => SemanticSearchRepository
+                    .instance
+                    .scheduleVectorsUpdate(libraryTag: tag),
+              ),
               isOfflineMode: () =>
                   Settings.getValue<bool>(SettingsRepository.keyOfflineMode) ??
                   false,
@@ -1770,31 +1897,19 @@ PluginSystemBloc _createPluginSystemBloc(BuildContext context) {
 }
 
 Future<void> initHive() async {
-  // ⚠️ החלון הראשון, וכל עוד אין חלון נוסף חי. שורש Hive פרטי שנשאר תחת
-  // `<dataRoot>/windows` הוא שארית מהפעלה קודמת ואף אחד לא ימחק אותו
-  // אחרת — נמדדו 69 תיקיות ו-33MB. תנאי `hasOtherWindows` מגן על המסלול
-  // של `RestartWidget`, שמריץ את האתחול מחדש בזמן שחלון משני חי ופתח שם
-  // קבצים.
+  // שורשי חלונות ישנים נמחקים רק כשאין חלון משני חי שמשתמש בקבצים,
+  // גם באתחול מחדש דרך RestartWidget.
   if (!WindowRole.isSecondary && !WindowBus.instance.hasOtherWindows) {
     await deleteStaleWindowRoots();
   }
-  // ⚠️ `hiveRootPath` ולא `getDataRootPath`: בחלון משני box ההגדרות יושב
-  // בתיקייה נפרדת, אבל שאר שורש הנתונים נשאר משותף. ראו
-  // `configureHiveRootForWindow`.
+  // בחלון משני הגדרות Hive יושבות בשורש פרטי; שאר הנתונים משותפים.
   final hiveRoot = await hiveRootPath();
   Hive.init(hiveRoot);
   // המסד נפתח כאן ולא בעצלות: `TabsRepository.loadTabs` קורא אותו
   // סינכרונית מבנאי של bloc.
   await UserStateDatabase.instance.database;
-  // פר-תהליך: המיגרציה משנה שמות של קבצים בשורש המשותף, ולחלון משני אין
-  // שם מה להעביר.
-  if (!WindowRole.isSecondary) {
-    await HiveToUserStateMigration(hiveRoot: hiveRoot).run();
-  }
-  // ⚠️ כאן ולא ב-`TabsBloc`. שני קוראים שונים טוענים את הכרטיסיות
-  // (`TabsBloc` דרך `LoadTabs`, ו-`NavigationBloc` בקונסטרוקטור שלו), והסדר
-  // ביניהם תלוי בתזמון של תור האירועים. איחוד שמוחק סשנים חייב לרוץ פעם
-  // אחת, לפני שניהם.
+  // סידור הסשנים חייב לרוץ פעם אחת לפני TabsBloc ו-NavigationBloc,
+  // כי שניהם טוענים כרטיסיות וסדר הטעינה ביניהם תלוי בתזמון.
   if (_restoresAllWindows) {
     _windowSlotsToRestore = await TabsRepository.compactWindowSessions();
   } else {
@@ -1856,16 +1971,6 @@ Future<void> loadCerts() => _loadCertsFuture ??= _loadCerts();
 
 Future<void> _loadCerts() async {
   trustCertificates(await loadNetfreeCaBytes());
-}
-
-/// Clean up resources when the app is closing
-void cleanup() {
-  _appWindowListener?.dispose();
-
-  // Clear shared book/acronym caches
-  BooksCache.instance.clear();
-  AcronymsCache.instance.clear();
-  GenerationCache.instance.clear();
 }
 
 // Note: TOC parsing helper moved to lib/utils/toc_parser.dart for reuse

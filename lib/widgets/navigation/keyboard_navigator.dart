@@ -12,7 +12,6 @@ class KeyboardNavigator extends StatelessWidget {
   final int currentTabIndex;
   final int totalTabs;
   final ValueChanged<int> onTabChange;
-  final FocusNode? contentFocusNode;
   final VoidCallback? onBack;
 
   const KeyboardNavigator({
@@ -21,7 +20,6 @@ class KeyboardNavigator extends StatelessWidget {
     required this.currentTabIndex,
     required this.totalTabs,
     required this.onTabChange,
-    this.contentFocusNode,
     this.onBack,
   });
 

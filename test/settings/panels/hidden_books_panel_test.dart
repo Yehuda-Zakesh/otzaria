@@ -520,6 +520,30 @@ void main() {
       reason: 'מספר ההסתרות אינו חסום — רשימה פנימית הייתה מאריכה את המסך',
     );
   });
+
+  testWidgets('קפיצה לסוף רשימה ארוכה בונה רק שורות נראות (issue #2381)', (
+    tester,
+  ) async {
+    final library = _library();
+    library.subCategories.single.books.addAll(
+      List.generate(3000, (i) => TextBook(title: 'ספר $i', categoryId: 10)),
+    );
+    await pump(tester, libraryLoader: () async => library);
+    await tester.tap(find.text('פתח רשימה'));
+    await tester.pumpAndSettle();
+
+    var built = 0;
+    debugOnRebuildDirtyWidget = (element, _) {
+      if (element.widget is CheckboxListTile) built++;
+    };
+    final scroll = tester.widget<ListView>(find.byType(ListView).last);
+    scroll.controller!.jumpTo(scroll.controller!.position.maxScrollExtent);
+    await tester.pump();
+    debugOnRebuildDirtyWidget = null;
+
+    expect(built, lessThan(50), reason: 'קפיצת פס הגלילה בנתה את כל הספרים');
+    expect(find.text('ספר 2999'), findsOneWidget);
+  });
 }
 
 class _MemoryCacheProvider extends CacheProvider {

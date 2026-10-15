@@ -327,6 +327,30 @@ void main() {
     });
   });
 
+  group('pdfTopmostVisiblePage בתצוגת ספר (issue #1712)', () {
+    // כפולה (2,3) שהעמוד הימני בה גבוה מהשמאלי, וכפולה (4,5) מתחתיה.
+    final pageRects = <Rect>[
+      const Rect.fromLTWH(203, 0, 400, 600), // עמוד 1 (שער)
+      const Rect.fromLTWH(406, 620, 400, 800), // עמוד 2: 620–1420
+      const Rect.fromLTWH(0, 620, 400, 600), // עמוד 3: 620–1220
+      const Rect.fromLTWH(406, 1440, 400, 800), // עמוד 4
+      const Rect.fromLTWH(0, 1440, 400, 800), // עמוד 5
+    ];
+    Rect viewportAt(double top) => Rect.fromLTWH(0, top, 806, 260);
+
+    test('מתחת לעמוד הקצר בכפולה — עדיין העמוד הראשון של אותה כפולה', () {
+      expect(pdfTopmostVisiblePage(viewportAt(1300), pageRects), 2);
+    });
+
+    test('בחלק התחתון של כפולה שווה גבהים — העמוד הראשון שלה', () {
+      expect(pdfTopmostVisiblePage(viewportAt(2100), pageRects), 4);
+    });
+
+    test('ברווח שבין כפולות — הכפולה שמתחת', () {
+      expect(pdfTopmostVisiblePage(viewportAt(1430), pageRects), 4);
+    });
+  });
+
   group('pdfTopmostVisiblePage', () {
     // פריסה אנכית: 3 עמודים בגובה 800 עם רווח 4 ביניהם.
     final pageRects = <Rect>[

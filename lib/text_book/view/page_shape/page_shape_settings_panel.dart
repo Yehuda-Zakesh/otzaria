@@ -7,12 +7,12 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
+import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
 import 'package:otzaria/theme/app_fonts.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_commentary_selection.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_settings_manager.dart';
-import 'package:otzaria/text_book/models/commentator_group.dart';
-import 'package:otzaria/text_book/utils/commentator_group_builder.dart';
-import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
+import 'package:otzaria/book_common/models/commentator_group.dart';
+import 'package:otzaria/book_common/utils/commentator_group_builder.dart';
 import 'package:otzaria/widgets/controls/action_buttons.dart';
 import 'package:otzaria/widgets/dialogs/dialogs_exports.dart';
 import 'package:otzaria/widgets/controls/segmented_control.dart';
@@ -211,11 +211,10 @@ class _PageShapeSettingsPanelState extends State<PageShapeSettingsPanel> {
   Future<void> _loadCommentatorGroups() async {
     final generation = ++_groupsLoadGeneration;
     final available = widget.availableCommentators;
-    final eras = await utils.splitByEra(
+    final groups = await groupCommentatorsByEra(
       available,
       source: widget.bookSource,
     );
-    final groups = buildCommentatorGroups(eras, available);
 
     if (mounted && generation == _groupsLoadGeneration) {
       setState(() {
@@ -434,11 +433,15 @@ class _PageShapeSettingsPanelState extends State<PageShapeSettingsPanel> {
 
   List<SegmentOption<CommentatorSaveScope>> get _commentatorSaveScopeOptions {
     return [
-      const SegmentOption(value: CommentatorSaveScope.book, label: 'ספר'),
+      // תמיד לספר הנוכחי — בבורר התצוגה "שולחן עבודה" חל על כל ספרי השולחן.
+      SegmentOption(
+        value: CommentatorSaveScope.book,
+        label: context.settingsText('ספר זה'),
+      ),
       if (_hasWorkspace)
-        const SegmentOption(
+        SegmentOption(
           value: CommentatorSaveScope.workspace,
-          label: 'שולחן עבודה',
+          label: context.settingsText('ספר זה בשולחן'),
         ),
       if (_availableCategories.isNotEmpty)
         const SegmentOption(
@@ -559,7 +562,6 @@ class _PageShapeSettingsPanelState extends State<PageShapeSettingsPanel> {
                 currentValue: _displaySettingsScope,
                 onChanged: _onDisplayScopeChanged,
                 expandToFillWidth: true,
-                showSelectedIcon: false,
                 height: 40,
               ),
               const SizedBox(height: 8),
@@ -611,7 +613,6 @@ class _PageShapeSettingsPanelState extends State<PageShapeSettingsPanel> {
                   currentValue: _commentatorSaveScope,
                   onChanged: _onCommentatorScopeChanged,
                   expandToFillWidth: true,
-                  showSelectedIcon: false,
                   height: 40,
                 ),
                 const SizedBox(height: 8),

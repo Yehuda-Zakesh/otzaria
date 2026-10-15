@@ -12,6 +12,7 @@ import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/tools/gematria/gematria_search.dart';
 import 'package:otzaria/tools/gematria/models/gematria_search_result.dart';
 import 'package:otzaria/tools/gematria/widgets/gematria_result_card.dart';
+import 'package:otzaria/tools/tool_query.dart';
 import 'package:otzaria/widgets/layout/context_overlay_panel.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
 import 'package:otzaria/widgets/navigation/app_top_bar.dart';
@@ -30,13 +31,16 @@ String _bookNameWithoutTextExtension(String fileName) {
 }
 
 class GematriaSearchScreen extends StatefulWidget {
-  const GematriaSearchScreen({super.key});
+  const GematriaSearchScreen({super.key, this.queryInbox});
+
+  final ToolQueryInbox? queryInbox;
 
   @override
   GematriaSearchScreenState createState() => GematriaSearchScreenState();
 }
 
-class GematriaSearchScreenState extends State<GematriaSearchScreen> {
+class GematriaSearchScreenState extends State<GematriaSearchScreen>
+    with ToolQueryConsumer {
   static const double _settingsPanelWidth = 400;
 
   final TextEditingController _searchController = TextEditingController();
@@ -49,6 +53,17 @@ class GematriaSearchScreenState extends State<GematriaSearchScreen> {
   bool _showingSettings = false;
   List<String> _activeParams = []; // פרמטרי החיפוש האחרון, לתצוגה למשתמש
   int _latestSearchId = 0;
+
+  @override
+  ToolQueryInbox? get toolQueryInbox => widget.queryInbox;
+
+  @override
+  void applyToolQuery(ToolQuery query) {
+    fillSearchField(_searchController, linkQueryText(query.text));
+    // פאנל ההגדרות מסתיר את התוצאות.
+    if (_showingSettings) setState(() => _showingSettings = false);
+    _performSearch();
+  }
 
   /// בונה את תוויות פרמטרי הגימטריה הפעילים להצגה למשתמש (שיטה + דגלים).
   @visibleForTesting
@@ -72,6 +87,11 @@ class GematriaSearchScreenState extends State<GematriaSearchScreen> {
     if (filterDuplicates) labels.add('ללא כפילויות');
     return labels;
   }
+
+  /// טקסט מקישור מגיע לרוב מנוקד או עם גרשיים, שהשדה דוחה כקלט לא תקין.
+  @visibleForTesting
+  static String linkQueryText(String text) =>
+      utils.removeVolwels(text).replaceAll(RegExp(r'''["'׳״]'''), '').trim();
 
   /// מחזירה אם תוצאת החיפוש שייכת לבקשה העדכנית ביותר.
   @visibleForTesting
@@ -107,17 +127,6 @@ class GematriaSearchScreenState extends State<GematriaSearchScreen> {
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _searchFocusNode.requestFocus(),
     );
-  }
-
-  void requestKeyboardFocus() {
-    if (!mounted || !_searchFocusNode.canRequestFocus) return;
-    _searchFocusNode.requestFocus();
-  }
-
-  void closeTransientPanels() {
-    if (!_showingSettings) return;
-    setState(() => _showingSettings = false);
-    _rerunSearchIfNeeded();
   }
 
   @override
@@ -168,6 +177,7 @@ class GematriaSearchScreenState extends State<GematriaSearchScreen> {
     final searchId = ++_latestSearchId;
 
     if (searchText.isEmpty) {
+      _clearResults();
       return;
     }
 
@@ -206,6 +216,7 @@ class GematriaSearchScreenState extends State<GematriaSearchScreen> {
       final validChars = RegExp(r'^[א-תםןךףץ\s0-9]+$');
       if (!validChars.hasMatch(searchText)) {
         if (mounted) {
+          _clearResults();
           UiSnack.showError(ToolsMessages.gematriaInvalidInput);
         }
         return;
@@ -223,7 +234,10 @@ class GematriaSearchScreenState extends State<GematriaSearchScreen> {
       }
     }
 
-    if (targetGimatria == 0) return;
+    if (targetGimatria == 0) {
+      _clearResults();
+      return;
+    }
 
     final activeParams = buildActiveParamLabels(
       gematriaMethod: gematriaMethod,
@@ -263,10 +277,8 @@ class GematriaSearchScreenState extends State<GematriaSearchScreen> {
               '$libraryPath/ספרייה/תנך/כתובים',
             ];
 
-      // קריאה אחת: searchInFiles בוחר אוטומטית בין DB (עם bookTitles)
-      // לבין סריקת קבצים על כל folders. זה גם מטפל בכשל באמצע שאילתה ב-DB
-      // (יפול ל-file search על כל התיקיות), וגם לא מפעיל סריקת ספרייה מלאה
-      // כש-DB החזיר 0 תוצאות תקפות.
+      // searchInFiles בוחר בין DB ממוקד לבין fallback על התיקיות;
+      // אין לסרוק את כל הספרייה כשחיפוש תקין החזיר אפס תוצאות.
       final allResults = await GimatriaSearch.searchInFiles(
         searchPaths,
         targetGimatria,

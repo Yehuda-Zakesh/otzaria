@@ -306,42 +306,48 @@ void main() {
       expect(find.byTooltip('קצר'), findsNothing);
     });
 
-    testWidgets('כותרת ארוכה שנקטעת ב-NavTreeTile מציגה Tooltip עם הטקסט המלא', (
-      tester,
-    ) async {
-      const longTitle =
-          'חזון איש יורה דעה הלכות שחיטה וטרפות סימן קכ"ג סעיף קטן ד';
-      await pump(
+    testWidgets(
+      'כותרת ארוכה שנקטעת ב-NavTreeTile מציגה Tooltip עם הטקסט המלא',
+      (
         tester,
-        SizedBox(
-          width: 120,
-          child: NavTreeTile.category(
-            title: longTitle,
-            level: 2,
+      ) async {
+        const longTitle =
+            'חזון איש יורה דעה הלכות שחיטה וטרפות סימן קכ"ג סעיף קטן ד';
+        await pump(
+          tester,
+          SizedBox(
+            width: 120,
+            child: NavTreeTile.category(
+              title: longTitle,
+              level: 2,
+            ),
           ),
-        ),
-      );
+        );
 
-      expect(find.text(longTitle), findsOneWidget);
-      expect(find.byTooltip(longTitle), findsOneWidget);
-    });
+        expect(find.text(longTitle), findsOneWidget);
+        expect(find.byTooltip(longTitle), findsOneWidget);
+      },
+    );
 
-    testWidgets('כותרת ארוכה שנקטעת ב-NavTreeHeader מציגה Tooltip עם הטקסט המלא', (
-      tester,
-    ) async {
-      const longTitle =
-          'שולחן ערוך חלק יורה דעה הלכות ריבית והיתר עסקה עם פירוש מקיף';
-      await pump(
+    testWidgets(
+      'כותרת ארוכה שנקטעת ב-NavTreeHeader מציגה Tooltip עם הטקסט המלא',
+      (
         tester,
-        SizedBox(
-          width: 100,
-          child: const NavTreeHeader(title: longTitle),
-        ),
-      );
+      ) async {
+        const longTitle =
+            'שולחן ערוך חלק יורה דעה הלכות ריבית והיתר עסקה עם פירוש מקיף';
+        await pump(
+          tester,
+          SizedBox(
+            width: 100,
+            child: const NavTreeHeader(title: longTitle),
+          ),
+        );
 
-      expect(find.text(longTitle), findsOneWidget);
-      expect(find.byTooltip(longTitle), findsOneWidget);
-    });
+        expect(find.text(longTitle), findsOneWidget);
+        expect(find.byTooltip(longTitle), findsOneWidget);
+      },
+    );
 
     testWidgets('OverflowTooltipText ישיר: מציג Tooltip אך ורק כשיש חריגה', (
       tester,

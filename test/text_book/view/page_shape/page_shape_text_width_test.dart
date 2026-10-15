@@ -23,7 +23,6 @@ import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/page_shape/page_shape_screen.dart';
 import 'package:otzaria/text_book/view/page_shape/simple_text_viewer.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../../test_helpers/memory_cache_provider.dart';
 
@@ -34,29 +33,6 @@ void main() {
 
   const bookTitle = 'ספר בדיקה';
   const screenWidth = 2000.0;
-
-  test('עיגון פסקה גבוהה משמר את ההתקדמות היחסית בתוכה', () {
-    const oldPosition = ItemPosition(
-      index: 4,
-      itemLeadingEdge: -0.5,
-      itemTrailingEdge: 1.5,
-    );
-    const measuredPosition = ItemPosition(
-      index: 4,
-      itemLeadingEdge: 0.02,
-      itemTrailingEdge: 2.02,
-    );
-
-    final progress = pageShapeAnchorProgress(oldPosition);
-    final offset = pageShapeAnchorRestorationOffset(
-      position: measuredPosition,
-      progress: progress,
-      viewportExtent: 400,
-    );
-
-    expect(progress, 0.25);
-    expect(offset, 208);
-  });
 
   setUp(() async {
     await Settings.init(cacheProvider: MemoryCacheProvider());
@@ -178,8 +154,6 @@ TextBookLoaded _loadedState(TextBook book) => TextBookLoaded(
   selectedIndex: 0,
   pinLeftPane: false,
   searchText: '',
-  scrollController: ItemScrollController(),
-  positionsListener: ItemPositionsListener.create(),
   searchMode: SearchMode.exact,
 );
 

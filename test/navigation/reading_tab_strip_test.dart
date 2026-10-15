@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/navigation/view/reading_tab_strip.dart';
@@ -100,6 +101,7 @@ void main() {
   Future<void> dragFrom(WidgetTester tester, String from, Offset target) async {
     final gesture = await tester.startGesture(
       tester.getCenter(find.text(from)),
+      kind: PointerDeviceKind.mouse,
     );
     await tester.pump(const Duration(milliseconds: 20));
     await gesture.moveTo(target);
@@ -120,7 +122,10 @@ void main() {
   }) async {
     final start = tester.getCenter(find.text(from));
     final target = tester.getCenter(find.text(over));
-    final gesture = await tester.startGesture(start);
+    final gesture = await tester.startGesture(
+      start,
+      kind: PointerDeviceKind.mouse,
+    );
     await tester.pump(const Duration(milliseconds: 20));
     await gesture.moveTo(target);
     await tester.pump(dwell);
@@ -381,6 +386,7 @@ void main() {
 
       final gesture = await tester.startGesture(
         tester.getCenter(find.text('א')),
+        kind: PointerDeviceKind.mouse,
       );
       await tester.pump(const Duration(milliseconds: 20));
       await gesture.moveTo(tester.getCenter(find.text('ב')));
@@ -439,7 +445,7 @@ void main() {
       await tester.pumpWidget(host(log: log, tabs: [_StubTab('א')]));
 
       expect(
-        find.byWidgetPredicate((w) => w.runtimeType == Draggable<OpenedTab>),
+        find.byWidgetPredicate((w) => w is Draggable<OpenedTab>),
         findsOneWidget,
       );
       expect(find.byType(LongPressDraggable<OpenedTab>), findsNothing);
@@ -464,6 +470,9 @@ void main() {
       // גובה הרצועה. ברירת המחדל מכילה את כל הכרטיסיות; גובה קטן ממנה הופך
       // אותה לנגללת.
       double? stripHeight,
+      void Function(OpenedTab, PaneDropSide)? onPaneDrop,
+      void Function(OpenedTab, VoidCallback)? onDragStarted,
+      VoidCallback? onDragFinished,
     }) {
       const itemHeight = 40.0;
       return MaterialApp(
@@ -484,7 +493,11 @@ void main() {
                     tabs: tabs,
                     widths: [for (final _ in tabs) itemHeight],
                     onReorder: log.reorder,
-                    onDragStarted: (_, _) => log.dragStarts++,
+                    onDragStarted: (tab, cancel) {
+                      log.dragStarts++;
+                      onDragStarted?.call(tab, cancel);
+                    },
+                    onDragFinishedAnywhere: onDragFinished,
                     onSpringOpen: log.springOpened.add,
                     tabBuilder: (tab, index, extent) => SizedBox(
                       height: extent,
@@ -499,7 +512,7 @@ void main() {
                   child: PaneDropTarget(
                     key: paneKey,
                     tab: _StubTab('מוצג'),
-                    onDrop: (_, _) {},
+                    onDrop: onPaneDrop ?? (_, _) {},
                     child: const ColoredBox(
                       color: Color(0xFFEEEEEE),
                       child: SizedBox.expand(),
@@ -568,6 +581,73 @@ void main() {
       expect(log.dragStarts, 1);
     });
 
+    for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.stylus]) {
+      testWidgets('משיכה לרוחב ברצועה האנכית מאפשרת פיצול ב־$kind', (
+        tester,
+      ) async {
+        final log = _StripLog();
+        final tabs = [_StubTab('א'), _StubTab('ב'), _StubTab('ג')];
+        OpenedTab? dropped;
+        PaneDropSide? side;
+        await tester.pumpWidget(
+          verticalHost(
+            log: log,
+            tabs: tabs,
+            onPaneDrop: (tab, droppedSide) {
+              dropped = tab;
+              side = droppedSide;
+            },
+          ),
+        );
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.text('א')),
+          kind: kind,
+        );
+        await gesture.moveBy(const Offset(30, 0));
+        await tester.pump();
+        final pane = tester.getRect(find.byKey(paneKey));
+        await gesture.moveTo(Offset(pane.right - 20, pane.center.dy));
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(log.dragStarts, 1);
+        expect(dropped, same(tabs[0]));
+        expect(side, PaneDropSide.start);
+        expect(log.moves, 0);
+      });
+
+      testWidgets('ביטול חיצוני מסיים גרירה במגע מהעמודה ב־$kind', (
+        tester,
+      ) async {
+        final log = _StripLog();
+        final tabs = [_StubTab('א'), _StubTab('ב')];
+        VoidCallback? cancel;
+        var finished = 0;
+        await tester.pumpWidget(
+          verticalHost(
+            log: log,
+            tabs: tabs,
+            onDragStarted: (_, callback) => cancel = callback,
+            onDragFinished: () => finished++,
+          ),
+        );
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.text('א')),
+          kind: kind,
+        );
+        await gesture.moveBy(const Offset(30, 0));
+        await tester.pump();
+        expect(cancel, isNotNull);
+        cancel!();
+        await tester.pumpAndSettle();
+        expect(finished, greaterThan(0));
+        expect(find.text('א'), findsOneWidget);
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(log.moves, 0);
+      });
+    }
+
     group('גלילה אוטומטית בגרירה', () {
       /// 12 כרטיסיות בגובה 40 בתוך רצועה של 200 — רק חמש נראות.
       List<OpenedTab> manyTabs() => [
@@ -592,6 +672,7 @@ void main() {
         final strip = tester.getRect(find.byKey(stripKey));
         final gesture = await tester.startGesture(
           tester.getCenter(find.text('כרטיסיה 0')),
+          kind: PointerDeviceKind.mouse,
         );
         await tester.pump(const Duration(milliseconds: 20));
         await gesture.moveTo(Offset(strip.center.dx, strip.bottom - 8));
@@ -618,6 +699,7 @@ void main() {
         final strip = tester.getRect(find.byKey(stripKey));
         final gesture = await tester.startGesture(
           tester.getCenter(find.text('כרטיסיה 0')),
+          kind: PointerDeviceKind.mouse,
         );
         await tester.pump(const Duration(milliseconds: 20));
         await gesture.moveTo(Offset(strip.center.dx, strip.bottom - 8));
@@ -640,6 +722,7 @@ void main() {
         final strip = tester.getRect(find.byKey(stripKey));
         final gesture = await tester.startGesture(
           tester.getCenter(find.text('כרטיסיה 0')),
+          kind: PointerDeviceKind.mouse,
         );
         await tester.pump(const Duration(milliseconds: 20));
         await gesture.moveTo(Offset(strip.center.dx, strip.bottom - 8));
@@ -669,6 +752,7 @@ void main() {
         final strip = tester.getRect(find.byKey(stripKey));
         final gesture = await tester.startGesture(
           tester.getCenter(find.text('כרטיסיה 0')),
+          kind: PointerDeviceKind.mouse,
         );
         await tester.pump(const Duration(milliseconds: 20));
         await gesture.moveTo(Offset(strip.center.dx, strip.bottom - 8));
@@ -684,6 +768,56 @@ void main() {
           reason: 'בלי גלילה היעד היה נעצר על הכרטיסיה האחרונה שנראתה',
         );
       });
+
+      testWidgets('החלקה אלכסונית שרובה אנכית גוללת במגע', (tester) async {
+        final log = _StripLog();
+        await tester.pumpWidget(
+          verticalHost(log: log, tabs: manyTabs(), stripHeight: 200),
+        );
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.text('כרטיסיה 3')),
+        );
+        await gesture.moveBy(const Offset(25, -60));
+        await tester.pump();
+        await gesture.moveBy(const Offset(0, -30));
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(log.dragStarts, 0);
+        expect(stripPosition(tester).pixels, greaterThan(0));
+      });
+
+      testWidgets(
+        'בדסקטופ גרירת מגע גוללת את הרשימה ואינה גוררת כרטיסיה (issue #2307)',
+        (tester) async {
+          final log = _StripLog();
+          await tester.pumpWidget(
+            verticalHost(log: log, tabs: manyTabs(), stripHeight: 200),
+          );
+
+          await tester.timedDragFrom(
+            tester.getCenter(find.text('כרטיסיה 3')),
+            const Offset(0, -120),
+            const Duration(milliseconds: 300),
+          );
+          await tester.pumpAndSettle();
+
+          expect(log.dragStarts, 0);
+          expect(stripPosition(tester).pixels, greaterThan(0));
+
+          // משיכה לרוחב מתחילה גרירה, שאחריה אפשר לסדר מחדש בציר האנכי.
+          final gesture = await tester.startGesture(
+            tester.getCenter(find.text('כרטיסיה 5')),
+          );
+          await gesture.moveBy(const Offset(40, 0));
+          await tester.pump();
+          await gesture.moveBy(const Offset(0, 40));
+          await tester.pump();
+          expect(log.dragStarts, 1);
+          await gesture.up();
+          await tester.pumpAndSettle();
+        },
+      );
     });
   });
 

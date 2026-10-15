@@ -9,7 +9,6 @@ import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../helpers/memory_settings_cache.dart';
 
@@ -49,7 +48,7 @@ void main() {
       },
     );
 
-    test('כשאין selectedIndex נופל ל-visibleIndices הראשון', () {
+    test('כשאין selectedIndex נופל לשורה הנוכחית של טאב המקור', () {
       final sourceTab = TextBookTab(
         book: TextBook(title: 'ספר בדיקה'),
         index: 5,
@@ -61,6 +60,7 @@ void main() {
         ),
       );
       addTearDown(sourceTab.dispose);
+      sourceTab.lines.jumpToLine(42);
 
       final tab = CommentatorsTab(sourceTab: sourceTab);
       addTearDown(tab.dispose);
@@ -330,6 +330,4 @@ TextBookLoaded _loadedState({
   selectedIndex: selectedIndex,
   pinLeftPane: false,
   searchText: '',
-  scrollController: ItemScrollController(),
-  positionsListener: ItemPositionsListener.create(),
 );

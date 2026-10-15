@@ -4,6 +4,32 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 
 void main() {
+  testWidgets('AppPopupMenuButton can open its menu through a GlobalKey', (
+    tester,
+  ) async {
+    final key = GlobalKey();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AppPopupMenuButton<String>(
+            key: key,
+            entries: const [AppMenuEntry<String>(value: 'item', label: 'פריט')],
+            child: const Text('פתח'),
+          ),
+        ),
+      ),
+    );
+
+    final menuFuture = (key.currentState as dynamic).showMenu() as Future<void>;
+    await tester.pumpAndSettle();
+
+    expect(find.text('פריט'), findsOneWidget);
+    await tester.tap(find.text('פריט'));
+    await tester.pumpAndSettle();
+    await menuFuture;
+  });
+
   testWidgets('Disabled app menu entries use muted foreground color', (
     tester,
   ) async {

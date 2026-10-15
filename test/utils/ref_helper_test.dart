@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/utils/text/ref_helper.dart';
+import 'package:pdfrx/pdfrx.dart';
 
 /// בונה TocEntry עם ילדים. עוזר לקיצור הטסטים של closestTocEntryIndex.
 TocEntry _entry(String text, int index, int level, {List<TocEntry>? children}) {
@@ -12,6 +13,12 @@ TocEntry _entry(String text, int index, int level, {List<TocEntry>? children}) {
   }
   return e;
 }
+
+PdfOutlineNode _pdfNode(String title, int? page) => PdfOutlineNode(
+  title: title,
+  dest: page == null ? null : PdfDest(page, PdfDestCommand.fit, null),
+  children: const [],
+);
 
 void main() {
   group('closestTocEntryIndex', () {
@@ -403,15 +410,32 @@ void main() {
       );
     });
 
-    test('עומק שווה — הניקוד ממשיך להכריע לטובת כתובת ה-TOC', () {
+    test('גמרא: כתובת ה-TOC של הדף מנצחת את כתובת השורה שקוצצה לדף', () {
       expect(
         formatDisplayReference(
-          bookTitle: 'בראשית',
-          resolvedRef: 'פרק א',
-          fallbackRef: 'א',
+          bookTitle: 'עירובין',
+          resolvedRef: 'דף כו:',
+          fallbackRef: refUpToDaf('עירובין, כו:, יז'),
         ),
-        'בראשית, פרק א',
+        'עירובין, דף כו:',
       );
+    });
+  });
+
+  group('refUpToDaf', () {
+    test('חותך את מספרי הקטע שאחרי הדף', () {
+      expect(refUpToDaf('עירובין, כו:, יז'), 'עירובין, כו:');
+      expect(refUpToDaf('רש"י על חולין, ו., ה, ב'), 'רש"י על חולין, ו.');
+      expect(
+        refUpToDaf('ציון לנפש חיה על ברכות,  ב., כא'),
+        'ציון לנפש חיה על ברכות,  ב.',
+      );
+    });
+
+    test('כתובת שאינה לפי דף, או שהדף הוא סופה, נשארת כמות שהיא', () {
+      expect(refUpToDaf('משנה ברורה, לב, ה'), 'משנה ברורה, לב, ה');
+      expect(refUpToDaf('עירובין, כו:'), 'עירובין, כו:');
+      expect(refUpToDaf('רש"י על חולין ו., ה, ב'), 'רש"י על חולין ו., ה, ב');
     });
   });
 
@@ -495,6 +519,19 @@ void main() {
         addBookTitleToRef('חלק ראשון', 'ימי מוהרנת חלק ראשון'),
         'ימי מוהרנת חלק ראשון, חלק ראשון',
       );
+    });
+  });
+
+  group('referenceFromPageNumber', () {
+    test('סעיף בלי יעד לא עוצר את הסריקה של אחיו', () {
+      final outline = [
+        _pdfNode('פרק א', 1),
+        _pdfNode('כותרת בלי יעד', null),
+        _pdfNode('פרק ב', 10),
+        _pdfNode('פרק ג', 20),
+      ];
+      expect(referenceFromPageNumber(12, outline), 'פרק ב');
+      expect(referenceFromPageNumber(5, outline), 'פרק א');
     });
   });
 }

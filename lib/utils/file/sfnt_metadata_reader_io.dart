@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'sfnt_bytes.dart';
+
 const Set<String> _metadataTags = {'cmap', 'OS/2', 'head', 'name', 'fvar'};
 const Map<String, int> _minTableLength = {'OS/2': 96, 'head': 64};
 
@@ -36,14 +38,14 @@ Uint8List? readMetadataSync(String path) {
 
     Uint8List? ttcHeader;
     final bases = <({int offset, int? ttcIndex})>[];
-    if (_tagAt(header, 0) == 'ttcf') {
-      final numFonts = _u32(header, 8);
+    if (header.sfntTag(0) == 'ttcf') {
+      final numFonts = header.sfntU32(8);
       if (numFonts <= 0 || numFonts > 0xFFFF) return null;
       final headerLength = 12 + numFonts * 4;
       ttcHeader = _readAt(raf, 0, headerLength);
       if (ttcHeader == null) return null;
       for (var i = 0; i < numFonts; i++) {
-        final offset = _u32(ttcHeader, 12 + i * 4);
+        final offset = ttcHeader.sfntU32(12 + i * 4);
         if (offset > 0 && offset < fileLength) {
           bases.add((offset: offset, ttcIndex: i));
         }
@@ -57,7 +59,7 @@ Uint8List? readMetadataSync(String path) {
     for (final base in bases) {
       final offsetTable = _readAt(raf, base.offset, 12);
       if (offsetTable == null) continue;
-      final numTables = _u16(offsetTable, 4);
+      final numTables = offsetTable.sfntU16(4);
       if (numTables <= 0) continue;
       final directoryLength = 12 + numTables * 16;
       final directory = _readAt(raf, base.offset, directoryLength);
@@ -66,10 +68,10 @@ Uint8List? readMetadataSync(String path) {
       final tables = <_TableReference>[];
       for (var i = 0; i < numTables; i++) {
         final record = 12 + i * 16;
-        final tag = _tagAt(directory, record);
+        final tag = directory.sfntTag(record);
         if (!_metadataTags.contains(tag)) continue;
-        final sourceOffset = _u32(directory, record + 8);
-        final declaredLength = _u32(directory, record + 12);
+        final sourceOffset = directory.sfntU32(record + 8);
+        final declaredLength = directory.sfntU32(record + 12);
         final minimumLength = _minTableLength[tag] ?? 0;
         final length = declaredLength > minimumLength
             ? declaredLength
@@ -155,19 +157,9 @@ Uint8List? _readAt(RandomAccessFile raf, int offset, int length) {
   return bytes.length == length ? bytes : null;
 }
 
-int _u16(Uint8List d, int o) =>
-    (o + 2 > d.length) ? -1 : (d[o] << 8) | d[o + 1];
-
-int _u32(Uint8List d, int o) => (o + 4 > d.length)
-    ? -1
-    : (d[o] << 24) | (d[o + 1] << 16) | (d[o + 2] << 8) | d[o + 3];
-
 void _writeU32(Uint8List d, int o, int value) {
   d[o] = (value >> 24) & 0xFF;
   d[o + 1] = (value >> 16) & 0xFF;
   d[o + 2] = (value >> 8) & 0xFF;
   d[o + 3] = value & 0xFF;
 }
-
-String _tagAt(Uint8List d, int o) =>
-    (o + 4 > d.length) ? '' : String.fromCharCodes(d.sublist(o, o + 4));

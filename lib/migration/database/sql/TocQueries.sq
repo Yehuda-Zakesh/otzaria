@@ -13,59 +13,9 @@ WHERE t.bookId = ?
 ORDER BY COALESCE(l.lineIndex, t.lineIndex, t.lineId) ASC,
          CASE WHEN t.id < 0 THEN -t.id ELSE t.id END ASC;
 
-selectTocById:
-SELECT t.*, tt.text, COALESCE(l.lineIndex, t.lineIndex, t.lineId) as lineIndex
-FROM tocEntry t
-JOIN tocText tt ON t.textId = tt.id
-LEFT JOIN line l ON t.lineId = l.id
-WHERE t.id = ?;
-
-selectRootByBookId:
-SELECT t.*, tt.text, COALESCE(l.lineIndex, t.lineIndex, t.lineId) as lineIndex
-FROM tocEntry t
-JOIN tocText tt ON t.textId = tt.id
-LEFT JOIN line l ON t.lineId = l.id
-WHERE t.bookId = ? AND t.parentId IS NULL
-ORDER BY COALESCE(l.lineIndex, t.lineIndex, t.lineId) ASC,
-         CASE WHEN t.id < 0 THEN -t.id ELSE t.id END ASC;
-
-selectChildren:
-SELECT t.*, tt.text, COALESCE(l.lineIndex, t.lineIndex, t.lineId) as lineIndex
-FROM tocEntry t
-JOIN tocText tt ON t.textId = tt.id
-LEFT JOIN line l ON t.lineId = l.id
-WHERE t.parentId = ?
-ORDER BY COALESCE(l.lineIndex, t.lineIndex, t.lineId) ASC,
-         CASE WHEN t.id < 0 THEN -t.id ELSE t.id END ASC;
-
-selectByLineId:
-SELECT t.*, tt.text, COALESCE(l.lineIndex, t.lineIndex, t.lineId) as lineIndex
-FROM tocEntry t
-JOIN tocText tt ON t.textId = tt.id
-LEFT JOIN line l ON t.lineId = l.id
-WHERE t.lineId = ?;
-
 insert:
 INSERT INTO tocEntry (bookId, parentId, textId, level, lineId, lineIndex, isLastChild, hasChildren)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
-updateLineId:
-UPDATE tocEntry SET lineId = ? WHERE id = ?;
-
-updateLineIndex:
-UPDATE tocEntry SET lineIndex = ? WHERE id = ?;
-
-updateIsLastChild:
-UPDATE tocEntry SET isLastChild = ? WHERE id = ?;
-
-updateHasChildren:
-UPDATE tocEntry SET hasChildren = ? WHERE id = ?;
-
 delete:
 DELETE FROM tocEntry WHERE id = ?;
-
-deleteByBookId:
-DELETE FROM tocEntry WHERE bookId = ?;
-
-lastInsertRowId:
-SELECT last_insert_rowid();

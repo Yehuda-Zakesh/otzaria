@@ -216,24 +216,6 @@ class UserImportLibrary {
     }),
   );
 
-  /// בונה מחדש מהבסיס ומכל הקבצים הפעילים, בטרנזקציה אחת.
-  Future<UserImportResult> rebuildFromEnabled() => _serial(() async {
-    final db = await _db.database;
-    db.execute('SAVEPOINT rebuild_user_content');
-    try {
-      final result = await _rebuildFromEnabled(db);
-      if (result.errors.isNotEmpty) {
-        db.execute('ROLLBACK TO rebuild_user_content');
-      }
-      db.execute('RELEASE rebuild_user_content');
-      return result;
-    } catch (_) {
-      db.execute('ROLLBACK TO rebuild_user_content');
-      db.execute('RELEASE rebuild_user_content');
-      rethrow;
-    }
-  });
-
   Future<UserImportResult> _rebuildFromEnabled(sqlite3.Database db) async {
     final repo = UserContentRepository(_db);
     Future<void> reset() async {

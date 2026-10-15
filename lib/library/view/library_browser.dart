@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/plugins/models/plugin_search_field_action.dart';
 import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/core/messages/messages_exports.dart';
 import 'package:otzaria/core/ui_snack.dart';
@@ -27,16 +28,15 @@ import 'package:otzaria/settings/services/custom_folders/bloc/custom_folders_blo
 import 'package:otzaria/widgets/feedback/edge_scrollbar_behavior.dart';
 import 'package:otzaria/widgets/lists/filter_chips_widget.dart';
 import 'package:otzaria/navigation/view/main_window_screen.dart';
+import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
 import 'package:otzaria/plugins/services/plugin_library_books_registry.dart';
 import 'package:otzaria/library/view/grid_items.dart';
 import 'package:otzaria/library/view/otzar_book_dialog.dart';
 import 'package:otzaria/library/view/book_preview_panel.dart';
 import 'package:otzaria/library/view/category_preview_panel.dart';
 import 'package:otzaria/library/view/library_empty_state_widget.dart';
-import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/search/view/search_dialog.dart';
 import 'package:otzaria/tabs/models/searching_tab.dart';
-import 'package:otzaria/library/view/library_panel_controller.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
 import 'package:otzaria/widgets/navigation/app_top_bar.dart';
 import 'package:otzaria/widgets/navigation/responsive_action_bar.dart';
@@ -331,6 +331,7 @@ class _LibraryBrowserState extends State<LibraryBrowser>
   bool get wantKeepAlive => true;
 
   final FocusNode _firstGridItemFocusNode = FocusNode();
+  final ScrollController _categoryGridController = ScrollController();
   final GlobalKey _tourLibraryKey = GlobalKey();
   final GlobalKey _tourLibrarySearchKey = GlobalKey();
   final GlobalKey _tourBookCardKey = GlobalKey();
@@ -405,24 +406,12 @@ class _LibraryBrowserState extends State<LibraryBrowser>
     );
   }
 
-  void _syncLibraryPanelController() {
-    LibraryPanelController.register(
-      isSettingsPanelOpen: () => _settingsPanelOpen.value,
-      showSettingsPanel: _openSettingsPanel,
-      closeSettingsPanel: _closeSettingsPanel,
-      openPreviewPanel: _showPreviewPanel,
-      closePreviewPanel: _hidePreviewPanel,
-      togglePreviewPanel: _togglePreviewPanel,
-    );
-  }
-
   @override
   void initState() {
     super.initState();
     _secondaryRowVisible = ValueNotifier<bool>(true);
     _topBarTotalHeight = ValueNotifier<double>(0);
     context.read<LibraryBloc>().add(LoadLibrary());
-    _syncLibraryPanelController();
     PluginLibraryBooksRegistry.instance.addListener(_onPluginBooksChanged);
   }
 
@@ -436,12 +425,12 @@ class _LibraryBrowserState extends State<LibraryBrowser>
   void dispose() {
     PluginLibraryBooksRegistry.instance.removeListener(_onPluginBooksChanged);
     _firstGridItemFocusNode.dispose();
+    _categoryGridController.dispose();
     _scrollDebounce?.cancel();
     _searchDebounce?.cancel();
     _secondaryRowVisible.dispose();
     _topBarTotalHeight.dispose();
     _settingsPanelOpen.dispose();
-    LibraryPanelController.unregister();
     super.dispose();
   }
 
@@ -905,7 +894,7 @@ class _LibraryBrowserState extends State<LibraryBrowser>
           child: KeyedSubtree(
             key: _tourLibrarySearchKey,
             child: OtzariaSearchField(
-              icon: OtzariaIcons.search_in_the_library_24_regular,
+              icon: OtzariaIcons.search_in_library_24_regular,
               controller: focusRepository.librarySearchController,
               focusNode: focusRepository.librarySearchFocusNode,
               autofocus: shouldAutofocusLibrarySearch(defaultTargetPlatform),
@@ -915,6 +904,7 @@ class _LibraryBrowserState extends State<LibraryBrowser>
                 args: {'category': state.currentCategory?.title ?? ''},
               ),
               maxWidth: isCompact ? 500 : 400,
+              pluginActionsField: PluginSearchField.library,
               onChanged: (value) {
                 context.read<LibraryBloc>().add(UpdateSearchQuery(value));
                 context.read<LibraryBloc>().add(const SelectTopics([]));
@@ -943,6 +933,10 @@ class _LibraryBrowserState extends State<LibraryBrowser>
 
   // ── Topics filter chips ───────────────────────────────────────────────────
 
+  // סמן הזהות אינו מחזיק ספרים ודרכם ספרייה ישנה אחרי רענון וניקוי החיפוש.
+  WeakReference<List<Book>>? _topicsSourceResults;
+  List<String> _relevantTopicsCache = const [];
+
   Widget? _buildTopicsSelection(
     BuildContext context,
     LibraryState state,
@@ -965,8 +959,12 @@ class _LibraryBrowserState extends State<LibraryBrowser>
       'אחרונים',
       'מחברי זמננו',
     ];
-    final allTopics = _getAllTopics(state.searchResults!);
-    final relevant = categoryTopics.where(allTopics.contains).toList();
+    if (!identical(state.searchResults, _topicsSourceResults?.target)) {
+      _topicsSourceResults = WeakReference(state.searchResults!);
+      final allTopics = _getAllTopics(state.searchResults!);
+      _relevantTopicsCache = categoryTopics.where(allTopics.contains).toList();
+    }
+    final relevant = _relevantTopicsCache;
     if (relevant.isEmpty) return null;
 
     return FilterChipsSelector<String>(
@@ -1387,11 +1385,7 @@ class _LibraryBrowserState extends State<LibraryBrowser>
 
   void _openSearchDialog(BuildContext context, {String? searchQuery}) {
     final tab = searchQuery != null && searchQuery.isNotEmpty
-        ? SearchingTab(
-            'חיפוש',
-            searchQuery,
-            initialConfiguration: const SearchConfiguration(),
-          )
+        ? SearchingTab.newSearch('חיפוש', searchQuery)
         : null;
     showDialog(
       context: context,
@@ -1480,8 +1474,9 @@ class _LibraryBrowserState extends State<LibraryBrowser>
               final repo = context.read<FocusRepository>();
               return _buildEmptyState(context, state, settingsState, repo);
             }
-            final displayBooks = _filterBooksByTopics(
-              books,
+            final displayBooks = _filterByTopics(books, state.selectedTopics);
+            final displayCategories = _filterByTopics(
+              categories,
               state.selectedTopics,
             );
             final displayLimit = min(displayBooks.length, 100);
@@ -1493,24 +1488,16 @@ class _LibraryBrowserState extends State<LibraryBrowser>
                   ?topicsHeader,
                   if (displayBooks.isNotEmpty)
                     _buildSearchResultsGrid(displayBooks, displayLimit),
-                  if (categories.isNotEmpty)
+                  if (displayCategories.isNotEmpty)
                     _buildSearchCategoriesGrid(
-                      categories,
+                      displayCategories,
                       firstFocus: displayBooks.isEmpty,
                     ),
                 ],
               ),
             );
           }
-          final categoryItems = _buildCategoryContent(state.currentCategory!);
-          if (categoryItems.isEmpty) {
-            final repo = context.read<FocusRepository>();
-            return _buildEmptyState(context, state, settingsState, repo);
-          }
-          return SingleChildScrollView(
-            key: PageStorageKey(state.currentCategory),
-            child: Column(children: categoryItems),
-          );
+          return _buildCategoryContent(state.currentCategory!);
         }
         if (state.searchResults != null) {
           final visibleResults = _visibleBooks(state.searchResults!);
@@ -1520,9 +1507,9 @@ class _LibraryBrowserState extends State<LibraryBrowser>
             return _buildEmptyState(context, state, settingsState, repo);
           }
           return _buildSearchListView(
-            _filterBooksByTopics(visibleResults, state.selectedTopics),
+            _filterByTopics(visibleResults, state.selectedTopics),
             _buildTopicsSelection(context, state),
-            categories: categories,
+            categories: _filterByTopics(categories, state.selectedTopics),
           );
         }
         return _buildListView(state.currentCategory!);
@@ -1551,8 +1538,7 @@ class _LibraryBrowserState extends State<LibraryBrowser>
     return (subCategories: filteredSubCategories, books: filteredBooks);
   }
 
-  List<Widget> _buildCategoryContent(Category category) {
-    final List<Widget> items = [];
+  Widget _buildCategoryContent(Category category) {
     final (subCategories: filteredSubCategories, books: filteredBooks) =
         _displayedContent(category);
 
@@ -1593,13 +1579,13 @@ class _LibraryBrowserState extends State<LibraryBrowser>
         attachedTourKey = true;
       }
     }
-    items.add(
-      MyGridView(
-        items: allItems,
-        onExitTop: () => _refocusSearchBar(selectAll: true),
-      ),
+    return MyGridView(
+      key: PageStorageKey(category),
+      items: allItems,
+      onExitTop: () => _refocusSearchBar(selectAll: true),
+      scrollable: true,
+      controller: _categoryGridController,
     );
-    return items;
   }
 
   Widget _buildBookItem(
@@ -1637,6 +1623,9 @@ class _LibraryBrowserState extends State<LibraryBrowser>
                   showTopics: showTopics,
                   isSelected: isSelected,
                   focusNode: focusNode,
+                  onFocused: _isPreviewPanelVisible(settingsState)
+                      ? () => _showBookPreview(book)
+                      : null,
                   onBookClickCallback: () {
                     if (_isPreviewPanelVisible(settingsState)) {
                       _showBookPreview(book);
@@ -1728,7 +1717,11 @@ class _LibraryBrowserState extends State<LibraryBrowser>
     );
   }
 
-  Widget _buildCategoryGridItem(Category category, {FocusNode? focusNode}) {
+  Widget _buildCategoryGridItem(
+    Category category, {
+    FocusNode? focusNode,
+    String? parentPath,
+  }) {
     return _withCategorySelection(
       category,
       (isSelected, onTap, onDoubleTap) => GestureDetector(
@@ -1737,7 +1730,10 @@ class _LibraryBrowserState extends State<LibraryBrowser>
           category: category,
           isSelected: isSelected,
           onCategoryClickCallback: onTap,
+          // onDoubleTap קיים רק כשהתצוגה המקדימה פעילה, ואז onTap הוא בחירה.
+          onFocused: onDoubleTap == null ? null : onTap,
           focusNode: focusNode,
+          parentPath: parentPath,
         ),
       ),
     );
@@ -1792,12 +1788,28 @@ class _LibraryBrowserState extends State<LibraryBrowser>
     List<Category> categories, {
     required bool firstFocus,
   }) {
+    final textTheme = Theme.of(context).textTheme;
+    final textScaler = MediaQuery.textScalerOf(context);
+    double lineHeight(TextStyle style) =>
+        textScaler.scale(style.fontSize!) * (style.height ?? 1);
+    // שתי שורות כותרת, שורת נתיב, רווח 3 וריפוד אנכי 20.
+    final minItemHeight =
+        categories.any(
+          (category) => categoryParentPath(category).isNotEmpty,
+        )
+        ? (23 +
+                  2 * lineHeight(textTheme.titleMedium!) +
+                  lineHeight(textTheme.bodySmall!))
+              .ceilToDouble()
+        : 0.0;
     return MyGridView(
+      minItemHeight: minItemHeight,
       items: [
         for (final (i, category) in categories.indexed)
           _buildCategoryGridItem(
             category,
             focusNode: firstFocus && i == 0 ? _firstGridItemFocusNode : null,
+            parentPath: categoryParentPath(category),
           ),
       ],
     );
@@ -2016,13 +2028,18 @@ class _LibraryBrowserState extends State<LibraryBrowser>
       mouseCursor: SystemMouseCursors.click,
       borderRadius: BorderRadius.zero,
       hoverDuration: Durations.medium1,
-      onTap: () => setState(() {
-        if (isExpanded) {
-          _expandedCategories.remove(category.path);
-        } else {
-          _expandedCategories.add(category.path);
+      onTap: () {
+        if (_isPreviewPanelVisible(context.read<SettingsBloc>().state)) {
+          context.read<LibraryBloc>().add(SelectCategoryForPreview(category));
         }
-      }),
+        setState(() {
+          if (isExpanded) {
+            _expandedCategories.remove(category.path);
+          } else {
+            _expandedCategories.add(category.path);
+          }
+        });
+      },
       child: Padding(
         padding: EdgeInsets.only(
           right: horizontalPadding + indent,
@@ -2057,6 +2074,9 @@ class _LibraryBrowserState extends State<LibraryBrowser>
                 textAlign: TextAlign.right,
                 style: titleStyle,
               ),
+            ),
+            ExcludeFocusTraversal(
+              child: CategoryActionsMenuButton(category: category),
             ),
             ExpandingChevron(
               isExpanded: isExpanded,
@@ -2630,10 +2650,28 @@ class _LibraryBrowserState extends State<LibraryBrowser>
   }
 
   void _openExternalBook(ExternalLibraryBook book) {
-    if (PluginLibraryBooksRegistry.instance.open(book)) return;
+    if (PluginLibraryBooksRegistry.instance.open(
+      book,
+      actionDispatcher: _pluginBookActionDispatcher(),
+    )) {
+      return;
+    }
     // ספר של תוסף שהוסר בינתיים: אין לו קישור, ודיאלוג אוצר החכמה ריק.
     if (book.link.isEmpty) return;
     _openOtzarBook(book);
+  }
+
+  /// `openAction` של ספק ספרים מתוסף. עץ בלי PluginSystemBloc (בדיקות
+  /// widget) מחזיר null, והלחיצה נמסרת לתוסף באירוע.
+  PluginLibraryBookActionDispatcher? _pluginBookActionDispatcher() {
+    try {
+      return context
+          .read<PluginSystemBloc>()
+          .declarativeHost
+          ?.dispatchLibraryBookAction;
+    } on ProviderNotFoundException {
+      return null;
+    }
   }
 
   void _openOtzarBook(ExternalLibraryBook book) {
@@ -2682,12 +2720,17 @@ class _LibraryBrowserState extends State<LibraryBrowser>
 
   /// מסנן את התוצאות המוצגות לפי הקטגוריות הנבחרות — ספר נכלל אם הוא שייך לאחת
   /// מהן (OR). כל צ'יפ נגזר מהתוצאות הקיימות, ולכן הסינון לעולם לא ריק. הרשימה
-  /// המלאה נשמרת ב-state כדי שצ'יפי שאר הקטגוריות יישארו.
-  List<Book> _filterBooksByTopics(List<Book> books, List<String>? topics) {
-    if (topics == null || topics.isEmpty) return books;
-    return books.where((book) {
-      final bookTopics = book.topics.split(',').map((t) => t.trim()).toSet();
-      return topics.any(bookTopics.contains);
+  /// המלאה נשמרת ב-state כדי שצ'יפי שאר הקטגוריות יישארו. תיקייה שייכת
+  /// לקטגוריות שבנתיב שלה ולשמה — כמו topics של ספר.
+  List<T> _filterByTopics<T>(List<T> items, List<String>? topics) {
+    if (topics == null || topics.isEmpty) return items;
+    return items.where((item) {
+      final itemTopics = switch (item) {
+        Book book => book.topics,
+        Category c => '${categoryParentPath(c)}, ${c.title}',
+        _ => '',
+      }.split(',').map((t) => t.trim()).toSet();
+      return topics.any(itemTopics.contains);
     }).toList();
   }
 
@@ -2778,14 +2821,17 @@ class _LibraryBrowserState extends State<LibraryBrowser>
 
   bool _focusFirstGridItem(LibraryState state) {
     // הצומת מחובר לפריט הראשון גם בעיון בקטגוריות, לא רק בתוצאות חיפוש.
-    if (_firstGridItemFocusNode.context != null &&
+    if ((_firstGridItemFocusNode.context?.mounted ?? false) &&
         _firstGridItemFocusNode.canRequestFocus) {
       LibraryGridKeyNavigator.focusCard(_firstGridItemFocusNode);
       return true;
     }
 
-    final results = state.searchResults;
-    if (results == null || results.isEmpty) {
+    // ברשת קטגוריה שנגללה עמוק הכרטיס הראשון אינו בנוי; גוללים לראש וממקדים אחרי הבנייה.
+    if (_categoryGridController.hasClients &&
+        _categoryGridController.offset > 0) {
+      _categoryGridController.jumpTo(0);
+    } else if (state.searchResults?.isNotEmpty != true) {
       return false;
     }
 

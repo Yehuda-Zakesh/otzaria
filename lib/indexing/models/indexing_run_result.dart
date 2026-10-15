@@ -7,6 +7,7 @@ enum IndexingFailureKind {
   permissionDenied(isRetryable: false, preventedIndexing: true),
   // מסמך שהמבנה שלו שבור או שהפורמט אינו נתמך — ניסיון חוזר לא יעזור.
   unreadableDocument(isRetryable: false, preventedIndexing: true),
+  crashedApp(isRetryable: false, preventedIndexing: true),
   // timeout חולף מטבעו (עומס רגעי, worker שנתקע). סימונו כקבוע היה מחשיב
   // ספר תקין כמאונדקס בלי תוכן, עד אינדוקס מלא ידני.
   timeout(isRetryable: true, preventedIndexing: true),
@@ -71,17 +72,11 @@ class IndexingRunResult extends Equatable {
   Iterable<IndexingFailure> get retryableFailures =>
       failures.where((failure) => failure.isRetryable);
 
-  Iterable<IndexingFailure> get permanentFailures => failures.where(
-    (failure) => failure.preventedIndexing && !failure.isRetryable,
-  );
-
   int get blockingFailureCount =>
       failures.where((failure) => failure.preventedIndexing).length;
 
   int get warningCount =>
       failures.where((failure) => !failure.preventedIndexing).length;
-
-  bool get hasRetryableFailures => retryableFailures.isNotEmpty;
 
   @override
   List<Object?> get props => [

@@ -207,10 +207,10 @@ class PluginProtocolRegistrationService {
     final destination = File(p.join(mimetypesDir.path, '$mimeIconName.png'));
     await sourceIcon.copy(destination.path);
 
-    // gtk-update-icon-cache דורש ‎index.theme‎ בתיקיית התמה כדי להצליח.
-    // ב-‎~/.local/share/icons/hicolor‎ הקובץ הזה בדרך כלל לא קיים (התמה
-    // המערכתית יושבת ב-‎/usr/share/icons/hicolor‎), אז נריץ רק אם הוא קיים.
-    // ה-MIME database עצמו יודע על האייקון דרך ‎mime-info‎ XML, וסביבות
+    // gtk-update-icon-cache דורש index.theme בתיקיית התמה כדי להצליח.
+    // ב-~/.local/share/icons/hicolor הקובץ הזה בדרך כלל לא קיים (התמה
+    // המערכתית יושבת ב-/usr/share/icons/hicolor), אז נריץ רק אם הוא קיים.
+    // ה-MIME database עצמו יודע על האייקון דרך mime-info XML, וסביבות
     // עבודה רובן יסרקו מחדש את התיקייה בלי הקריאה הזו.
     final themeIndex = File(p.join(iconsRoot, 'index.theme'));
     if (await themeIndex.exists()) {
@@ -327,7 +327,7 @@ $iconLine    <glob pattern="$pattern"/>
         value: const DwordValue(0x00100000),
       ),
       // האייקון הייעודי לתוסף משובץ ב-EXE כמשאב שני
-      // (IDI_OTZPLUGIN_FILE_ICON ב-Runner.rc); index ‎1 מצביע עליו.
+      // (IDI_OTZPLUGIN_FILE_ICON ב-Runner.rc); index 1 מצביע עליו.
       (
         subkey: '$progIdRoot\\DefaultIcon',
         name: '',

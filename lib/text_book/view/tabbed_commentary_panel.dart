@@ -25,6 +25,7 @@ import 'package:otzaria/models/links.dart';
 import 'package:otzaria/text_book/models/commentary_scroll_request.dart';
 import 'package:otzaria/text_book/widgets/text_book_state_builder.dart';
 import 'package:otzaria/widgets/navigation/panel_tab_header.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 
 /// אינדקסי הלשוניות ב-[TabbedCommentaryPanel]
 const int kCommentaryTabIndex = 0;
@@ -59,6 +60,7 @@ class TabbedCommentaryPanel extends StatefulWidget {
   final String? notesBookIdOverride;
   final int? notesCategoryIdOverride;
   final int? notesFocusLineNumber;
+  final Widget? notesFooter;
 
   /// בקשות גלילה לקטע מפרש מלחיצה על עוגן-אות בטקסט הראשי. מועבר כמות שהוא
   /// לרשימת המפרשים; רלוונטי רק במצב המפוצל, שבו היא בכלל מוצגת כאן.
@@ -84,6 +86,7 @@ class TabbedCommentaryPanel extends StatefulWidget {
     this.notesBookIdOverride,
     this.notesCategoryIdOverride,
     this.notesFocusLineNumber,
+    this.notesFooter,
     this.commentaryScrollTarget,
   });
 
@@ -96,11 +99,6 @@ class _TabbedCommentaryPanelState extends State<TabbedCommentaryPanel>
   late TabController _tabController;
 
   // פונקציה ציבורית לעבור לכרטיסיית הקישורים
-  void switchToLinksTab() {
-    if (_tabController.index != kLinksTabIndex) {
-      _tabController.animateTo(kLinksTabIndex);
-    }
-  }
 
   @override
   void initState() {
@@ -159,7 +157,7 @@ class _TabbedCommentaryPanelState extends State<TabbedCommentaryPanel>
                 final isCompact = constraints.maxWidth < 270;
                 final firstTabIconData = widget.showSplitView
                     ? OtzariaIcons.book_24_regular
-                    : FluentIcons.settings_24_regular;
+                    : OtzariaIcons.apps_list_24_regular;
                 return PanelTabHeader(
                   controller: _tabController,
                   onClose: widget.onClosePane,
@@ -228,6 +226,8 @@ class _TabbedCommentaryPanelState extends State<TabbedCommentaryPanel>
                         openBookCallback: widget.openBookCallback,
                         fontSize: settingsState.commentatorsFontSize,
                         showSearch: widget.showSearch,
+                        // ב-shrinkWrap כיווץ מפרש מעלים מהציור את המפרש שמעליו
+                        shrinkWrap: false,
                         selectionSyncController: widget.selectionSyncController,
                         openFilterRequest: widget.openFilterRequest,
                         highlightQueryListenable:
@@ -266,8 +266,6 @@ class _TabbedCommentaryPanelState extends State<TabbedCommentaryPanel>
                     openBookCallback: widget.openBookCallback,
                     fontSize: widget.fontSize,
                     selectionSyncController: widget.selectionSyncController,
-                    showVisibleLinksIfNoSelection:
-                        widget.initialTabIndex == kLinksTabIndex,
                   ),
                   // כרטיסיית ההערות האישיות
                   PersonalNotesSidebar(
@@ -278,6 +276,9 @@ class _TabbedCommentaryPanelState extends State<TabbedCommentaryPanel>
                         ? state.book.categoryId
                         : widget.notesCategoryIdOverride,
                     focusLineNumber: widget.notesFocusLineNumber,
+                    footer: widget.notesBookIdOverride == null
+                        ? widget.notesFooter
+                        : null,
                     onNavigateToLine:
                         widget.onNavigateToLine ??
                         (line) => _handleNoteNavigation(context, state, line),
@@ -302,9 +303,9 @@ class _TabbedCommentaryPanelState extends State<TabbedCommentaryPanel>
 
     final targetIndex = (lineNumber - 1).clamp(0, state.content.length - 1);
 
-    await state.scrollController.scrollTo(
-      index: targetIndex,
-      alignment: 0.05,
+    final lines = widget.tab?.lines ?? LineScrollScope.maybeOf(context);
+    await lines?.scrollToLine(
+      targetIndex,
       duration: const Duration(milliseconds: 350),
       curve: Curves.easeInOut,
     );

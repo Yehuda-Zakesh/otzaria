@@ -53,9 +53,11 @@ final value = 1;
 
     test('שומר תמונת data URI שאינה דורשת רשת', () {
       final html = markdownBytesToHtml(
-        Uint8List.fromList(utf8.encode(
-          '<img src="data:image/png;base64,AA==">',
-        )),
+        Uint8List.fromList(
+          utf8.encode(
+            '<img src="data:image/png;base64,AA==">',
+          ),
+        ),
         'ספר',
       );
       expect(html, contains('data:image/png;base64,AA=='));

@@ -65,32 +65,6 @@ class WorkStatusItem {
     this.autoDismissAfter,
   });
 
-  WorkStatusItem copyWith({
-    String? id,
-    String? title,
-    String? message,
-    String? detail,
-    Object? progress = _sentinel,
-    WorkStatusKind? kind,
-    Object? onTap = _sentinel,
-    List<WorkStatusAction>? actions,
-    Object? autoDismissAfter = _sentinel,
-  }) {
-    return WorkStatusItem(
-      id: id ?? this.id,
-      title: title ?? this.title,
-      message: message ?? this.message,
-      detail: detail ?? this.detail,
-      progress: progress == _sentinel ? this.progress : progress as double?,
-      kind: kind ?? this.kind,
-      onTap: onTap == _sentinel ? this.onTap : onTap as VoidCallback?,
-      actions: actions ?? this.actions,
-      autoDismissAfter: autoDismissAfter == _sentinel
-          ? this.autoDismissAfter
-          : autoDismissAfter as Duration?,
-    );
-  }
-
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -118,5 +92,3 @@ class WorkStatusItem {
       Object.hashAll(actions) ^
       autoDismissAfter.hashCode;
 }
-
-const Object _sentinel = Object();

@@ -40,6 +40,8 @@ SearchResult _result(int i) => SearchResult(
   filePath: 'book_$i.txt',
   mergedCount: 1,
   merged: const [],
+  textStatus: TextStatus.ok,
+  continuesToNextLine: false,
 );
 
 Future<void> _pumpResults(

@@ -12,6 +12,7 @@ import 'package:otzaria/tools/measurement_converter/measurement_converter_screen
 import 'package:otzaria/tools/shamor_zachor/shamor_zachor.dart';
 import 'package:otzaria/tools/tikkun_korim/engine/tikkun_engine_impl.dart';
 import 'package:otzaria/tools/tikkun_korim/view/tikkun_korim_screen.dart';
+import 'package:otzaria/tools/tool_query.dart';
 
 /// בונה את עמוד התוכן של כלי מובנה, או `null` אם המזהה אינו מוכר.
 ///
@@ -21,6 +22,7 @@ Widget? buildBuiltInToolPage(
   String toolId, {
   required GlobalKey<CalendarWidgetState> calendarKey,
   required GlobalKey<GematriaSearchScreenState> gematriaKey,
+  required ToolQueryInbox queryInbox,
 }) {
   switch (toolId) {
     case 'builtin.calendar':
@@ -39,13 +41,13 @@ Widget? buildBuiltInToolPage(
         data: TikkunDataSourceImpl(),
       );
     case 'builtin.gematria':
-      return GematriaSearchScreen(key: gematriaKey);
+      return GematriaSearchScreen(key: gematriaKey, queryInbox: queryInbox);
     case 'builtin.aramaic_dictionary':
-      return const AramaicDictionaryScreen();
+      return AramaicDictionaryScreen(queryInbox: queryInbox);
     case 'builtin.acronyms_dictionary':
-      return const AcronymsDictionaryScreen();
+      return AcronymsDictionaryScreen(queryInbox: queryInbox);
     case 'builtin.biographies':
-      return const BiographiesScreen();
+      return BiographiesScreen(queryInbox: queryInbox);
   }
   return null;
 }

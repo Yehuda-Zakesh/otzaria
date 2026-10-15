@@ -3,6 +3,7 @@ import 'package:otzaria/plugins/models/plugin_permission_grant.dart';
 import 'package:otzaria/plugins/models/plugin_published_record.dart';
 import 'package:otzaria/plugins/models/plugin_valid_permissions.dart';
 import 'package:otzaria/plugins/storage/plugin_system_database.dart';
+import 'package:otzaria/plugins/utils/plugin_safe_mode.dart';
 
 class PluginRegistryRepository {
   final PluginSystemDatabase _db;
@@ -11,9 +12,28 @@ class PluginRegistryRepository {
     : _db = database ?? PluginSystemDatabase.instance;
 
   Future<List<InstalledPlugin>> getAllPlugins() async {
-    final plugins = await _db.getAllInstalledPlugins();
+    await PluginSafeMode.ready;
+    final plugins = (await _db.getAllInstalledPlugins())
+        .map(_sessionView)
+        .toList();
     plugins.sort(_compareForDisplay);
     return plugins;
+  }
+
+  /// In safe mode every plugin reads as disabled for this session only; the
+  /// saved flag is restored on write by [_keepSavedEnabled].
+  static InstalledPlugin _sessionView(InstalledPlugin plugin) =>
+      PluginSafeMode.isActive && plugin.enabled
+      ? plugin.copyWith(enabled: false, savedEnabled: true)
+      : plugin;
+
+  /// Read-modify-write paths (reordering, permissions, updates) would
+  /// otherwise persist the session-only disabled state.
+  Future<InstalledPlugin> _keepSavedEnabled(InstalledPlugin plugin) async {
+    await PluginSafeMode.ready;
+    if (!PluginSafeMode.isActive) return plugin;
+    final saved = await _db.getInstalledPlugin(plugin.pluginId);
+    return saved == null ? plugin : plugin.copyWith(enabled: saved.enabled);
   }
 
   /// השוואת תוספים לצורך תצוגה — קודם לפי [InstalledPlugin.effectiveToolTabOrder],
@@ -48,19 +68,32 @@ class PluginRegistryRepository {
     return maxOrder == null ? null : maxOrder + 1;
   }
 
+  /// Stores the user's enabled choice. In safe mode this is the only write
+  /// that changes it; the plugin still stays off until a normal restart.
+  Future<void> saveEnabledChoice(String pluginId, bool enabled) async {
+    final saved = await _db.getInstalledPlugin(pluginId);
+    if (saved == null) return;
+    await _db.insertOrUpdatePlugin(saved.copyWith(enabled: enabled));
+  }
+
   Future<InstalledPlugin?> getPlugin(String pluginId) async {
-    return _db.getInstalledPlugin(pluginId);
+    await PluginSafeMode.ready;
+    final plugin = await _db.getInstalledPlugin(pluginId);
+    return plugin == null ? null : _sessionView(plugin);
   }
 
   Future<void> savePlugin(InstalledPlugin plugin) async {
-    await _db.insertOrUpdatePlugin(plugin);
+    await _db.insertOrUpdatePlugin(await _keepSavedEnabled(plugin));
   }
 
   Future<void> savePluginWithPermissions(
     InstalledPlugin plugin,
     Map<String, bool> permissions,
   ) async {
-    await _db.insertOrUpdatePluginWithPermissions(plugin, permissions);
+    await _db.insertOrUpdatePluginWithPermissions(
+      await _keepSavedEnabled(plugin),
+      permissions,
+    );
   }
 
   Future<void> deletePlugin(String pluginId) async {
@@ -84,16 +117,6 @@ class PluginRegistryRepository {
     return plugins.where((p) => p.isDevelopment).toList();
   }
 
-  Future<void> saveDevelopmentPlugin(InstalledPlugin plugin) async {
-    if (!plugin.isDevelopment) {
-      throw ArgumentError('Cannot save a packaged plugin as development');
-    }
-    if (plugin.devRootPath == null || plugin.devRootPath!.trim().isEmpty) {
-      throw ArgumentError('Development plugin must have a valid devRootPath');
-    }
-    await _db.insertOrUpdatePlugin(plugin);
-  }
-
   Future<void> saveDevelopmentPluginWithPermissions(
     InstalledPlugin plugin,
     Map<String, bool> permissions,
@@ -104,7 +127,10 @@ class PluginRegistryRepository {
     if (plugin.devRootPath == null || plugin.devRootPath!.trim().isEmpty) {
       throw ArgumentError('Development plugin must have a valid devRootPath');
     }
-    await _db.insertOrUpdatePluginWithPermissions(plugin, permissions);
+    await _db.insertOrUpdatePluginWithPermissions(
+      await _keepSavedEnabled(plugin),
+      permissions,
+    );
   }
 
   Future<void> detachDevelopmentPlugin(String pluginId) async {
@@ -150,6 +176,27 @@ class PluginRegistryRepository {
   ) async {
     await _db.setPermission(pluginId, permission, granted);
   }
+
+  Future<void> clearNewTabPageRegistration(String pluginId) =>
+      _db.clearNewTabPageRegistration(pluginId);
+
+  Future<String?> getNewTabPageOwner() async {
+    await PluginSafeMode.ready;
+    if (PluginSafeMode.isActive) return null;
+    return _db.getNewTabPageOwner();
+  }
+
+  Future<bool> grantNewTabPage(
+    String pluginId, {
+    required bool allowPreviouslyDenied,
+    required String? expectedOwner,
+    required void Function() onGranted,
+  }) => _db.grantNewTabPage(
+    pluginId,
+    allowPreviouslyDenied: allowPreviouslyDenied,
+    expectedOwner: expectedOwner,
+    onGranted: onGranted,
+  );
 
   Future<bool?> getPermission(String pluginId, String permission) async {
     if (pluginBaselinePermissions.contains(permission)) return true;
@@ -244,6 +291,8 @@ class PluginRegistryRepository {
 
   /// מחזיר האם התוסף מופעל. null = לא נמצא (=treat as disabled).
   Future<bool> getIsEnabled(String pluginId) async {
+    await PluginSafeMode.ready;
+    if (PluginSafeMode.isActive) return false;
     final plugin = await _db.getInstalledPlugin(pluginId);
     return plugin?.enabled ?? false;
   }

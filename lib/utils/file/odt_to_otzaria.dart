@@ -106,7 +106,7 @@ String odtToText(Uint8List bytes, String title, {bool embedImages = true}) {
     noteFormats: _extractNoteFormats(document, archive),
   );
 
-  // חבילה שאין בה `office:text` אינה מסמך טקסט — ‎.ods‎ ששמו שונה, או
+  // חבילה שאין בה `office:text` אינה מסמך טקסט — .ods ששמו שונה, או
   // content.xml קטוע. פלט "כותרת בלבד" היה נראה כספר תקין וריק, נשמר
   // במטמון, מאונדקס, ומסמן כל הערה אישית מעבר לשורה 1 כחסרה. מסמך **ריק
   // אך תקין** ממשיך להחזיר כותרת בלבד — `office:text` קיים ובלי ילדים.

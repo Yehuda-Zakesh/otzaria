@@ -1,5 +1,6 @@
 import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/plugins/utils/plugin_safe_mode.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_event.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_state.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
@@ -12,6 +13,10 @@ import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 import 'package:otzaria/plugins/services/context_menu_registry.dart';
 import 'package:otzaria/plugins/services/plugin_shortcut_registry.dart';
 import 'package:otzaria/plugins/services/plugin_toolbar_registry.dart';
+import 'package:otzaria/plugins/services/plugin_new_tab_page_registry.dart';
+import 'package:otzaria/plugins/services/plugin_new_tab_page_service.dart';
+import 'package:otzaria/plugins/services/plugin_network_policy.dart';
+import 'package:otzaria/plugins/services/plugin_text_reader_registry.dart';
 import 'package:otzaria/plugins/services/plugin_highlight_registry.dart';
 import 'package:otzaria/plugins/services/plugin_startup_contributions_service.dart';
 import 'package:otzaria/plugins/services/plugin_lazy_activation_service.dart';
@@ -20,9 +25,15 @@ import 'package:otzaria/plugins/services/plugin_dev_watch_service.dart';
 import 'package:otzaria/plugins/services/plugin_download_service.dart';
 import 'package:otzaria/plugins/services/plugin_external_search_service.dart';
 import 'package:otzaria/plugins/services/plugin_file_server.dart';
+import 'package:otzaria/plugins/services/plugin_search_dialog_registry.dart';
+import 'package:otzaria/plugins/services/plugin_search_field_actions_registry.dart';
+import 'package:otzaria/plugins/services/plugin_search_field_session_service.dart';
+import 'package:otzaria/plugins/services/plugin_external_editions_registry.dart';
+import 'package:otzaria/plugins/services/plugin_condition_evaluator.dart';
 import 'package:otzaria/plugins/services/plugin_in_book_search_service.dart';
 import 'package:otzaria/plugins/services/plugin_library_books_registry.dart';
 import 'package:otzaria/plugins/services/plugin_install_report_service.dart';
+import 'package:otzaria/plugins/services/plugin_install_results_log.dart';
 import 'package:otzaria/plugins/declarative/services/declarative_plugin_host_service.dart';
 import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/tabs/bloc/tabs_state.dart';
@@ -37,6 +48,7 @@ import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/messages/plugin_messages.dart';
+import 'package:otzaria/update/app_release_version.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
@@ -55,6 +67,15 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
   /// ולא פעולות זולות (נעיצה, סידור, showInTools) שגם הן גוררות LoadPlugins.
   String? _lastDeclarativeSyncSignature;
 
+  final PluginInstallResultsLog _installResultsLog;
+
+  /// התקנות מקישור install-local שממתינות להחלטת המשתמש, לפי תיקיית ה-temp.
+  final Map<String, ({String path, String pluginId, String version})>
+  _pendingLocalInstalls = {};
+
+  /// קישורי install-local שממתינים לאישור דריסה, לפי נתיב הארכיון.
+  final Map<String, String> _pendingLocalOverwrites = {};
+
   PluginSystemBloc({
     required this.repository,
     PluginInstallerService? installerService,
@@ -65,7 +86,10 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     this.declarativeHost,
     Stream<TabsState>? readerStates,
     TabsState? initialReaderState,
-  }) : _installerService =
+    PluginInstallResultsLog? installResultsLog,
+  }) : _installResultsLog =
+           installResultsLog ?? PluginInstallResultsLog.instance,
+       _installerService =
            installerService ?? PluginInstallerService(repository: repository),
        _downloadService = downloadService ?? PluginDownloadService(),
        _bundledSeedService =
@@ -80,6 +104,7 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     on<InstallRemotePluginRequested>(_onInstallRemotePluginRequested);
     on<ConfirmPluginInstall>(_onConfirmPluginInstall);
     on<CancelPluginInstall>(_onCancelPluginInstall);
+    on<PluginOverwriteDeclined>(_onPluginOverwriteDeclined);
     on<UninstallPluginRequested>(_onUninstallPluginRequested);
     on<ResetPluginDataRequested>(_onResetPluginDataRequested);
     on<PinPluginRequested>(_onPinPluginRequested);
@@ -152,8 +177,22 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     // יחליף את התוסף בספינר, ה-WebView ייהרס ויטען מאפס.
     if (state is! PluginSystemLoaded) emit(PluginSystemLoading());
     try {
+      await PluginSafeMode.ready;
       final plugins = await repository.getAllPlugins();
+      if (PluginSafeMode.isActive) {
+        devWatchService.syncWatchers(const []);
+        // Listing only. Contribution sync treats a disabled plugin as removed
+        // and unpublishes its data, so nothing else runs in safe mode.
+        for (final plugin in plugins) {
+          _clearPluginRegistrations(plugin.pluginId);
+          PluginRuntimeDispatcher.instance.invalidatePlugin(plugin.pluginId);
+        }
+        _registerPluginShortcuts(const []);
+        emit(PluginSystemLoaded(plugins));
+        return;
+      }
       devWatchService.syncWatchers(await repository.getDevelopmentPlugins());
+      await PluginTextReaderRegistry.instance.sync(plugins, repository);
       _registerPluginShortcuts(plugins);
       await PluginStartupContributionsService.instance.sync(
         plugins,
@@ -180,6 +219,8 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     SeedBundledPlugins event,
     Emitter<PluginSystemState> emit,
   ) async {
+    await PluginSafeMode.ready;
+    if (PluginSafeMode.isActive) return;
     try {
       if (await _bundledSeedService.seedPending()) add(LoadPlugins());
     } catch (e) {
@@ -366,16 +407,49 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     );
   }
 
+  void _recordLocalResult(
+    String? path,
+    PluginInstallOutcome outcome, {
+    String? pluginId,
+    String? version,
+    String? message,
+  }) {
+    if (path == null) return;
+    unawaited(
+      _installResultsLog
+          .append(
+            path: path,
+            outcome: outcome,
+            pluginId: pluginId,
+            version: version,
+            message: message,
+          )
+          .catchError(
+            (Object e) => debugPrint('Plugin install result log failed: $e'),
+          ),
+    );
+  }
+
   Future<void> _onInstallPluginRequested(
     InstallPluginRequested event,
     Emitter<PluginSystemState> emit,
   ) async {
+    final localPath = event.recordsResult
+        ? event.archivePath
+        : _pendingLocalOverwrites.remove(event.archivePath);
     try {
       final prepareInfo = await _installerService.prepareInstall(
         event.archivePath,
         forceOverwrite: event.forceOverwrite,
       );
 
+      if (localPath != null) {
+        _pendingLocalInstalls[prepareInfo.tempDirPath] = (
+          path: localPath,
+          pluginId: prepareInfo.manifest.id,
+          version: prepareInfo.manifest.version,
+        );
+      }
       emit(
         PluginSystemInstallRequiresPermissions(
           manifest: prepareInfo.manifest,
@@ -388,6 +462,9 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
         ),
       );
     } on PluginOverwriteException catch (e) {
+      if (localPath != null) {
+        _pendingLocalOverwrites[event.archivePath] = localPath;
+      }
       emit(
         PluginSystemOverwriteRequired(
           archivePath: event.archivePath,
@@ -396,10 +473,43 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
           isUserInitiated: event.isUserInitiated,
         ),
       );
+    } on PluginNewerVersionInstalledException catch (e) {
+      final message = PluginMessages.newerVersionInstalled(
+        e.pluginName,
+        e.installedVersion,
+      );
+      UiSnack.show(message);
+      _recordLocalResult(
+        localPath,
+        PluginInstallOutcome.rejectedOlder,
+        pluginId: e.pluginId,
+        version: e.requestedVersion,
+        message: message,
+      );
+      add(LoadPlugins());
     } catch (e) {
       UiSnack.showError(PluginMessages.installPluginError(e));
+      _recordLocalResult(
+        localPath,
+        e is PluginIncompatibleAppVersionException
+            ? PluginInstallOutcome.rejectedIncompatible
+            : PluginInstallOutcome.failed,
+        message: e.toString(),
+      );
       add(LoadPlugins()); // Reset state
     }
+  }
+
+  void _onPluginOverwriteDeclined(
+    PluginOverwriteDeclined event,
+    Emitter<PluginSystemState> emit,
+  ) {
+    _recordLocalResult(
+      _pendingLocalOverwrites.remove(event.archivePath),
+      PluginInstallOutcome.cancelled,
+      message: 'הדריסה בוטלה על ידי המשתמש',
+    );
+    add(LoadPlugins());
   }
 
   Future<void> _onInstallRemotePluginRequested(
@@ -418,7 +528,7 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     try {
       String? appVersion;
       try {
-        appVersion = (await PackageInfo.fromPlatform()).version;
+        appVersion = canonicalAppVersion(await PackageInfo.fromPlatform());
       } catch (_) {}
 
       archivePath = await _downloadService.downloadPluginArchive(
@@ -505,6 +615,7 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     ConfirmPluginInstall event,
     Emitter<PluginSystemState> emit,
   ) async {
+    var local = _pendingLocalInstalls.remove(event.tempDirPath);
     try {
       await _installerService.finalizeInstall(
         event.tempDirPath,
@@ -513,6 +624,11 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
         grantedPermissions: event.grantedPermissions,
       );
 
+      if (!event.manifest.permissions.contains('navigation.write') ||
+          event.grantedPermissions['navigation.write'] != true) {
+        PluginNewTabPageRegistry.instance.remove(event.manifest.id);
+        PluginNewTabPageService.broadcastChanged();
+      }
       UiSnack.showSuccess(
         event.isUpdate
             ? PluginMessages.pluginUpdatedSuccess
@@ -523,6 +639,15 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
         success: true,
         updated: event.isUpdate,
       );
+      _recordLocalResult(
+        local?.path,
+        event.isUpdate
+            ? PluginInstallOutcome.updated
+            : PluginInstallOutcome.installed,
+        pluginId: event.manifest.id,
+        version: event.manifest.version,
+      );
+      local = null;
       final duplicates = await _findSameNameDuplicates(event.manifest);
       if (duplicates.isNotEmpty) {
         // הממשק מציג דיאלוג ומוסיף בעצמו UninstallPluginRequested / LoadPlugins.
@@ -540,6 +665,13 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     } catch (e) {
       await _installerService.cancelInstall(event.tempDirPath);
       UiSnack.showError(PluginMessages.confirmInstallError(e));
+      _recordLocalResult(
+        local?.path,
+        PluginInstallOutcome.failed,
+        pluginId: event.manifest.id,
+        version: event.manifest.version,
+        message: e.toString(),
+      );
       _reportInstallResult(
         event.reportContext,
         success: false,
@@ -578,6 +710,14 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       success: false,
       errorMessage: 'ההתקנה בוטלה על ידי המשתמש',
     );
+    final local = _pendingLocalInstalls.remove(event.tempDirPath);
+    _recordLocalResult(
+      local?.path,
+      PluginInstallOutcome.cancelled,
+      pluginId: local?.pluginId,
+      version: local?.version,
+      message: 'ההתקנה בוטלה על ידי המשתמש',
+    );
     add(LoadPlugins());
   }
 
@@ -595,7 +735,11 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       _removeSearchProviders(event.pluginId);
       // מיד, ולא בסנכרון שאחרי: רשימה שבאמצע שמירה הייתה נכתבת שוב ל-DB.
       PluginLibraryBooksRegistry.instance.removePlugin(event.pluginId);
+      PluginNewTabPageRegistry.instance.remove(event.pluginId);
+      await _cancelPluginNotifications(event.pluginId);
       await _installerService.uninstallPlugin(event.pluginId);
+      PluginNewTabPageRegistry.instance.remove(event.pluginId);
+      PluginNewTabPageService.broadcastChanged();
       add(LoadPlugins());
     } catch (e) {
       UiSnack.showError(PluginMessages.uninstallPluginError(e));
@@ -621,6 +765,7 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       await _cancelPluginNotifications(event.pluginId);
       await _installerService.resetPluginData(event.pluginId);
       PluginRuntimeDispatcher.instance.invalidatePlugin(event.pluginId);
+      PluginNetworkPolicy.notifyChanged(event.pluginId);
       await PluginRuntimeDispatcher.instance.reloadPlugin(event.pluginId);
       add(LoadPlugins());
       UiSnack.show(PluginMessages.pluginDataReset(plugin.name));
@@ -639,17 +784,18 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     );
     if (raw == null) return;
     final notifications = NotificationService();
-    if (!notifications.isInitialized) return;
     final ids = (jsonDecode(raw) as List).whereType<int>();
-    for (final id in ids) {
-      await notifications.cancelNotification(id);
-    }
+    await notifications.cancelNotifications(ids);
   }
 
   Future<void> _onEnablePluginRequested(
     EnablePluginRequested event,
     Emitter<PluginSystemState> emit,
   ) async {
+    if (PluginSafeMode.isActive) {
+      await _saveChoiceInSafeMode(event.pluginId, enabled: true);
+      return;
+    }
     try {
       final plugin = await repository.getPlugin(event.pluginId);
       if (plugin != null) {
@@ -666,18 +812,17 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     DisablePluginRequested event,
     Emitter<PluginSystemState> emit,
   ) async {
+    if (PluginSafeMode.isActive) {
+      await _saveChoiceInSafeMode(event.pluginId, enabled: false);
+      return;
+    }
     try {
-      _removeDeclarative(event.pluginId);
-      ContextMenuRegistry.instance.removeAll(event.pluginId);
-      PluginToolbarRegistry.instance.removeAll(event.pluginId);
-      PluginShortcutRegistry.instance.removeAll(event.pluginId);
-      PluginHighlightRegistry.instance.removePlugin(event.pluginId);
-      PluginFileServer.instance.revokeAllForPlugin(event.pluginId);
-      _removeSearchProviders(event.pluginId);
-      PluginLibraryBooksRegistry.instance.removePlugin(event.pluginId);
+      _clearPluginRegistrations(event.pluginId);
       final plugin = await repository.getPlugin(event.pluginId);
       if (plugin != null) {
         await repository.savePlugin(plugin.copyWith(enabled: false));
+        PluginNewTabPageRegistry.instance.remove(event.pluginId);
+        PluginNewTabPageService.broadcastChanged();
         PluginRuntimeDispatcher.instance.invalidatePlugin(event.pluginId);
         add(LoadPlugins());
       }
@@ -686,18 +831,73 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     }
   }
 
+  /// Nothing loads or unloads in safe mode; only the user's choice is stored
+  /// for the next normal start.
+  Future<void> _saveChoiceInSafeMode(
+    String pluginId, {
+    required bool enabled,
+  }) async {
+    try {
+      await repository.saveEnabledChoice(pluginId, enabled);
+      UiSnack.show(PluginMessages.safeModeChoiceSaved(enabled: enabled));
+      add(LoadPlugins());
+    } catch (e) {
+      UiSnack.showError(
+        enabled
+            ? PluginMessages.enablePluginError(e)
+            : PluginMessages.disablePluginError(e),
+      );
+    }
+  }
+
+  void _clearPluginRegistrations(String pluginId) {
+    PluginTextReaderRegistry.instance.remove(pluginId);
+    _removeDeclarative(pluginId);
+    ContextMenuRegistry.instance.removeAll(pluginId);
+    PluginToolbarRegistry.instance.removeAll(pluginId);
+    PluginShortcutRegistry.instance.removeAll(pluginId);
+    PluginHighlightRegistry.instance.removePlugin(pluginId);
+    PluginFileServer.instance.revokeAllForPlugin(pluginId);
+    _removeSearchProviders(pluginId);
+    PluginLibraryBooksRegistry.instance.removePlugin(pluginId);
+    PluginNewTabPageRegistry.instance.remove(pluginId);
+    PluginSearchDialogRegistry.instance.removeAll(pluginId);
+    PluginSearchFieldActionsRegistry.instance.removeAll(pluginId);
+    PluginSearchFieldSessionService.instance.removePlugin(pluginId);
+    PluginExternalEditionsRegistry.instance.removePlugin(pluginId);
+    PluginLazyActivationService.instance.removePlugin(pluginId);
+    PluginConditionEvaluator.instance.removePlugin(pluginId);
+  }
+
   Future<void> _onSetPluginPermissionRequested(
     SetPluginPermissionRequested event,
     Emitter<PluginSystemState> emit,
   ) async {
     try {
       _removeDeclarative(event.pluginId);
-      await repository.setPermission(
-        event.pluginId,
-        event.permission,
-        event.granted,
-      );
+      if (event.permission == pluginNewTabPagePermission && event.granted) {
+        if (!await PluginNewTabPageService.instance.grant(
+          event.pluginId,
+          repository,
+          expectedOwner: await PluginNewTabPageService.instance.ownerId(
+            repository,
+          ),
+        )) {
+          return;
+        }
+      } else {
+        await repository.setPermission(
+          event.pluginId,
+          event.permission,
+          event.granted,
+        );
+      }
       if (!event.granted) {
+        if (event.permission == 'navigation.write' ||
+            event.permission == pluginNewTabPagePermission) {
+          PluginNewTabPageRegistry.instance.remove(event.pluginId);
+          PluginNewTabPageService.broadcastChanged();
+        }
         if (event.permission == 'reader.open') {
           _removeSearchProviders(event.pluginId);
         } else if (event.permission == 'search.dialog' ||
@@ -716,12 +916,22 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
         if (event.permission == 'app.shortcuts') {
           PluginShortcutRegistry.instance.removeAll(event.pluginId);
         }
+        if (event.permission == pluginSearchFieldActionsPermission) {
+          PluginSearchFieldActionsRegistry.instance.removeAll(event.pluginId);
+          PluginSearchFieldSessionService.instance.removePlugin(event.pluginId);
+        }
+        if (event.permission == 'reader.highlight') {
+          PluginHighlightRegistry.instance.removePlugin(event.pluginId);
+        }
         if (event.permission == pluginRunOnStartupPermission ||
             event.permission == pluginStartupContributionsPermission) {
           PluginLazyActivationService.instance.removePlugin(event.pluginId);
         }
       }
       PluginRuntimeDispatcher.instance.invalidatePlugin(event.pluginId);
+      if (event.permission.startsWith('network.')) {
+        PluginNetworkPolicy.notifyChanged(event.pluginId);
+      }
       final grantedPermissions = await repository.getGrantedPermissionNames(
         event.pluginId,
       );
@@ -753,6 +963,10 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
           event.directoryPath,
           preValidatedManifest: manifest,
         );
+        if (!manifest.permissions.contains('navigation.write')) {
+          PluginNewTabPageRegistry.instance.remove(manifest.id);
+          PluginNewTabPageService.broadcastChanged();
+        }
         add(LoadPlugins());
         UiSnack.showSuccess(PluginMessages.devPluginReloaded);
       } else {
@@ -783,8 +997,11 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       PluginToolbarRegistry.instance.removeAll(event.pluginId);
       PluginHighlightRegistry.instance.removePlugin(event.pluginId);
       _removeSearchProviders(event.pluginId);
+      PluginNewTabPageRegistry.instance.remove(event.pluginId);
       PluginFileServer.instance.revokeAllForPlugin(event.pluginId);
       await repository.detachDevelopmentPlugin(event.pluginId);
+      PluginNewTabPageRegistry.instance.remove(event.pluginId);
+      PluginNewTabPageService.broadcastChanged();
       devWatchService.stopWatcher(event.pluginId);
       add(LoadPlugins());
     } catch (e) {

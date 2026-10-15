@@ -127,7 +127,6 @@ void main() {
 
     for (final property in unknown) {
       test(property, () {
-        expect(isKnownCssProperty(property), isFalse);
         expect(filter(property, 'whatever'), isNull);
       });
     }

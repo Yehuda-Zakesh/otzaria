@@ -1,5 +1,7 @@
 import 'dart:collection';
 
+import 'package:otzaria/text_book/view/page_shape/utils/page_shape_default_commentators.dart';
+import 'package:otzaria/book_common/utils/commentator_name_matching.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -11,9 +13,8 @@ import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/utils/reader_build_policy.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_settings_manager.dart';
-import 'package:otzaria/text_book/view/page_shape/utils/default_commentators.dart';
 import 'package:otzaria/text_book/view/tabbed_commentary_panel.dart';
-import 'package:otzaria/text_book/models/commentator_group.dart';
+import 'package:otzaria/book_common/models/commentator_group.dart';
 import 'package:otzaria/text_book/view/page_shape/simple_text_viewer.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/commentary_anchor_links.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_commentary_selection.dart';
@@ -47,18 +48,17 @@ import 'package:otzaria/core/messages/text_book_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/data/book_locator.dart';
 import 'package:otzaria/library/hidden/hidden_titles.dart';
-import 'package:otzaria/library/hidden/hidden_library_selection.dart';
 import 'package:otzaria/library/hidden/hidden_library_store.dart';
-import 'package:otzaria/core/windowing/settings_sync.dart';
 import 'package:otzaria/data/data_providers/book_database_resolver.dart';
 import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
 import 'package:otzaria/data/data_providers/library_provider_manager.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_state.dart';
 import 'package:otzaria/personal_notes/repository/personal_notes_repository.dart';
+import 'package:otzaria/personal_notes/widgets/commentary_notes_section.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
-import 'package:otzaria/text_book/utils/reading_segment_navigation.dart';
+import 'package:otzaria/text_book/view/reading_viewport/reading_scrollbar_label.dart';
 import 'package:otzaria/widgets/controls/action_buttons.dart';
 import 'package:otzaria/text_book/view/selection/selection_sync_controller.dart';
 import 'package:otzaria/widgets/navigation/panel_tab_header.dart';
@@ -68,24 +68,6 @@ const double _kCommentaryPaneWidthFactor = 0.17;
 
 /// רוחב הכותרת האנכית + רווחים + מפריד (20 לכותרת + 4 לרווח + 8 למפריד)
 const double _kCommentaryLabelAndSpacingWidth = 32.0;
-
-@visibleForTesting
-double pageShapeAnchorProgress(ItemPosition position) {
-  final extent = position.itemTrailingEdge - position.itemLeadingEdge;
-  if (position.itemLeadingEdge >= 0 || extent <= 0) return 0;
-  return (-position.itemLeadingEdge / extent).clamp(0.0, 1.0);
-}
-
-@visibleForTesting
-double pageShapeAnchorRestorationOffset({
-  required ItemPosition position,
-  required double progress,
-  required double viewportExtent,
-}) {
-  final itemExtent =
-      (position.itemTrailingEdge - position.itemLeadingEdge) * viewportExtent;
-  return position.itemLeadingEdge * viewportExtent + progress * itemExtent;
-}
 
 /// מסך תצוגת צורת הדף - מציג את הטקסט המרכזי עם מפרשים מסביב
 typedef PageShapeDefaultsLoader =
@@ -100,7 +82,6 @@ class PageShapeScreen extends StatefulWidget {
   /// המסך פותח את החלונית בעצמו כדי שהשינויים יוחלו עליו בעדכון חי.
   final ValueNotifier<int>? openSettingsNotifier;
   final ValueChanged<String?>? onOpenSearch;
-  final ScrollOffsetController? scrollOffsetController;
   final TextBookTab? tab;
   @visibleForTesting
   final PageShapeDefaultsLoader? defaultsLoader;
@@ -111,7 +92,6 @@ class PageShapeScreen extends StatefulWidget {
     this.sidebarTabNotifier,
     this.openSettingsNotifier,
     this.onOpenSearch,
-    this.scrollOffsetController,
     this.tab,
     this.defaultsLoader,
   });
@@ -127,8 +107,7 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
   String? _bottomRightCommentator;
   bool _isLoadingConfig = true;
   int _loadConfigurationGeneration = 0;
-  StreamSubscription<HiddenLibrarySelection>? _hiddenSelectionSubscription;
-  StreamSubscription<String>? _settingsSyncSubscription;
+  StreamSubscription<void>? _hiddenSelectionSubscription;
   bool _applyTextMaxWidth = PageShapeSettingsManager.getApplyTextMaxWidth();
   bool _isLeftSidebarOpen = false;
   int _leftSidebarTabIndex = 0;
@@ -148,7 +127,6 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
   final ValueNotifier<int> _closeCommentatorsFilterNotifier =
       ValueNotifier<int>(0);
   final GlobalKey _mainTextViewerKey = GlobalKey();
-  int _reanchorGeneration = 0;
 
   // גדלים לחלוניות - יחושבו לפי גודל המסך
   double? _leftSidebarWidth;
@@ -249,86 +227,7 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
     });
   }
 
-  /// עיגון מחדש לפריט העליון הנראה לפני שינוי רוחב התוכן.
-  void _reanchorMainText() {
-    final generation = ++_reanchorGeneration;
-    final blocState = context.read<TextBookBloc>().state;
-    if (blocState is! TextBookLoaded) return;
-
-    final controller = blocState.scrollController;
-    if (!controller.isAttached) return;
-
-    final visible = blocState.positionsListener.itemPositions.value.where(
-      (p) => p.itemLeadingEdge < 1 && p.itemTrailingEdge > 0,
-    );
-    if (visible.isEmpty) return;
-
-    ItemPosition pickByMin(Iterable<ItemPosition> items) =>
-        items.reduce((a, b) => a.itemLeadingEdge <= b.itemLeadingEdge ? a : b);
-
-    final atOrBelowFold = visible.where((p) => p.itemLeadingEdge >= 0);
-    final anchor = atOrBelowFold.isNotEmpty
-        ? pickByMin(atOrBelowFold)
-        : pickByMin(visible);
-    final progress = pageShapeAnchorProgress(anchor);
-
-    controller.jumpTo(
-      index: anchor.index,
-      alignment: anchor.itemLeadingEdge.clamp(0.0, 1.0),
-    );
-
-    final offsetController = blocState.scrollOffsetController;
-    if (progress == 0 || offsetController == null) return;
-    unawaited(
-      _restoreMainTextAnchor(
-        generation: generation,
-        anchorIndex: anchor.index,
-        progress: progress,
-        offsetController: offsetController,
-      ),
-    );
-  }
-
-  Future<void> _restoreMainTextAnchor({
-    required int generation,
-    required int anchorIndex,
-    required double progress,
-    required ScrollOffsetController offsetController,
-  }) async {
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted || generation != _reanchorGeneration) return;
-
-    final blocState = context.read<TextBookBloc>().state;
-    if (blocState is! TextBookLoaded ||
-        blocState.scrollOffsetController != offsetController ||
-        !blocState.scrollController.isAttached) {
-      return;
-    }
-
-    final measured = blocState.positionsListener.itemPositions.value
-        .where((position) => position.index == anchorIndex)
-        .firstOrNull;
-    final viewportExtent = _mainTextViewerKey.currentContext?.size?.height;
-    if (measured == null ||
-        viewportExtent == null ||
-        !viewportExtent.isFinite ||
-        viewportExtent <= 0) {
-      return;
-    }
-
-    final offset = pageShapeAnchorRestorationOffset(
-      position: measured,
-      progress: progress,
-      viewportExtent: viewportExtent,
-    );
-    if (!offset.isFinite || offset.abs() < 0.5) return;
-
-    await offsetController.animateScroll(
-      offset: offset,
-      duration: const Duration(milliseconds: 1),
-      curve: Curves.linear,
-    );
-  }
+  void _reanchorMainText() => widget.tab?.lines.keepViewAcrossRelayout();
 
   /// שמירת גדלים
   void _saveSizes() {
@@ -442,7 +341,7 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
             state.book,
             state.availableCommentators,
           ) ??
-          DefaultCommentators.getPageShapeDefaults(
+          PageShapeDefaultCommentators.getPageShapeDefaults(
             state.book,
             availableCommentators: state.availableCommentators,
           );
@@ -492,7 +391,7 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
         );
         if (resolved != null &&
             !availableCommentators.contains(resolved) &&
-            findMatchingPageShapeCommentator(
+            findMatchingCommentator(
                   entry.value ?? resolved,
                   hiddenList,
                   commentedBookTitle: bookTitle,
@@ -529,6 +428,19 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
       commentedBookTitle: state.book.title,
     );
   }
+
+  List<String> _displayedCommentators(TextBookLoaded state) => [
+    for (final (column, commentator) in [
+      ('left', _leftCommentator),
+      ('bottom', _bottomCommentator),
+      ('bottomRight', _bottomRightCommentator),
+    ])
+      if (commentator != null && _isCommentatorVisible(column, commentator))
+        commentator,
+    ..._selectedRightPaneCommentators(
+      state,
+    ).where((commentator) => _isCommentatorVisible('right', commentator)),
+  ];
 
   bool _isCommentatorVisible(String column, String? commentator) {
     if (commentator == null) return _columnVisibility[column] == true;
@@ -863,14 +775,8 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
         .clamp(0, state.content.length - 1)
         .toInt();
 
-    await scrollToSourceLine(
-      scrollController: state.scrollController,
-      scrollOffsetController: widget.scrollOffsetController,
-      positionsListener: state.positionsListener,
-      segments: state.readingSegments,
-      lineIndex: targetIndex,
-      viewportExtent: context.size?.height ?? MediaQuery.sizeOf(context).height,
-      alignment: 0.05,
+    await widget.tab?.lines.scrollToLine(
+      targetIndex,
       duration: const Duration(milliseconds: 350),
       curve: Curves.easeInOut,
     );
@@ -934,19 +840,6 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
       _notesCategoryIdOverride = null;
       _notesFocusLineNumber = null;
     });
-  }
-
-  /// כתובת היעד לתווית הריחוף על סרגל הטקסט הראשי. ממיר אינדקס סגמנט
-  /// (במצב קריאה רציף) לשורת המקור כדי שמיפוי ה-TOC יהיה נכון.
-  String _mainTextLabelForIndex(int index, TextBookLoaded state) {
-    final segments = state.readingSegments;
-    final lineIndex = segments.isNotEmpty
-        ? (index >= 0 && index < segments.length
-              ? segments[index].startLineIndex
-              : index)
-        : index;
-    final ref = refFromTocList(lineIndex, state.tableOfContents);
-    return addBookTitleToRef(ref, state.book.title);
   }
 
   void _toggleLeftSidebar() {
@@ -1032,16 +925,8 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
   @override
   void initState() {
     super.initState();
-    _hiddenSelectionSubscription = const HiddenLibraryStore().changes.listen(
-      (_) => unawaited(_loadConfiguration()),
-    );
-    _settingsSyncSubscription = SettingsSync.instance.changes.listen((key) {
-      if (key.isEmpty ||
-          key == HiddenLibraryStore.bookKeysSetting ||
-          key == HiddenLibraryStore.categoryPathsSetting) {
-        unawaited(_loadConfiguration());
-      }
-    });
+    _hiddenSelectionSubscription = const HiddenLibraryStore().visibilityChanges
+        .listen((_) => unawaited(_loadConfiguration()));
     widget.sidebarTabNotifier?.addListener(_handleSidebarTabRequest);
     widget.openSettingsNotifier?.addListener(_handleOpenSettingsRequest);
     widget.tab?.toggleCommentatorsPaneNotifier.addListener(
@@ -1078,7 +963,6 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
   @override
   void dispose() {
     unawaited(_hiddenSelectionSubscription?.cancel() ?? Future.value());
-    unawaited(_settingsSyncSubscription?.cancel() ?? Future.value());
     widget.sidebarTabNotifier?.removeListener(_handleSidebarTabRequest);
     widget.openSettingsNotifier?.removeListener(_handleOpenSettingsRequest);
     widget.tab?.toggleCommentatorsPaneNotifier.removeListener(
@@ -1201,6 +1085,15 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
                           notesBookIdOverride: _notesBookIdOverride,
                           notesCategoryIdOverride: _notesCategoryIdOverride,
                           notesFocusLineNumber: _notesFocusLineNumber,
+                          notesFooter: CommentaryNotesSection(
+                            bookIds: _displayedCommentators(state),
+                            onOpenNote: (bookId, lineNumber) =>
+                                _openCommentaryPersonalNote(
+                                  bookId,
+                                  null,
+                                  lineNumber,
+                                ),
+                          ),
                           onNavigateToLine: (lineNumber) =>
                               _navigateToLine(state, lineNumber),
                           onClosePane: _toggleLeftSidebar,
@@ -1338,10 +1231,7 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
                                                           _selectionSyncController,
                                                       openBookCallback: widget
                                                           .openBookCallback,
-                                                      scrollController: state
-                                                          .scrollController,
-                                                      positionsListener: state
-                                                          .positionsListener,
+                                                      lines: widget.tab?.lines,
                                                       isMainText: true,
                                                       isPersonalNotesTabActive:
                                                           _isLeftSidebarOpen &&
@@ -1351,6 +1241,10 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
                                                           _isLeftSidebarOpen &&
                                                           _leftSidebarTabIndex ==
                                                               kCommentaryTabIndex,
+                                                      isLinksTabActive:
+                                                          _isLeftSidebarOpen &&
+                                                          _leftSidebarTabIndex ==
+                                                              kLinksTabIndex,
                                                       onOpenCommentatorsPane:
                                                           _openCommentatorsPane,
                                                       onOpenCommentatorsPaneWithFilter:
@@ -1362,9 +1256,9 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
                                                               .isEmpty
                                                           ? null
                                                           : (index) =>
-                                                                _mainTextLabelForIndex(
-                                                                  index,
+                                                                readingScrollbarLabel(
                                                                   state,
+                                                                  index,
                                                                 ),
                                                       onOpenSidebarTab:
                                                           _openLeftSidebarTab,
@@ -1901,7 +1795,7 @@ class _CommentaryPaneState extends State<_CommentaryPane> {
     unawaited(_ensureWindowLoaded(first, last));
   }
 
-  /// האם ה-viewport ‏[first]..[last] בתוך טווח טעון עם שולי ביטחון —
+  /// האם ה-viewport [first]..[last] בתוך טווח טעון עם שולי ביטחון —
   /// בקצות הספר אין מה לטעון מעבר, ולכן השוליים שם מוותרים.
   bool _isWindowLoaded(int first, int last) {
     final content = _content;

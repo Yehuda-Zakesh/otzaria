@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
@@ -5,20 +6,12 @@ import 'package:otzaria/theme/app_fonts.dart';
 import 'package:otzaria/widgets/smart_text/raised_markers.dart';
 
 /// יחסי הגדלים של fwfh ל-`<small>`/`<sup>` ול-`<big>`.
-///
-/// שלושת מסלולי הרינדור — המסלול המהיר כאן, HtmlWidget, והקריאה הרציפה —
-/// חייבים להתלכד עליהם: כל טקסט בסוגריים נעטף ב-`<small>`, ולכן פער ביחס
-/// משנה את גודל הסוגריים לפי המסלול שבו השורה במקרה עברה.
+/// זהים בשלושת מסלולי הרינדור כדי ששורות שכנות לא ישנו את גודל הסוגריים.
 const double kHtmlSmallerFontScale = 5 / 6;
 const double kHtmlLargerFontScale = 6 / 5;
 
-/// ממיר HTML פשוט (טקסט + תגי עיצוב בסיסיים בלבד) ל-[TextSpan] ישירות,
-/// כדי לעקוף את עלות הפרסור ובניית העץ של HtmlWidget עבור רוב שורות הספרים.
-///
-/// כל markup שאינו ברשימה הלבנה (תגים עם attributes, קישורים, spans, כותרות
-/// בתוך שורה, entities) מחזיר null — והקורא נופל חזרה ל-HtmlWidget המלא.
-/// יוצאי הדופן: תגי הסימונים המורמים (ראו raised_markers.dart) ותגי הדגשת
-/// החיפוש, שמזוהים במדויק — כך שורות עם סימונים או התאמות נשארות במסלול המהיר.
+/// ממיר תגי עיצוב פשוטים, סימונים מורמים והדגשות חיפוש ל-[TextSpan].
+/// markup שאינו נתמך מחזיר null כדי שהקורא ישתמש ב-HtmlWidget.
 class SimpleInlineHtml {
   SimpleInlineHtml._();
 
@@ -27,10 +20,6 @@ class SimpleInlineHtml {
   static final RegExp _entityRegex = RegExp(
     r'&[a-zA-Z]{2,10};|&#x?[0-9a-fA-F]{1,6};',
   );
-  // רווח ASCII בלבד, כמו ב-HTML וב-fwfh: NBSP ו-U+2009 אינם מתכווצים.
-  static final RegExp _whitespaceRegex = RegExp(r'[\t\n\f\r ]+');
-  static final RegExp _leadingWhitespaceRegex = RegExp(r'^[\t\n\f\r ]+');
-  static final RegExp _trailingWhitespaceRegex = RegExp(r'[\t\n\f\r ]+$');
 
   /// עוגני המפרשים הריקים של שו"ע/טור (`<i data-commentator=…></i>`) — אין
   /// להם תוכן ואין מי שקורא אותם מהעץ המרונדר, ולכן אינם מציירים דבר.
@@ -55,21 +44,67 @@ class SimpleInlineHtml {
   static final Map<String, _Highlight> _searchHighlightOpens = {
     '<span style="color: red">': _Highlight(_red, null),
     '<span style="color: red; ">': _Highlight(_red, null),
-    '<span style="color: blue; background-color: yellow;">': _Highlight(
-      const Color(0xFF0000FF),
-      _yellowPaint,
-    ),
-    '<span style="background-color: yellow; color: black">': _Highlight(
-      const Color(0xFF000000),
-      _yellowPaint,
-    ),
+    '<span style="color: blue; background-color: rgba(255, 255, 0, 0.8);">':
+        _Highlight(
+          const Color(0xFF0000FF),
+          _yellowPaint,
+        ),
+    '<span style="background-color: rgba(255, 255, 0, 0.8); color: black">':
+        _Highlight(
+          const Color(0xFF000000),
+          _yellowPaint,
+        ),
   };
   static const Color _red = Color(0xFFFF0000);
   // background ולא backgroundColor — כמו ש-fwfh מצייר background-color.
-  static final Paint _yellowPaint = Paint()..color = const Color(0xFFFFFF00);
+  // 80% שומר ניגודיות לכחול גם בכהה, ומותיר את הבחירה שמתחת לטקסט נראית.
+  static final Paint _yellowPaint = Paint()..color = const Color(0xCCFFFF00);
 
   /// מנסה להמיר את [html]. מחזיר null אם נדרש HtmlWidget.
+  ///
+  /// התוצאה (גם null) נשמרת ב-LRU; קלט ריק או תוצאה חריגה אינם נשמרים.
   static TextSpan? tryParse(String html, TextStyle baseStyle) {
+    if (html.isEmpty || html.length > _cacheMaxChars) {
+      return _tryParseUncached(html, baseStyle);
+    }
+    // גופן מערכת משתנה מזוהה ברקע ומשנה את fontVariations של הבולד.
+    final key = (
+      html,
+      baseStyle,
+      AppFonts.boldFontVariations(baseStyle.fontFamily) != null,
+    );
+    final cached = _cache.remove(key);
+    if (cached != null) {
+      _cache[key] = cached;
+      return cached.$1;
+    }
+    final result = _tryParseUncached(html, baseStyle);
+    // אומדן לעץ שטוח: כל ילד מחויב כספאן וסגנון, גם אם אין לו סגנון משלו.
+    final nodes = 1 + 2 * (result?.children?.length ?? 0);
+    if (nodes > _cacheMaxNodes) return result;
+    _cache[key] = (result, nodes);
+    _cacheChars += html.length;
+    _cacheNodes += nodes;
+    while (_cacheChars > _cacheMaxChars ||
+        _cacheNodes > _cacheMaxNodes ||
+        _cache.length > _cacheMaxEntries) {
+      final oldestKey = _cache.keys.first;
+      final removed = _cache.remove(oldestKey)!;
+      _cacheChars -= oldestKey.$1.length;
+      _cacheNodes -= removed.$2;
+    }
+    return result;
+  }
+
+  static final LinkedHashMap<(String, TextStyle, bool), (TextSpan?, int)>
+  _cache = LinkedHashMap();
+  static int _cacheChars = 0;
+  static int _cacheNodes = 0;
+  static const int _cacheMaxChars = 2 * 1024 * 1024;
+  static const int _cacheMaxEntries = 4096;
+  static const int _cacheMaxNodes = 32 * 1024;
+
+  static TextSpan? _tryParseUncached(String html, TextStyle baseStyle) {
     if (html.contains('&')) {
       html = html
           .replaceAll('&nbsp;', '\u00A0')
@@ -82,7 +117,7 @@ class SimpleInlineHtml {
 
     // המקרה הנפוץ ביותר: שורה בלי שום תג.
     if (!html.contains('<')) {
-      return TextSpan(text: _trim(html.replaceAll(_whitespaceRegex, ' ')));
+      return TextSpan(text: _trim(_collapse(html)));
     }
 
     var bold = 0, italic = 0, underline = 0, big = 0, small = 0;
@@ -137,7 +172,7 @@ class SimpleInlineHtml {
       if (raw.isEmpty) return;
       // HtmlWidget מכווץ רצפי רווחים לרווח יחיד — משמרים התנהגות זהה.
       segments.add(
-        _Segment(raw.replaceAll(_whitespaceRegex, ' '), styleForCurrent()),
+        _Segment(_collapse(raw), styleForCurrent()),
       );
     }
 
@@ -228,6 +263,8 @@ class SimpleInlineHtml {
     dotAll: true,
   );
 
+  static final RegExp _headingTagRegex = RegExp(r'</?h[1-6]\b');
+
   /// גודל ברירת המחדל של fwfh לכל רמת כותרת, ביחס לגופן הסובב.
   static const Map<String, double> _defaultHeadingScale = {
     'h1': 2,
@@ -241,9 +278,29 @@ class SimpleInlineHtml {
   /// כותרת שהיא כל השורה (`<hN>` בלי attributes): fwfh מציג אותה כבלוק יחיד
   /// שהשוליים שלו נחתכים בקצות הגוף, ולכן היא טקסט אחד בסגנון [SimpleHeading.style].
   static SimpleHeading? tryParseHeading(String html, TextStyle baseStyle) {
+    final style = headingStyle(html, baseStyle);
+    if (style == null) return null;
+    final match = _wholeLineHeadingRegex.firstMatch(html)!;
+    final span = tryParse(match[2]!, style);
+    if (span == null || span.toPlainText().isEmpty) return null;
+    return SimpleHeading(style, span);
+  }
+
+  /// הסגנון שבו fwfh מציג שורה שכולה כותרת, או null כשהשורה אינה כותרת.
+  static TextStyle? headingStyle(String html, TextStyle baseStyle) {
     if (!html.contains('<h')) return null;
     final match = _wholeLineHeadingRegex.firstMatch(html);
     if (match == null) return null;
+    final content = match[2]!;
+    for (
+      var tagStart = content.indexOf('<');
+      tagStart != -1;
+      tagStart = content.indexOf('<', tagStart + 1)
+    ) {
+      if (_headingTagRegex.matchAsPrefix(content, tagStart) != null) {
+        return null;
+      }
+    }
     final tag = 'h${match[1]}';
     final fontFamily = baseStyle.fontFamily;
     final sizeOverride = AppFonts.headingFontSizeOverride(tag, fontFamily);
@@ -258,21 +315,57 @@ class SimpleInlineHtml {
             (w) => w.value == int.tryParse(weightOverride),
             orElse: () => FontWeight.bold,
           );
-    final style = baseStyle.copyWith(
+    return baseStyle.copyWith(
       fontSize: (baseStyle.fontSize ?? 14.0) * scale,
       fontWeight: weight,
       fontVariations:
           baseStyle.fontVariations ??
           AppFonts.boldFontVariations(fontFamily, weight),
     );
-    final span = tryParse(match[2]!, style);
-    if (span == null || span.toPlainText().isEmpty) return null;
-    return SimpleHeading(style, span);
   }
 
-  static String _trim(String text) => text
-      .replaceFirst(_leadingWhitespaceRegex, '')
-      .replaceFirst(_trailingWhitespaceRegex, '');
+  // רווח ASCII בלבד, כמו ב-HTML וב-fwfh: NBSP ו-U+2009 אינם מתכווצים.
+  // בלי RegExp: בשורה של מאות אלפי תווים הוא לבדו עלה עשרות מילישניות.
+  static bool _isSpace(int c) =>
+      c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0C || c == 0x0D;
+
+  static String _collapse(String text) {
+    StringBuffer? out;
+    var copied = 0;
+    for (var i = 0; i < text.length; i++) {
+      if (!_isSpace(text.codeUnitAt(i))) continue;
+      var end = i + 1;
+      while (end < text.length && _isSpace(text.codeUnitAt(end))) {
+        end++;
+      }
+      if (end - i > 1 || text.codeUnitAt(i) != 0x20) {
+        (out ??= StringBuffer())
+          ..write(text.substring(copied, i))
+          ..write(' ');
+        copied = end;
+      }
+      i = end - 1;
+    }
+    return out == null ? text : (out..write(text.substring(copied))).toString();
+  }
+
+  static String _trimStart(String text) {
+    var start = 0;
+    while (start < text.length && _isSpace(text.codeUnitAt(start))) {
+      start++;
+    }
+    return text.substring(start);
+  }
+
+  static String _trimEnd(String text) {
+    var end = text.length;
+    while (end > 0 && _isSpace(text.codeUnitAt(end - 1))) {
+      end--;
+    }
+    return text.substring(0, end);
+  }
+
+  static String _trim(String text) => _trimEnd(_trimStart(text));
 
   /// מדמה את כללי הרווחים של HTML: רווחים צמודים ל-<br> ולקצוות הפסקה נבלעים.
   static void _normalizeWhitespace(List<_Segment> segments) {
@@ -291,32 +384,22 @@ class SimpleInlineHtml {
     for (var i = 0; i < segments.length; i++) {
       if (!segments[i].isBreak) continue;
       if (i > 0 && !segments[i - 1].isBreak) {
-        segments[i - 1].text = segments[i - 1].text.replaceFirst(
-          _trailingWhitespaceRegex,
-          '',
-        );
+        segments[i - 1].text = _trimEnd(segments[i - 1].text);
       }
       if (i + 1 < segments.length && !segments[i + 1].isBreak) {
-        segments[i + 1].text = segments[i + 1].text.replaceFirst(
-          _leadingWhitespaceRegex,
-          '',
-        );
+        segments[i + 1].text = _trimStart(segments[i + 1].text);
       }
     }
 
     while (segments.isNotEmpty) {
       final first = segments.first;
-      first.text = first.isBreak
-          ? ''
-          : first.text.replaceFirst(_leadingWhitespaceRegex, '');
+      first.text = first.isBreak ? '' : _trimStart(first.text);
       if (first.text.isNotEmpty) break;
       segments.removeAt(0);
     }
     while (segments.isNotEmpty) {
       final last = segments.last;
-      last.text = last.isBreak
-          ? ''
-          : last.text.replaceFirst(_trailingWhitespaceRegex, '');
+      last.text = last.isBreak ? '' : _trimEnd(last.text);
       if (last.text.isNotEmpty) break;
       segments.removeLast();
     }

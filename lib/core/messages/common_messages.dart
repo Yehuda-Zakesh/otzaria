@@ -5,8 +5,6 @@ abstract class CommonMessages {
   static const String textCopiedShort = 'הטקסט הועתק';
   static const String formattedTextCopied = 'הטקסט המעוצב הועתק ללוח';
   static const String plainTextCopied = 'הטקסט הועתק ללוח ללא עיצוב';
-  static const String copyError = 'שגיאה בהעתקה';
-  static const String formattedCopyError = 'שגיאה בהעתקה מעוצבת';
   static const String textCopyError = 'שגיאה בהעתקת הטקסט';
   static const String clipboardCopyError = 'שגיאה בהעתקה ללוח';
   static const String clipboardUnavailable = 'לא ניתן לגשת ללוח';
@@ -23,8 +21,6 @@ abstract class CommonMessages {
 
   // ── ניווט וקישורים ──────────────────────────────────────────────────────
   static const String sectionNotFound = 'הדף לא נמצא בתוכן העניינים';
-  static const String bookNotFound = 'הספר איננו קיים';
-  static const String textNotFound = 'הטקסט לא נמצא';
 
   static String openedRef(String ref) => 'נפתח: $ref';
 
@@ -64,9 +60,9 @@ abstract class CommonMessages {
   static const String noTextSelectedForSearch = 'לא נבחר טקסט לחיפוש';
 
   // ── הערות ושמירה ────────────────────────────────────────────────────────
-  static const String noteCreated = 'ההערה נוצרה והוצבה בסרגל';
   static const String savedSuccessfully = 'השינויים נשמרו בהצלחה';
-  static const String cleanupCompleted = 'ניקוי טיוטות הושלם';
+  static const String diagnosticsSaveError =
+      'שמירת האבחון נכשלה. האיסוף הופסק והנתונים נשמרו בזיכרון.';
 
   // ── טלפון ───────────────────────────────────────────────────────────────
   static const String cannotOpenPhoneApp = 'לא ניתן לפתוח את אפליקציית הטלפון';

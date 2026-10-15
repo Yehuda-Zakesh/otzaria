@@ -257,8 +257,19 @@ export interface SearchResult {
   type: 'text' | 'pdf';
   book: string;
   text: string;
+  /** ראה `SearchTextStatus`. */
+  textStatus?: SearchTextStatus;
+  /** הביטוי נמשך מסוף השורה `index` אל השורה הבאה; `text` מחבר את שתיהן ב-`<br>`. */
+  continuesToNextLine?: boolean;
   index: number;
 }
+
+/**
+ * האם `text` הוא השורה שבה נמצאה ההתאמה. `'stale'`: הספר השתנה מאז האינדקס,
+ * ו-`text` הוא השורה הנוכחית בלי הדגשה (או ריק). `'unavailable'`: `text` ריק.
+ * חסר בגרסאות קודמות — להתייחס כ-`'ok'`.
+ */
+export type SearchTextStatus = 'ok' | 'stale' | 'unavailable';
 
 /**
  * זהות ספר קנונית. בקלט די באחד מ-`bookUid`/`id`/`bookId`.
@@ -273,6 +284,14 @@ export interface BookIdentity {
   type?: BookType | null;
   source?: 'library' | 'user' | 'external' | 'attached' | null;
   external?: { provider: 'hebrewbooks' | 'otzar'; id: number | string };
+}
+
+/** Initial print range; the user can change the range and commentators in the dialog. */
+export interface ReaderPrintRangeArgs extends BookIdentity {
+  startIndex: number;
+  endIndex?: number;
+  /** Omitted: active reader selection for this book, otherwise linked commentators. []: none. */
+  commentators?: string[];
 }
 
 /** One book in `library.setProviderBooks`. */
@@ -344,6 +363,10 @@ export interface SearchQueryHit extends BookIdentity {
   categoryPath?: string | null;
   reference: string;
   text: string;
+  /** ראה `SearchTextStatus`. */
+  textStatus?: SearchTextStatus;
+  /** הביטוי נמשך מסוף השורה `index` אל השורה הבאה; `text` מחבר את שתיהן ב-`<br>`. */
+  continuesToNextLine?: boolean;
   index: number;
   mergedCount: number;
   merged?: Array<
@@ -551,7 +574,7 @@ export interface LinkTargetSummary {
 
 export interface GetLinkTargetsSummaryResult {
   targets: LinkTargetSummary[];
-  /** השורה הגבוהה ביותר שיש עליה קישור (0-based), או ‎-1‎ כשאין קישורים. */
+  /** השורה הגבוהה ביותר שיש עליה קישור (0-based), או -1 כשאין קישורים. */
   maxSourceLine: number;
 }
 
@@ -743,6 +766,13 @@ export interface JewishHoliday {
   kind: JewishHolidayKind;
 }
 
+export interface DafYomi {
+  /** שם המסכת בעברית, למשל "ברכות" */
+  masechet: string;
+  /** מספר הדף במסכת */
+  daf: number;
+}
+
 export interface JewishDate {
   year: number;
   month: number;
@@ -752,6 +782,10 @@ export interface JewishDate {
   monthName: string;
   isLeapYear: boolean;
   isShabbat: boolean;
+  /** שם פרשת השבוע הקרובה מהתאריך הנתון (מושפע מ-inIsrael בפרשיות מחוברות) */
+  parasha: string;
+  /** דף היומי (בבלי); null עבור תאריכים שקדמו לתחילת המחזור הראשון (11.9.1923) */
+  dafYomi: DafYomi | null;
   holidays: JewishHoliday[];
 }
 
@@ -1134,6 +1168,7 @@ export interface ReaderSectionContentChangedEvent {
 }
 
 export type ContextMenuContext =
+  | 'reader-book'
   | 'reader-selection'
   | 'reader-page-shape-selection'
   /** Right-click on a plugin highlight, with or without an active selection.
@@ -1407,6 +1442,27 @@ export interface OtzariaEventMap {
     /** The host consumes `[id, hits, categoryPath, title]` index entries. */
     indexTitles?: boolean;
   };
+  /**
+   * The user clicked this plugin's `searchFieldActions` button in a search
+   * field, opening a session. Sent only to the owning plugin.
+   */
+  'search.fieldAction.invoked': {
+    actionId: string;
+    sessionId: string;
+    field: SearchFieldId;
+    /** Field text at the click; the selected range is what the plugin replaces. */
+    text: string;
+    selectionStart: number;
+    selectionEnd: number;
+  };
+  /** The user clicked the button again while its session is open. */
+  'search.fieldAction.stopRequested': { actionId: string; sessionId: string };
+  /** The session ended; later calls with its `sessionId` fail with `error.not_found`. */
+  'search.fieldAction.ended': {
+    actionId: string;
+    sessionId: string;
+    reason: 'plugin' | 'closed' | 'edited' | 'replaced';
+  };
   /** The user chose a book of a `libraryBooks` provider this plugin owns. */
   'library.providerBook.openRequested': {
     provider: string;
@@ -1436,6 +1492,12 @@ export interface OtzariaEventMap {
    */
   'ui.messageClicked': { payload: unknown };
 }
+
+/** שדות החיפוש שבהם `searchFieldActions` יכול להציג כפתור. */
+export type SearchFieldId = 'fullText' | 'library' | 'inBook' | 'findRef';
+
+/** מראה כפתור `searchFieldActions` בזמן סשן. */
+export type SearchFieldActionState = 'idle' | 'active' | 'busy';
 
 /** 'more' נשמר לתאימות אחורה — פותח את פאנל הכלים. */
 export type NavigationTarget = 'library' | 'reading' | 'more' | 'settings';
@@ -1885,6 +1947,31 @@ export interface ListInstalledFontsResult {
   platform: string;
 }
 
+export interface SubmitBookCorrectionParams {
+  reportId: string;
+  bookId: string;
+  bookUid?: string;
+  sectionIndex: number;
+  endSectionIndex?: number;
+  snapshots: Array<{ index: number; text: string }>;
+  original: string;
+  proposed: string;
+  sourceStart?: number;
+  sourceEnd?: number;
+  details?: string;
+  allowQueue?: boolean;
+  forceFreeText?: boolean;
+}
+
+export interface SubmitBookCorrectionResult {
+  status: 'sent' | 'queued';
+  reportId: string;
+  nativeReportId: string;
+  message: string;
+  duplicate: boolean;
+  correctionSupported: boolean | null;
+}
+
 export type OtzariaMethod =
   | 'app.getInfo'
   | 'app.getTheme'
@@ -1923,8 +2010,12 @@ export type OtzariaMethod =
   | 'search.fullText'
   | 'search.query'
   | 'search.getOptions'
+  | 'search.setFieldText'
+  | 'search.setFieldActionState'
+  | 'search.endFieldSession'
   | 'reader.openBook'
   | 'reader.openBookAtRef'
+  | 'reader.printRange'
   | 'reader.registerInBookSearchProvider'
   | 'reader.respondInBookSearch'
   | 'reader.openSearchTab'
@@ -1990,6 +2081,7 @@ export type OtzariaMethod =
   | 'publishedData.remove'
   | 'publishedData.listOwn'
   | 'feedback.sendEmail'
+  | 'feedback.submitBookCorrection'
   | 'feedback.report'
   | 'feedback.hasReporterEmail'
   | 'history.list'
@@ -2030,6 +2122,7 @@ export type OtzariaMethod =
   | 'fs.deleteFile'
   | 'shortcut.create'
   | 'plugin.openSelf'
+  | 'plugin.setNewTabPage'
   | 'plugin.openOther'
   /** @internal חנות התוספים בלבד — לא מתועד ב-API_REFERENCE ואינו חוזה יציב. */
   | 'plugin.requestInstall'
@@ -2064,6 +2157,12 @@ export interface OtzariaGlobal {
     method: 'network.fetchStream',
     payload: NetworkFetchParams
   ): AsyncIterable<NetworkFetchStreamChunk>;
+
+  /** Waits for the print dialog to finish, without the generic 30-second RPC timeout. */
+  call(
+    method: 'reader.printRange',
+    payload: ReaderPrintRangeArgs
+  ): Promise<OtzariaResponse<{ printed: boolean }>>;
 
   /** פותח כרטיסיית חיפוש מובנית עם השאילתה וההגדרות. */
   call(
@@ -2117,11 +2216,43 @@ export interface OtzariaGlobal {
     payload: { folderToken: string }
   ): Promise<OtzariaResponse<boolean>>;
 
+  /**
+   * Registers this plugin page as the target of the reader "+" button.
+   * Pass { enabled: false } to remove this plugin registration.
+   * Requires navigation.write.
+   */
+  call(
+    method: 'plugin.setNewTabPage',
+    payload?: { enabled?: boolean }
+  ): Promise<OtzariaResponse<boolean>>;
+
   /** מחזיר רשימה של כל התוספים המותקנים. */
   call(
     method: 'plugin.listInstalled',
     payload?: Record<string, unknown>
   ): Promise<OtzariaResponse<InstalledPlugin[]>>;
+
+  /** Writes `before + text + after` into the field of an open session. */
+  call(
+    method: 'search.setFieldText',
+    payload: { sessionId: string; text: string }
+  ): Promise<OtzariaResponse<boolean>>;
+
+  call(
+    method: 'search.setFieldActionState',
+    payload: { sessionId: string; state: SearchFieldActionState; tooltip?: string }
+  ): Promise<OtzariaResponse<boolean>>;
+
+  /** Ends the session; `submit: true` runs the search as if Enter was pressed. */
+  call(
+    method: 'search.endFieldSession',
+    payload: { sessionId: string; submit?: boolean }
+  ): Promise<OtzariaResponse<boolean>>;
+
+  call(
+    method: 'feedback.submitBookCorrection',
+    payload: SubmitBookCorrectionParams
+  ): Promise<OtzariaResponse<SubmitBookCorrectionResult>>;
 
   /**
    * Call a Host API method.

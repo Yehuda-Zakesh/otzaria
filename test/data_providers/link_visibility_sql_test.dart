@@ -11,12 +11,12 @@ import 'package:sqlite3/sqlite3.dart' as sqlite3;
 void main() {
   late Directory tmp;
 
-  /// מסד בצורת הסכמה האמיתית: ‏A (בסיס) ↔ B (מצטט).
-  /// link 1: A→B ‏OTHER, צד 0 יידוכא — ציטוט "פרק שלם", כולל שורת coverage
-  /// link 2: A→B ‏OTHER, גלוי
-  /// link 3: A→B ‏COMMENTARY — תלוי-טקסט, עולה הפוך תמיד
-  /// link 4: A→B ‏OTHER, צד 1 מדוכא
-  /// link 5: A→B ‏OTHER, שני הצדדים מדוכאים
+  /// מסד בצורת הסכמה האמיתית: A (בסיס) ↔ B (מצטט).
+  /// link 1: A→B OTHER, צד 0 יידוכא — ציטוט "פרק שלם", כולל שורת coverage
+  /// link 2: A→B OTHER, גלוי
+  /// link 3: A→B COMMENTARY — תלוי-טקסט, עולה הפוך תמיד
+  /// link 4: A→B OTHER, צד 1 מדוכא
+  /// link 5: A→B OTHER, שני הצדדים מדוכאים
   String buildDb({required bool withTable, bool populate = true}) {
     final path = '${tmp.path}/links_${withTable}_$populate.db';
     final db = sqlite3.sqlite3.open(path);

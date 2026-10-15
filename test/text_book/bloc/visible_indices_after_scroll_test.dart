@@ -8,8 +8,22 @@ import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
+import 'package:otzaria/text_book/utils/reading_segments.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+
+void _attach(LineScrollController lines, TextBookBloc bloc) {
+  lines.attach(
+    ReadingViewportBinding(
+      segments: () {
+        final state = bloc.state;
+        return state is TextBookLoaded ? readingSegmentsOf(state) : null;
+      },
+      viewportExtent: () => 600,
+    ),
+  );
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -37,9 +51,11 @@ void main() {
         //            visibleIndices = [10], currentTitle = "סעיף ב".
 
         final repository = _TwoSectionRepository();
-        final positionsListener = ItemPositionsListener.create();
+        final lines = LineScrollController();
+        final positionsListener = lines.positionsListener;
         final bloc = TextBookBloc(
           repository: repository,
+          readingPosition: lines.position,
           initialState: TextBookInitial.named(
             TextBook(title: 'ספר בדיקה'),
             10,
@@ -48,10 +64,9 @@ void main() {
             searchMode: SearchMode.exact,
             showPageShapeView: false,
           ),
-          scrollController: ItemScrollController(),
-          positionsListener: positionsListener,
         );
 
+        _attach(lines, bloc);
         bloc.add(
           const LoadContent(
             fontSize: 20,
@@ -112,9 +127,11 @@ void main() {
       // sanity check: כשהמשתמש באמת גולל אחורה (לא רק 5% עליונים), הזיהוי
       // צריך לעקוב. מדמים מצב שבו "סעיף א" תופס 60% מהמסך ו"סעיף ב" 35%.
       final repository = _TwoSectionRepository();
-      final positionsListener = ItemPositionsListener.create();
+      final lines = LineScrollController();
+      final positionsListener = lines.positionsListener;
       final bloc = TextBookBloc(
         repository: repository,
+        readingPosition: lines.position,
         initialState: TextBookInitial.named(
           TextBook(title: 'ספר בדיקה'),
           10,
@@ -123,10 +140,9 @@ void main() {
           searchMode: SearchMode.exact,
           showPageShapeView: false,
         ),
-        scrollController: ItemScrollController(),
-        positionsListener: positionsListener,
       );
 
+      _attach(lines, bloc);
       bloc.add(
         const LoadContent(
           fontSize: 20,
@@ -183,8 +199,6 @@ void main() {
           searchMode: SearchMode.exact,
           showPageShapeView: false,
         ),
-        scrollController: ItemScrollController(),
-        positionsListener: ItemPositionsListener.create(),
       );
       bloc.add(
         const LoadContent(

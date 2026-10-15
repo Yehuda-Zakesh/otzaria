@@ -155,9 +155,13 @@ public final class DownloadEngine: NSObject, URLSessionDataDelegate {
         // המקום בתור נשמר בזמן ההמתנה: ניסיון חוזר אינו מוסיף חיבור רביעי.
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
             self.queue.addOperation {
-                if !self.ended { self.start(job) }
+                guard !self.ended else { return }
+                self.start(job)
+                self.report(force: true)
             }
         }
+        // ההעברה כבר הוסרה: הדיווח מוציא את הקובץ מהפעילים, וההמתנה משהה את האומדן.
+        report(force: true)
     }
 
     // MARK: - קובץ אחד
@@ -328,7 +332,7 @@ public final class DownloadEngine: NSObject, URLSessionDataDelegate {
             return
         } catch {
             transfer.fatal = AssistantError(
-                "לא ניתן היה לשמור את הקבצים. ייתכן שאין מספיק מקום פנוי.", technical: "\(error)"
+                AssistantError.saveFailed, technical: "\(error)"
             )
             dataTask.cancel()
             return
@@ -395,7 +399,7 @@ public final class DownloadEngine: NSObject, URLSessionDataDelegate {
             return
         }
         fail(AssistantError(
-            "אחד הקבצים שהורדו נמצא פגום ולא נשמר.",
+            AssistantError.downloadDamaged,
             technical: "\(item.name): size or sha256 mismatch"
         ))
     }

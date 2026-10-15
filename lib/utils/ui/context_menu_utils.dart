@@ -28,6 +28,8 @@ import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 import 'package:otzaria/widgets/misc/direct_link_menu_entries.dart';
 import 'package:otzaria/text_book/view/selection/selected_text_copy.dart';
+import 'package:otzaria/text_book/utils/reader_menu_entries.dart';
+import 'package:otzaria/utils/text/global_search_helper.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 
 /// תווית פריט תפריט ההקשר לפתיחה ברקע — משותפת לתוצאות חיפוש ולמפרשים.
@@ -110,7 +112,6 @@ class ContextMenuUtils {
     required VoidCallback onCopySelected,
     VoidCallback? onCopySelectedWithoutNikud,
     void Function(Link link)? onNavigateToLink,
-    VoidCallback? onNoteSaved,
   }) {
     final profile =
         displayProfile ??
@@ -121,36 +122,42 @@ class ContextMenuUtils {
         );
     final copyProfile = copyDisplayProfile ?? profile;
     final linksService = TargetLineLinksService.instance;
-    final entries = <AppContextMenuEntry>[
-      AppContextMenuEntry(
-        label: 'הוסף הערה אישית',
-        icon: FluentIcons.note_add_24_regular,
-        onTap: () => _createCommentaryNote(
-          context: context,
-          link: link,
-          savedSelectedText: savedSelectedText,
-          onNoteSaved: onNoteSaved,
+    final selection = ReaderMenuSelection(savedSelectedText);
+    // קישור עומק דורש מזהה מסד; source=user מבחין בספרי משתמש בעלי ID חופף.
+    final targetBookId = link.targetBookId;
+    return [
+      AppContextMenuEntry.iconRow([
+        buildSearchAllBooksIconAction(
+          selection: selection,
+          onTap: () => openGlobalSearch(context, selection.cleaned),
         ),
-      ),
-      if (link.targetSource.isOfficial)
-        AppContextMenuEntry(
-          label: 'דווח על טעות בספר',
-          icon: FluentIcons.error_circle_24_regular,
-          onTap: () => _reportCommentaryError(
+        AppContextMenuIconAction(
+          label: 'העתקה',
+          icon: FluentIcons.copy_24_regular,
+          enabled: selection.hasText,
+          onTap: onCopySelected,
+        ),
+        AppContextMenuIconAction(
+          label: 'הערה',
+          icon: FluentIcons.note_add_24_regular,
+          onTap: () => _createCommentaryNote(
             context: context,
             link: link,
-            fontSize: fontSize,
             savedSelectedText: savedSelectedText,
           ),
         ),
-      const AppContextMenuEntry.divider(),
-      AppContextMenuEntry(
-        label: 'העתק',
-        icon: FluentIcons.copy_24_regular,
-        enabled:
-            savedSelectedText != null && savedSelectedText.trim().isNotEmpty,
-        onTap: onCopySelected,
-      ),
+        if (targetBookId != null)
+          AppContextMenuIconAction(
+            label: 'קישור',
+            icon: OtzariaIcons.link_copy_24_regular,
+            submenuBuilder: () => buildDirectLinkSubmenuActions(
+              bookId: targetBookId,
+              source: link.targetSource,
+              index: link.index2 - 1,
+              selectedText: savedSelectedText,
+            ),
+          ),
+      ]),
       if (onCopySelectedWithoutNikud != null &&
           showCopyWithoutNikud(savedSelectedText))
         AppContextMenuEntry(
@@ -200,27 +207,20 @@ class ContextMenuUtils {
           icon: FluentIcons.window_new_24_regular,
           onTap: () => _openLinkTargetInNewWindow(link),
         ),
-    ];
-
-    // קישור עומק דורש מזהה מסד; source=user מבחין בספרי משתמש בעלי ID חופף.
-    final targetBookId = link.targetBookId;
-    if (targetBookId != null) {
-      entries.add(const AppContextMenuEntry.divider());
-      entries.add(
+      if (link.targetSource.isOfficial) ...[
+        const AppContextMenuEntry.divider(),
         AppContextMenuEntry(
-          label: 'העתק קישור ישיר',
-          icon: OtzariaIcons.link_24_regular,
-          childrenBuilder: () => buildDirectLinkContextMenuEntries(
-            bookId: targetBookId,
-            source: link.targetSource,
-            index: link.index2 - 1,
-            selectedText: savedSelectedText,
+          label: 'דווח על טעות בספר',
+          icon: FluentIcons.error_circle_24_regular,
+          onTap: () => _reportCommentaryError(
+            context: context,
+            link: link,
+            fontSize: fontSize,
+            savedSelectedText: savedSelectedText,
           ),
         ),
-      );
-    }
-
-    return entries;
+      ],
+    ];
   }
 
   /// פותח את יעד [link] בכרטיסייה חדשה ברקע (טקסט או PDF, לפי תבנית הפתיחה).
@@ -259,7 +259,6 @@ class ContextMenuUtils {
     required BuildContext context,
     required Link link,
     String? savedSelectedText,
-    VoidCallback? onNoteSaved,
   }) async {
     final bookTitle = utils.getTitleFromPath(link.path2);
     final selectedText = savedSelectedText?.trim();
@@ -304,7 +303,6 @@ class ContextMenuUtils {
         selectedText: selectedText,
         categoryId: link.targetCategoryId,
       );
-      onNoteSaved?.call();
       if (context.mounted) UiSnack.showSuccess(TextBookMessages.noteSaved);
     } catch (e) {
       if (context.mounted) {
@@ -484,54 +482,25 @@ class ContextMenuUtils {
     }
 
     try {
-      final clipboard = SystemClipboard.instance;
-      if (clipboard != null) {
-        final settingsState = context.read<SettingsBloc>().state;
-        if (link != null && settingsState.copyWithHeaders != 'none') {
-          // ספר הכותרת נגזר מה-link (headerBookOverride), ולכן ההעתקה עם
-          // כותרות עובדת גם בחלונית ה-PDF שאין בה TextBookBloc.
-          await copySelectedTextForBook(
-            plainText: plainText,
-            selectedIndex: link.index2 - 1,
-            sourceContent: [plainText],
-            textBookState: _maybeTextBookState(context),
-            settingsState: settingsState,
-            fontFamily: settingsState.commentatorsFontFamily,
-            fontSize: fontSize,
-            headerBookOverride: _targetBookFromLink(link),
-            removeNikud: removeNikud,
-            copyProfile: copyProfile,
-            plainTextOnly: plainTextOnly,
-          );
-          return;
-        }
-
-        final finalPlainText = CopyUtils.applyCopyPreferences(
-          text: plainText,
-          replaceHolyNames: settingsState.replaceHolyNames,
-          holyNameStyle: settingsState.holyNameStyle,
-          removeNikud: removeNikud,
-          profile: copyProfile,
-        );
-
-        final item = DataWriterItem();
-        item.add(Formats.plainText(finalPlainText));
-        if (!plainTextOnly) {
-          final htmlText = CopyUtils.buildStyledHtml(
-            htmlText: finalPlainText,
-            fontFamily: settingsState.commentatorsFontFamily,
-            fontSize: fontSize,
-          );
-          item.add(Formats.htmlText(htmlText));
-        }
-
-        await clipboard.write([item]);
-        UiSnack.show(
-          plainTextOnly
-              ? CommonMessages.plainTextCopied
-              : CommonMessages.textCopiedShort,
-        );
-      }
+      final settingsState = context.read<SettingsBloc>().state;
+      // ערוץ ההעתקה של המפרשים חל כמו בגוף הספר. ספר הכותרת נגזר מה-link,
+      // ולכן הכותרות עובדות גם בחלונית ה-PDF; בלי link אין כותרת מקור.
+      await copySelectedTextForBook(
+        plainText: plainText,
+        selectedIndex: link == null ? null : link.index2 - 1,
+        sourceContent: [plainText],
+        textBookState: _maybeTextBookState(context),
+        settingsState: link == null
+            ? settingsState.copyWith(copyWithHeaders: 'none')
+            : settingsState,
+        fontFamily: settingsState.commentatorsFontFamily,
+        fontSize: fontSize,
+        headerBookOverride: link == null ? null : _targetBookFromLink(link),
+        removeNikud: removeNikud,
+        copyProfile: copyProfile,
+        copyTarget: TextTarget.commentary,
+        plainTextOnly: plainTextOnly,
+      );
     } catch (e) {
       debugPrint('Error copying text: $e');
       UiSnack.showError(CommonMessages.textCopyError);

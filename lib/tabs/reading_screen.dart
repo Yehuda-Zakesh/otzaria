@@ -15,11 +15,14 @@ import 'package:otzaria/navigation/bloc/navigation_state.dart' show Screen;
 import 'package:otzaria/pdf_book/view/pdf_book_screen.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
+import 'package:otzaria/plugins/services/plugin_text_reader_registry.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/bloc/tabs_state.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
 import 'package:otzaria/tabs/models/searching_tab.dart';
+import 'package:otzaria/tabs/models/semantic_search_tab.dart';
+import 'package:otzaria/semantic_search/view/semantic_search_results_screen.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
@@ -30,6 +33,7 @@ import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/tabs/resolving_tab_screen.dart';
 import 'package:otzaria/tools/view/tool_tab_screen.dart';
 import 'package:otzaria/tabs/utils/tab_swipe_direction.dart';
+import 'package:otzaria/tabs/utils/tab_content_vertical_drag_recognizer.dart';
 import 'package:otzaria/tabs/utils/touch_tab_swipe_recognizer.dart';
 import 'package:otzaria/tabs/view/active_pane_marker.dart';
 import 'package:otzaria/tabs/view/pane_drag_handle.dart';
@@ -97,16 +101,33 @@ class _ReadingScreenState extends State<ReadingScreen>
     // זריעה מיידית ולא רק מה-listener: בעלייה עם טאב תוסף משוחזר, קבוצה ריקה
     // הייתה גורמת ל-onForegroundInstanceReady להשהות מיד את התוסף שעל המסך.
     _syncVisiblePluginTabs(context.read<TabsBloc>().state);
+    PluginTextReaderRegistry.instance.addListener(_onTextReaderChanged);
+  }
+
+  void _onTextReaderChanged() {
+    if (mounted) _syncVisiblePluginTabs(context.read<TabsBloc>().state);
   }
 
   void _syncVisiblePluginTabs(TabsState state) {
+    final registry = PluginTextReaderRegistry.instance;
     PluginRuntimeDispatcher.instance.setVisiblePluginInstances(
-      ToolTab.visiblePluginInstancesOf(state.currentTab),
+      {
+        ...ToolTab.visiblePluginInstancesOf(state.currentTab),
+        if (registry.activePlugin case final plugin?)
+          if (state.currentTab case final currentTab?)
+            for (final tab in leafPanes(currentTab).whereType<TextBookTab>())
+              if (registry.usesPlugin(tab))
+                (
+                  pluginId: plugin.pluginId,
+                  instanceId: registry.instanceIdFor(tab),
+                ),
+      },
     );
   }
 
   @override
   void dispose() {
+    PluginTextReaderRegistry.instance.removeListener(_onTextReaderChanged);
     // Check if widget is still mounted before accessing context
     if (mounted) {
       try {
@@ -127,22 +148,14 @@ class _ReadingScreenState extends State<ReadingScreen>
 
   /// Handing Flutter the same widget instance skips rebuilding that subtree, so
   /// a tab switch only rebuilds the tabs whose content actually changed.
-  final Map<OpenedTab, ({bool enableTourTargets, Widget view})> _tabViewCache =
-      Map.identity();
+  final Map<OpenedTab, Widget> _tabViewCache = Map.identity();
   int? _tabViewCacheCounter;
 
-  Widget _cachedTabView(OpenedTab tab, {required bool enableTourTargets}) {
-    final cached = _tabViewCache[tab];
-    if (cached != null && cached.enableTourTargets == enableTourTargets) {
-      return cached.view;
-    }
-    final view = _buildTabView(tab, enableTourTargets: enableTourTargets);
-    _tabViewCache[tab] = (enableTourTargets: enableTourTargets, view: view);
-    return view;
-  }
+  Widget _cachedTabView(OpenedTab tab) =>
+      _tabViewCache[tab] ??= _buildTabView(tab);
 
   void _pruneTabViewCache(TabsState state) {
-    // updateCounter marks tabs mutated in place (pin, split ratio); their
+    // updateCounter marks tabs mutated in place (e.g. pin); their
     // content must be rebuilt.
     if (_tabViewCacheCounter != state.updateCounter) {
       _tabViewCacheCounter = state.updateCounter;
@@ -199,19 +212,13 @@ class _ReadingScreenState extends State<ReadingScreen>
     if (_isTouchPlatform) return child;
     return RawGestureDetector(
       gestures: <Type, GestureRecognizerFactory>{
-        // "בולען" אנכי: מעל WebView של תוסף אין Scrollable שמתחרה בזירה,
-        // והאופקי כחבר יחיד זכה מיד בכל גלילה אנכית (רעד ומעבר טאב בטעות).
-        VerticalDragGestureRecognizer:
-            GestureRecognizerFactoryWithHandlers<VerticalDragGestureRecognizer>(
-              () => VerticalDragGestureRecognizer(
-                supportedDevices: const {
-                  PointerDeviceKind.trackpad,
-                  PointerDeviceKind.touch,
-                },
-              ),
-              (recognizer) {
-                recognizer.onStart = (_) {};
-              },
+        // מעל WebView אין מזהה גלילה פנימי שימנע מעבר טאב בגלילה אנכית.
+        TabContentVerticalDragRecognizer:
+            GestureRecognizerFactoryWithHandlers<
+              TabContentVerticalDragRecognizer
+            >(
+              TabContentVerticalDragRecognizer.new,
+              (recognizer) => recognizer.onStart = (_) {},
             ),
         HorizontalDragGestureRecognizer:
             GestureRecognizerFactoryWithHandlers<
@@ -501,9 +508,16 @@ class _ReadingScreenState extends State<ReadingScreen>
                                       key: TabContentBoundaries.instance.keyFor(
                                         state.tabs[i],
                                       ),
-                                      child: _cachedTabView(
-                                        state.tabs[i],
-                                        enableTourTargets: i == validIndex,
+                                      child: TourTargetsScope(
+                                        enabled:
+                                            i == validIndex &&
+                                            state.tabs[i] is! CombinedTab,
+                                        child: _BackgroundTabMediaQuery(
+                                          frozen: i != validIndex,
+                                          controller: _pageController!,
+                                          index: i,
+                                          child: _cachedTabView(state.tabs[i]),
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -526,10 +540,7 @@ class _ReadingScreenState extends State<ReadingScreen>
   /// חלונית יהיה זהה בשני המצבים: כך מיזוג טאבים לתצוגה מפוצלת (ופירוקה
   /// בחזרה) מעביר את החלונית הקיימת במקום לבנות אותה מחדש, ואין רגע שבו
   /// שני מסכים מחוברים לאותו `scrollController`.
-  Widget _buildTabView(
-    OpenedTab tab, {
-    required bool enableTourTargets,
-  }) {
+  Widget _buildTabView(OpenedTab tab) {
     final isSplit = tab is CombinedTab;
     // רק חלוניות PDF מתחלקות בתקציב מטמון התמונות.
     final pdfPanes = leafPanes(tab).whereType<PdfBookTab>().length;
@@ -566,7 +577,6 @@ class _ReadingScreenState extends State<ReadingScreen>
                 child: _buildPaneContent(
                   pane,
                   isInCombinedView: isSplit,
-                  enableTourTargets: enableTourTargets && !isSplit,
                   // חימום מטמון התוכן טוען את הספר כולו; בטאב מפוצל שתי
                   // החלוניות היו מחממות ספרים גדולים במקביל ומכפילות את
                   // צריכת הזיכרון.
@@ -592,7 +602,6 @@ class _ReadingScreenState extends State<ReadingScreen>
   Widget _buildPaneContent(
     OpenedTab tab, {
     required bool isInCombinedView,
-    required bool enableTourTargets,
     bool allowBackgroundWarming = true,
     int pdfPaneCount = 1,
   }) {
@@ -601,7 +610,6 @@ class _ReadingScreenState extends State<ReadingScreen>
         key: ValueKey(tab),
         tab: tab,
         isInCombinedView: isInCombinedView,
-        enableTourTargets: enableTourTargets,
         pdfPaneCount: pdfPaneCount,
       );
     } else if (tab is TextBookTab) {
@@ -619,10 +627,11 @@ class _ReadingScreenState extends State<ReadingScreen>
             },
             tab: tab,
             isInCombinedView: isInCombinedView,
-            enableTourTargets: enableTourTargets,
           ),
         ),
       );
+    } else if (tab is SemanticSearchTab) {
+      return SemanticSearchResultsScreen(key: ValueKey(tab), tab: tab);
     } else if (tab is SearchingTab) {
       return BlocProvider.value(
         key: ValueKey(tab),
@@ -654,6 +663,52 @@ class _ReadingScreenState extends State<ReadingScreen>
       return ToolTabScreen(key: ValueKey(tab), tab: tab);
     }
     return const SizedBox.shrink();
+  }
+}
+
+/// מקפיא את מדדי החלון רק בטאבים מוסתרים לגמרי; בזמן החלקה שני הטאבים
+/// הנראים חייבים לקבל מדדים עדכניים גם לפני שהטאב הנבחר מתחלף.
+class _BackgroundTabMediaQuery extends StatefulWidget {
+  final bool frozen;
+  final PageController controller;
+  final int index;
+  final Widget child;
+
+  const _BackgroundTabMediaQuery({
+    required this.frozen,
+    required this.controller,
+    required this.index,
+    required this.child,
+  });
+
+  @override
+  State<_BackgroundTabMediaQuery> createState() =>
+      _BackgroundTabMediaQueryState();
+}
+
+class _BackgroundTabMediaQueryState extends State<_BackgroundTabMediaQuery> {
+  MediaQueryData? _data;
+
+  @override
+  Widget build(BuildContext context) {
+    final live = MediaQuery.of(context);
+    return AnimatedBuilder(
+      animation: widget.controller,
+      child: widget.child,
+      builder: (context, child) {
+        final controller = widget.controller;
+        final page =
+            controller.hasClients && controller.position.hasContentDimensions
+            ? controller.page ?? controller.initialPage.toDouble()
+            : controller.initialPage.toDouble();
+        if (!widget.frozen ||
+            (page - widget.index).abs() < 1 ||
+            _data == null) {
+          _data = live;
+        }
+        return MediaQuery(data: _data!, child: child!);
+      },
+    );
   }
 }
 

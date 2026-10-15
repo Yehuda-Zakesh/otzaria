@@ -9,9 +9,8 @@ import 'package:otzaria/models/links.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
 
@@ -115,8 +114,6 @@ void main() {
           false,
           const [],
         ),
-        scrollController: ItemScrollController(),
-        positionsListener: ItemPositionsListener.create(),
       );
       addTearDown(bloc.close);
 

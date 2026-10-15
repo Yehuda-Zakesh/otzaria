@@ -21,6 +21,9 @@ import 'package:otzaria/models/books.dart';
 import 'package:otzaria/personal_notes/storage/personal_notes_database.dart';
 import 'package:otzaria/plugins/storage/plugin_system_database.dart';
 import 'package:otzaria/plugins/view/webview_environment_holder.dart';
+import 'package:otzaria/semantic_search/models/semantic_paths.dart';
+import 'package:otzaria/semantic_search/repository/semantic_data_ownership.dart';
+import 'package:otzaria/semantic_search/repository/semantic_search_repository.dart';
 import 'package:otzaria/settings/engine/settings_engine_exports.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/settings/widgets/settings_card.dart';
@@ -242,6 +245,8 @@ Future<void> _cleanupCreatedMoveTargets({
   required bool finalLibraryCreated,
   required bool finalIndexCreated,
   required bool finalDatabasesCreated,
+  String? newVectors,
+  bool finalVectorsCreated = false,
 }) async {
   if (stagingRoot != null) {
     try {
@@ -271,6 +276,13 @@ Future<void> _cleanupCreatedMoveTargets({
       debugPrint('[performLibraryMove] databases cleanup failed: $e');
     }
   }
+  if (finalVectorsCreated && newVectors != null) {
+    try {
+      await _deleteIfExists(newVectors);
+    } catch (e) {
+      debugPrint('[performLibraryMove] vectors cleanup failed: $e');
+    }
+  }
 }
 
 @visibleForTesting
@@ -286,6 +298,8 @@ Future<void> cleanupCreatedMoveTargetsForTesting({
   required bool finalLibraryCreated,
   required bool finalIndexCreated,
   required bool finalDatabasesCreated,
+  String? newVectors,
+  bool finalVectorsCreated = false,
 }) => _cleanupCreatedMoveTargets(
   stagingRoot: stagingRoot,
   newLibrary: newLibrary,
@@ -294,6 +308,17 @@ Future<void> cleanupCreatedMoveTargetsForTesting({
   finalLibraryCreated: finalLibraryCreated,
   finalIndexCreated: finalIndexCreated,
   finalDatabasesCreated: finalDatabasesCreated,
+  newVectors: newVectors,
+  finalVectorsCreated: finalVectorsCreated,
+);
+
+/// נתיבי סט הוקטורים של החיפוש הסמנטי לפני ההעברה ואחריה (`<root>/vectors`).
+({String from, String to}) semanticVectorsMovePaths(
+  String fromLibrary,
+  String newLibrary,
+) => (
+  from: SemanticPaths(fromLibrary).vectorsDirectory,
+  to: SemanticPaths(newLibrary).vectorsDirectory,
 );
 
 Future<void> _closeUserDatabasesForMove() async {
@@ -344,6 +369,11 @@ Future<void> performLibraryMove({
   final databasesNeedsMove =
       !p.equals(oldDatabases, newDatabases) &&
       await Directory(oldDatabases).exists();
+  final vectors = semanticVectorsMovePaths(from, newLibrary);
+  // תיקיית vectors שאינה של החיפוש הסמנטי אינה מועברת ואינה נמחקת.
+  final vectorsNeedsMove =
+      !p.equals(vectors.from, vectors.to) &&
+      await isSemanticOwnedDirectory(vectors.from);
   final indexingActive = TantivyDataProvider.instance.isIndexing.value;
   final shouldCopyIndex = shouldCopyIndexDuringLibraryMove(
     indexNeedsMove: indexNeedsMove,
@@ -378,6 +408,7 @@ Future<void> performLibraryMove({
   var finalLibraryCreated = false;
   var finalIndexCreated = false;
   var finalDatabasesCreated = false;
+  var finalVectorsCreated = false;
   var settingsUpdated = false;
 
   try {
@@ -389,6 +420,9 @@ Future<void> performLibraryMove({
       await _ensureMoveTargetAvailable(newDatabases);
       await _closeUserDatabasesForMove();
     }
+    // עוצר הורדה/התקנה וחוסם חדשות עד סוף ההעברה; ה-session נפתח בחיפוש הבא.
+    await SemanticSearchRepository.instance.releaseForLibraryMove();
+    if (vectorsNeedsMove) await _ensureMoveTargetAvailable(vectors.to);
 
     final staging = await Directory(
       p.join(to, '.otzaria_move_${DateTime.now().millisecondsSinceEpoch}'),
@@ -397,6 +431,7 @@ Future<void> performLibraryMove({
     final stagedLibrary = p.join(staging.path, p.basename(newLibrary));
     final stagedIndex = p.join(staging.path, p.basename(newIndex));
     final stagedDatabases = p.join(staging.path, p.basename(newDatabases));
+    final stagedVectors = p.join(staging.path, p.basename(vectors.to));
 
     // 1. מעתיקים ל-staging בלבד. אם ההעתקה נכשלת, היעד הסופי נשאר נקי.
     await copyDirectoryEntries(from, stagedLibrary, includeOnly: include);
@@ -405,6 +440,9 @@ Future<void> performLibraryMove({
     }
     if (databasesNeedsMove) {
       await copyDirectoryEntries(oldDatabases, stagedDatabases);
+    }
+    if (vectorsNeedsMove) {
+      await copyDirectoryEntries(vectors.from, stagedVectors);
     }
     await Directory(stagedLibrary).rename(newLibrary);
     finalLibraryCreated = true;
@@ -415,6 +453,10 @@ Future<void> performLibraryMove({
     if (databasesNeedsMove) {
       await Directory(stagedDatabases).rename(newDatabases);
       finalDatabasesCreated = true;
+    }
+    if (vectorsNeedsMove) {
+      await Directory(stagedVectors).rename(vectors.to);
+      finalVectorsCreated = true;
     }
     await _deleteIfExists(staging.path);
     stagingRoot = null;
@@ -502,7 +544,10 @@ Future<void> performLibraryMove({
       finalLibraryCreated: finalLibraryCreated,
       finalIndexCreated: finalIndexCreated,
       finalDatabasesCreated: finalDatabasesCreated,
+      newVectors: vectors.to,
+      finalVectorsCreated: finalVectorsCreated,
     );
+    SemanticSearchRepository.instance.finishLibraryMove();
     if (navigator.canPop()) navigator.pop();
     UiSnack.showError(SettingsMessages.libraryMoveError(e));
     return;
@@ -532,6 +577,7 @@ Future<void> performLibraryMove({
       final leftover = await deleteMovedEntries(from, includeOnly: include);
       var indexDeleteFailed = false;
       var databasesDeleteFailed = false;
+      var vectorsDeleteFailed = false;
       if (indexNeedsMove && await Directory(oldIndex).exists()) {
         try {
           await Directory(oldIndex).delete(recursive: true);
@@ -546,7 +592,20 @@ Future<void> performLibraryMove({
           databasesDeleteFailed = true;
         }
       }
-      if (leftover != null || indexDeleteFailed || databasesDeleteFailed) {
+      try {
+        if (vectorsNeedsMove) await deleteSemanticOwnedDirectory(vectors.from);
+        // הורדה חלקית של ~1.2GB לא נשארת יתומה במיקום הישן.
+        await deleteSemanticOwnedDirectory(
+          SemanticPaths(from).vectorsDownloadDirectory,
+        );
+      } catch (_) {
+        vectorsDeleteFailed = true;
+      }
+      SemanticSearchRepository.instance.finishLibraryMove();
+      if (leftover != null ||
+          indexDeleteFailed ||
+          databasesDeleteFailed ||
+          vectorsDeleteFailed) {
         UiSnack.showWarning(SettingsMessages.libraryMovedOldFilesLeft);
       }
     },
@@ -774,6 +833,11 @@ class TargetFolderSection extends StatelessWidget {
   final VoidCallback onPickFolder;
   final VoidCallback onUseDefault;
 
+  /// כשמוגדר (אנדרואיד) — מוצגים רק היעדים האלה, בלי בורר תיקיות חופשי:
+  /// מחוץ לתיקיות האפליקציה Scoped Storage חוסם כתיבה של קובצי ה-DB.
+  final List<({bool isRemovable, String root})>? storageChoices;
+  final ValueChanged<String>? onSelectStorage;
+
   const TargetFolderSection({
     super.key,
     required this.folderName,
@@ -783,7 +847,40 @@ class TargetFolderSection extends StatelessWidget {
     required this.isAtDefault,
     required this.onPickFolder,
     required this.onUseDefault,
+    this.storageChoices,
+    this.onSelectStorage,
   });
+
+  Widget _storageChoiceTile(
+    BuildContext context,
+    ({bool isRemovable, String root}) choice,
+  ) {
+    final cs = Theme.of(context).colorScheme;
+    final selected = choice.root == selectedPath;
+    return SettingsActionTile.path(
+      icon: choice.isRemovable
+          ? FluentIcons.storage_24_regular
+          : FluentIcons.phone_24_regular,
+      iconColor: selected ? cs.primary : null,
+      title: choice.isRemovable
+          ? context.settingsText('כרטיס SD')
+          : context.settingsText('אחסון פנימי'),
+      path: choice.root,
+      placeholder: '',
+      actions: [
+        if (selected)
+          Text(
+            context.settingsText('נבחר'),
+            style: TextStyle(color: cs.primary, fontWeight: FontWeight.w600),
+          )
+        else
+          ActionButton.recommended(
+            text: context.settingsText('השתמש במיקום זה'),
+            onPressed: () => onSelectStorage?.call(choice.root),
+          ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -794,11 +891,19 @@ class TargetFolderSection extends StatelessWidget {
               args: {'folder': folderName},
             )
           : context.settingsText('מיקום חדש'),
-      subtitle: context.settingsText(
-        'בחר מיקום מותאם אישית, או השתמש במיקום ברירת המחדל של האפליקציה',
-      ),
+      subtitle: storageChoices != null
+          ? context.settingsText(
+              'בחר אם לשמור את הספרייה באחסון הפנימי או על כרטיס SD',
+            )
+          : context.settingsText(
+              'בחר מיקום מותאם אישית, או השתמש במיקום ברירת המחדל של האפליקציה',
+            ),
       children: [
-        if (defaultPath != null && defaultPath!.isNotEmpty)
+        for (final choice in storageChoices ?? const [])
+          _storageChoiceTile(context, choice),
+        if (storageChoices == null &&
+            defaultPath != null &&
+            defaultPath!.isNotEmpty)
           SettingsActionTile.path(
             icon: FluentIcons.home_24_regular,
             title: context.settingsText('מיקום ברירת מחדל'),
@@ -812,21 +917,22 @@ class TargetFolderSection extends StatelessWidget {
               ),
             ],
           ),
-        SettingsActionTile.path(
-          icon: FluentIcons.folder_open_24_regular,
-          title: context.settingsText('בחירת מיקום'),
-          path: selectedPath,
-          placeholder: context.settingsText('טרם נבחר מיקום'),
-          actions: [
-            ActionButton.recommended(
-              text: context.settingsText(
-                selectedPath == null ? 'בחר תיקייה' : 'שנה מיקום',
+        if (storageChoices == null)
+          SettingsActionTile.path(
+            icon: FluentIcons.folder_open_24_regular,
+            title: context.settingsText('בחירת מיקום'),
+            path: selectedPath,
+            placeholder: context.settingsText('טרם נבחר מיקום'),
+            actions: [
+              ActionButton.recommended(
+                text: context.settingsText(
+                  selectedPath == null ? 'בחר תיקייה' : 'שנה מיקום',
+                ),
+                onPressed: onPickFolder,
+                icon: FluentIcons.folder_open_24_regular,
               ),
-              onPressed: onPickFolder,
-              icon: FluentIcons.folder_open_24_regular,
-            ),
-          ],
-        ),
+            ],
+          ),
       ],
     );
   }

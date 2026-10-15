@@ -44,7 +44,6 @@ class TourState extends Equatable {
   }
 
   bool get isLastStep => currentIndex >= steps.length - 1;
-  int get totalSteps => steps.length;
   bool get hasActiveLiveTip => activeLiveTipId != null;
 
   List<TourStep> get progressSteps => steps.where((s) => !s.isDialog).toList();

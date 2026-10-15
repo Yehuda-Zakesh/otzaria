@@ -55,7 +55,7 @@ void main() {
             r'C:\Program Files\Otzaria\otzaria.exe',
           );
 
-      // פקודת open של ה-ProgID — פותחת את אוצריא בלחיצה על קובץ ‎.otzplugin
+      // פקודת open של ה-ProgID — פותחת את אוצריא בלחיצה על קובץ .otzplugin
       expect(
         entries,
         contains((
@@ -68,7 +68,7 @@ void main() {
         reason: 'חסר הרישום של פקודת open עבור ProgID של ‎.otzplugin',
       );
 
-      // DefaultIcon מצביע על משאב ‎1 ב-EXE (האייקון הייעודי לתוסף)
+      // DefaultIcon מצביע על משאב 1 ב-EXE (האייקון הייעודי לתוסף)
       expect(
         entries,
         contains((
@@ -90,7 +90,7 @@ void main() {
         reason: 'חסר הקישור בין סיומת ‎.otzplugin ל-ProgID',
       );
 
-      // EditFlags=FTA_NoRecentDocs — מונע הוספת ‎.otzplugin ל-Jump List
+      // EditFlags=FTA_NoRecentDocs — מונע הוספת .otzplugin ל-Jump List
       expect(
         entries,
         contains((

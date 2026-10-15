@@ -11,14 +11,6 @@ class Topic {
     required this.name,
   });
 
-  /// Creates a Topic instance from a map (e.g., a database row).
-  factory Topic.fromMap(Map<String, dynamic> map) {
-    return Topic(
-      id: map['id'] as int,
-      name: map['name'] as String,
-    );
-  }
-
   /// Creates a Topic instance from JSON.
   factory Topic.fromJson(Map<String, dynamic> json) {
     return Topic(
@@ -33,16 +25,6 @@ class Topic {
       'id': id,
       'name': name,
     };
-  }
-
-  Topic copyWith({
-    int? id,
-    String? name,
-  }) {
-    return Topic(
-      id: id ?? this.id,
-      name: name ?? this.name,
-    );
   }
 
   @override

@@ -506,8 +506,8 @@ class _Stylesheet {
       final cbStd = stsh.getUint16(cursor, Endian.little);
       cursor += 2;
       if (cbStd == 0) continue; // משבצת פנויה — הסגנון אינו מוגדר במסמך
-      // ‏4 ולא `cbStd`: מיד אחרי הבדיקה נקראים `sti` ו-`istdBase`, שני
-      // שדות בני 2 בתים. ‏`cbStd` בין 1 ל-3 זרק `RangeError`.
+      // 4 ולא `cbStd`: מיד אחרי הבדיקה נקראים `sti` ו-`istdBase`, שני
+      // שדות בני 2 בתים. `cbStd` בין 1 ל-3 זרק `RangeError`.
       if (cbStd < 4 || cursor + cbStd > locations.stshLength) break;
 
       final sti = stsh.getUint16(cursor, Endian.little) & 0x0FFF;
@@ -573,7 +573,7 @@ int? legacyWordFootnoteNumberFormat(
   required int plcfSedOffset,
   required int plcfSedLength,
 }) {
-  // PlcfSed: ‏(n+1) מיקומי CP בני 4 בתים ואחריהם n מבני SED בני 12 בתים.
+  // PlcfSed: (n+1) מיקומי CP בני 4 בתים ואחריהם n מבני SED בני 12 בתים.
   if (plcfSedLength <= 4 ||
       plcfSedOffset < 0 ||
       plcfSedOffset + plcfSedLength > table.length) {
@@ -660,7 +660,7 @@ _RangeTable<T> _readFkps<T>(
       final from = view.getUint32(k * 4, Endian.little);
       final to = view.getUint32((k + 1) * 4, Endian.little);
       if (to <= from) continue;
-      // ‏FKP-ים נכתבים בסדר עולה; חריגה מסדר זו סימן לעמוד פגום.
+      // FKP-ים נכתבים בסדר עולה; חריגה מסדר זו סימן לעמוד פגום.
       if (starts.isNotEmpty && from < starts.last) continue;
 
       final wordOffset = stream[page + (count + 1) * 4 + k * descriptorSize];
@@ -694,7 +694,7 @@ _GrpprlRange _grpprlAt(
         : _GrpprlRange.none;
   }
 
-  // ‏PapxInFkp: ‏cb!=0 → 2*cb-1 בתים; cb==0 → הבית הבא הוא cb' ואז 2*cb'.
+  // PapxInFkp: cb!=0 → 2*cb-1 בתים; cb==0 → הבית הבא הוא cb' ואז 2*cb'.
   var cursor = offset;
   final cb = stream[cursor];
   cursor++;

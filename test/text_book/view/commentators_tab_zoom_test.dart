@@ -17,7 +17,6 @@ import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/commentary_list_base.dart';
 import 'package:otzaria/text_book/view/commentators_tab_screen.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../helpers/memory_settings_cache.dart';
 import '../../unit/mocks/mock_settings_repository.mocks.dart';
@@ -61,8 +60,6 @@ TextBookLoaded _loaded(TextBook book) => TextBookLoaded(
   selectedIndex: 0,
   pinLeftPane: false,
   searchText: '',
-  scrollController: ItemScrollController(),
-  positionsListener: ItemPositionsListener.create(),
 );
 
 void main() {

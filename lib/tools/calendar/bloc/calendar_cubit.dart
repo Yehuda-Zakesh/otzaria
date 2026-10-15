@@ -12,6 +12,7 @@ import 'package:otzaria/tools/calendar/services/notification_service.dart';
 import 'package:otzaria/tools/calendar/repository/google_calendar_repository.dart';
 import 'package:otzaria/tools/calendar/services/google_calendar_service.dart';
 import 'package:otzaria/tools/calendar/services/ics_calendar_service.dart';
+import 'package:otzaria/tools/calendar/helpers/calendar_date_helpers.dart';
 import 'package:otzaria/tools/calendar/helpers/zmanim_helpers.dart'
     as zmanim_helpers;
 import 'package:otzaria/tools/calendar/models/calendar_event.dart';
@@ -75,8 +76,9 @@ class CalendarCubit extends Cubit<CalendarState> {
   int _pluginRefreshGeneration = 0;
   int _calendarWidgetCount = 0;
 
-  // Getter for accessing notification service from outside
-  NotificationService get notificationService => _notificationService;
+  // רשת חודש מכילה עד 42 ימים; אין להרחיב את כל ההיסטוריה לטווחי ימים.
+  List<CustomEvent>? _eventCacheSource;
+  final _eventsByDate = <DateTime, List<CustomEvent>>{};
 
   /// מסתיים לאחר שטעינת ההגדרות קבעה את היום הלוחי.
   Future<void> get initialized => _initializationCompleter.future;
@@ -566,11 +568,6 @@ class CalendarCubit extends Cubit<CalendarState> {
     _scheduleTodayRefresh();
   }
 
-  /// טעינה מחדש של הגדרות מהאחסון
-  Future<void> reloadSettings() async {
-    await _initializeCalendar();
-  }
-
   @override
   Future<void> close() {
     _todayRefreshTimer?.cancel();
@@ -650,7 +647,7 @@ class CalendarCubit extends Cubit<CalendarState> {
   }
 
   void _previousWeek() {
-    final newDate = state.selectedGregorianDate.subtract(Duration(days: 7));
+    final newDate = addCalendarDays(state.selectedGregorianDate, -7);
     final newJewishDate = JewishDate.fromDateTime(newDate);
     final newTimes = _calculateDailyTimes(newDate, state.selectedCity);
     emit(
@@ -663,7 +660,7 @@ class CalendarCubit extends Cubit<CalendarState> {
   }
 
   void _nextWeek() {
-    final newDate = state.selectedGregorianDate.add(Duration(days: 7));
+    final newDate = addCalendarDays(state.selectedGregorianDate, 7);
     final newJewishDate = JewishDate.fromDateTime(newDate);
     final newTimes = _calculateDailyTimes(newDate, state.selectedCity);
     emit(
@@ -676,7 +673,7 @@ class CalendarCubit extends Cubit<CalendarState> {
   }
 
   void _previousDay() {
-    final newDate = state.selectedGregorianDate.subtract(Duration(days: 1));
+    final newDate = addCalendarDays(state.selectedGregorianDate, -1);
     final newJewishDate = JewishDate.fromDateTime(newDate);
     final newTimes = _calculateDailyTimes(newDate, state.selectedCity);
     emit(
@@ -689,7 +686,7 @@ class CalendarCubit extends Cubit<CalendarState> {
   }
 
   void _nextDay() {
-    final newDate = state.selectedGregorianDate.add(Duration(days: 1));
+    final newDate = addCalendarDays(state.selectedGregorianDate, 1);
     final newJewishDate = JewishDate.fromDateTime(newDate);
     final newTimes = _calculateDailyTimes(newDate, state.selectedCity);
     emit(
@@ -782,9 +779,9 @@ class CalendarCubit extends Cubit<CalendarState> {
     );
   }
 
-  /// פונקציה פנימית לניווט לפי משך זמן
-  void _navigateByDuration(Duration duration) {
-    final newDate = state.selectedGregorianDate.add(duration);
+  /// פונקציה פנימית לניווט לפי מספר ימים
+  void _navigateByDays(int days) {
+    final newDate = addCalendarDays(state.selectedGregorianDate, days);
     final newJewishDate = JewishDate.fromDateTime(newDate);
     final newTimes = _calculateDailyTimes(newDate, state.selectedCity);
 
@@ -800,17 +797,16 @@ class CalendarCubit extends Cubit<CalendarState> {
   }
 
   /// ניווט ליום הבא (לשימוש עם מקשי חיצים)
-  void navigateToNextDay() => _navigateByDuration(const Duration(days: 1));
+  void navigateToNextDay() => _navigateByDays(1);
 
   /// ניווט ליום הקודם (לשימוש עם מקשי חיצים)
-  void navigateToPreviousDay() => _navigateByDuration(const Duration(days: -1));
+  void navigateToPreviousDay() => _navigateByDays(-1);
 
   /// ניווט לשבוע הבא (לשימוש עם מקשי חיצים)
-  void navigateToNextWeek() => _navigateByDuration(const Duration(days: 7));
+  void navigateToNextWeek() => _navigateByDays(7);
 
   /// ניווט לשבוע הקודם (לשימוש עם מקשי חיצים)
-  void navigateToPreviousWeek() =>
-      _navigateByDuration(const Duration(days: -7));
+  void navigateToPreviousWeek() => _navigateByDays(-7);
 
   void setEventSearchQuery(String query) {
     emit(state.copyWith(eventSearchQuery: query));
@@ -824,13 +820,12 @@ class CalendarCubit extends Cubit<CalendarState> {
     emit(state.copyWith(showAllEvents: value));
   }
 
-  Map<String, String> shortTimesFor(DateTime date) {
-    final full = _calculateDailyTimes(date, state.selectedCity);
-    return {
-      if (full['sunrise'] != null) 'sunrise': full['sunrise']!,
-      if (full['sunset'] != null) 'sunset': full['sunset']!,
-    };
-  }
+  Map<String, String> shortTimesFor(DateTime date) =>
+      zmanim_helpers.calculateDailyTimes(
+        date,
+        state.selectedCity,
+        only: const {'sunrise', 'sunset'},
+      );
 
   // --- Google Calendar Integration ---
 
@@ -862,16 +857,6 @@ class CalendarCubit extends Cubit<CalendarState> {
 
   Future<List<GoogleCalendarInfo>> getAvailableCalendars() =>
       _googleCalendar.listCalendars();
-
-  Future<void> updateGoogleCalendarSyncPastDays(int days) async {
-    emit(state.copyWith(googleCalendarSyncPastDays: days));
-    await _settingsRepository.updateGoogleCalendarSyncPastDays(days);
-  }
-
-  Future<void> updateGoogleCalendarSyncFutureDays(int days) async {
-    emit(state.copyWith(googleCalendarSyncFutureDays: days));
-    await _settingsRepository.updateGoogleCalendarSyncFutureDays(days);
-  }
 
   Future<bool> connectGoogleCalendar() async {
     emit(state.copyWith(googleCalendarSyncInProgress: true));
@@ -1279,9 +1264,24 @@ class CalendarCubit extends Cubit<CalendarState> {
     }
   }
 
+  static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
   List<CustomEvent> eventsForDate(DateTime date) {
-    return state.events.where((e) => e.occursOn(date)).toList()
-      ..sort(compareCalendarEventsByTime);
+    if (!identical(_eventCacheSource, state.events)) {
+      _eventsByDate.clear();
+      _eventCacheSource = state.events;
+    }
+    final day = _dateOnly(date);
+    var matches = _eventsByDate[day];
+    if (matches == null) {
+      if (_eventsByDate.length == 42) {
+        _eventsByDate.remove(_eventsByDate.keys.first);
+      }
+      matches = state.events.where((e) => e.occursOn(date)).toList()
+        ..sort(compareCalendarEventsByTime);
+      _eventsByDate[day] = matches;
+    }
+    return List<CustomEvent>.of(matches);
   }
 
   List<CustomEvent> getFilteredEvents(String query) {
@@ -1439,12 +1439,6 @@ JewishDate _computePreviousJewishMonth(JewishDate current) {
   return prev;
 }
 
-// Public wrappers (for testing)
-JewishDate computeNextJewishMonth(JewishDate current) =>
-    _computeNextJewishMonth(current);
-JewishDate computePreviousJewishMonth(JewishDate current) =>
-    _computePreviousJewishMonth(current);
-
 bool _isCityInIsrael(String cityName) {
   return calendar_location.isCityInIsrael(cityName);
 }
@@ -1516,7 +1510,7 @@ DateTime resolveCalendarDayForTransition({
     return civilToday;
   }
 
-  return civilToday.add(const Duration(days: 1));
+  return addCalendarDays(civilToday, 1);
 }
 
 /// ממירה מחרוזת שמורה להגדרת מעבר היום, עם ברירת מחדל לשקיעה.
@@ -1592,14 +1586,14 @@ DateTime nextCalendarTodayRefreshTime({
   final candidates = <DateTime>[];
 
   for (int dayOffset = 0; dayOffset <= 1; dayOffset++) {
-    final date = civilToday.add(Duration(days: dayOffset));
+    final date = addCalendarDays(civilToday, dayOffset);
     final alos90 = _calculateAlos90(date, city);
     if (alos90 != null) {
       candidates.add(tz.TZDateTime.from(alos90, tzLocation));
     }
 
     if (transition == CalendarDayTransition.midnight) {
-      final nextDate = date.add(const Duration(days: 1));
+      final nextDate = addCalendarDays(date, 1);
       candidates.add(
         tz.TZDateTime(
           tzLocation,

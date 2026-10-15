@@ -10,8 +10,7 @@ import 'package:otzaria/settings/services/per_book_settings_service.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
 
@@ -36,8 +35,6 @@ TextBookLoaded _seed(TextBook book, {List<String> active = const []}) {
     visibleIndices: const [0],
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }
 
@@ -59,8 +56,6 @@ void main() {
     bloc = TextBookBloc(
       repository: _FakeTextBookRepository(),
       initialState: TextBookInitial.named(book, 0, true, const []),
-      scrollController: ItemScrollController(),
-      positionsListener: ItemPositionsListener.create(),
     );
   });
 

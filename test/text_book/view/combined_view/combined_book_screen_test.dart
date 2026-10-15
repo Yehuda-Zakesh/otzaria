@@ -1,4 +1,5 @@
 import 'package:flutter/gestures.dart';
+import 'package:otzaria/book_common/utils/commentators_menu.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
@@ -15,9 +16,8 @@ import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/models/commentator_group.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
-import 'package:otzaria/text_book/utils/commentators_context_menu.dart';
+import 'package:otzaria/book_common/models/commentator_group.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/text_book/view/combined_view/combined_book_screen.dart';
 import 'package:otzaria/text_book/view/selection/enhanced_gesture_detector.dart';
 import 'package:otzaria/text_book/view/selection/selection_sync_controller.dart';
@@ -27,7 +27,6 @@ import 'package:otzaria/widgets/misc/link_context_menu_entry.dart';
 import 'package:otzaria/widgets/misc/link_preview_overlay.dart';
 import 'package:otzaria/widgets/smart_text/smart_text_widget.dart';
 import 'package:otzaria/widgets/text/selection_copy_shortcuts.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../../../test_helpers/memory_cache_provider.dart';
 
 void main() {
@@ -65,33 +64,20 @@ void main() {
       connectionType: 'COMMENTARY',
     );
 
-    test('מעביר את מפרש הקישור לראש הבחירה הפעילה', () {
+    test('מוסיף מפרש שאינו פעיל לסוף הבחירה', () {
       expect(
         activatePreviewCommentator(
           activeCommentators: const ['שפתי כהן'],
           link: link,
         ),
-        ['טורי זהב', 'שפתי כהן'],
+        ['שפתי כהן', 'טורי זהב'],
       );
     });
 
-    test('מעביר מפרש פעיל מאוחר לראש בלי לשכפל אותו', () {
+    test('לחיצה על ציון אינה משנה את סדר המפרשים (issue #2015)', () {
+      const active = ['שפתי כהן', 'טורי זהב', 'באר היטב'];
       expect(
-        activatePreviewCommentator(
-          activeCommentators: const ['שפתי כהן', 'טורי זהב', 'באר היטב'],
-          link: link,
-        ),
-        ['טורי זהב', 'שפתי כהן', 'באר היטב'],
-      );
-    });
-
-    test('אינו משנה את הרשימה כשהמפרש כבר ראשון', () {
-      const active = ['טורי זהב'];
-      expect(
-        activatePreviewCommentator(
-          activeCommentators: active,
-          link: link,
-        ),
+        activatePreviewCommentator(activeCommentators: active, link: link),
         same(active),
       );
     });
@@ -501,54 +487,6 @@ void main() {
       await tester.pump();
 
       expect(region(), same(regionBefore));
-    });
-  });
-
-  group('shouldRestoreScrollOnContinuousModeChange', () {
-    test('החלפת מצב (רגיל→רציף או להיפך) → משחזרים גלילה', () {
-      // הבאג שתוקן: מיפוי שורה↔פריט מתחלף אבל הרשימה נשארת על אינדקס
-      // הפריט הישן — בלי שחזור המשתמש קופץ למקום רחוק בספר.
-      expect(
-        shouldRestoreScrollOnContinuousModeChange(
-          previousMode: false,
-          currentMode: true,
-        ),
-        isTrue,
-      );
-      expect(
-        shouldRestoreScrollOnContinuousModeChange(
-          previousMode: true,
-          currentMode: false,
-        ),
-        isTrue,
-      );
-    });
-
-    test('אותו מצב → אין שחזור (emit-ים שוטפים לא מזיזים את הגלילה)', () {
-      expect(
-        shouldRestoreScrollOnContinuousModeChange(
-          previousMode: true,
-          currentMode: true,
-        ),
-        isFalse,
-      );
-      expect(
-        shouldRestoreScrollOnContinuousModeChange(
-          previousMode: false,
-          currentMode: false,
-        ),
-        isFalse,
-      );
-    });
-
-    test('ה-state הראשון שנצפה (previousMode=null) → אין שחזור', () {
-      expect(
-        shouldRestoreScrollOnContinuousModeChange(
-          previousMode: null,
-          currentMode: true,
-        ),
-        isFalse,
-      );
     });
   });
 
@@ -1090,8 +1028,6 @@ TextBookLoaded _loadedState() {
     selectedIndex: null,
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }
 

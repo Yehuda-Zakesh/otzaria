@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/plugins/utils/plugin_safe_mode.dart';
 import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_event.dart';
@@ -150,19 +151,6 @@ class ToolTabScreenState extends State<ToolTabScreen>
     });
   }
 
-  /// מאפס את לוח השנה לתאריך של היום.
-  void resetToToday() {
-    if (widget.tab.toolId != 'builtin.calendar') return;
-    if (mounted) context.read<CalendarCubit>().jumpToToday();
-    _requestCalendarFocus();
-  }
-
-  void closeTransientPanels() {
-    if (widget.tab.toolId == 'builtin.calendar') {
-      _calendarKey.currentState?.closeTransientPanels();
-    }
-  }
-
   void _markActivated() {
     if (_activated) return;
     // עדכון מצב מתוך build נדחה לסוף הפריים.
@@ -266,6 +254,7 @@ class ToolTabScreenState extends State<ToolTabScreen>
           entry.toolId,
           calendarKey: _calendarKey,
           gematriaKey: _gematriaKey,
+          queryInbox: widget.tab.queryInbox,
         ) ??
         _buildUnavailable(
           const ToolUnavailable(ToolUnavailableReason.notFound),
@@ -280,6 +269,10 @@ class ToolTabScreenState extends State<ToolTabScreen>
       ToolUnavailableReason.builtInHidden => (
         'הכלי "$name" מוסתר',
         'ניתן להציג אותו דרך הגדרות ← ניהול כלים',
+      ),
+      ToolUnavailableReason.pluginDisabled when PluginSafeMode.isActive => (
+        'התוסף "$name" מושבת במצב בטוח',
+        'התוספים ייטענו שוב בהפעלה מחדש רגילה',
       ),
       ToolUnavailableReason.pluginDisabled => (
         'התוסף "$name" מושבת',

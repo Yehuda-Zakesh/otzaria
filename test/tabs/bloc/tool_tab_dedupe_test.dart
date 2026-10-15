@@ -10,6 +10,7 @@ import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/tabs/tabs_repository.dart';
+import 'package:otzaria/tools/tool_query.dart';
 
 import '../../helpers/memory_settings_cache.dart';
 
@@ -153,5 +154,73 @@ void main() {
     await pumpEventQueue();
 
     expect(bloc.state.tabs, [same(plugin)]);
+  });
+
+  group('בקשת חיפוש לכלי שכבר פתוח', () {
+    test('עוברת לטאב הקיים, והטאב הנכנס לא נוסף', () async {
+      final existing = tool('builtin.gematria');
+      bloc.add(AddTab(existing));
+      await pumpEventQueue();
+
+      final incoming = ToolTab(
+        toolId: 'builtin.gematria',
+        title: 'גימטריה',
+        query: const ToolQuery('26'),
+      );
+      bloc.add(OpenOrFocusTab(incoming));
+      await pumpEventQueue();
+
+      expect(bloc.state.tabs, [same(existing)]);
+      expect(existing.queryInbox.take()?.text, '26');
+    });
+
+    test('עוברת לחלונית הכלי בטאב מפוצל', () async {
+      final pane = tool('builtin.biographies');
+      bloc.add(AddTab(CombinedTab(rightTab: book('בראשית'), leftTab: pane)));
+      await pumpEventQueue();
+
+      bloc.add(
+        OpenOrFocusTab(
+          ToolTab(
+            toolId: 'builtin.biographies',
+            title: 'ביוגרפיות',
+            query: const ToolQuery('רש"י'),
+          ),
+        ),
+      );
+      await pumpEventQueue();
+
+      expect(pane.queryInbox.take()?.text, 'רש"י');
+    });
+
+    test('פתיחה בלי בקשה אינה מוחקת בקשה ממתינה', () async {
+      final existing = ToolTab(
+        toolId: 'builtin.gematria',
+        title: 'גימטריה',
+        query: const ToolQuery('26'),
+      );
+      bloc.add(AddTab(existing));
+      await pumpEventQueue();
+
+      bloc.add(OpenOrFocusTab(tool('builtin.gematria')));
+      await pumpEventQueue();
+
+      expect(existing.queryInbox.take()?.text, '26');
+    });
+  });
+  test('RenameTab מעדכן כותרת של חלונית בטאב מפוצל ופולט מצב', () async {
+    final pane = ToolTab(toolId: 'a.plugin', title: 'כלי');
+    final opened = bloc.stream.firstWhere((state) => state.tabs.length == 1);
+    bloc.add(
+      AddTab(CombinedTab(rightTab: pane, leftTab: book('בראשית'))),
+    );
+    await opened;
+
+    final renamed = bloc.stream.first;
+    bloc.add(RenameTab(pane, 'קידוש החודש'));
+    await renamed;
+
+    expect(pane.title, 'קידוש החודש');
+    expect(bloc.state.tabs.single, isA<CombinedTab>());
   });
 }

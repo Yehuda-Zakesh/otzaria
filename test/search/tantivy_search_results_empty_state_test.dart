@@ -178,7 +178,10 @@ void main() {
     expect(
       find.descendant(
         of: find.byType(CustomScrollView, skipOffstage: false),
-        matching: find.byType(ExternalSearchResultsSection, skipOffstage: false),
+        matching: find.byType(
+          ExternalSearchResultsSection,
+          skipOffstage: false,
+        ),
         skipOffstage: false,
       ),
       findsOneWidget,

@@ -241,6 +241,7 @@
 				33CC110E2044A8840003C045 /* Bundle Framework */,
 				3399D490228B24CF009A79C7 /* ShellScript */,
 				16797AFA96B7B4DB9F1DFFF3 /* [CP] Embed Pods Frameworks */,
+				5E0A1C2B2F00000100A0C0DE /* Embed ONNX Runtime */,
 			);
 			buildRules = (
 			);
@@ -422,6 +423,25 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
+		5E0A1C2B2F00000100A0C0DE /* Embed ONNX Runtime */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed ONNX Runtime";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "/bin/bash \"$PROJECT_DIR/../tool/onnxruntime/embed_onnxruntime_macos.sh\"\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -476,9 +496,9 @@
 			baseConfigurationReference = 46E41816851F2CD185804F3C /* Pods-RunnerTests.debug.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CURRENT_PROJECT_VERSION = 99702;
+				CURRENT_PROJECT_VERSION = 99800;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.9.97;
+				MARKETING_VERSION = 0.9.98;
 				PRODUCT_BUNDLE_IDENTIFIER = org.otzaria.otzaria.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
@@ -491,9 +511,9 @@
 			baseConfigurationReference = 483707C3999A110DB81D84C0 /* Pods-RunnerTests.release.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CURRENT_PROJECT_VERSION = 99702;
+				CURRENT_PROJECT_VERSION = 99800;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.9.97;
+				MARKETING_VERSION = 0.9.98;
 				PRODUCT_BUNDLE_IDENTIFIER = org.otzaria.otzaria.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
@@ -506,9 +526,9 @@
 			baseConfigurationReference = BEAAE3A967B4124B87E7E452 /* Pods-RunnerTests.profile.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CURRENT_PROJECT_VERSION = 99702;
+				CURRENT_PROJECT_VERSION = 99800;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 0.9.97;
+				MARKETING_VERSION = 0.9.98;
 				PRODUCT_BUNDLE_IDENTIFIER = org.otzaria.otzaria.RunnerTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;

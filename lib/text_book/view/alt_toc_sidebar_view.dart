@@ -25,6 +25,7 @@ import 'package:otzaria/text_book/utils/inline_section_markers.dart';
 import 'package:otzaria/text_book/utils/reading_segment_navigation.dart';
 import 'package:otzaria/widgets/navigation/nav_panel_search.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 
 /// "הלכות וסימנים" (`SimanNames`) ראשון — המבנה הראשון המתאים למיקום הוא
 /// שנפתח מעצמו; שאר המבנים בסדר המסד.
@@ -34,10 +35,17 @@ List<AltTocStructure> sidebarStructureOrder(List<AltTocStructure> structures) =>
       ...structures.where((s) => s.key != 'SimanNames'),
     ];
 
+final Expando<String> _matchTextCache = Expando<String>();
+
+/// הטקסט המנורמל של [entry] לאיתור. אינו תלוי בשאילתה, ולכן נשמר בין הקשות.
+@visibleForTesting
+String altTocEntryMatchText(AltTocEntry entry) =>
+    _matchTextCache[entry] ??= normalizeFindText(entry.text ?? '');
+
 class AltTocSidebarView extends StatefulWidget {
   final TextBook book;
   final void Function() closeLeftPaneCallback;
-  final ItemScrollController scrollController;
+  final LineScrollController lines;
 
   /// פוקוס-נוד לשדה החיפוש של הכותרות, מנוהל ע"י המסך האב כדי לאפשר
   /// פוקוס אוטומטי בפתיחת הפאנל ובמעבר ללשונית 'כותרות'.
@@ -52,7 +60,7 @@ class AltTocSidebarView extends StatefulWidget {
     super.key,
     required this.book,
     required this.closeLeftPaneCallback,
-    required this.scrollController,
+    required this.lines,
     this.focusNode,
     this.dibburim = const {},
     this.tableOfContents = const [],
@@ -248,8 +256,7 @@ class _AltTocSidebarViewState extends State<AltTocSidebarView>
     final results = <({int structureId, AltTocEntry entry})>[];
     for (final structure in _structures) {
       for (final entry in _flattenEntries(structure.id)) {
-        final entryText = normalizeFindText(entry.text ?? '');
-        if (entryText.contains(normalizedQuery)) {
+        if (altTocEntryMatchText(entry).contains(normalizedQuery)) {
           results.add((structureId: structure.id, entry: entry));
         }
       }
@@ -271,13 +278,23 @@ class _AltTocSidebarViewState extends State<AltTocSidebarView>
             if (_hasDibburimEntries) dibburimStructure,
           ];
           _isLoading = false;
-
-          // מבנה יחיד נפתח כברירת מחדל; הדיבורים נשארים מכווצים עד לחיצה.
-          if (_structures.length == 1 &&
-              _structures.single.id != kDibburimStructureId) {
-            _toggleStructure(_structures.first);
-          }
         });
+
+        if (_structures.length == 1) {
+          final structure = _structures.single;
+          if (structure.id == kDibburimStructureId) {
+            await _loadEntriesForStructure(structure.id);
+            if (!mounted) return;
+          }
+          // השמטת שם הספר יכולה להשאיר דיבורים ישירות בשורש.
+          if (structure.id != kDibburimStructureId ||
+              _structureRoots[structure.id]?.every(
+                    (entry) => entry.hasChildren,
+                  ) ==
+                  true) {
+            _toggleStructure(structure);
+          }
+        }
 
         // הפאנל בונה את התצוגה רק כשהוא נפתח, וה-BlocListener לא יירה על
         // ה-state ההתחלתי. גלילה ראשונית למיקום הפעיל אחרי טעינת המבנים.
@@ -554,13 +571,8 @@ class _AltTocSidebarViewState extends State<AltTocSidebarView>
     if (state is! TextBookLoaded) {
       return;
     }
-    final navigation = scrollToSourceLine(
-      scrollController: widget.scrollController,
-      scrollOffsetController: state.scrollOffsetController,
-      positionsListener: state.positionsListener,
-      segments: state.readingSegments,
-      lineIndex: lineIndex,
-      viewportExtent: context.size?.height ?? MediaQuery.sizeOf(context).height,
+    final navigation = widget.lines.scrollToLine(
+      lineIndex,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
     );

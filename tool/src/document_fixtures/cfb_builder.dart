@@ -36,11 +36,13 @@ class CfbBuilder {
         _Entry('e:${e.key}', e.key, e.value, inner: true),
     ];
 
-    // ‏4 משבצות בסקטור. הספרייה נפרסת על פני כמה סקטורים כשצריך: קיצוצה
+    // 4 משבצות בסקטור. הספרייה נפרסת על פני כמה סקטורים כשצריך: קיצוצה
     // לסקטור אחד מחק בשקט את הרשומות המוטמעות, והבדיקה שאמורה לכסות אותן
     // רצה על קובץ שאין בו כלום.
     final directorySectors =
-        (_directoryEntryCount(entries) * _directoryEntrySize + sectorSize - 1) ~/
+        (_directoryEntryCount(entries) * _directoryEntrySize +
+            sectorSize -
+            1) ~/
         sectorSize;
 
     final layout = _allocate(entries, directorySectors);
@@ -107,9 +109,9 @@ class CfbBuilder {
       bigStart[entry.key] = addSectors(entry.data);
     }
 
-    // ה-FAT הוא סקטור אחד (128 כניסות) ולכן חוסם את הקובץ ל-‎~64KB‎. חריגה
+    // ה-FAT הוא סקטור אחד (128 כניסות) ולכן חוסם את הקובץ ל-~64KB. חריגה
     // זורקת ולא נחתכת בשקט: fixture שנחתך אינו נכשל אלא בודק פחות ממה
-    // שנדמה. ‏DIFAT וריבוי סקטורי FAT אינם נדרשים ל-fixtures.
+    // שנדמה. DIFAT וריבוי סקטורי FAT אינם נדרשים ל-fixtures.
     final fat = List<int>.filled(sectorSize ~/ 4, freeSector)
       ..[0] = fatSector
       ..[1] = endOfChain;

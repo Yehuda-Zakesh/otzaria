@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:otzaria/theme/app_surfaces.dart';
 import 'package:otzaria/theme/app_tokens.dart';
@@ -8,6 +9,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/core/messages/library_messages.dart';
+import 'package:otzaria/core/messages/semantic_search_messages.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';
 import 'package:otzaria/history/bloc/history_event.dart';
 import 'package:otzaria/history/bloc/history_state.dart';
@@ -38,6 +40,7 @@ import 'package:otzaria/search/view/full_text_settings_widgets.dart';
 import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
+import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/searching_tab.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 import 'package:otzaria/widgets/controls/action_buttons.dart';
@@ -51,6 +54,16 @@ import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
 import 'package:otzaria/tour/tour_target_keys.dart';
+import 'package:otzaria/search_feedback/search_feedback_api.dart';
+import 'package:otzaria/search_feedback/search_feedback_service.dart';
+import 'package:otzaria/search_feedback/semantic_search_strings.dart';
+import 'package:otzaria/semantic_search/bloc/semantic_search_bloc.dart';
+import 'package:otzaria/semantic_search/models/semantic_availability.dart';
+import 'package:otzaria/semantic_search/models/semantic_mode_gate.dart';
+import 'package:otzaria/semantic_search/models/semantic_result_item.dart';
+import 'package:otzaria/semantic_search/repository/semantic_search_repository.dart';
+import 'package:otzaria/semantic_search/view/semantic_mode_panel.dart';
+import 'package:otzaria/tabs/models/semantic_search_tab.dart';
 
 typedef PluginSearchSubmitLauncher =
     void Function(String pluginId, Map<String, dynamic> payload);
@@ -104,6 +117,15 @@ class SearchDialog extends StatefulWidget {
   final PluginSearchDialogRegistry? pluginSearchDialogRegistry;
   final PluginSearchSubmitLauncher? pluginSearchSubmitLauncher;
 
+  /// ברירת המחדל: [SemanticSearchRepository.instance] (לבדיקות).
+  final SemanticSearchRepository? semanticRepository;
+
+  /// ברירת המחדל: [SearchFeedbackService.instance] (לבדיקות).
+  final SearchFeedbackConsentStore? semanticConsent;
+
+  /// האם מותרת התצוגה המקדימה של פיתוח; ברירת המחדל [kDebugMode].
+  final bool semanticDebugPreview;
+
   const SearchDialog({
     super.key,
     this.existingTab,
@@ -114,6 +136,9 @@ class SearchDialog extends StatefulWidget {
     this.initialSearchMode,
     this.pluginSearchDialogRegistry,
     this.pluginSearchSubmitLauncher,
+    this.semanticRepository,
+    this.semanticConsent,
+    this.semanticDebugPreview = kDebugMode,
   });
 
   @override
@@ -140,11 +165,46 @@ class _SearchDialogState extends State<SearchDialog> {
   Set<String> _scopeSelection = {'/'};
   final ValueNotifier<bool> _advancedControlsHasFocus = ValueNotifier(false);
   final MenuController _historyMenuController = MenuController();
+  final MenuController _defaultsMenuController = MenuController();
   late final VoidCallback _queryListener;
   late final bool _ownsSearchTab;
   late final PluginSearchDialogRegistry _pluginSearchDialogRegistry;
   late final Map<String, bool> _pluginSearchSelections;
   late final Map<String, bool> _persistedPluginSelections;
+
+  bool _semanticSelected = false;
+  bool _semanticIncludeLexical = true;
+  bool _semanticGroupIdentical = true;
+  bool _semanticSubmitted = false;
+  SemanticSearchBloc? _semanticBloc;
+  TabsBloc? _tabsBloc;
+
+  /// החיפוש נשלח לכרטיסייה חדשה, ולכן [SearchDialog.existingTab] זמני ומיותר.
+  bool _existingTabHandedOff = false;
+
+  /// חיפוש בספרייה, חדש או בעריכה; לא בתוך ספר (issue #1892).
+  bool get _supportsSemanticMode =>
+      widget.bookTitle == null &&
+      widget.onSearch == null &&
+      !widget.returnResultOnSubmit;
+
+  SemanticSearchTab? get _editedSemanticTab => switch (widget.editTab) {
+    final SemanticSearchTab tab => tab,
+    _ => null,
+  };
+
+  /// כרטיסייה חכמה בעריכה נשארת חכמה גם לפני שהזמינות נבדקה; אחרת הדיאלוג
+  /// נפתח במצב רגיל ו"עדכן חיפוש" פותח כרטיסייה רגילה חדשה (issue #1892).
+  bool _semanticVisible(SemanticAvailability? availability) =>
+      _editedSemanticTab != null ||
+      (availability != null &&
+          isSemanticModeVisible(
+            availability,
+            debug: widget.semanticDebugPreview,
+          ));
+
+  bool get _isSemanticActive =>
+      _semanticSelected && _semanticVisible(_semanticBloc?.state.availability);
 
   bool get _usesStagedSubmit =>
       widget.onSearch != null ||
@@ -183,28 +243,29 @@ class _SearchDialogState extends State<SearchDialog> {
       final lastTyping =
           Settings.getValue<String>('key-last-search-typing') ?? '';
 
-      // חיפוש חדש נפתח במצב ברירת המחדל (חיפוש רגיל/מדויק) עם המרווח
-      // השמור; שינוי מצב או מרווח נשמר לסשן הנוכחי בלבד — כמו אפשרויות
-      // החיפוש המתקדם.
-      final searchMode =
-          widget.initialSearchMode ?? SearchDefaults.initialModeForNewSearch();
-
-      _searchTab = SearchingTab(
+      // בלי העדפות תצוגת התוצאות: זה טאב השירות של הדיאלוג, והמיון/האיחוד
+      // שלו נראים רק בבקשת החיפוש שנשלחת לתוספים.
+      _searchTab = SearchingTab.newSearch(
         "חיפוש",
         lastTyping,
-        // בלי העדפות תצוגת התוצאות: זה טאב השירות של הדיאלוג, והמיון/האיחוד
-        // שלו נראים רק בבקשת החיפוש שנשלחת לתוספים.
-        initialConfiguration: SearchConfiguration(
-          searchMode: searchMode,
-          distance: searchMode == SearchMode.fuzzy
-              ? kMaxFuzzyDistance
-              : SearchDefaults.initialDistanceForNewSearch(),
-        ),
+        mode: widget.initialSearchMode,
+        withResultPreferences: false,
       );
-
-      // חיפוש חדש נפתח עם אפשרויות ברירת המחדל של המצב שבו הוא נפתח
-      // (או מצב הסשן הנוכחי) — לכל מצב חיפוש ברירות מחדל משלו
-      _searchTab.globalSearchOptions.addAll(_initialOptionsForMode(searchMode));
+    }
+    if (widget.existingTab != null) _tabsBloc = context.read<TabsBloc?>();
+    if (_supportsSemanticMode) {
+      _semanticBloc = SemanticSearchBloc(
+        repository:
+            widget.semanticRepository ?? SemanticSearchRepository.instance,
+      )..add(const SemanticSearchStarted());
+      // מצב מבוקש במפורש (קיצור חיפוש מתקדם, איתור) וכרטיסייה בעריכה
+      // גוברים על זיכרון הסשן.
+      _semanticSelected =
+          _editedSemanticTab != null ||
+          (SearchDefaults.initialSemanticForNewSearch() &&
+              widget.initialSearchMode == null &&
+              widget.existingTab == null &&
+              widget.editTab == null);
     }
     _pluginSearchSelections = Map<String, bool>.from(
       _searchTab.searchBloc.state.configuration.pluginSearchSelections,
@@ -240,6 +301,12 @@ class _SearchDialogState extends State<SearchDialog> {
           : Set<String>.from(persisted.manualFacets);
     }
     _scopeSelection = {...categories, ...dimensions};
+    final editedOptions = _editedSemanticTab?.options;
+    if (editedOptions != null) {
+      _scopeSelection = editedOptions.facets.toSet();
+      _semanticIncludeLexical = editedOptions.includeLexical;
+      _semanticGroupIdentical = editedOptions.groupIdenticalText;
+    }
 
     // מאזין לשינויים בתיבת החיפוש כדי לעדכן את האפשרויות ולשמור את ההקלדה
     _queryListener = () {
@@ -355,7 +422,7 @@ class _SearchDialogState extends State<SearchDialog> {
                 onPressed: () {
                   Navigator.of(context).pop();
                   mainWindowScreenKey.currentState?.handleInternalDeepLink(
-                    'otzaria://settings/library',
+                    'otzaria://open/settings/library',
                   );
                 },
               ),
@@ -410,9 +477,11 @@ class _SearchDialogState extends State<SearchDialog> {
   }
 
   /// קביעת מצב החיפוש הנוכחי כמצב שבו ייפתח כל חיפוש חדש. הפריט בתפריט
-  /// נלחץ בטעות, ולכן השמירה עוברת דרך אישור.
-  Future<void> _confirmSetModeAsDefault(SearchMode mode) async {
-    final modeLabel = context.settingsText(mode.shortLabel);
+  /// נלחץ בטעות, ולכן השמירה עוברת דרך אישור. [mode] הוא null במצב החכם.
+  Future<void> _confirmSetModeAsDefault(SearchMode? mode) async {
+    final modeLabel = context.settingsText(
+      mode?.shortLabel ?? kSemanticSearchModeLabel,
+    );
     final confirmed = await showTwoActionsDialog(
       context: context,
       title: context.settingsText('קביעת מצב ברירת המחדל'),
@@ -424,14 +493,23 @@ class _SearchDialogState extends State<SearchDialog> {
       confirmText: context.settingsText('קבע כברירת מחדל'),
     );
     if (confirmed != true) return;
-    SearchDefaults.saveModeDefault(mode);
+    if (mode == null) {
+      SearchDefaults.saveSemanticDefault();
+    } else {
+      SearchDefaults.saveModeDefault(mode);
+    }
     UiSnack.show(LibraryMessages.searchModeSetAsDefault(modeLabel));
   }
 
   /// תפריט ברירות המחדל של המצב הנוכחי — פעולה נדירה, ולכן בתפריט
   /// בשורה התחתונה ולא בגוף החלונית.
-  Widget _buildDefaultsMenu(SearchState state) {
+  Widget _buildDefaultsMenu(
+    SearchState state, {
+    required bool semanticActive,
+  }) {
     final mode = state.configuration.searchMode;
+    // אפשרויות המילה והמרווח שייכים למצב הלקסיקלי, ואינם חלים על החכם.
+    final hasWordOptions = !semanticActive && mode != SearchMode.fuzzy;
     final isExact = mode == SearchMode.exact;
     final disabledOptionIds = _disabledSearchOptionIds(state);
     final defaults = isExact
@@ -471,25 +549,25 @@ class _SearchDialogState extends State<SearchDialog> {
         if (!isExact) _searchTab.searchOptions.clear();
       });
       _searchTab.searchOptionsChanged.value++;
-      if (isExact) {
-        final savedDistance = SearchDefaults.loadDistanceDefault();
-        _searchTab.searchBloc.add(
-          _usesStagedSubmit
-              ? UpdateDistanceWithoutSearch(savedDistance)
-              : UpdateDistance(savedDistance),
-        );
-      }
+      final savedDistance = SearchDefaults.loadDistanceDefault();
+      _searchTab.searchBloc.add(
+        _usesStagedSubmit
+            ? UpdateDistanceWithoutSearch(savedDistance)
+            : UpdateDistance(savedDistance),
+      );
     }
 
     return MenuAnchor(
+      controller: _defaultsMenuController,
       menuChildren: [
         MenuItemButton(
           key: const ValueKey('search-dialog-default-mode'),
           leadingIcon: const Icon(FluentIcons.bookmark_24_regular),
-          onPressed: () => _confirmSetModeAsDefault(mode),
+          onPressed: () =>
+              _confirmSetModeAsDefault(semanticActive ? null : mode),
           child: Text(context.settingsText('קבע מצב זה כברירת מחדל')),
         ),
-        if (mode != SearchMode.fuzzy)
+        if (hasWordOptions)
           SubmenuButton(
             menuChildren: [
               for (final key in keys)
@@ -504,26 +582,24 @@ class _SearchDialogState extends State<SearchDialog> {
                       : (checked) => saveDefault(key, checked ?? false),
                   child: Text(isExact ? context.settingsText(key) : key),
                 ),
-              if (isExact) ...[
-                const Divider(height: 8),
-                MenuItemButton(
-                  closeOnActivate: false,
-                  onPressed: () {
-                    setState(() {
-                      SearchDefaults.saveDistanceDefault(state.distance);
-                    });
-                    UiSnack.show(
-                      LibraryMessages.distanceSetAsDefault(state.distance),
-                    );
-                  },
-                  child: Text(
-                    context.settingsText(
-                      'קבע את המרווח הנוכחי ({distance}) כברירת מחדל',
-                      args: {'distance': state.distance},
-                    ),
+              const Divider(height: 8),
+              MenuItemButton(
+                closeOnActivate: false,
+                onPressed: () {
+                  setState(() {
+                    SearchDefaults.saveDistanceDefault(state.distance);
+                  });
+                  UiSnack.show(
+                    LibraryMessages.distanceSetAsDefault(state.distance),
+                  );
+                },
+                child: Text(
+                  context.settingsText(
+                    'קבע את המרווח הנוכחי ({distance}) כברירת מחדל',
+                    args: {'distance': state.distance},
                   ),
                 ),
-              ],
+              ),
             ],
             leadingIcon: const Icon(FluentIcons.options_24_regular),
             child: Text(
@@ -532,7 +608,7 @@ class _SearchDialogState extends State<SearchDialog> {
                   : context.settingsText('קביעת ברירת מחדל לחיפוש מתקדם'),
             ),
           ),
-        if (mode != SearchMode.fuzzy)
+        if (hasWordOptions)
           MenuItemButton(
             leadingIcon: const Icon(FluentIcons.arrow_reset_24_regular),
             onPressed: resetToDefaults,
@@ -640,6 +716,8 @@ class _SearchDialogState extends State<SearchDialog> {
     if (restorer != null) FocusRepository().unregisterActiveRestorer(restorer);
     _searchTab.queryController.removeListener(_queryListener);
     _advancedControlsHasFocus.dispose();
+    _semanticBloc?.close();
+    _disposeHandedOffExistingTab();
     if (_ownsSearchTab) {
       if (widget.editTab == null) {
         // מצב החיפוש והפרמטרים (אפשרויות לפי מצב + מרווח) נשמרים לסשן
@@ -656,14 +734,13 @@ class _SearchDialogState extends State<SearchDialog> {
     super.dispose();
   }
 
-  /// האפשרויות הגלובליות שאיתן נפתח חיפוש חדש במצב [mode] — לכל מצב
-  /// ברירות מחדל וזיכרון-סשן משלו (במקורב אין אפשרויות מילה).
-  Map<String, bool> _initialOptionsForMode(SearchMode mode) {
-    return switch (mode) {
-      SearchMode.advanced => SearchDefaults.initialOptionsForNewSearch(),
-      SearchMode.exact => SearchDefaults.initialExactOptionsForNewSearch(),
-      SearchMode.fuzzy => const {},
-    };
+  /// טאב זמני שנמסר לדיאלוג (איתור, ספרייה) ואינו פתוח — נסגר עם ה-bloc שלו.
+  void _disposeHandedOffExistingTab() {
+    final existing = widget.existingTab;
+    final tabsBloc = _tabsBloc;
+    if (existing == null || !_existingTabHandedOff || tabsBloc == null) return;
+    final open = tabsBloc.state.tabs.expand(leafPanes);
+    if (!open.any((tab) => identical(tab, existing))) existing.dispose();
   }
 
   /// משמר את האפשרויות הגלובליות הנוכחיות לזיכרון-הסשן של [mode].
@@ -694,7 +771,7 @@ class _SearchDialogState extends State<SearchDialog> {
     setState(() {
       _searchTab.globalSearchOptions
         ..clear()
-        ..addAll(_initialOptionsForMode(newMode));
+        ..addAll(SearchDefaults.initialOptionsForMode(newMode));
       if (newMode == SearchMode.exact) {
         // במצב הרגיל אין עורך פר-מילה — הסימון תמיד גלובלי.
         _searchTab.useGlobalSearchOptions.value = true;
@@ -710,6 +787,10 @@ class _SearchDialogState extends State<SearchDialog> {
       providerInitialized: TantivyDataProvider.instance.isInitialized.value,
     )) {
       UiSnack.showError(LibraryMessages.searchIndexMissing);
+      return;
+    }
+    if (_isSemanticActive) {
+      _performSemanticSearch();
       return;
     }
 
@@ -864,7 +945,8 @@ class _SearchDialogState extends State<SearchDialog> {
       return;
     }
 
-    if (widget.editTab != null) {
+    // מעבר מחיפוש חכם לחיפוש רגיל פותח כרטיסייה חדשה.
+    if (widget.editTab != null && _editedSemanticTab == null) {
       _applyEditToTarget(
         query: query,
         negativeQuery: negativeQuery,
@@ -955,6 +1037,7 @@ class _SearchDialogState extends State<SearchDialog> {
     Navigator.of(context).pop();
 
     // פתיחת טאב חדש תמיד
+    _existingTabHandedOff = true;
     final tabsBloc = context.read<TabsBloc>();
     final navigationBloc = context.read<NavigationBloc>();
 
@@ -962,6 +1045,128 @@ class _SearchDialogState extends State<SearchDialog> {
 
     // מעבר למסך העיון
     navigationBloc.add(const NavigateToScreen(Screen.search));
+  }
+
+  /// בלי הסכמה או בלי נתונים אין חיפוש; הדיאלוג עצמו אינו רושם דבר.
+  void _performSemanticSearch() {
+    final availability = _semanticBloc?.state.availability;
+    if (_semanticSubmitted ||
+        availability == null ||
+        !canRunSemanticSearch(
+          availability,
+          debug: widget.semanticDebugPreview,
+        )) {
+      return;
+    }
+    final library = context.read<LibraryBloc>().state.library;
+    final parsedCategory = parseCategoryQuery(
+      _searchTab.queryController.text,
+      library,
+    );
+    if (parsedCategory.hasCategoryToken && !parsedCategory.categoryFound) {
+      UiSnack.showError(
+        LibraryMessages.categoryOrBookNotFound(parsedCategory.notFoundNames),
+      );
+      return;
+    }
+    final query = parsedCategory.query;
+    if (query.trim().isEmpty) {
+      UiSnack.show(LibraryMessages.emptySearchQuery);
+      return;
+    }
+    final isOfficialCategory = officialCategoryFilter(library);
+    if (parsedCategory.categoryFound &&
+        !parsedCategory.facets!.toSet().every(
+          (facet) => isSemanticScopeFacetSupported(
+            facet,
+            isOfficialCategory: isOfficialCategory,
+          ),
+        )) {
+      UiSnack.showError(SemanticSearchMessages.unsupportedScope);
+      return;
+    }
+    _semanticSubmitted = true;
+    _existingTabHandedOff = true;
+    SearchDefaults.rememberSessionSemantic(true);
+    final options = SemanticQueryOptions(
+      query: query,
+      facets: semanticScopeFacets(
+        parsedCategory.categoryFound
+            ? [
+                ...parsedCategory.facets!,
+                ...FacetHelper.dimensionFacetsOf(_scopeSelection),
+              ]
+            : _scopeSelection,
+        isOfficialCategory: parsedCategory.categoryFound
+            ? null
+            : isOfficialCategory,
+      ),
+      includeLexical: _semanticIncludeLexical,
+      groupIdenticalText: _semanticGroupIdentical,
+    );
+    final edited = _editedSemanticTab;
+    if (edited != null) {
+      Navigator.of(context).pop();
+      edited.submit(options);
+      return;
+    }
+    final tab = SemanticSearchTab(runOnFirstShow: true, options: options);
+    final tabsBloc = context.read<TabsBloc>();
+    final navigationBloc = context.read<NavigationBloc>();
+    Navigator.of(context).pop();
+    tabsBloc.add(AddTab(tab));
+    navigationBloc.add(const NavigateToScreen(Screen.search));
+  }
+
+  SearchFeedbackConsentStore get _semanticConsentStore =>
+      widget.semanticConsent ?? SearchFeedbackService.instance;
+
+  Future<void> _grantSemanticConsent() async {
+    await _semanticConsentStore.grant();
+    if (!mounted) return;
+    _semanticBloc?.add(const SemanticSearchStarted());
+  }
+
+  Future<void> _declineSemanticConsent() async {
+    await _semanticConsentStore.decline();
+    SearchDefaults.rememberSessionSemantic(false);
+    if (mounted) setState(() => _semanticSelected = false);
+  }
+
+  /// מספק את זמינות המצב הסמנטי; `null` כשהמצב אינו נתמך בדיאלוג הזה.
+  Widget _withSemanticAvailability(
+    Widget Function(SemanticAvailability? availability) builder,
+  ) {
+    final bloc = _semanticBloc;
+    if (bloc == null) return builder(null);
+    return BlocBuilder<SemanticSearchBloc, SemanticSearchState>(
+      bloc: bloc,
+      builder: (context, state) => builder(state.availability),
+    );
+  }
+
+  Widget _buildSemanticPanel(SemanticAvailability availability) {
+    return SemanticModePanel(
+      availability: availability,
+      debug: widget.semanticDebugPreview,
+      queryController: _searchTab.queryController,
+      queryFocusNode: _searchTab.searchFieldFocusNode,
+      scopeSelection: _scopeSelection,
+      onScopeChanged: _onScopeChanged,
+      includeLexical: _semanticIncludeLexical,
+      onIncludeLexicalChanged: (value) =>
+          setState(() => _semanticIncludeLexical = value),
+      groupIdenticalText: _semanticGroupIdentical,
+      onGroupIdenticalTextChanged: (value) =>
+          setState(() => _semanticGroupIdentical = value),
+      onSubmit: _performSearch,
+      onGrantConsent: _grantSemanticConsent,
+      onDeclineConsent: _declineSemanticConsent,
+      queryTrailingAction: _buildHistoryButton(),
+      onDownload: () => _semanticBloc?.add(const SemanticDownloadRequested()),
+      onCancelDownload: () =>
+          _semanticBloc?.add(const SemanticDownloadCancelRequested()),
+    );
   }
 
   bool _openSelectedPluginSearchTargets({
@@ -1180,21 +1385,84 @@ class _SearchDialogState extends State<SearchDialog> {
   }
 
   /// בורר מצב החיפוש — שלושה מקטעים ברוחב מלא; ההסבר של כל מצב ב-tooltip.
-  Widget _buildModeSelector(BuildContext context, SearchState state) {
+  Widget _buildModeSelector(
+    BuildContext context,
+    SearchState state,
+    SemanticAvailability? semanticAvailability,
+  ) {
     final colorScheme = Theme.of(context).colorScheme;
     final currentMode = state.configuration.searchMode;
+    final semanticVisible = _semanticVisible(semanticAvailability);
+    final semanticActive = _semanticSelected && semanticVisible;
 
-    Widget buildSegment(IconData icon, SearchMode mode) {
-      final isSelected = currentMode == mode;
+    Widget segmentBody(IconData icon, String label, bool isSelected) {
       final foreground = isSelected
           ? colorScheme.onSecondaryContainer
           : colorScheme.onSurfaceVariant;
+      return AnimatedContainer(
+        duration: AppTokens.animFast,
+        decoration: BoxDecoration(
+          color: isSelected
+              ? colorScheme.secondaryContainer
+              : colorScheme.surfaceContainerHigh,
+          borderRadius: AppTokens.borderRadiusAll,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: foreground),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                  color: foreground,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget buildSemanticSegment() {
+      return Expanded(
+        child: Tooltip(
+          message: context.settingsText(
+            'מוצא קטעים שעוסקים בעניין שתיארתם, גם כשהמילים שונות.',
+          ),
+          waitDuration: const Duration(milliseconds: 400),
+          child: InkWell(
+            key: const ValueKey('search-dialog-semantic-mode'),
+            onTap: () {
+              setState(() => _semanticSelected = true);
+              SearchDefaults.rememberSessionSemantic(true);
+              _searchTab.searchFieldFocusNode.requestFocus();
+            },
+            borderRadius: AppTokens.borderRadiusAll,
+            child: segmentBody(
+              FluentIcons.lightbulb_24_regular,
+              context.settingsText(kSemanticSearchModeLabel),
+              semanticActive,
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget buildSegment(IconData icon, SearchMode mode) {
+      final isSelected = !semanticActive && currentMode == mode;
       return Expanded(
         child: Tooltip(
           message: context.settingsText(mode.tooltip),
           waitDuration: const Duration(milliseconds: 400),
           child: InkWell(
             onTap: () {
+              _semanticSelected = false;
+              SearchDefaults.rememberSessionSemantic(false);
               final oldMode =
                   _searchTab.searchBloc.state.configuration.searchMode;
               _searchTab.searchBloc.add(
@@ -1207,31 +1475,10 @@ class _SearchDialogState extends State<SearchDialog> {
               _searchTab.searchFieldFocusNode.requestFocus();
             },
             borderRadius: AppTokens.borderRadiusAll,
-            child: AnimatedContainer(
-              duration: AppTokens.animFast,
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? colorScheme.secondaryContainer
-                    : colorScheme.surfaceContainerHigh,
-                borderRadius: AppTokens.borderRadiusAll,
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(icon, size: 18, color: foreground),
-                  const SizedBox(width: 6),
-                  Text(
-                    context.settingsText(mode.shortLabel),
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.w400,
-                      color: foreground,
-                    ),
-                  ),
-                ],
-              ),
+            child: segmentBody(
+              icon,
+              context.settingsText(mode.shortLabel),
+              isSelected,
             ),
           ),
         ),
@@ -1257,6 +1504,7 @@ class _SearchDialogState extends State<SearchDialog> {
                 FluentIcons.arrow_bidirectional_left_right_24_regular,
                 SearchMode.fuzzy,
               ),
+              if (semanticVisible) buildSemanticSegment(),
             ],
           ),
         ),
@@ -1264,48 +1512,53 @@ class _SearchDialogState extends State<SearchDialog> {
     );
   }
 
-  /// שדה החיפוש עם כפתור ההיסטוריה, ומתחתיו שורה אחת של "איפה ואיך":
-  /// היקף החיפוש ופקד המרווח/המרחק.
-  Widget _buildQueryRow() {
+  /// כפתור היסטוריית החיפושים שבסוף שדה החיפוש.
+  Widget _buildHistoryButton() {
     final colorScheme = Theme.of(context).colorScheme;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final historyMenuWidth = screenWidth < 420 ? screenWidth - 48 : 360.0;
+    return MenuAnchor(
+      controller: _historyMenuController,
+      alignmentOffset: const Offset(0, 4),
+      style: MenuStyle(
+        padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+        backgroundColor: WidgetStatePropertyAll(
+          colorScheme.surfaceContainerHigh,
+        ),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(
+            borderRadius: AppTokens.borderRadiusAll,
+            side: BorderSide(color: colorScheme.outlineVariant),
+          ),
+        ),
+      ),
+      menuChildren: [
+        SizedBox(width: historyMenuWidth, child: _buildHistoryDropdown()),
+      ],
+      builder: (context, controller, _) => IconButton(
+        icon: Icon(
+          controller.isOpen
+              ? FluentIcons.chevron_up_24_regular
+              : FluentIcons.history_24_regular,
+          size: 24,
+        ),
+        tooltip: context.settingsText('היסטוריית חיפושים'),
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(),
+        onPressed: () =>
+            controller.isOpen ? controller.close() : controller.open(),
+      ),
+    );
+  }
+
+  /// שדה החיפוש עם כפתור ההיסטוריה, ומתחתיו שורה אחת של "איפה ואיך":
+  /// היקף החיפוש ופקד המרווח/המרחק.
+  Widget _buildQueryRow() {
     final searchField = EnhancedSearchField(
       key: enhancedSearchFieldKey,
       widget: _SearchDialogWrapper(tab: _searchTab),
       onSubmit: _performSearch,
-      trailingAction: MenuAnchor(
-        controller: _historyMenuController,
-        alignmentOffset: const Offset(0, 4),
-        style: MenuStyle(
-          padding: const WidgetStatePropertyAll(EdgeInsets.zero),
-          backgroundColor: WidgetStatePropertyAll(
-            colorScheme.surfaceContainerHigh,
-          ),
-          shape: WidgetStatePropertyAll(
-            RoundedRectangleBorder(
-              borderRadius: AppTokens.borderRadiusAll,
-              side: BorderSide(color: colorScheme.outlineVariant),
-            ),
-          ),
-        ),
-        menuChildren: [
-          SizedBox(width: historyMenuWidth, child: _buildHistoryDropdown()),
-        ],
-        builder: (context, controller, _) => IconButton(
-          icon: Icon(
-            controller.isOpen
-                ? FluentIcons.chevron_up_24_regular
-                : FluentIcons.history_24_regular,
-            size: 24,
-          ),
-          tooltip: context.settingsText('היסטוריית חיפושים'),
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(),
-          onPressed: () =>
-              controller.isOpen ? controller.close() : controller.open(),
-        ),
-      ),
+      trailingAction: _buildHistoryButton(),
     );
 
     final distanceWidget = FuzzyDistance(
@@ -1596,7 +1849,13 @@ class _SearchDialogState extends State<SearchDialog> {
       child: Row(
         children: [
           BlocBuilder<SearchBloc, SearchState>(
-            builder: (context, state) => _buildDefaultsMenu(state),
+            builder: (context, state) => _withSemanticAvailability(
+              (availability) => _buildDefaultsMenu(
+                state,
+                semanticActive:
+                    _semanticSelected && _semanticVisible(availability),
+              ),
+            ),
           ),
           const Spacer(),
           ValueListenableBuilder<bool>(
@@ -1605,23 +1864,42 @@ class _SearchDialogState extends State<SearchDialog> {
               final blocked = isSearchBlockedByMissingIndex(
                 providerInitialized: providerInitialized,
               );
-              return Tooltip(
-                message: blocked
-                    ? context.settingsText(
-                        'אינדקס לא קיים, לא ניתן לבצע חיפוש זה ללא אינדקס',
-                      )
-                    : context.settingsText('חפש'),
-                child: ActionButton.recommended(
-                  text: widget.editTab != null
-                      ? context.settingsText('עדכן חיפוש')
-                      : context.settingsText('חפש'),
-                  icon: FluentIcons.search_24_regular,
-                  onPressed: blocked ? null : _performSearch,
+              return _withSemanticAvailability(
+                (semanticAvailability) => _buildSearchButton(
+                  blocked: blocked,
+                  semanticBlocked:
+                      _semanticSelected &&
+                      _semanticVisible(semanticAvailability) &&
+                      !canRunSemanticSearch(
+                        semanticAvailability!,
+                        debug: widget.semanticDebugPreview,
+                      ),
                 ),
               );
             },
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSearchButton({
+    required bool blocked,
+    required bool semanticBlocked,
+  }) {
+    return Tooltip(
+      message: blocked
+          ? context.settingsText(
+              'אינדקס לא קיים, לא ניתן לבצע חיפוש זה ללא אינדקס',
+            )
+          : context.settingsText('חפש'),
+      child: ActionButton.recommended(
+        key: const ValueKey('search-dialog-submit'),
+        text: widget.editTab != null
+            ? context.settingsText('עדכן חיפוש')
+            : context.settingsText('חפש'),
+        icon: FluentIcons.search_24_regular,
+        onPressed: blocked || semanticBlocked ? null : _performSearch,
       ),
     );
   }
@@ -1657,6 +1935,20 @@ class _SearchDialogState extends State<SearchDialog> {
               _performSearch();
               return KeyEventResult.handled;
             }
+            // התפריטים נפתחים בלי להזיז את הפוקוס מהשדה, ולכן Escape מגיע לכאן
+            // ולא לתפריט — סוגרים קודם תפריט פתוח, ורק אחר כך את הדיאלוג.
+            if (event is KeyDownEvent &&
+                event.logicalKey == LogicalKeyboardKey.escape) {
+              for (final menu in [
+                _historyMenuController,
+                _defaultsMenuController,
+              ]) {
+                if (menu.isOpen) {
+                  menu.close();
+                  return KeyEventResult.handled;
+                }
+              }
+            }
             return KeyEventResult.ignored;
           },
           child: SizedBox(
@@ -1674,36 +1966,55 @@ class _SearchDialogState extends State<SearchDialog> {
                       listenable: _pluginSearchDialogRegistry,
                       builder: (context, _) =>
                           BlocBuilder<SearchBloc, SearchState>(
-                            builder: (context, state) {
-                              final modeContent = _buildModeContent(state);
-                              final moreOptions = _buildMoreOptions(state);
-                              return SingleChildScrollView(
-                                padding: EdgeInsets.fromLTRB(
-                                  horizontalPadding,
-                                  8,
-                                  horizontalPadding,
-                                  8,
-                                ),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    _buildIndexWarning(),
-                                    _buildModeSelector(context, state),
-                                    const SizedBox(height: 12),
-                                    _buildQueryRow(),
-                                    if (modeContent != null) ...[
-                                      const SizedBox(height: 12),
-                                      modeContent,
-                                    ],
-                                    if (moreOptions != null) ...[
-                                      const SizedBox(height: 4),
-                                      moreOptions,
-                                    ],
-                                  ],
-                                ),
-                              );
-                            },
+                            builder: (context, state) =>
+                                _withSemanticAvailability((
+                                  semanticAvailability,
+                                ) {
+                                  final semanticActive =
+                                      _semanticSelected &&
+                                      _semanticVisible(semanticAvailability);
+                                  final modeContent = semanticActive
+                                      ? null
+                                      : _buildModeContent(state);
+                                  final moreOptions = semanticActive
+                                      ? null
+                                      : _buildMoreOptions(state);
+                                  return SingleChildScrollView(
+                                    padding: EdgeInsets.fromLTRB(
+                                      horizontalPadding,
+                                      8,
+                                      horizontalPadding,
+                                      8,
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        _buildIndexWarning(),
+                                        _buildModeSelector(
+                                          context,
+                                          state,
+                                          semanticAvailability,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        if (semanticActive)
+                                          _buildSemanticPanel(
+                                            semanticAvailability!,
+                                          )
+                                        else
+                                          _buildQueryRow(),
+                                        if (modeContent != null) ...[
+                                          const SizedBox(height: 12),
+                                          modeContent,
+                                        ],
+                                        if (moreOptions != null) ...[
+                                          const SizedBox(height: 4),
+                                          moreOptions,
+                                        ],
+                                      ],
+                                    ),
+                                  );
+                                }),
                           ),
                     ),
                   ),

@@ -13,7 +13,7 @@ class WordPiece {
   const WordPiece(this.text, {this.compressed = false});
 }
 
-/// בונה מסמך Word בינארי (‎.doc‎ / ‎.dot‎) תקין: מכולת CFB עם זרם
+/// בונה מסמך Word בינארי (.doc / .dot) תקין: מכולת CFB עם זרם
 /// `WordDocument` שבראשו FIB, וזרם `1Table` עם CLX ו-piece table אמיתיים.
 ///
 /// **מקור יחיד** למחולל הקורפוס ולבדיקות — ראו [CfbBuilder].
@@ -138,7 +138,7 @@ _TableStream _buildTableStream({
   }
 
   if (footnoteCount > 0) {
-    // PlcffndRef: ‏(n+1) מיקומי CP בגוף, ואחריהם n מבני FRD בני 2 בתים.
+    // PlcffndRef: (n+1) מיקומי CP בגוף, ואחריהם n מבני FRD בני 2 בתים.
     align();
     final refs = Uint8List(4 * (footnoteCount + 1) + 2 * footnoteCount);
     final refsView = ByteData.sublistView(refs);
@@ -206,7 +206,7 @@ Uint8List _utf16(String text) {
   return bytes;
 }
 
-/// CLX = ‏Pcdt עם PlcPcd: ‏(n+1) מיקומי CP ואחריהם n מתארי חתיכה בני 8 בתים.
+/// CLX = Pcdt עם PlcPcd: (n+1) מיקומי CP ואחריהם n מתארי חתיכה בני 8 בתים.
 Uint8List _buildClx(
   List<WordPiece> pieces,
   List<int> offsets,

@@ -16,14 +16,14 @@ import 'shell_quote.dart';
 /// `null` כשהאפליקציה רצה ממיקום שאינו מתאים לעדכון עצמי:
 /// - App Translocation (הרצה ראשונה מקובץ עם quarantine) — הנתיב אקראי
 ///   וקריאה-בלבד, וההחלפה לא תגיע להתקנה האמיתית.
-/// - הרצה ישירות מתוך DMG (תחת ‎/Volumes‎) — כרך קריאה-בלבד.
+/// - הרצה ישירות מתוך DMG (תחת /Volumes) — כרך קריאה-בלבד.
 ///
 /// [executablePath] ניתן להזרקה בטסטים; ברירת המחדל היא
 /// [Platform.resolvedExecutable] (למשל
 /// `/Applications/אוצריא.app/Contents/MacOS/אוצריא`).
 String? findInstalledMacAppBundlePath({String? executablePath}) {
   final exe = executablePath ?? Platform.resolvedExecutable;
-  // המבנה הקבוע של bundle:‏ <app>.app/Contents/MacOS/<binary>
+  // המבנה הקבוע של bundle: <app>.app/Contents/MacOS/<binary>
   final bundle = p.dirname(p.dirname(p.dirname(exe)));
   if (!bundle.endsWith('.app')) return null;
   if (bundle.contains('/AppTranslocation/')) return null;

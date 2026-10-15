@@ -190,7 +190,7 @@ Future<void> main() async {
   }
 
   /// הרף: הפרש קבוע קטן מעל המקרה הזעיר, בתוספת מרווח יחסי שגדל יחד עם
-  /// רעש התזמון של המכונה. הרגרסיה שנמדדה הייתה ‎+500ms ומעלה.
+  /// רעש התזמון של המכונה. הרגרסיה שנמדדה הייתה +500ms ומעלה.
   void expectScanFree(Duration small, Duration large, String scenario) {
     final limit = (small.inMilliseconds * 1.6 + 150).round();
     expect(

@@ -273,6 +273,38 @@ void main() {
 
         expect(opened, r'C:\root\index');
       },
+      variant: TargetPlatformVariant.desktop(),
+    );
+
+    testWidgets(
+      'במובייל אין "פתח תיקייה..." — אין מנהל קבצים לפתוח בו (issue #2191)',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(
+            SettingsActionTile.pathTile(
+              icon: icon,
+              title: title,
+              currentPath: '/data/otzaria',
+              onFolderChanged: (_) async {},
+              onOpenFolder: () {},
+              requestChangeLocation: (_) async {},
+              changeLocationLabel: 'מתקדם',
+              pathTargets: const [
+                PathTarget(label: 'ספרייה', path: '/data/otzaria/books'),
+              ],
+            ),
+          ),
+        );
+        await tester.tap(find.text('אפשרויות מיקום'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('פתח תיקייה...'), findsNothing);
+        expect(find.text('מתקדם'), findsOneWidget);
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.android,
+        TargetPlatform.iOS,
+      }),
     );
 
     testWidgets(

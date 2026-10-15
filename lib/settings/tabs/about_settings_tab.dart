@@ -16,7 +16,6 @@ import 'package:otzaria/settings/tabs/about_settings_data.dart';
 import 'package:otzaria/settings/view/settings_screen.dart';
 import 'package:otzaria/settings/widgets/settings_widgets_exports.dart';
 import 'package:otzaria/widgets/dialogs/ad_popup_dialog.dart';
-import 'package:otzaria/utils/ui/image_decode_size.dart';
 import 'package:otzaria/settings/widgets/settings_tab_scroll_view.dart';
 
 /// פותח כתובת URL בדפדפן החיצוני.
@@ -59,14 +58,6 @@ class AboutSettingsTab extends StatelessWidget {
       tab: SettingsTab.about,
       cardId: 'about.aid',
       keywords: ['סיוע', 'תורה', 'לומדי תורה', 'עזרה'],
-    ),
-    SettingsSearchEntry(
-      id: 'about.editing',
-      title: 'הצטרף לצוות העריכה ומהדירי הספרים',
-      subtitle: 'עזור לנו להוסיף ספרים חדשים לספריית אוצריא',
-      tab: SettingsTab.about,
-      cardId: 'about.library',
-      keywords: ['עריכה', 'הצטרף', 'הוספת ספרים'],
     ),
     SettingsSearchEntry(
       id: 'about.dev',
@@ -270,22 +261,6 @@ class AboutSettingsTab extends StatelessWidget {
                     ],
                   ),
                 ),
-                SettingsActionTile.text(
-                  icon: FluentIcons.edit_24_regular,
-                  title: context.settingsText(
-                    'הצטרף לצוות העריכה ומהדירי הספרים',
-                  ),
-                  subtitle: context.settingsText(
-                    'עזור לנו להוסיף ספרים חדשים לספריית אוצריא',
-                  ),
-                  actions: [
-                    ActionButton.recommended(
-                      text: context.settingsText('הצטרף לעריכה'),
-                      onPressed: () =>
-                          _openUrl('https://www.otzaria.org/library'),
-                    ),
-                  ],
-                ),
               ],
             ),
 
@@ -307,10 +282,9 @@ class AboutSettingsTab extends StatelessWidget {
       child: Row(
         children: [
           Image.asset(
-            'assets/icon/iconnew.png',
+            'assets/icon/iconnew_256.png',
             width: 60,
             height: 60,
-            cacheWidth: imageDecodeSize(context, 60),
             errorBuilder: (_, _, _) =>
                 const Icon(FluentIcons.library_24_regular, size: 60),
           ),

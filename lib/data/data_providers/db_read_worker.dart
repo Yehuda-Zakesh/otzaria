@@ -806,6 +806,25 @@ void _workerMain(_Bootstrap bootstrap) {
       case 'lineContents' || 'lines':
         final repo = await ensureRepo(args['dbPath'] as String);
         return _readBookLines(repo, method, args);
+      case 'commentatorsByBook':
+        final repo = await ensureRepo(args['dbPath'] as String);
+        return repo.database.linkDao.selectCommentatorsByBook(
+          args['bookId'] as int,
+        );
+      case 'bookCatalog':
+        final repo = await ensureRepo(args['dbPath'] as String);
+        return (
+          books: await repo.getAllBooksLean(),
+          categories: await repo.getAllCategories(),
+        );
+      case 'siblingCommentaryRows':
+        final repo = await ensureRepo(args['dbPath'] as String);
+        return repo.getSiblingCommentaryLinkRowsForLine(
+          bookId: args['bookId'] as int,
+          bookTitle: args['bookTitle'] as String,
+          lineIndex: args['lineIndex'] as int,
+          excludeBookId: args['excludeBookId'] as int,
+        );
       case 'bookText':
         final repo = await ensureRepo(args['dbPath'] as String);
         return readBookContentText(

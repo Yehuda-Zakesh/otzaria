@@ -13,7 +13,7 @@ void main() {
     });
 
     test('מחלץ file:// URI לנתיב מקומי ומפענח רווחים', () {
-      // ‎Uri.toFilePath()‎ תלוי-פלטפורמה (Linux מחזיר ‎/‎, Windows מחזיר ‎\‎),
+      // Uri.toFilePath() תלוי-פלטפורמה (Linux מחזיר /, Windows מחזיר \),
       // אז בודקים רק שהתוצאה היא נתיב קובץ, לא URI, ובלי קידוד.
       final result = resolveLocalPluginPathForTesting(
         'file:///home/user/my%20plugin.otzplugin',
@@ -42,7 +42,7 @@ void main() {
     });
 
     test('file:// URI לא תקין נופל בחזרה לבדיקת הסיומת המקורית', () {
-      // הקלט אינו URI חוקי אבל מסתיים ב-‎.otzplugin — נשמר כפי שהוא.
+      // הקלט אינו URI חוקי אבל מסתיים ב-.otzplugin — נשמר כפי שהוא.
       const malformed = 'file://[invalid.otzplugin';
       expect(
         resolveLocalPluginPathForTesting(malformed),

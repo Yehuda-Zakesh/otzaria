@@ -42,7 +42,7 @@ class PluginSettingsAccessPolicy {
     // "שמור וזכור": ספרים במעקב והתקדמות הלימוד של המשתמש.
     'sz:',
     // הגדרות צורת הדף פר-ספר ופר-קטגוריה: שם הספר הוא חלק מהמפתח, ולכן
-    // מניית המפתחות חושפת אילו ספרים המשתמש למד. ‎page_shape_global_visibility_‎
+    // מניית המפתחות חושפת אילו ספרים המשתמש למד. page_shape_global_visibility_
     // אינו כאן — הוא העדפת תצוגה גלובלית בלי זהות ספר.
     'page_shape_book_',
     'page_shape_highlight_',

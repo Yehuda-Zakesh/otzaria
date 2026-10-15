@@ -15,7 +15,6 @@ class BookCardWidget extends StatefulWidget {
   final String categoryName;
   final String bookName;
   final BookDetails bookDetails;
-  final bool isInCompletedListContext;
   final VoidCallback? onDelete;
   final VoidCallback? onTap; // Override default navigation
 
@@ -25,7 +24,6 @@ class BookCardWidget extends StatefulWidget {
     required this.categoryName,
     required this.bookName,
     required this.bookDetails,
-    this.isInCompletedListContext = false,
     this.onDelete,
     this.onTap,
   });

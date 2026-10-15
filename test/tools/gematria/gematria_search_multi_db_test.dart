@@ -12,11 +12,22 @@ import 'package:otzaria/migration/models/book.dart' as migration_models;
 import 'package:otzaria/migration/models/category.dart' as migration_models;
 import 'package:otzaria/migration/models/line.dart' as migration_models;
 import 'package:otzaria/settings/engine/settings_repository.dart';
+import 'package:otzaria/text_book/utils/section_search_utils.dart';
 import 'package:otzaria/tools/gematria/gematria_search.dart';
+import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
 import 'package:path/path.dart' as path;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  // בראשית א,ה כפי שהוא שמור במסד.
+  const gen1v5 =
+      '(ה) וַיִּקְרָ֨א אֱלֹהִ֤ים&thinsp;<small>׀</small>&thinsp;לָאוֹר֙ י֔וֹם וְלַחֹ֖שֶׁךְ קָ֣רָא לָ֑יְלָה';
+  const vayehiErev = 'וַֽיְהִי־עֶ֥רֶב';
+
+  // התוצאה נשלחת כטקסט ההדגשה בפתיחת הספר, ולכן חייבת להימצא בשורה המקורית.
+  bool highlights(String rawLine, String preview) =>
+      cleanLineForSearch(rawLine).contains(utils.removeVolwels(preview));
 
   group('GimatriaSearch — חיפוש על פני שני DBs', () {
     late Directory tempDir;
@@ -259,6 +270,54 @@ void main() {
       // ה-isolate נבנה מחדש בכל קריאה; יציאה מוקדמת קודמת לא משפיעה עליו.
       expect((await search()).length, greaterThan(1));
     });
+
+    test('פסק אינו יוצר תוצאה כפולה (לאור = 237)', () async {
+      await insertBookWithLines(
+        repo: seforimRepo,
+        title: 'בראשית',
+        lines: [gen1v5],
+      );
+      final results = await GimatriaSearch.searchInFiles(
+        const <String>[],
+        237,
+        bookTitles: const ['בראשית'],
+      );
+      expect(results.map((r) => r.text).toList(), hasLength(1));
+      expect(highlights(gen1v5, results.single.text), isTrue);
+    });
+
+    test('עם הכולל: פסק אינו נספר כמילה ("אלהים לאור" = 323 + 2)', () async {
+      await insertBookWithLines(
+        repo: seforimRepo,
+        title: 'בראשית',
+        lines: [gen1v5],
+      );
+      final results = await GimatriaSearch.searchInFiles(
+        const <String>[],
+        325,
+        bookTitles: const ['בראשית'],
+        useWithKolel: true,
+      );
+      final texts = results.map((r) => r.text);
+      expect(texts.map(utils.removeVolwels), contains('אלהים לאור'));
+      expect(texts.every((t) => highlights(gen1v5, t)), isTrue);
+    });
+
+    test('עם הכולל: מקף מפריד בין מילים ("ויהי ערב" = 31 + 272 + 2)', () async {
+      await insertBookWithLines(
+        repo: seforimRepo,
+        title: 'בראשית',
+        lines: [vayehiErev],
+      );
+      final results = await GimatriaSearch.searchInFiles(
+        const <String>[],
+        305,
+        bookTitles: const ['בראשית'],
+        useWithKolel: true,
+      );
+      expect(results, hasLength(1));
+      expect(highlights(vayehiErev, results.single.text), isTrue);
+    });
   });
 
   group('GimatriaSearch — fallback לקבצים כשאין DB', () {
@@ -316,12 +375,49 @@ void main() {
         expect(results.first.text.contains('אב'), isTrue);
       },
     );
+
+    test('מקף ופסק מפרידים בין מילים גם בחיפוש קבצים', () async {
+      final folder = path.join(tempDir.path, 'txtbooks');
+      await Directory(folder).create(recursive: true);
+      await File(
+        path.join(folder, 'בראשית.txt'),
+      ).writeAsString('$gen1v5\n$vayehiErev\n');
+
+      final results = await GimatriaSearch.searchInFiles(
+        [folder],
+        237,
+      );
+      expect(results, hasLength(1));
+
+      final withKolel = await GimatriaSearch.searchInFiles(
+        [folder],
+        305,
+        useWithKolel: true,
+      );
+      expect(withKolel, hasLength(1));
+    });
+
+    test('NEL אינו יוצר תוצאה כפולה ואינו נספר בכולל', () async {
+      final folder = path.join(tempDir.path, 'txtbooks');
+      await Directory(folder).create(recursive: true);
+      await File(
+        path.join(folder, 'בראשית.txt'),
+      ).writeAsString('אב \u0085 גדול');
+
+      final results = await GimatriaSearch.searchInFiles([folder], 3);
+      final withKolel = await GimatriaSearch.searchInFiles(
+        [folder],
+        48,
+        wholeVerseOnly: true,
+        useWithKolel: true,
+      );
+
+      expect(results.map((result) => result.text).toList(), ['אב']);
+      expect(withKolel.map((result) => result.text).toList(), ['אב גדול']);
+    });
   });
 
   group('GimatriaSearch.extractPathFromTocEntries — פונקציה טהורה', () {
-    // הטסט הקיים מכסה זאת ב-test/gematria_search_test.dart; כאן רק וידוא
-    // שה-API מאופשר גם מתוך הסביבה הזו (multi-DB) — לא מבוצעת שום אינטראקציה
-    // עם DB.
     test('רשימת TOC ריקה מחזירה מחרוזת ריקה (אין מידע לבנות נתיב)', () {
       final result = GimatriaSearch.extractPathFromTocEntries(
         currentLineIndex: 0,

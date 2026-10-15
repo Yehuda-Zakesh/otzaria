@@ -5,7 +5,7 @@ import 'package:otzaria/core/window_listener.dart';
 /// מקלדת (ראו `PluginRuntimeDispatcher.restoreKeyboardFocusAfterWindowRestore`),
 /// ולכן ההעברה הנייטיבית נתלית דווקא בו ולא בכל אירוע מצב-חלון.
 ///
-/// ‏`window_manager` משדר על החזרה `restore`, ואם החלון היה מוגדל לפני
+/// `window_manager` משדר על החזרה `restore`, ואם החלון היה מוגדל לפני
 /// המיזעור — `maximize`. שני האירועים האלה מגיעים גם בלי מיזעור כלל
 /// (המשתמש הגדיל את החלון), ולכן ההבחנה נשענת על מיזעור שקדם להם.
 void main() {

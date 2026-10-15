@@ -198,58 +198,15 @@ Future<PdfOutlineNode?> getDafYomiOutline(PdfBook book, String daf) async {
 Future<List<PdfOutlineNode>> _loadOutlineFromFile(PdfBook book) async {
   PdfDocument? document;
   try {
-    document = await PdfDocument.openFile(book.path);
+    // progressive: בלעדיו pdfium מפענח כל עמוד לפני ה-outline (שניות בסריקה).
+    document = await PdfDocument.openFile(
+      book.path,
+      useProgressiveLoading: true,
+    );
     return await document.loadOutline();
   } finally {
     // המתנה לשחרור בפועל — ה-worker היחיד של pdfrx חייב להשתחרר מהמסמך
     // לפני שהטאב שנפתח מיד אחר כך פותח את אותו PDF.
     await document?.dispose();
-  }
-}
-
-/// פותח ספר PDF לפי שם וסימן
-Future<void> openPdfBookFromRef(
-  String bookname,
-  String ref,
-  BuildContext context,
-) async {
-  await _openBookFromRefHelper(bookname, ref, context, PdfBook);
-}
-
-/// פותח ספר טקסט לפי שם וסימן
-Future<void> openTextBookFromRef(
-  String bookname,
-  String ref,
-  BuildContext context,
-) async {
-  await _openBookFromRefHelper(bookname, ref, context, TextBook);
-}
-
-Future<void> _openBookFromRefHelper(
-  String bookname,
-  String ref,
-  BuildContext context,
-  Type bookType,
-) async {
-  final libraryBlocState = BlocProvider.of<LibraryBloc>(context).state;
-  final book = libraryBlocState.library?.findBookByTitle(bookname, bookType);
-
-  if (book != null) {
-    final index = await findReference(book, ref);
-    if (!context.mounted) return;
-    if (index != null) {
-      openBook(
-        context,
-        book,
-        index,
-        '',
-        ignoreHistory: true,
-        requiresStableLayout: bookType == PdfBook,
-      );
-    } else {
-      UiSnack.showError(UiSnack.sectionNotFound);
-    }
-  } else {
-    UiSnack.showError(UiSnack.bookNotFound);
   }
 }

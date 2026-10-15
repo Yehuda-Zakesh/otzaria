@@ -16,10 +16,10 @@ import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/models/search_results.dart';
 import 'package:otzaria/text_book/view/text_book_search_screen.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../support/search_engine_test_init.dart';
 import '../../test_helpers/memory_cache_provider.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 
 /// חלונית החיפוש בטאב שיורד לרקע: התוצאות נשמרות, ועותק שורות הספר משוחרר.
 ///
@@ -81,7 +81,7 @@ Future<void> main() async {
                   enabled: isVisible,
                   child: TextBookSearchView(
                     contentLoader: contentLoader,
-                    scrollControler: ItemScrollController(),
+                    lines: LineScrollController(),
                     focusNode: focusNode,
                     closeLeftPaneCallback: () {},
                     initialQuery: '',
@@ -349,8 +349,6 @@ TextBookLoaded _loadedState() {
     selectedIndex: 0,
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }
 

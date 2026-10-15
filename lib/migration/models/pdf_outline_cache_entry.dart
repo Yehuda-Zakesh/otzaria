@@ -37,35 +37,6 @@ class PdfOutlineCacheEntry {
     );
   }
 
-  Map<String, dynamic> toJson() {
-    return {
-      'filePath': filePath,
-      'fileSize': fileSize,
-      'lastModified': lastModified,
-      'outlineJson': outlineJson,
-      'createdAt': createdAt,
-      'accessedAt': accessedAt,
-    };
-  }
-
-  PdfOutlineCacheEntry copyWith({
-    String? filePath,
-    int? fileSize,
-    int? lastModified,
-    String? outlineJson,
-    int? createdAt,
-    int? accessedAt,
-  }) {
-    return PdfOutlineCacheEntry(
-      filePath: filePath ?? this.filePath,
-      fileSize: fileSize ?? this.fileSize,
-      lastModified: lastModified ?? this.lastModified,
-      outlineJson: outlineJson ?? this.outlineJson,
-      createdAt: createdAt ?? this.createdAt,
-      accessedAt: accessedAt ?? this.accessedAt,
-    );
-  }
-
   /// ממיר את ה-JSON השמור לרשימת outline entries.
   List<(String, String, int)> decodeEntries() =>
       decodeOutlineEntries(outlineJson);

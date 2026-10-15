@@ -11,14 +11,6 @@ class PubPlace {
     required this.name,
   });
 
-  /// Creates a PubPlace instance from a map (e.g., a database row).
-  factory PubPlace.fromMap(Map<String, dynamic> map) {
-    return PubPlace(
-      id: map['id'] as int,
-      name: map['name'] as String,
-    );
-  }
-
   /// Creates a PubPlace instance from JSON.
   factory PubPlace.fromJson(Map<String, dynamic> json) {
     return PubPlace(
@@ -33,16 +25,6 @@ class PubPlace {
       'id': id,
       'name': name,
     };
-  }
-
-  PubPlace copyWith({
-    int? id,
-    String? name,
-  }) {
-    return PubPlace(
-      id: id ?? this.id,
-      name: name ?? this.name,
-    );
   }
 
   @override

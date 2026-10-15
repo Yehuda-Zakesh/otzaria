@@ -26,7 +26,7 @@ import 'package:otzaria/utils/text/otzaria_markup.dart';
 /// סגנונות פגומה אינה מפילה עוד את שכבת ה-PAPX/CHPX כולה.
 const int kLegacyWordConverterVersion = 9;
 
-/// ממיר מסמך Word בינארי ישן (‎.doc‎ / ‎.dot‎, פורמט Word 97-2003) לטקסט
+/// ממיר מסמך Word בינארי ישן (.doc / .dot, פורמט Word 97-2003) לטקסט
 /// של אוצריא.
 ///
 /// **הטקסט במסמך אינו רציף.** Word מפצל אותו ל"חתיכות" (pieces) לפי הקידוד,
@@ -449,7 +449,7 @@ _Text _readCharacters(
 
   // תקרה גלובלית: טווחי ה-CP שבטבלה אינם חייבים להיות זרים, ולכן חתיכות
   // שכולן מצביעות לאותו קטע מייצרות גידול **ריבועי** בגודל הקובץ. בלי
-  // התקרה ‎.doc‎ בן קילובייטים בודדים מקצה ג'יגה-בייטים ומפיל את התהליך.
+  // התקרה .doc בן קילובייטים בודדים מקצה ג'יגה-בייטים ומפיל את התהליך.
   final limit = _maxCharacters;
   if (cpTo - cpFrom > limit) {
     fail('המסמך מצהיר על ${cpTo - cpFrom} תווים (מעל התקרה $limit)');
@@ -493,7 +493,7 @@ _Text _readCharacters(
   return _Text(characters, offsets);
 }
 
-/// תקרת תווים לתת-מסמך יחיד. ‏50 מיליון תווים הם סדר גודל מעל כל ספר
+/// תקרת תווים לתת-מסמך יחיד. 50 מיליון תווים הם סדר גודל מעל כל ספר
 /// אמיתי, ועדיין חוסמים את הניפוח שטבלת חתיכות זדונית מייצרת.
 const int _maxCharacters = 50 * 1000 * 1000;
 
@@ -522,7 +522,7 @@ Map<int, String> _readFootnotes(
       return const {};
     }
 
-    // ‏PlcffndRef: ‏(n+1) מיקומי CP ואחריהם n מבני FRD בני 2 בתים.
+    // PlcffndRef: (n+1) מיקומי CP ואחריהם n מבני FRD בני 2 בתים.
     final refs = ByteData.sublistView(
       table,
       fib.fcPlcffndRef,
@@ -530,7 +530,7 @@ Map<int, String> _readFootnotes(
     );
     final count = (fib.lcbPlcffndRef - 4) ~/ 6;
 
-    // ‏PlcffndTxt: מיקומי CP בלבד, יחסית לתחילת תת-המסמך.
+    // PlcffndTxt: מיקומי CP בלבד, יחסית לתחילת תת-המסמך.
     final texts = ByteData.sublistView(
       table,
       fib.fcPlcffndTxt,

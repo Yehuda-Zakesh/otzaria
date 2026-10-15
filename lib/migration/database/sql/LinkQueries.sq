@@ -6,24 +6,6 @@ FROM link l
 JOIN connection_type ct ON l.connectionTypeId = ct.id
 WHERE l.id = ?;
 
-countAllLinks:
-SELECT COUNT(*) FROM link;
-
-selectLinksBySourceLineIds:
-SELECT l.*, ct.name AS connectionType, b.title AS targetBookTitle, tl.content AS targetText
-FROM link l
-JOIN connection_type ct ON l.connectionTypeId = ct.id
-JOIN book b ON l.targetBookId = b.id
-JOIN line tl ON l.targetLineId = tl.id
-WHERE l.sourceLineId IN ?
-ORDER BY b.orderIndex;
-
-selectLinksBySourceBook:
-SELECT l.*, ct.name AS connectionType
-FROM link l
-JOIN connection_type ct ON l.connectionTypeId = ct.id
-WHERE l.sourceBookId = ?;
-
 selectCommentatorsByBook:
 SELECT DISTINCT l.targetBookId, b.title AS targetBookTitle, a.name AS author, COUNT(*) AS linkCount
 FROM link l
@@ -164,31 +146,3 @@ VALUES (?, ?, ?, ?, ?);
 
 delete:
 DELETE FROM link WHERE id = ?;
-
-deleteByBookId:
-DELETE FROM link WHERE sourceBookId = ? OR targetBookId = ?;
-
-lastInsertRowId:
-SELECT last_insert_rowid();
-
--- Count links by source book
-countLinksBySourceBook:
-SELECT COUNT(*) FROM link WHERE sourceBookId = ?;
-
--- Count links by target book
-countLinksByTargetBook:
-SELECT COUNT(*) FROM link WHERE targetBookId = ?;
-
--- Count links by source book and connection type
-countLinksBySourceBookAndType:
-SELECT COUNT(*)
-FROM link l
-JOIN connection_type ct ON l.connectionTypeId = ct.id
-WHERE l.sourceBookId = ? AND ct.name = ?;
-
--- Count links by target book and connection type
-countLinksByTargetBookAndType:
-SELECT COUNT(*)
-FROM link l
-JOIN connection_type ct ON l.connectionTypeId = ct.id
-WHERE l.targetBookId = ? AND ct.name = ?;

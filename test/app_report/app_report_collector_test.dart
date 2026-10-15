@@ -2,11 +2,21 @@ import 'dart:convert';
 import 'dart:ffi' show Abi;
 import 'dart:io';
 
+import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/app_report/repository/app_report_collector.dart';
-import 'package:otzaria/app_report/repository/app_report_redactor.dart';
 import 'package:otzaria/app_report/repository/error_log_blocks.dart';
+import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/core/info/os_version.dart';
+import 'package:otzaria/plugins/models/installed_plugin.dart';
+import 'package:otzaria/plugins/models/plugin_manifest.dart';
+import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
+import 'package:otzaria/plugins/storage/plugin_system_database.dart';
+import 'package:otzaria/settings/engine/settings_repository.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:path/path.dart' as p;
+
+import '../helpers/memory_settings_cache.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -126,5 +136,57 @@ void main() {
       'x64',
     );
     expect(AppReportCollector.detectArch(abi: Abi.windowsArm64), 'arm64');
+  });
+
+  test('osVersion: הדיווח והאבחון מתקנים Windows 11 שמדווח כ-Windows 10', () {
+    expect(
+      AppReportCollector.osVersion(
+        raw: '"Windows 10 Pro" 10.0 (Build 26100)',
+        isWindows: true,
+      ),
+      '"Windows 11 Pro" 10.0 (Build 26100)',
+    );
+    expect(AppReportCollector.systemInfo()['osVersion'], displayOsVersion());
+  });
+
+  test('אבחון: אוסף שנבנה כמו בתוכנה כולל את התוספים המותקנים', () async {
+    await Settings.init(cacheProvider: MemorySettingsCache());
+    // ספרייה חסרה בתיקייה הזמנית: מקטע הספרייה אינו נוגע בספרייה האמיתית.
+    await Settings.setValue(
+      SettingsRepository.keyLibraryPath,
+      p.join(tmp.path, 'books'),
+    );
+    AppPaths.debugOverrideDataRootPath(tmp.path);
+    addTearDown(() async {
+      await PluginSystemDatabase.instance.close();
+      AppPaths.debugOverrideDataRootPath(null);
+    });
+    await PluginRegistryRepository().savePlugin(
+      InstalledPlugin(
+        pluginId: 'demo.plugin',
+        name: 'Demo',
+        version: '1.0.0',
+        installPath: tmp.path,
+        entrypointPath: 'index.html',
+        enabled: true,
+        pinned: false,
+        manifest: PluginManifest.fromJson(const {
+          'id': 'demo.plugin',
+          'name': 'Demo',
+          'version': '1.0.0',
+          'entrypoint': 'index.html',
+        }),
+        installedAt: now,
+        updatedAt: now,
+      ),
+    );
+
+    final diagnostics = await AppReportCollector(
+      redactor: redactor,
+      clock: () => now,
+    ).collectDiagnostics();
+    final plugins = (diagnostics['appInfo'] as Map)['plugins'] as Map;
+    expect(plugins['installedCount'], 1);
+    expect((plugins['installed'] as List).single['id'], 'demo.plugin');
   });
 }

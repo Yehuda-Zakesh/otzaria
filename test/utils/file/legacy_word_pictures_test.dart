@@ -99,7 +99,7 @@ void main() {
     });
 
     test('instance אי-זוגי — נדחים שני UID ולא אחד', () {
-      // ‏rgbUid כפול הוא מה שמבדיל בין 0x6E0 ל-0x6E1. דילוג על אחד בלבד
+      // rgbUid כפול הוא מה שמבדיל בין 0x6E0 ל-0x6E1. דילוג על אחד בלבד
       // היה מכניס 16 בתים של UID לתוך בייטי התמונה.
       final data = _dataStream(
         _container(_blip(_blipPng, pixels, instance: 0x6E1)),
@@ -109,7 +109,7 @@ void main() {
     });
 
     test('blip בתוך FBSE נמצא אחרי הכותר והשם באורך המשתנה', () {
-      // ‏FBSE אינו מכולה (recVer רגיל), ולכן בלי הטיפול המפורש בו לא
+      // FBSE אינו מכולה (recVer רגיל), ולכן בלי הטיפול המפורש בו לא
       // נמצאת אף תמונה במסמכים שנשמרים כך.
       const nameLength = 4;
       final fbseHeader = List<int>.filled(36, 0)..[33] = nameLength;

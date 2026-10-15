@@ -1,9 +1,14 @@
 /// ריכוז הודעות המערכת (UiSnack) של מערכת התוספים.
 abstract class PluginMessages {
+  static const String nativeTextReader = 'קורא רגיל';
+  static const String textReaderSettings = 'הגדרות קורא התוסף';
   static const String externalBookNotFound = 'הספר לא נמצא בקטלוג החיצוני';
 
   // ===== התקנה והסרה =====
   static const String pluginInstalledSuccess = 'התוסף הותקן בהצלחה';
+  static String safeModeChoiceSaved({required bool enabled}) => enabled
+      ? 'התוסף ייטען בהפעלה מחדש רגילה'
+      : 'התוסף יישאר מושבת גם בהפעלה מחדש רגילה';
   static const String pluginUpdatedSuccess = 'התוסף עודכן בהצלחה';
   static const String pluginAlreadyInstalledSameVersion =
       'תוסף זה כבר מותקן אצלך, באותה הגרסה. '
@@ -48,6 +53,11 @@ abstract class PluginMessages {
 
   static String resetPluginDataError(Object error) =>
       'שגיאה באיפוס נתוני התוסף: $error';
+
+  static String newTabPageOccupied(String requester, String owner) =>
+      'התוסף "$requester" מבקש את כפתור "+", שכבר ניתן ל"$owner". '
+      'ניתן לבחור בהודעה זו או בהרשאות התוספים.';
+  static const String chooseNewTabPagePlugin = 'בחר תוסף';
 
   // ===== ניהול תוספים =====
   static String loadPluginsError(Object error) => 'שגיאה בטעינת תוספים: $error';
@@ -105,6 +115,18 @@ abstract class PluginMessages {
   /// בלעדיו הודעת תוסף נראית כהודעת מערכת של אוצריא.
   static String declarativeSnack(String message, String pluginName) =>
       pluginName.trim().isEmpty ? message : '$message · מאת $pluginName';
+
+  /// `localService.post` — השירות המקומי לא ענה, ולתוסף אין הודעה משלו.
+  static const String localServiceUnavailable =
+      'השירות המקומי של התוסף אינו זמין';
+
+  /// `localService.post` — השירות ענה בשגיאה בלי הודעה, או בתשובה פגומה.
+  static const String localServiceFailed =
+      'השירות המקומי של התוסף לא השלים את הבקשה';
+
+  /// `localService.post` — הגישה לשירות חסומה בהגדרות הרשת של התוסף.
+  static const String localServiceBlocked =
+      'הגישה של התוסף לשירות המקומי חסומה בהגדרות הרשת';
 
   // ===== WebView2 =====
   static const String downloadLinkOpenFailed = 'לא ניתן לפתוח את קישור ההורדה';

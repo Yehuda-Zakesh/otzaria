@@ -182,9 +182,9 @@ void main() {
 
   group('AltToc פר-ספר מתוך הקאש הגלובלי', () {
     Future<void> attachGlobalIndex() async {
-      final build = repository.beginAltTocFlatBuild();
+      final build = repository.beginAltTocFlatIndex();
       while (!await build.step()) {}
-      repository.attachAltTocIndex(build.entries);
+      repository.attachAltTocIndex(build.index);
     }
 
     const queries = [

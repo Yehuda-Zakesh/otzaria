@@ -54,14 +54,19 @@ class AppSegmentedControl<T> extends StatelessWidget {
   final bool showSelectedIcon;
   final double? height;
 
+  /// Lines a label may wrap to before it is cut with an ellipsis. Above 1,
+  /// [height] is a minimum and the control grows when a label wraps.
+  final int maxLabelLines;
+
   const AppSegmentedControl({
     super.key,
     required this.options,
     required this.currentValue,
     required this.onChanged,
     this.expandToFillWidth = false,
-    this.showSelectedIcon = true,
+    this.showSelectedIcon = false,
     this.height,
+    this.maxLabelLines = 1,
   });
 
   List<ButtonSegment<T>> _segments() {
@@ -75,10 +80,13 @@ class AppSegmentedControl<T> extends StatelessWidget {
             label: Text(
               o.label,
               style: AppTextStyles.settingTitle,
-              maxLines: 1,
+              maxLines: maxLabelLines,
+              textAlign: TextAlign.center,
               overflow: TextOverflow.ellipsis,
             ),
             icon: hasIcons ? _buildOptionIcon(o) : null,
+            // תווית ארוכה נחתכת ב-ellipsis; הטולטיפ מציג אותה במלואה.
+            tooltip: o.label,
           ),
         )
         .toList();
@@ -128,7 +136,10 @@ class AppSegmentedControl<T> extends StatelessWidget {
           ? _buttonStyle(cs).copyWith(
               minimumSize: WidgetStateProperty.all(Size(0, height!)),
               maximumSize: WidgetStateProperty.all(
-                Size(double.infinity, height!),
+                Size(
+                  double.infinity,
+                  maxLabelLines > 1 ? double.infinity : height!,
+                ),
               ),
             )
           : _buttonStyle(cs).copyWith(

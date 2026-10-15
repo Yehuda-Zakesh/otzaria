@@ -5,6 +5,7 @@ import 'package:otzaria/personal_notes/storage/personal_notes_database.dart';
 import 'package:otzaria/personal_notes/utils/note_anchor_utils.dart';
 import 'package:otzaria/personal_notes/utils/note_collection_utils.dart';
 import 'package:otzaria/personal_notes/utils/note_text_utils.dart';
+import 'package:otzaria/personal_notes/utils/personal_notes_book_key.dart';
 
 class PersonalNotesService {
   final PersonalNotesDatabase _database;
@@ -70,7 +71,7 @@ class PersonalNotesService {
         : extractDisplayTextFromLines(
             lines,
             normalizedLineNumber,
-            excludeBookTitle: bookId,
+            excludeBookTitle: _bookTitle(bookId),
           );
 
     // עיגון לפי מילים: כשנבחר טקסט ספציפי, מחשבים offset והקשר בשורה הגולמית.
@@ -151,7 +152,6 @@ class PersonalNotesService {
 
   Future<List<PersonalNote>> deleteNote({
     required String bookId,
-    required String bookContent,
     required String noteId,
   }) async {
     await _database.deleteNote(noteId);
@@ -178,7 +178,7 @@ class PersonalNotesService {
     final newDisplayTitle = extractDisplayTextFromLines(
       lines,
       normalizedLineNumber,
-      excludeBookTitle: bookId,
+      excludeBookTitle: _bookTitle(bookId),
     );
     final now = DateTime.now();
 
@@ -187,7 +187,7 @@ class PersonalNotesService {
       displayTitle: newDisplayTitle,
       // מיקום ידני מחדש הופך את ההערה להערת-שורה-שלמה (אין עוד מילים מעוגנות).
       clearAnchor: true,
-      lastKnownLineNumber: null,
+      clearLastKnownLineNumber: true,
       status: PersonalNoteStatus.located,
       updatedAt: now,
     );
@@ -220,7 +220,6 @@ class PersonalNotesService {
         return note.copyWith(
           lineNumber: previousLine,
           status: PersonalNoteStatus.located,
-          updatedAt: DateTime.now(),
         );
       }
       return note;
@@ -232,8 +231,7 @@ class PersonalNotesService {
       return note.copyWith(
         status: PersonalNoteStatus.missing,
         lastKnownLineNumber: note.lineNumber,
-        lineNumber: null,
-        updatedAt: DateTime.now(),
+        clearLineNumber: true,
       );
     }
 
@@ -248,7 +246,7 @@ class PersonalNotesService {
     final actualDisplayTitle = extractDisplayTextFromLines(
       lines,
       note.lineNumber!,
-      excludeBookTitle: bookId,
+      excludeBookTitle: _bookTitle(bookId),
     );
     if (_displayTitleMatches(note.displayTitle, actualDisplayTitle)) {
       return note;
@@ -267,15 +265,34 @@ class PersonalNotesService {
         lineNumber: match.line,
         lastKnownLineNumber: note.lineNumber,
         status: PersonalNoteStatus.located,
-        updatedAt: DateTime.now(),
       );
     }
 
     return note.copyWith(
       status: PersonalNoteStatus.missing,
       lastKnownLineNumber: note.lineNumber,
-      lineNumber: null,
-      updatedAt: DateTime.now(),
+      clearLineNumber: true,
+    );
+  }
+
+  /// האם הטקסט שאליו [note] מעוגנת נמצא בשורה [lineNumber] של [lines].
+  bool noteTextMatchesLine(
+    PersonalNote note,
+    List<String> lines,
+    int lineNumber,
+    String bookId,
+  ) {
+    final title = note.displayTitle;
+    if (title == null || title.isEmpty) return false;
+    if (lineNumber < 1 || lineNumber > lines.length) return false;
+    if (_displayTitleExistsInLine(title, lines[lineNumber - 1])) return true;
+    return _displayTitleMatches(
+      title,
+      extractDisplayTextFromLines(
+        lines,
+        lineNumber,
+        excludeBookTitle: _bookTitle(bookId),
+      ),
     );
   }
 
@@ -321,7 +338,7 @@ class PersonalNotesService {
       final candidateTitle = extractDisplayTextFromLines(
         lines,
         candidateLine,
-        excludeBookTitle: bookId,
+        excludeBookTitle: _bookTitle(bookId),
       );
       if (_displayTitleMatches(referenceTitle, candidateTitle)) {
         return _LineMatch(line: candidateLine);
@@ -350,6 +367,10 @@ class PersonalNotesService {
 
     return computeWordOverlapRatio(storedWords, actualWords) >= 0.8;
   }
+
+  // מילות הכותרת מוחרגות מתמצית השורה; סיומת המקור במפתח אינה חלק מהכותרת.
+  static String _bookTitle(String bookId) =>
+      parsePersonalNotesBookKey(bookId).title;
 
   String _generateId() {
     final timestamp = DateTime.now().microsecondsSinceEpoch;

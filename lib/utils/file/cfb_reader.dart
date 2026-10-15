@@ -4,7 +4,7 @@ import 'package:otzaria/utils/file/document_conversion_exceptions.dart';
 import 'package:otzaria/utils/file/document_format.dart';
 
 /// קורא מכולת Compound File Binary (CFB/OLE2) — מערכת-הקבצים הזעירה
-/// שבתוכה מיקרוסופט אורזת מסמכי Office ישנים (‎.doc‎, ‎.xls‎, ‎.msg‎).
+/// שבתוכה מיקרוסופט אורזת מסמכי Office ישנים (.doc, .xls, .msg).
 ///
 /// הרכיב גנרי ואינו יודע דבר על Word: הוא מספק גישה ל-streams לפי שם, וזהו.
 /// כך הוא נבדק בפני עצמו ומשמש גם את זיהוי ה-WBK — שצריך להבחין בין גיבוי
@@ -119,7 +119,7 @@ class CfbFile {
         difatSector != _freeSector &&
         fatSectors.length < fatSectorCount) {
       // רק הגנת-מעגל. אורך השרשרת חסום כבר ע"י `fatSectorCount` בתנאי הלולאה,
-      // ואכיפה של `difatSectorCount` הייתה דוחה כל ‎.doc‎ גדול שכותרו מצהיר
+      // ואכיפה של `difatSectorCount` הייתה דוחה כל .doc גדול שכותרו מצהיר
       // עליו בחסר — טעות נפוצה בכותבים שאינם Word.
       if (!difatVisited.add(difatSector)) fail('שרשרת DIFAT מעגלית');
       requireSector(difatSector);
@@ -400,7 +400,7 @@ class CfbEntry {
 
 /// האם המכולה היא מסמך Word בינארי — קיום זרם `WordDocument`.
 ///
-/// זו ההבחנה שחסרה לחתימת ה-OLE לבדה: ‎.xls‎ ו-‎.msg‎ נושאים את אותה חתימה
+/// זו ההבחנה שחסרה לחתימת ה-OLE לבדה: .xls ו-.msg נושאים את אותה חתימה
 /// בדיוק, וקובץ WBK יכול להיות כל אחד מהם.
 bool isLegacyWordContainer(Uint8List bytes, {String? path}) {
   if (!CfbFile.hasSignature(bytes)) return false;

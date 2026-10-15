@@ -20,6 +20,20 @@ class AcronymDictionaryEntry {
   final List<String> meanings;
 }
 
+/// רשומת קטלוג ראשי תיבות לחיפוש: התווית המקורית לתצוגה, לצד המפתח המנורמל
+/// שכבר חושב פעם אחת בזמן הטעינה (ראו [DictionaryLookupRepository.getAcronymSearchCatalog]).
+class AcronymCatalogEntry {
+  const AcronymCatalogEntry({
+    required this.displayAcronym,
+    required this.normalizedKey,
+    required this.meanings,
+  });
+
+  final String displayAcronym;
+  final String normalizedKey;
+  final List<String> meanings;
+}
+
 /// מייצג רשומה במילון ארמי-עברי.
 class AramaicDictionaryEntry {
   const AramaicDictionaryEntry({
@@ -315,12 +329,11 @@ class AramaicDictionaryEntryPresentation {
 /// Repository משותף לטעינה וחיפוש במילוני הכלים.
 class DictionaryLookupRepository {
   DictionaryLookupRepository({
-    Future<Map<String, List<String>>> Function()? loadAcronyms,
+    this._loadAcronyms,
     Future<List<AramaicDictionaryEntry>> Function()? loadAramaicEntries,
     Future<List<LaazDictionaryEntry>> Function()? loadLaazEntries,
     Future<List<Link>> Function()? loadLaazLinks,
-  }) : _loadAcronyms = loadAcronyms ?? _defaultLoadAcronyms,
-       _loadAramaicEntries = loadAramaicEntries ?? _defaultLoadAramaicEntries,
+  }) : _loadAramaicEntries = loadAramaicEntries ?? _defaultLoadAramaicEntries,
        _loadLaazEntries = loadLaazEntries ?? _defaultLoadLaazEntries,
        _loadLaazLinks = loadLaazLinks ?? _defaultLoadLaazLinks;
 
@@ -330,7 +343,7 @@ class DictionaryLookupRepository {
   /// כותרת ספר לעזי רש"י ב-DB; הזיהוי תמיד לפי כותרת, לא לפי id.
   static const String laazBookTitle = 'אוצר לעזי רש"י';
 
-  final Future<Map<String, List<String>>> Function() _loadAcronyms;
+  final Future<Map<String, List<String>>> Function()? _loadAcronyms;
   final Future<List<AramaicDictionaryEntry>> Function() _loadAramaicEntries;
   final Future<List<LaazDictionaryEntry>> Function() _loadLaazEntries;
   final Future<List<Link>> Function() _loadLaazLinks;
@@ -348,6 +361,8 @@ class DictionaryLookupRepository {
   Map<String, String> _originalAcronymByKey = <String, String>{};
   List<AramaicDictionaryEntry> _aramaicEntries = <AramaicDictionaryEntry>[];
   Set<String> _aramaicTerms = <String>{};
+  // מקביל ל-_aramaicEntries: הנרמול נעשה פעם אחת בטעינה ולא בכל תפריט הקשר.
+  List<({String normalized, List<String> words})> _aramaicIndex = const [];
   List<LaazDictionaryEntry> _laazEntries = <LaazDictionaryEntry>[];
 
   /// כותרת ספר-רש"י -> אינדקס-שורה (1-based) -> ערכי הלעז המקושרים לאותה שורה.
@@ -488,15 +503,21 @@ class DictionaryLookupRepository {
         const <LaazDictionaryEntry>[];
   }
 
-  /// מחזיר את כלל רשומות ראשי התיבות.
-  Map<String, List<String>> getAllAcronyms() {
-    return Map<String, List<String>>.unmodifiable(
-      _acronymsByKey.map(
-        (key, meanings) =>
-            MapEntry(_originalAcronymByKey[key] ?? key, meanings),
-      ),
-    );
+  /// קטלוג לחיפוש עם תווית מקורית ומפתח מנורמל.
+  List<AcronymCatalogEntry> getAcronymSearchCatalog() {
+    return List<AcronymCatalogEntry>.unmodifiable([
+      for (final entry in _acronymsByKey.entries)
+        AcronymCatalogEntry(
+          displayAcronym: _originalAcronymByKey[entry.key] ?? entry.key,
+          normalizedKey: entry.key,
+          meanings: entry.value,
+        ),
+    ]);
   }
+
+  /// מנרמל שאילתת חיפוש לראשי תיבות, לשימוש חד-פעמי מחוץ ל-repository —
+  /// במקום לתת לכל קריאה ל-[acronymMatchesQuery] לנרמל את אותה שאילתה מחדש.
+  String normalizeAcronymQuery(String raw) => _normalizeAcronym(raw);
 
   /// מחזיר את כל רשומות המילון הארמי-עברי.
   List<AramaicDictionaryEntry> getAllAramaicEntries() {
@@ -504,13 +525,10 @@ class DictionaryLookupRepository {
   }
 
   /// בודק אם הטקסט נראה כמו ראשי תיבות.
-  bool isLikelyAcronym(String raw) {
-    final trimmed = raw.trim();
-    return trimmed.contains('"') ||
-        trimmed.contains('״') ||
-        trimmed.contains("'") ||
-        trimmed.contains('׳');
-  }
+  bool isLikelyAcronym(String raw) => _acronymMarks.hasMatch(raw);
+
+  // אותם סימנים ש-_normalizeAcronym ממיר.
+  static final _acronymMarks = RegExp('["״\'׳’‘“”]');
 
   /// מחזיר את כל הפירושים לראשי תיבות אם קיימים.
   AcronymDictionaryEntry? findAcronym(String raw) {
@@ -576,16 +594,15 @@ class DictionaryLookupRepository {
     final exact = <AramaicDictionaryEntry>[];
     final containsAsWord = <AramaicDictionaryEntry>[];
 
-    for (final entry in _aramaicEntries) {
-      final normalizedEntry = _normalizeAramaic(entry.aramaic);
-      if (normalizedEntry == normalizedWord) {
-        exact.add(entry);
+    for (var i = 0; i < _aramaicEntries.length; i++) {
+      final indexed = _aramaicIndex[i];
+      if (indexed.normalized == normalizedWord) {
+        exact.add(_aramaicEntries[i]);
         continue;
       }
 
-      final words = _splitAramaicWords(normalizedEntry);
-      if (words.contains(normalizedWord)) {
-        containsAsWord.add(entry);
+      if (indexed.words.contains(normalizedWord)) {
+        containsAsWord.add(_aramaicEntries[i]);
       }
     }
 
@@ -601,8 +618,16 @@ class DictionaryLookupRepository {
   }
 
   Future<void> _loadAcronymsInternal() async {
-    final acronyms = await _loadAcronyms();
+    final loadAcronyms = _loadAcronyms;
+    final index = loadAcronyms == null
+        ? await _defaultLoadAcronymIndex()
+        : _buildAcronymIndex(await loadAcronyms());
+    _acronymsByKey = index.byKey;
+    _originalAcronymByKey = index.originalByKey;
+  }
 
+  static ({Map<String, List<String>> byKey, Map<String, String> originalByKey})
+  _buildAcronymIndex(Map<String, List<String>> acronyms) {
     final normalizedAcronyms = <String, List<String>>{};
     final originalAcronyms = <String, String>{};
 
@@ -621,31 +646,40 @@ class DictionaryLookupRepository {
       originalAcronyms.putIfAbsent(normalized, () => acronym);
     });
 
-    _acronymsByKey = normalizedAcronyms.map(
-      (key, meanings) => MapEntry(
-        key,
-        List<String>.unmodifiable(meanings.toSet().toList()),
+    return (
+      byKey: normalizedAcronyms.map(
+        (key, meanings) => MapEntry(
+          key,
+          List<String>.unmodifiable(meanings.toSet().toList()),
+        ),
       ),
+      originalByKey: originalAcronyms,
     );
-    _originalAcronymByKey = originalAcronyms;
   }
 
   Future<void> _loadAramaicInternal() async {
     final aramaicEntries = await _loadAramaicEntries();
     final aramaicTerms = <String>{};
+    final aramaicIndex = <({String normalized, List<String> words})>[];
 
     for (final entry in aramaicEntries) {
       final normalizedEntry = _normalizeAramaic(entry.aramaic);
+      final words = _splitAramaicWords(normalizedEntry);
+      aramaicIndex.add((
+        normalized: normalizedEntry,
+        words: List.unmodifiable(words),
+      ));
       if (normalizedEntry.isEmpty) {
         continue;
       }
 
       aramaicTerms.add(normalizedEntry);
-      aramaicTerms.addAll(_splitAramaicWords(normalizedEntry));
+      aramaicTerms.addAll(words);
     }
 
     _aramaicEntries = List<AramaicDictionaryEntry>.unmodifiable(aramaicEntries);
     _aramaicTerms = Set<String>.unmodifiable(aramaicTerms);
+    _aramaicIndex = List.unmodifiable(aramaicIndex);
   }
 
   Future<void> _loadLaazInternal() async {
@@ -680,19 +714,31 @@ class DictionaryLookupRepository {
     _laazByRashiLine = byRashiLine;
   }
 
-  static Future<Map<String, List<String>>> _defaultLoadAcronyms() async {
+  static Future<
+    ({Map<String, List<String>> byKey, Map<String, String> originalByKey})
+  >
+  _defaultLoadAcronymIndex() async {
     final String jsonString = await rootBundle.loadString(
       'assets/Acronyms.json',
     );
-    final jsonData = await compute(_decodeJsonObject, jsonString);
+    // נרמול 13 אלף המפתחות תוקע פריימים על ה-UI isolate, ולכן רץ יחד עם הפענוח.
+    return compute(decodeAcronymIndex, jsonString);
+  }
 
-    return jsonData.map((key, value) {
-      if (value is List) {
-        return MapEntry(key, value.cast<String>());
-      }
+  @visibleForTesting
+  static ({Map<String, List<String>> byKey, Map<String, String> originalByKey})
+  decodeAcronymIndex(String jsonString) {
+    final jsonData = _decodeJsonObject(jsonString);
 
-      return MapEntry(key, <String>[]);
-    });
+    return _buildAcronymIndex(
+      jsonData.map((key, value) {
+        if (value is List) {
+          return MapEntry(key, value.cast<String>());
+        }
+
+        return MapEntry(key, <String>[]);
+      }),
+    );
   }
 
   static Future<List<AramaicDictionaryEntry>>
@@ -815,6 +861,7 @@ class DictionaryLookupRepository {
   void _resetAramaicCache() {
     _aramaicEntries = <AramaicDictionaryEntry>[];
     _aramaicTerms = <String>{};
+    _aramaicIndex = const [];
     _areAramaicLoaded = false;
   }
 

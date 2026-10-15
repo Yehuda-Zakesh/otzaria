@@ -15,7 +15,6 @@ import 'package:otzaria/utils/file/document_format.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart';
 import 'package:otzaria/utils/file/toc_parser.dart';
 import 'package:otzaria/settings/settings_exports.dart';
-import 'package:otzaria/settings/services/custom_folders/custom_folder.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 
@@ -69,8 +68,6 @@ class FileSystemLibraryProvider implements LibraryProvider {
     _isInitialized = true;
     debugPrint('📁 FileSystemLibraryProvider initialized');
   }
-
-  String get libraryPath => _libraryPath;
 
   Future<Map<String, String>> get keyToPath => _keyToPath ??= _buildKeyToPath();
 
@@ -248,7 +245,7 @@ class FileSystemLibraryProvider implements LibraryProvider {
     if (format != null &&
         format.isProductionSupported &&
         format.isTextual &&
-        // ‎.xml‎ ו-‎.wbk‎ נאספים רק אם תוכנם אכן מסמך — אותו שער שבכל שאר
+        // .xml ו-.wbk נאספים רק אם תוכנם אכן מסמך — אותו שער שבכל שאר
         // נקודות הכניסה. בלעדיו כל קובץ XML בתיקיית הספרים הופך ל"ספר"
         // שנכשל בפתיחה ובכל אינדוקס.
         (!format.needsContentSniffing ||
@@ -420,11 +417,6 @@ class FileSystemLibraryProvider implements LibraryProvider {
     });
   }
 
-  /// Refreshes the title to path mapping
-  void refresh() {
-    _keyToPath = null;
-  }
-
   /// Resets runtime state so the provider re-reads the active library path.
   void resetRuntimeState() {
     _categoryIdToPath.clear();
@@ -453,50 +445,6 @@ class FileSystemLibraryProvider implements LibraryProvider {
     _categoryIdToPath.clear();
     _isInitialized = false;
     _keyToPath = null;
-  }
-
-  /// Checks if a book is in the personal folder or a custom folder
-  Future<bool> isPersonalBook(
-    String title, {
-    String? category,
-    String? fileType,
-  }) async {
-    String? bookPath;
-    if (category != null && fileType != null) {
-      bookPath = await _getBookPath(title, category.hashCode, fileType);
-    } else {
-      // Fuzzy search
-      final map = await keyToPath;
-      for (final key in map.keys) {
-        if (key.startsWith('$title|')) {
-          bookPath = map[key];
-          break;
-        }
-      }
-    }
-
-    if (bookPath == null) return false;
-
-    // Check if in the built-in personal folder
-    if (bookPath.contains(
-      '${Platform.pathSeparator}אישי${Platform.pathSeparator}',
-    )) {
-      return true;
-    }
-
-    // Check if in any custom folder
-    final customFoldersJson = Settings.getValue<String>(
-      SettingsRepository.keyCustomFolders,
-    );
-    final customFolders = CustomFoldersManager.loadFolders(customFoldersJson);
-
-    for (final folder in customFolders) {
-      if (bookPath.startsWith(folder.path)) {
-        return true;
-      }
-    }
-
-    return false;
   }
 
   /// Gets the path to the personal books folder

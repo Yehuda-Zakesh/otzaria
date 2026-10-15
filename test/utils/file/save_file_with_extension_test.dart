@@ -82,61 +82,64 @@ void main() {
   });
 
   group('saveFileWithExtension — הגנת מצב סייפר', () {
-    testWidgets('במצב סייפר פעיל — דורש סיסמה, וכשבוטל מחזיר null בלי לפתוח סייר', (
-      tester,
-    ) async {
-      final settingsBloc = _MockSettingsBloc();
-      final repository = _FakeSettingsRepo();
+    testWidgets(
+      'במצב סייפר פעיל — דורש סיסמה, וכשבוטל מחזיר null בלי לפתוח סייר',
+      (
+        tester,
+      ) async {
+        final settingsBloc = _MockSettingsBloc();
+        final repository = _FakeSettingsRepo();
 
-      whenListen(
-        settingsBloc,
-        const Stream<SettingsState>.empty(),
-        initialState: SettingsState.initial().copyWith(
-          protectedModeEnabled: true,
-        ),
-      );
+        whenListen(
+          settingsBloc,
+          const Stream<SettingsState>.empty(),
+          initialState: SettingsState.initial().copyWith(
+            protectedModeEnabled: true,
+          ),
+        );
 
-      String? saveResult;
-      late BuildContext testContext;
+        String? saveResult;
+        late BuildContext testContext;
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: RepositoryProvider<SettingsRepository>.value(
-            value: repository,
-            child: BlocProvider<SettingsBloc>.value(
-              value: settingsBloc,
-              child: Builder(
-                builder: (context) {
-                  testContext = context;
-                  return const SizedBox.shrink();
-                },
+        await tester.pumpWidget(
+          MaterialApp(
+            home: RepositoryProvider<SettingsRepository>.value(
+              value: repository,
+              child: BlocProvider<SettingsBloc>.value(
+                value: settingsBloc,
+                child: Builder(
+                  builder: (context) {
+                    testContext = context;
+                    return const SizedBox.shrink();
+                  },
+                ),
               ),
             ),
           ),
-        ),
-      );
+        );
 
-      // הרצת saveFileWithExtension ברקע
-      final future = saveFileWithExtension(
-        fileName: 'test.pdf',
-        extension: 'pdf',
-        bytes: Uint8List.fromList([1, 2, 3]),
-        context: testContext,
-      ).then((res) => saveResult = res);
+        // הרצת saveFileWithExtension ברקע
+        final future = saveFileWithExtension(
+          fileName: 'test.pdf',
+          extension: 'pdf',
+          bytes: Uint8List.fromList([1, 2, 3]),
+          context: testContext,
+        ).then((res) => saveResult = res);
 
-      await tester.pump();
-      await tester.pump();
+        await tester.pump();
+        await tester.pump();
 
-      // מוודאים שדיאלוג הסיסמה נפתח
-      expect(find.byType(SaferModePasswordDialog), findsOneWidget);
+        // מוודאים שדיאלוג הסיסמה נפתח
+        expect(find.byType(SaferModePasswordDialog), findsOneWidget);
 
-      // ביטול הדיאלוג
-      await tester.tap(find.text('ביטול'));
-      await tester.pumpAndSettle();
+        // ביטול הדיאלוג
+        await tester.tap(find.text('ביטול'));
+        await tester.pumpAndSettle();
 
-      await future;
-      expect(saveResult, isNull);
-    });
+        await future;
+        expect(saveResult, isNull);
+      },
+    );
   });
 }
 
@@ -150,4 +153,3 @@ class _FakeSettingsRepo extends Fake implements SettingsRepository {
   @override
   bool verifyProtectedModePassword(String password) => password == '1234';
 }
-

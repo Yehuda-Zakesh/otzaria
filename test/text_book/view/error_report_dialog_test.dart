@@ -3,14 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/models/books.dart';
-import 'package:otzaria/models/direct_error_report.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/shortcuts/shortcut_helper.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/utils/canonical_json.dart';
 import 'package:otzaria/text_book/view/error_report_dialog.dart';
 import 'package:otzaria/text_book/view/text_correction_editor.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 // ignore: depend_on_referenced_packages
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 // ignore: depend_on_referenced_packages
@@ -186,6 +184,10 @@ void main() {
       expect(
         ErrorReportHelper.emailRecipientsFor('wikiJewishBooksToOtzaria'),
         'otzaria.200@gmail.com,WikiJewishBooks@gmail.com',
+      );
+      expect(
+        ErrorReportHelper.emailRecipientsFor('DictaToOtzaria'),
+        'otzaria.200@gmail.com,jewishoffice@gmail.com',
       );
       expect(
         ErrorReportHelper.emailRecipientsFor('yam-HaHachmaToOtzaria'),
@@ -661,18 +663,21 @@ void main() {
       expect(result.usedLineFallback, isFalse);
     });
 
-    test('should handle three occurrences in same line by returning full line context', () {
-      final content = ['אמר שלום ואז שלום ושוב שלום'];
+    test(
+      'should handle three occurrences in same line by returning full line context',
+      () {
+        final content = ['אמר שלום ואז שלום ושוב שלום'];
 
-      final result = ErrorReportHelper.resolveSelectionContext(
-        content: content,
-        selectedText: 'שלום',
-        preferredLineNumber: 0,
-      );
+        final result = ErrorReportHelper.resolveSelectionContext(
+          content: content,
+          selectedText: 'שלום',
+          preferredLineNumber: 0,
+        );
 
-      expect(result.usedLineFallback, isTrue);
-      expect(result.contextText, contains('שלום ואז שלום ושוב שלום'));
-    });
+        expect(result.usedLineFallback, isTrue);
+        expect(result.contextText, contains('שלום ואז שלום ושוב שלום'));
+      },
+    );
 
     test('should handle empty selected text gracefully', () {
       final content = ['שורה ראשונה', 'שורה שנייה'];
@@ -1159,6 +1164,37 @@ void main() {
     expect(report.contentDigest, hasLength(64));
   });
 
+  test('הצעת תיקון בלי הצעה (null) נשלחת כדיווח חופשי', () {
+    const line = 'א ב ג';
+    final report = ErrorReportHelper.buildDirectReport(
+      senderEmail: 'user@example.com',
+      reportData: ReportedErrorData(
+        selectedText: 'ב',
+        errorDetails: 'יש כאן טעות',
+        correction: TextCorrection.wholeLine(
+          originalLine: line,
+          proposedText: null,
+        ),
+      ),
+      bookTitle: 'ספר',
+      currentRef: 'א',
+      bookDetails: const {},
+      lineNumber: 1,
+      contextText: line,
+      libraryVersion: '27',
+      source: ReportSourceSnapshot(
+        bookId: 1,
+        lineIndex: 0,
+        heRef: null,
+        originalLine: line,
+      ),
+    );
+
+    expect(report.reportKind, DirectErrorReportKind.freeText);
+    expect(report.correction, isNull);
+    expect(report.toApiPayload()['report_kind'], 'free_text');
+  });
+
   test('created_at של דיווח חדש נשלח ב-UTC עם Z', () {
     final report = ErrorReportHelper.buildDirectReport(
       senderEmail: 'user@example.com',
@@ -1355,7 +1391,5 @@ TextBookLoaded _loadedState() {
     selectedIndex: 0,
     pinLeftPane: false,
     searchText: '',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
   );
 }

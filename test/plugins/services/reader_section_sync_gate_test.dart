@@ -131,6 +131,17 @@ void main() {
       expect(sync(sectionIndex: 1), isTrue);
     });
 
+    test('פגיעה מקדמת את הקטע — הפינוי לפי שימוש אחרון (LRU)', () {
+      gate = ReaderSectionSyncGate.forTesting(maxEntries: 2);
+      expect(sync(sectionIndex: 1), isTrue);
+      expect(sync(sectionIndex: 2), isTrue);
+      expect(sync(sectionIndex: 1), isFalse);
+      expect(sync(sectionIndex: 3), isTrue);
+      // קטע 2 הוא שפונה, לא קטע 1 שנפגע זה עתה.
+      expect(sync(sectionIndex: 1), isFalse);
+      expect(sync(sectionIndex: 2), isTrue);
+    });
+
     test('התקרה קטנה מזו של הטראקר, כדי שקו-הבסיס לא ייעלם לפני הסימון', () {
       expect(
         ReaderSectionSyncGate.defaultMaxEntries,

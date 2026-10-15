@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
+import 'package:otzaria/plugins/services/plugin_new_tab_page_registry.dart';
 import 'package:otzaria/navigation/view/tab_search_menu.dart';
 import 'package:otzaria/navigation/view/vertical_reading_tab_strip.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
@@ -162,24 +163,35 @@ class _ReadingTabsSidePanelState extends State<ReadingTabsSidePanel> {
   /// שורת הכפתורים שבראש העמודה. במצב מכווץ אין מקום לשני כפתורים זה לצד זה,
   /// ולכן הם נערמים זה מעל זה — וחיפוש הכרטיסיות נשאר נגיש.
   Widget _buildHeader(BuildContext context, {required bool collapsed}) {
-    final buttons = [
-      _buildCollapseButton(context, collapsed: collapsed),
-      const TabSearchButton(),
-    ];
-
-    if (collapsed) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [for (final button in buttons) Center(child: button)],
-      );
-    }
-
-    return SizedBox(
-      height: 36,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: buttons,
-      ),
+    return ListenableBuilder(
+      listenable: PluginNewTabPageRegistry.instance,
+      builder: (context, _) {
+        final buttons = [
+          _buildCollapseButton(context, collapsed: collapsed),
+          const TabSearchButton(),
+          if (PluginNewTabPageRegistry.instance.hasActiveRegistration)
+            IconButton(
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              tooltip: context.settingsText('כרטיסייה חדשה'),
+              icon: const Icon(FluentIcons.add_24_regular),
+              onPressed: PluginNewTabPageRegistry.instance.open,
+            ),
+        ];
+        if (collapsed) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [for (final button in buttons) Center(child: button)],
+          );
+        }
+        return SizedBox(
+          height: 36,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: buttons,
+          ),
+        );
+      },
     );
   }
 

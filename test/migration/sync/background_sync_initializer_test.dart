@@ -1,5 +1,10 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mockito/mockito.dart';
+import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/migration/sync/background_sync_initializer.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 
@@ -125,6 +130,49 @@ void main() {
       BackgroundSyncInitializer.resetForAppRestart();
 
       expect(BackgroundSyncInitializer.hasRun, isFalse);
+    });
+  });
+
+  group('BackgroundSyncInitializer כשל בסנכרון', () {
+    late Directory dataRoot;
+
+    setUp(() {
+      dataRoot = Directory.systemTemp.createTempSync('background-sync-test-');
+      AppPaths.debugOverrideDataRootPath(dataRoot.path);
+    });
+
+    tearDown(() {
+      BackgroundSyncInitializer.reset();
+      AppPaths.debugOverrideDataRootPath(null);
+      dataRoot.deleteSync(recursive: true);
+    });
+
+    test('כשל בלי ממתין אינו הופך לשגיאה לא מטופלת', () async {
+      final settings = MockSettingsWrapper();
+      when(
+        settings.getValue<bool>(
+          SettingsRepository.keyOfflineMode,
+          defaultValue: false,
+        ),
+      ).thenThrow(TimeoutException('sync worker hang: no progress'));
+      BackgroundSyncInitializer.settings = settings;
+      final uncaught = <Object>[];
+
+      await runZonedGuarded(
+        () => BackgroundSyncInitializer.initializeAfterDelay(delaySeconds: 0),
+        (error, _) => uncaught.add(error),
+      );
+      await pumpEventQueue();
+
+      expect(uncaught, isEmpty);
+      await expectLater(
+        BackgroundSyncInitializer.waitForCompletion(),
+        throwsA(isA<TimeoutException>()),
+      );
+      expect(
+        ErrorLogFile.resolveFile().readAsStringSync(),
+        contains('Background sync failed'),
+      );
     });
   });
 }

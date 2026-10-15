@@ -10,7 +10,7 @@
 # $PREBUILT_INDEX_REBUILD_TAG_FILE when set. Any other failure exits 1.
 #
 # רקע: בעבר כל בנייה הריצה `otzaria build-release-index` על כל הספרייה —
-# ‏118 דקות מול 12 דקות לאותה חבילה בלי האינדקס (ריצה 34779834547), ושני jobs
+# 118 דקות מול 12 דקות לאותה חבילה בלי האינדקס (ריצה 34779834547), ושני jobs
 # נוספים המתינו לה. האינדקס תלוי רק ב-seforim.db ובמנוע החיפוש, ולכן הוא נבנה
 # פעם אחת אחרי שחרור הספרייה (ראה build-library-index.yml שם) ונשמר על אותו
 # release. כאן רק מורידים אותו ומאמתים שהוא שייך בדיוק לבנייה הזאת.
@@ -62,7 +62,7 @@ schema=$(read_provenance '.schemaVersion')
 
 library_tag=$(read_provenance '.libraryReleaseTag')
 
-# ‏1. האינדקס נבנה בדיוק מה-DB שנארז כאן. seforim.db.zst מגיע מ-
+# 1. האינדקס נבנה בדיוק מה-DB שנארז כאן. seforim.db.zst מגיע מ-
 # releases/latest/download, ו-"latest" עלול להתחלף בין שתי ההורדות — ההשוואה
 # הזו היא מה שהופך את הזוג לאטומי.
 expected_database=$(read_provenance '.seforimDbZstSha256')
@@ -70,7 +70,7 @@ actual_database=$(hash_file "$database_archive")
 [ "$expected_database" = "$actual_database" ] || fail \
   "the stored index was built from seforim.db.zst $expected_database (release $library_tag) but this build packages $actual_database — rerun build-library-index.yml in Otzaria/SeforimLibrary for the current database release"
 
-# ‏2. סכמת האינדקס של המנוע שנפתר כאן. זו אותה השוואה שהאפליקציה עושה אצל
+# 2. סכמת האינדקס של המנוע שנפתר כאן. זו אותה השוואה שהאפליקציה עושה אצל
 # המשתמש — גרסת חבילה שונה בלי שינוי סכמה אינה פוסלת (ה-lock אינו ב-git ו-^ נפתר מחדש).
 expected_engine=$(read_provenance '.searchEngineVersion')
 package_config="$(dirname "$pubspec_lock")/.dart_tool/package_config.json"
@@ -88,17 +88,18 @@ required_schema=$(engine_const INDEX_SCHEMA_VERSION)
 [ -n "$required_format" ] && [ -n "$required_schema" ] \
   || fail "cannot read INDEX_FORMAT / INDEX_SCHEMA_VERSION from $engine_source"
 
-# ‏3. אותה קבוצת כרכי תלמוד. הכרכים אינם מאונדקסים, אבל הם יושבים בעץ הקטלוג
+# 3. אותה קבוצת כרכי תלמוד. הכרכים אינם מאונדקסים, אבל הם יושבים בעץ הקטלוג
 # ולכן קובעים את catalogueOrder — החצי העליון של כל מזהה מסמך. סט אחר מזיז את
 # הסדר של כמעט כל הספרייה מול מה שהאפליקציה תחשב אצל המשתמש, והבדיקה שבאפליקציה
 # משווה רק מספר רוויזיה ולכן לא הייתה תופסת זאת.
 #
 # ההשוואה היא על **שמות** הכרכים ולא על בתי הארכיון:
-# ‏_addBundledTalmudBavliPdfBooksToCategory גוזר כל כותרת ב-getTitleFromPath
+# _addBundledTalmudBavliPdfBooksToCategory גוזר כל כותרת ב-getTitleFromPath
 # וממקם אותה ליד ספר הטקסט בעל אותה כותרת. סריקה מחודשת של אותן מסכתות באיכות
 # אחרת משנה כל בית בארכיון ואינה משנה דבר בסדר — ולכן אסור לה להפיל בנייה.
 volume_names() { # volume_names <talmud tar.zst>  — חייב להיות זהה לצד הבונה
-  zstd -d -c "$1" | tar -tf - | sed 's#.*/##' | grep -i '\.pdf$' | LC_ALL=C sort -u
+  # literal: בלי locale של UTF-8 (קונטיינר ה-job) tar מחזיר שמות עבריים כ-escapes.
+  zstd -d -c "$1" | tar --quoting-style=literal -tf - | sed 's#.*/##' | grep -i '\.pdf$' | LC_ALL=C sort -u
 }
 expected_volumes_digest=$(read_provenance '.talmudVolumesDigest')
 actual_volumes_digest=$(volume_names "$talmud_archive" | hash_stdin)

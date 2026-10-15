@@ -144,7 +144,7 @@ const _kSegBaseWithIcon = 80.0;
 const _kSegCharWidth = 8.0;
 const _kSegGroupPadding = 24.0;
 const _kSegMinWidth = 180.0;
-const _kSegMaxWidth = 400.0;
+const _kSegMaxWidth = 440.0;
 
 double _segGroupWidth(List<SegmentOption<dynamic>> options) {
   final hasIcons = options.any((o) => o.icon != null || o.rtlIcon != null);
@@ -158,6 +158,42 @@ double _segGroupWidth(List<SegmentOption<dynamic>> options) {
     _kSegMinWidth,
     _kSegMaxWidth,
   );
+}
+
+/// Space a segment takes besides its label: the button padding on both
+/// sides and the borders.
+const _kSegLabelInset = 26.0;
+
+/// An option icon and the gap after it.
+const _kSegIconInset = 26.0;
+
+/// Whether a label would wrap inside its segment when the group is
+/// [groupWidth] wide. A wrapped label makes the control taller than a
+/// ListTile row, which does not grow with its trailing (issue #1920).
+bool _segLabelsWrap(
+  List<SegmentOption<dynamic>> options,
+  double groupWidth,
+  TextStyle labelStyle,
+  TextDirection textDirection,
+  TextScaler textScaler,
+) {
+  final hasIcons = options.any((o) => o.icon != null || o.rtlIcon != null);
+  final labelWidth =
+      groupWidth / options.length -
+      _kSegLabelInset -
+      (hasIcons ? _kSegIconInset : 0);
+  for (final option in options) {
+    final painter = TextPainter(
+      text: TextSpan(text: option.label, style: labelStyle),
+      textDirection: textDirection,
+      textScaler: textScaler,
+      maxLines: 1,
+    )..layout(maxWidth: labelWidth);
+    final wraps = painter.didExceedMaxLines;
+    painter.dispose();
+    if (wraps) return true;
+  }
+  return false;
 }
 
 // ── SettingsActionTile ────────────────────────────────────────────────────────
@@ -850,7 +886,21 @@ class __SegmentedTileState<T> extends State<_SegmentedTile<T>> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isNarrow = constraints.maxWidth < LayoutBreakpoints.compact;
+        final groupWidth = _segGroupWidth(widget.options);
+        // A label that wraps beside the title would be cut, so the control
+        // moves below the title, where the row grows with it.
+        final isNarrow =
+            constraints.maxWidth < LayoutBreakpoints.compact ||
+            _segLabelsWrap(
+              widget.options,
+              groupWidth,
+              // A segment label is the button's text style with the setting
+              // title style over it.
+              (Theme.of(context).textTheme.labelLarge ?? const TextStyle())
+                  .merge(AppTextStyles.settingTitle),
+              Directionality.of(context),
+              MediaQuery.textScalerOf(context),
+            );
 
         final control = Focus(
           focusNode: _focusNode,
@@ -859,7 +909,9 @@ class __SegmentedTileState<T> extends State<_SegmentedTile<T>> {
             currentValue: widget.currentValue,
             onChanged: widget.onChanged,
             expandToFillWidth: isNarrow,
+            showSelectedIcon: false,
             height: 40,
+            maxLabelLines: 2,
           ),
         );
 
@@ -875,10 +927,7 @@ class __SegmentedTileState<T> extends State<_SegmentedTile<T>> {
               title: widget.title,
               subtitle: _resolvedSubtitle,
               actions: [
-                SizedBox(
-                  width: _segGroupWidth(widget.options),
-                  child: control,
-                ),
+                SizedBox(width: groupWidth, child: control),
               ],
             ),
           );
@@ -1037,15 +1086,18 @@ class _PathMenuButtonState extends State<_PathMenuButton> {
     final hasPath = widget.currentPath.isNotEmpty;
     final targets = widget.pathTargets;
     final hasTargets = targets != null && targets.isNotEmpty;
+    final platform = Theme.of(context).platform;
     final entries = <AppMenuEntry<_PathMenuAction>>[
-      AppMenuEntry(
-        value: _PathMenuAction.openFolder,
-        label: context.settingsText(
-          hasTargets ? 'פתח תיקייה...' : 'פתח תיקייה',
+      // במובייל אין מנהל קבצים שבו openInFileManager יכול לפתוח תיקייה.
+      if (platform != TargetPlatform.android && platform != TargetPlatform.iOS)
+        AppMenuEntry(
+          value: _PathMenuAction.openFolder,
+          label: context.settingsText(
+            hasTargets ? 'פתח תיקייה...' : 'פתח תיקייה',
+          ),
+          icon: FluentIcons.folder_open_24_regular,
+          enabled: hasPath || hasTargets,
         ),
-        icon: FluentIcons.folder_open_24_regular,
-        enabled: hasPath || hasTargets,
-      ),
       AppMenuEntry(
         value: _PathMenuAction.changeLocation,
         label: context.settingsText(widget.changeLocationLabel),

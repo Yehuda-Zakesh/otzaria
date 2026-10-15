@@ -22,13 +22,13 @@ import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/text_book_repository.dart';
+import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/text_book/view/text_book_screen.dart';
 import 'package:otzaria/tools/shamor_zachor/providers/shamor_zachor_data_provider.dart';
 import 'package:otzaria/tools/shamor_zachor/providers/shamor_zachor_progress_provider.dart';
 import 'package:otzaria/tour/bloc/tour_cubit.dart';
 import 'package:provider/provider.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:otzaria/tour/tour_target_keys.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
 import '../../support/search_engine_test_init.dart';
@@ -70,10 +70,11 @@ Future<void> main() async {
   Future<_TestTextBookBloc> pumpScreen(
     WidgetTester tester, {
     required String searchText,
+    int? markLine,
   }) async {
     final book = TextBook(title: 'ספר בדיקה');
     final bloc = _TestTextBookBloc(
-      _loadedState(book, searchText: searchText),
+      _loadedState(book, searchText: searchText, markLine: markLine),
     );
     final tab = TextBookTab(book: book, index: 0, blocOverride: bloc);
     final tabsBloc = _TestTabsBloc(TabsState(tabs: [tab], currentTabIndex: 0));
@@ -114,11 +115,13 @@ Future<void> main() async {
             BlocProvider<TourCubit>.value(value: tourCubit),
           ],
           child: MaterialApp(
-            home: TextBookViewerBloc(
-              tab: tab,
-              isInCombinedView: false,
-              enableTourTargets: true,
-              openBookCallback: (_) {},
+            home: TourTargetsScope(
+              enabled: true,
+              child: TextBookViewerBloc(
+                tab: tab,
+                isInCombinedView: false,
+                openBookCallback: (_) {},
+              ),
             ),
           ),
         ),
@@ -156,9 +159,26 @@ Future<void> main() async {
 
     expect(bloc.recordedEvents.whereType<UpdateSearchText>(), isEmpty);
   });
+
+  testWidgets('Esc מנקה את הדגשת ה-?mark מקישור (issue #2067)', (tester) async {
+    final bloc = await pumpScreen(tester, searchText: '', markLine: 0);
+    bloc.recordedEvents.clear();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+
+    expect(
+      bloc.recordedEvents.whereType<ApplyMarkHighlight>().single,
+      const ApplyMarkHighlight(),
+    );
+  });
 }
 
-TextBookLoaded _loadedState(TextBook book, {required String searchText}) {
+TextBookLoaded _loadedState(
+  TextBook book, {
+  required String searchText,
+  int? markLine,
+}) {
   return TextBookLoaded(
     book: book,
     showLeftPane: false,
@@ -178,9 +198,8 @@ TextBookLoaded _loadedState(TextBook book, {required String searchText}) {
     selectedIndex: 0,
     pinLeftPane: false,
     searchText: searchText,
+    permanentHighlightLine: markLine,
     currentTitle: 'סימן א',
-    scrollController: ItemScrollController(),
-    positionsListener: ItemPositionsListener.create(),
     searchMode: SearchMode.exact,
   );
 }

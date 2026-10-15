@@ -259,7 +259,6 @@ void main() {
               ),
             ],
             baseStyle: _baseStyle,
-            onLineTap: (_) {},
           ),
         ),
       );

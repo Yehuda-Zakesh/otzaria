@@ -428,7 +428,7 @@ List<TikkunLine> buildSpecialLines(
   }
 }
 
-/// האינדקס הגלובלי הקטן ביותר מבין מילות השורה, או ‎-1.
+/// האינדקס הגלובלי הקטן ביותר מבין מילות השורה, או -1.
 int firstTokenIdxOfLine(TikkunLine line) {
   var best = -1;
   void scan(List<LayoutWord>? group) {

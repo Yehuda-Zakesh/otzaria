@@ -27,48 +27,6 @@ class SearchResult {
     required this.rank,
   });
 
-  /// Creates a SearchResult instance from JSON.
-  factory SearchResult.fromJson(Map<String, dynamic> json) {
-    return SearchResult(
-      bookId: json['bookId'] as int,
-      bookTitle: json['bookTitle'] as String,
-      lineId: json['lineId'] as int,
-      lineIndex: json['lineIndex'] as int,
-      snippet: json['snippet'] as String,
-      rank: (json['rank'] as num).toDouble(),
-    );
-  }
-
-  /// Converts the SearchResult to JSON.
-  Map<String, dynamic> toJson() {
-    return {
-      'bookId': bookId,
-      'bookTitle': bookTitle,
-      'lineId': lineId,
-      'lineIndex': lineIndex,
-      'snippet': snippet,
-      'rank': rank,
-    };
-  }
-
-  SearchResult copyWith({
-    int? bookId,
-    String? bookTitle,
-    int? lineId,
-    int? lineIndex,
-    String? snippet,
-    double? rank,
-  }) {
-    return SearchResult(
-      bookId: bookId ?? this.bookId,
-      bookTitle: bookTitle ?? this.bookTitle,
-      lineId: lineId ?? this.lineId,
-      lineIndex: lineIndex ?? this.lineIndex,
-      snippet: snippet ?? this.snippet,
-      rank: rank ?? this.rank,
-    );
-  }
-
   @override
   String toString() {
     return 'SearchResult(bookId: $bookId, bookTitle: $bookTitle, lineId: $lineId, lineIndex: $lineIndex, snippet: "$snippet", rank: $rank)';

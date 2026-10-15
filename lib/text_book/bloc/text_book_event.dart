@@ -10,6 +10,9 @@ sealed class TextBookEvent extends Equatable {
 }
 
 class LoadContent extends TextBookEvent {
+  /// מיקום הכרטיסייה בעת יצירת הקורא, אם קורא תוסף כבר שינה אותו.
+  /// משפיע על טעינה ראשונה בלבד; טעינה חוזרת שומרת את המיקום הטעון.
+  final int? startIndex;
   final double fontSize;
   final bool showSplitView;
   final bool removeNikud;
@@ -31,6 +34,7 @@ class LoadContent extends TextBookEvent {
   final bool preserveContinuousReadingMode;
 
   const LoadContent({
+    this.startIndex,
     required this.fontSize,
     required this.showSplitView,
     required this.removeNikud,
@@ -45,6 +49,7 @@ class LoadContent extends TextBookEvent {
 
   @override
   List<Object?> get props => [
+    startIndex,
     fontSize,
     showSplitView,
     removeNikud,
@@ -219,19 +224,16 @@ class ClearHighlightedLine extends TextBookEvent {
 class ApplyMarkHighlight extends TextBookEvent {
   final String highlightText;
   final int? permanentHighlightLine;
-  final int? scrollToIndex;
 
   const ApplyMarkHighlight({
     this.highlightText = '',
     this.permanentHighlightLine,
-    this.scrollToIndex,
   });
 
   @override
   List<Object?> get props => [
     highlightText,
     permanentHighlightLine,
-    scrollToIndex,
   ];
 }
 

@@ -180,6 +180,119 @@ void main() {
     });
   });
 
+  group('searchFieldActions', () {
+    Map<String, dynamic> actionsManifest({
+      List<String> permissions = const [
+        'app.startup_contributions',
+        'app.run_on_startup',
+        'search.field_actions',
+      ],
+      String minAppVersion = '0.9.99',
+      List<Map<String, dynamic>>? items,
+    }) => _manifest(
+      permissions: permissions,
+      minAppVersion: minAppVersion,
+      startup: {
+        'searchFieldActions':
+            items ??
+            [
+              {
+                'id': 'dictate',
+                'title': 'חיפוש בדיבור',
+                'icon': 'mic_24_regular',
+                'activeIcon': 'mic_24_filled',
+                'fields': ['library', 'inBook'],
+              },
+            ],
+      },
+    );
+
+    test('תרומה תקינה עוברת ללא שגיאות ואזהרות', () {
+      final report = _run(tempDir, actionsManifest());
+      expect(report.errors, isEmpty);
+      expect(
+        report.warnings.where((w) => w.contains('searchFieldActions')),
+        isEmpty,
+      );
+    });
+
+    test('חסרה הרשאת search.field_actions — שגיאה חוסמת', () {
+      final report = _run(
+        tempDir,
+        actionsManifest(
+          permissions: const [
+            'app.startup_contributions',
+            'app.run_on_startup',
+          ],
+        ),
+      );
+      expect(report.errors, contains(contains('"search.field_actions"')));
+    });
+
+    test('minAppVersion ישן מדי — שגיאה חוסמת', () {
+      final report = _run(tempDir, actionsManifest(minAppVersion: '0.9.98'));
+      expect(
+        report.errors,
+        contains(contains('searchFieldActions נתמך החל מגרסה 0.9.99')),
+      );
+    });
+
+    test('יותר מ-2 כפתורים, מזהה כפול ופריט פגום — שגיאות', () {
+      final report = _run(
+        tempDir,
+        actionsManifest(
+          items: [
+            {'id': 'a', 'title': 'א'},
+            {'id': 'a', 'title': 'ב'},
+            {'id': 'c'},
+          ],
+        ),
+      );
+      expect(report.errors, contains(contains('מוגבל ל-2')));
+      expect(report.errors, contains(contains('מזהה כפול')));
+      expect(report.errors, contains(contains('לא תקין')));
+    });
+
+    test('שדה ואייקון לא מוכרים — אזהרה בלבד', () {
+      final report = _run(
+        tempDir,
+        actionsManifest(
+          items: [
+            {
+              'id': 'a',
+              'title': 'א',
+              'icon': 'no_such_icon',
+              'fields': ['library', 'someFutureField'],
+            },
+          ],
+        ),
+      );
+      expect(report.errors, isEmpty);
+      expect(report.warnings, contains(contains('someFutureField')));
+      expect(report.warnings, contains(contains('no_such_icon')));
+    });
+
+    test('קריאה ל-search.setFieldText מחייבת minAppVersion 0.9.99', () {
+      final dir = Directory(p.join(tempDir.path, 'plugin'))..createSync();
+      final json = actionsManifest(minAppVersion: '0.9.98', items: const []);
+      (json['contributes'] as Map).remove('startup');
+      File(p.join(dir.path, 'manifest.json')).writeAsStringSync(
+        jsonEncode(json),
+      );
+      File(p.join(dir.path, 'index.html')).writeAsStringSync(
+        '<!doctype html><html lang="he" dir="rtl"><script>'
+        "Otzaria.call('search.setFieldText', {sessionId: 's', text: 'x'});"
+        '</script><style>body { color: var(--color-text); }</style></html>',
+      );
+      final report = PluginExtendedValidator.validate(
+        manifest: PluginManifest.fromJson(json),
+        manifestJson: json,
+        directoryPath: dir.path,
+      );
+      expect(report.errors, contains(contains('search.setFieldText')));
+    });
+  });
+
   group('libraryBooks', () {
     Map<String, dynamic> booksManifest({
       List<String> permissions = const [
@@ -223,6 +336,78 @@ void main() {
     test('minAppVersion ישן מדי — שגיאה חוסמת', () {
       final report = _run(tempDir, booksManifest(minAppVersion: '0.9.97'));
       expect(report.errors, contains(contains('libraryBooks נתמך החל מגרסה')));
+    });
+
+    test('openAction: הרשאת הפעולה חייבת להיות מוצהרת', () {
+      List<Map<String, dynamic>> items() => [
+        {
+          'id': 'books',
+          'provider': 'mylib',
+          'title': 'הספרייה שלי',
+          'openAction': {
+            'type': 'localService.post',
+            'args': {
+              'port': {r'$storage': 'servicePort'},
+              'path': '/book/open',
+              'body': {
+                'id': {r'$book': 'id'},
+              },
+            },
+          },
+        },
+      ];
+
+      final missing = _run(tempDir, booksManifest(items: items()));
+      expect(missing.errors, contains(contains('network.localhost')));
+
+      final missingStorage = _run(
+        tempDir,
+        booksManifest(
+          permissions: const [
+            'app.startup_contributions',
+            'library.books.provide',
+            'network.localhost',
+          ],
+          items: items(),
+        ),
+      );
+      expect(missingStorage.errors, contains(contains('plugin.storage.read')));
+
+      final valid = _run(
+        tempDir,
+        booksManifest(
+          permissions: const [
+            'app.startup_contributions',
+            'library.books.provide',
+            'network.localhost',
+            'plugin.storage.read',
+          ],
+          items: items(),
+        ),
+      );
+      expect(valid.errors, isEmpty);
+    });
+
+    test(r'openAction עם $selection — שגיאה חוסמת', () {
+      final report = _run(
+        tempDir,
+        booksManifest(
+          items: [
+            {
+              'id': 'books',
+              'provider': 'mylib',
+              'title': 'הספרייה שלי',
+              'openAction': {
+                'type': 'ui.showSnack',
+                'args': {
+                  'message': {r'$selection': 'selectedText'},
+                },
+              },
+            },
+          ],
+        ),
+      );
+      expect(report.errors, contains(contains('openAction')));
     });
 
     test('שם ספק מובנה, ספק כפול ושלושה ספקים — שגיאות חוסמות', () {
@@ -370,6 +555,221 @@ void main() {
         permissions: permissions,
         minAppVersion: '0.9.97',
         startup: startup(),
+      ),
+    );
+    expect(valid.errors, isEmpty);
+  });
+
+  test('localService.post בתפריט ההקשר דורש 0.9.98 ו-network.localhost', () {
+    Map<String, dynamic> startup() => {
+      'contextMenuItems': [
+        {
+          'id': 'search',
+          'title': 'חיפוש בשירות',
+          'action': {
+            'type': 'localService.post',
+            'args': {
+              'port': 39700,
+              'path': '/text/search',
+              'body': {
+                'text': {r'$selection': 'selectedText'},
+              },
+            },
+          },
+        },
+      ],
+    };
+    const permissions = [
+      'app.startup_contributions',
+      'reader.context_menu',
+      'network.localhost',
+    ];
+
+    final oldVersion = _run(
+      tempDir,
+      _manifest(
+        permissions: permissions,
+        minAppVersion: '0.9.97',
+        startup: startup(),
+      ),
+    );
+    expect(
+      oldVersion.errors,
+      contains(contains('localService.post נתמכת החל מגרסה 0.9.98')),
+    );
+
+    final missingPermission = _run(
+      tempDir,
+      _manifest(
+        permissions: const ['app.startup_contributions', 'reader.context_menu'],
+        minAppVersion: '0.9.98',
+        startup: startup(),
+      ),
+    );
+    expect(missingPermission.errors, contains(contains('network.localhost')));
+
+    final valid = _run(
+      tempDir,
+      _manifest(
+        permissions: permissions,
+        minAppVersion: '0.9.98',
+        startup: startup(),
+      ),
+    );
+    expect(valid.errors, isEmpty);
+  });
+
+  test('localService.post בתפריט ההקשר: ערך מילולי שגוי נדחה בהתקנה', () {
+    final report = _run(
+      tempDir,
+      _manifest(
+        permissions: const [
+          'app.startup_contributions',
+          'reader.context_menu',
+          'network.localhost',
+        ],
+        minAppVersion: '0.9.98',
+        startup: {
+          'contextMenuItems': [
+            {
+              'id': 'search',
+              'title': 'חיפוש בשירות',
+              'action': {
+                'type': 'localService.post',
+                'args': {'port': 39700, 'path': '/text/search?q=1'},
+              },
+            },
+          ],
+        },
+      ),
+    );
+
+    expect(report.errors, contains(contains('localService.post.path')));
+  });
+
+  test('localService.post בפקד דקלרטיבי דורשת minAppVersion 0.9.98', () {
+    final startup = {
+      'programs': [
+        {
+          'id': 'p1',
+          'version': 1,
+          'triggers': ['reader.activeBookChanged'],
+          'commands': [
+            {
+              'id': 'c1',
+              'type': 'data.first',
+              'args': {
+                'items': {
+                  r'$literal': [1],
+                },
+              },
+            },
+          ],
+          'outputs': {
+            'visible': {r'$result': 'c1'},
+          },
+        },
+      ],
+      'toolbarItems': [
+        {
+          'id': 'b1',
+          'type': 'button',
+          'title': 'שלח לשירות',
+          'icon': 'apps_24_regular',
+          'binding': {'program': 'p1', 'visibleOutput': 'visible'},
+          'action': {
+            'type': 'localService.post',
+            'args': {'port': 39700, 'path': '/ping'},
+          },
+        },
+      ],
+    };
+    const permissions = [
+      'app.startup_contributions',
+      'reader.toolbar',
+      'network.localhost',
+    ];
+
+    final oldVersion = _run(
+      tempDir,
+      _manifest(
+        permissions: permissions,
+        minAppVersion: '0.9.97',
+        startup: startup,
+      ),
+    );
+    expect(
+      oldVersion.errors,
+      contains(contains('localService.post נתמכת החל מגרסה 0.9.98')),
+    );
+
+    final supportedVersion = _run(
+      tempDir,
+      _manifest(
+        permissions: permissions,
+        minAppVersion: '0.9.98',
+        startup: startup,
+      ),
+    );
+    expect(supportedVersion.errors, isEmpty);
+  });
+
+  test(r'$storage בתפריט ההקשר דורש minAppVersion 0.9.98', () {
+    final startup = {
+      'contextMenuItems': [
+        {
+          'id': 'save',
+          'title': 'שמור',
+          'action': {
+            'type': 'storage.set',
+            'args': {
+              'key': 'last',
+              'value': {r'$storage': 'current'},
+            },
+          },
+        },
+      ],
+    };
+    const permissions = [
+      'app.startup_contributions',
+      'reader.context_menu',
+      'plugin.storage.write',
+      'plugin.storage.read',
+    ];
+
+    final missingStorage = _run(
+      tempDir,
+      _manifest(
+        permissions: permissions
+            .where((p) => p != 'plugin.storage.read')
+            .toList(),
+        minAppVersion: '0.9.98',
+        startup: startup,
+      ),
+    );
+    expect(missingStorage.errors, contains(contains('plugin.storage.read')));
+
+    final oldVersion = _run(
+      tempDir,
+      _manifest(
+        permissions: permissions,
+        minAppVersion: '0.9.97',
+        startup: startup,
+      ),
+    );
+    expect(
+      oldVersion.errors,
+      contains(contains(r'ההפניה $storage נתמכת החל מגרסה 0.9.98')),
+    );
+    // ולא שגיאה נוספת על storage.set, שנתמך כבר ב-0.9.97.
+    expect(oldVersion.errors, hasLength(1));
+
+    final valid = _run(
+      tempDir,
+      _manifest(
+        permissions: permissions,
+        minAppVersion: '0.9.98',
+        startup: startup,
       ),
     );
     expect(valid.errors, isEmpty);

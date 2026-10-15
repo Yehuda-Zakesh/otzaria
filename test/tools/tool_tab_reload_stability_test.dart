@@ -87,9 +87,9 @@ void main() {
 
     test('דיאלוג ההרשאות של התקנה — גם הוא אינו מפרק את התוסף', () {
       final loaded = PluginSystemLoaded([_plugin(storeId)]);
-      final entry = (resolveToolLookup(_lookup(storeId, loaded), null)
-              as ToolAvailable)
-          .entry;
+      final entry =
+          (resolveToolLookup(_lookup(storeId, loaded), null) as ToolAvailable)
+              .entry;
 
       final installing = PluginSystemInstallRequiresPermissions(
         manifest: _plugin('other.plugin').manifest,
@@ -104,9 +104,9 @@ void main() {
 
     test('התוסף הוסר — המצב האמיתי גובר על הכלי הקודם', () {
       final loaded = PluginSystemLoaded([_plugin(storeId)]);
-      final entry = (resolveToolLookup(_lookup(storeId, loaded), null)
-              as ToolAvailable)
-          .entry;
+      final entry =
+          (resolveToolLookup(_lookup(storeId, loaded), null) as ToolAvailable)
+              .entry;
 
       final resolved = resolveToolLookup(
         _lookup(storeId, const PluginSystemLoaded([])),

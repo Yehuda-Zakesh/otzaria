@@ -1,6 +1,5 @@
 import 'package:equatable/equatable.dart';
-import 'package:otzaria/app_report/models/app_report.dart';
-import 'package:otzaria/app_report/models/app_report_image.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 
 /// אירועי טופס הדיווח על התוכנה.
 sealed class AppReportEvent extends Equatable {
@@ -80,6 +79,16 @@ class AppReportErrorLogToggled extends AppReportEvent {
   List<Object?> get props => [include];
 }
 
+/// הכללה או החרגה של ה-minidump מהדיווח.
+class AppReportMinidumpToggled extends AppReportEvent {
+  const AppReportMinidumpToggled(this.include);
+
+  final bool include;
+
+  @override
+  List<Object?> get props => [include];
+}
+
 /// החלפת רשימת התמונות המצורפות (הוספה או הסרה).
 class AppReportImagesChanged extends AppReportEvent {
   const AppReportImagesChanged(this.images);
@@ -92,4 +101,14 @@ class AppReportImagesChanged extends AppReportEvent {
 
 class AppReportSubmitted extends AppReportEvent {
   const AppReportSubmitted();
+}
+
+/// שמירת הטופס כטיוטה, להשלמה ולשליחה בפתיחה הבאה.
+class AppReportDraftSaved extends AppReportEvent {
+  const AppReportDraftSaved();
+}
+
+/// מחיקת הטיוטה השמורה וניקוי הטופס.
+class AppReportDraftDiscarded extends AppReportEvent {
+  const AppReportDraftDiscarded();
 }

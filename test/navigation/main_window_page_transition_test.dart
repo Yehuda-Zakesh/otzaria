@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -94,6 +96,93 @@ void main() {
       final controller = await pumpPages(tester, exclude: true);
       await pressTabs(tester);
       expect(controller.page, 1);
+    });
+  });
+
+  group('פוקוס לחיפוש הספרייה במעבר למסך (issue #1723)', () {
+    late FocusNode searchNode;
+    late StateSetter setHostState;
+    var currentIndex = 1;
+
+    Future<void> pumpHost(WidgetTester tester) async {
+      currentIndex = 1;
+      searchNode = FocusNode();
+      addTearDown(searchNode.dispose);
+      final controller = PageController(initialPage: 1);
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              setHostState = setState;
+              return PageView(
+                controller: controller,
+                physics: const NeverScrollableScrollPhysics(),
+                children: MainWindowScreenState.excludeOffscreenPagesFromFocus(
+                  [
+                    KeepAlivePage(
+                      key: const ValueKey('library'),
+                      child: Material(child: TextField(focusNode: searchNode)),
+                    ),
+                    const KeepAlivePage(
+                      key: ValueKey('reading'),
+                      child: SizedBox.expand(),
+                    ),
+                  ],
+                  currentIndex,
+                ),
+              );
+            },
+          ),
+        ),
+      );
+      controller.jumpToPage(0);
+      await tester.pump();
+      controller.jumpToPage(1);
+      await tester.pumpAndSettle();
+    }
+
+    void showLibrary() => setHostState(() => currentIndex = 0);
+
+    testWidgets('בקשה באותו אירוע שבו העמוד מתחלף נדחית (בקרה)', (
+      tester,
+    ) async {
+      await pumpHost(tester);
+      showLibrary();
+      searchNode.requestFocus();
+      await tester.pump();
+      expect(searchNode.hasFocus, isFalse);
+    });
+
+    testWidgets('אחרי החלפת העמוד שדה החיפוש מקבל פוקוס', (tester) async {
+      await pumpHost(tester);
+      showLibrary();
+      unawaited(
+        MainWindowScreenState.afterPageBecomesCurrent(
+          Future<void>.value(),
+        ).then((_) => searchNode.requestFocus()),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(searchNode.hasFocus, isTrue);
+    });
+
+    testWidgets('במעבר בין עמודים רחוקים — אחרי סיום ההחלקה', (tester) async {
+      await pumpHost(tester);
+      final slide = Completer<void>();
+      unawaited(
+        MainWindowScreenState.afterPageBecomesCurrent(
+          slide.future,
+        ).then((_) => searchNode.requestFocus()),
+      );
+      await tester.pump();
+      expect(searchNode.hasFocus, isFalse);
+      // סוף ההחלקה: העמוד הופך לנוכחי רק עכשיו.
+      showLibrary();
+      slide.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(searchNode.hasFocus, isTrue);
     });
   });
 

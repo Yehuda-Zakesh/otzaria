@@ -1,32 +1,10 @@
-// lib/widgets/dialogs/reusable_items_dialog.dart
-//
-// [AppCustomContentDialog] — מיכל דיאלוג עם תוכן מותאם.
-//
-// מתאים לכל מסך מורכב שנפתח כדיאלוג: אירועי לוח שנה, הערות, היסטוריה וכד'.
-//
-// מאפיינים:
-//  • Escape תמיד סוגר (דרך [DialogNavigationMixin])
-//  • [actions] — שורת כפתורים אופציונלית בתחתית (ActionButton.recommended / .neutral)
-//  • [onConfirm] + [handleEnterKey] — Enter אופציונלי להפעלת פעולה ראשית
-//  • Enter פעיל רק כש-handleEnterKey=true **וגם** onConfirm מוגדר — מונע
-//    סגירת דיאלוג בלתי מכוונת בלחיצת Enter בתוך שדות קלט
-//  • רספונסיבי: 95% רוחב במובייל (< compact), 50% ב-desktop
-//  • כפתור X לסגירה בפינה
-//  • [scrollable] — ה-Scrollbar ממוקם אוטומטית בתוך ה-16px הקיים (לא מוסיף padding)
-
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:otzaria/theme/theme_exports.dart';
 import 'package:otzaria/widgets/layout/panel_scrollable_content.dart';
 import 'package:otzaria/widgets/misc/keyboard_dialog_navigation.dart';
 
-// ── AppCustomContentDialog ─────────────────────────────────────────────────────
-
 /// מיכל דיאלוג ראשי לתוכן מורכב — מסכים, רשימות, טפסים.
-///
-/// כל דיאלוג שמשתמש בו מקבל אוטומטית:
-///  • Escape → סגירה
-///  • Enter → [onConfirm] (רק אם [handleEnterKey]=true **וגם** [onConfirm] מוגדר)
 class AppCustomContentDialog extends StatefulWidget {
   final String title;
   final Widget child;
@@ -47,6 +25,9 @@ class AppCustomContentDialog extends StatefulWidget {
   /// false כשה-child מנהל scroll פנימי בעצמו (ListView, CustomScrollView וכד').
   final bool scrollable;
 
+  /// האם ניתן לסגור דרך X, Escape או חזרה בזמן שהתוכן מבצע פעולה.
+  final bool canDismiss;
+
   const AppCustomContentDialog({
     super.key,
     required this.title,
@@ -55,6 +36,7 @@ class AppCustomContentDialog extends StatefulWidget {
     this.onConfirm,
     this.handleEnterKey = false,
     this.scrollable = true,
+    this.canDismiss = true,
   });
 
   @override
@@ -75,9 +57,11 @@ class _AppCustomContentDialogState extends State<AppCustomContentDialog>
     final effectiveHandleEnterKey =
         widget.handleEnterKey && widget.onConfirm != null;
 
-    return buildKeyboardNavigator(
+    final dialog = buildKeyboardNavigator(
       onConfirm: widget.onConfirm ?? () {},
-      onCancel: () => Navigator.of(context).pop(),
+      onCancel: () {
+        if (widget.canDismiss) Navigator.of(context).pop();
+      },
       handleEnterKey: effectiveHandleEnterKey,
       child: Dialog(
         insetPadding: const EdgeInsets.all(16),
@@ -114,7 +98,9 @@ class _AppCustomContentDialogState extends State<AppCustomContentDialog>
                     ),
                     IconButton(
                       icon: Icon(FluentIcons.dismiss_24_regular),
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: widget.canDismiss
+                          ? () => Navigator.of(context).pop()
+                          : null,
                     ),
                   ],
                 ),
@@ -152,5 +138,6 @@ class _AppCustomContentDialogState extends State<AppCustomContentDialog>
         ),
       ),
     );
+    return PopScope(canPop: widget.canDismiss, child: dialog);
   }
 }

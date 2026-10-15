@@ -14,7 +14,7 @@ import 'package:otzaria/theme/theme_exports.dart';
 /// סיומת קובץ התוסף הנקלט בגרירה.
 const String _pluginExtension = '.otzplugin';
 
-/// אזור שמקבל קובץ ‎.otzplugin‎ הנגרר מהמערכת ומתקין אותו.
+/// אזור שמקבל קובץ .otzplugin הנגרר מהמערכת ומתקין אותו.
 class PluginDropZone extends StatefulWidget {
   final Widget child;
 

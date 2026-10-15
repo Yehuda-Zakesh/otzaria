@@ -7,6 +7,7 @@ import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/utils/text/ref_helper.dart';
+import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 /// כתובת השורה עם שם הספר: ה-heRef המלא (עד הפסוק) כשיש, אחרת נתיב הכותרות.
@@ -19,7 +20,7 @@ Future<String> _lineRef(
       await heRefFromDbLine(book, index) ??
       await refFromDbLine(book, index) ??
       await refFromIndex(index, tableOfContents());
-  return addBookTitleToRef(ref, book.title);
+  return addBookTitleToRef(refUpToDaf(ref), book.title);
 }
 
 /// בונה סימניה מטאב קריאה (טקסט/PDF/מפרשים) במיקומו הנוכחי.
@@ -35,7 +36,7 @@ Future<Bookmark?> bookmarkFromReadingTab(
   if (tab is CommentatorsTab) {
     final blocState = tab.bloc.state;
     if (blocState is TextBookLoaded && blocState.visibleIndices.isNotEmpty) {
-      final index = blocState.visibleIndices.first;
+      final index = tab.currentIndex;
       final ref = await _lineRef(
         blocState.book,
         index,
@@ -71,7 +72,7 @@ Future<Bookmark?> bookmarkFromReadingTab(
   if (tab is TextBookTab) {
     final blocState = tab.bloc.state;
     if (blocState is TextBookLoaded && blocState.visibleIndices.isNotEmpty) {
-      final index = blocState.visibleIndices.first;
+      final index = tab.index;
       final ref = await _lineRef(
         blocState.book,
         index,
@@ -148,6 +149,39 @@ Future<Bookmark?> bookmarkFromReadingTab(
   }
 
   return null;
+}
+
+/// הטאב שפותח את [bookmark]. לסימניית מפרשים נבנה טאב מקור בלתי-תלוי
+/// ונגזר ממנו PdfCommentatorsTab/CommentatorsTab; אחרת — טאב הספר עצמו.
+OpenedTab tabFromBookmark(Bookmark bookmark) {
+  final openLeftPane = shouldAutoOpenReadingLeftPane();
+  if (bookmark.targetKind == BookmarkTargetKind.commentators) {
+    if (bookmark.book is PdfBook) {
+      final sourceTab = PdfBookTab(
+        book: bookmark.book as PdfBook,
+        pageNumber: bookmark.index,
+        openLeftPane: openLeftPane,
+      )..activeCommentators = bookmark.commentatorsToShow.toSet();
+      return PdfCommentatorsTab(sourceTab: sourceTab);
+    }
+
+    final sourceTab =
+        OpenedTab.fromBook(
+              bookmark.book,
+              bookmark.index,
+              commentators: bookmark.commentatorsToShow,
+              openLeftPane: openLeftPane,
+            )
+            as TextBookTab;
+    return CommentatorsTab(sourceTab: sourceTab);
+  }
+
+  return OpenedTab.fromBook(
+    bookmark.book,
+    bookmark.index,
+    commentators: bookmark.commentatorsToShow,
+    openLeftPane: openLeftPane,
+  );
 }
 
 /// מוצא את הכותרת המתאימה לעמוד מסוים ב-outline של PDF.

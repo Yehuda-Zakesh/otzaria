@@ -13,8 +13,8 @@ import 'package:otzaria_icons/otzaria_icons.dart';
 
 /// אייקון הניקוד של הכפתור לפי המצב הנוכחי.
 IconData textDisplayBarIcon(bool removeNikud) => removeNikud
-    ? OtzariaIcons.alef_with_score_24_regular
-    : OtzariaIcons.alef_deletion_24_regular;
+    ? OtzariaIcons.alef_niqqud_24_filled
+    : OtzariaIcons.alef_delete_24_filled;
 
 String textDisplayBarTooltip(bool removeNikud) =>
     removeNikud ? 'הצג ניקוד' : 'הסתר ניקוד';
@@ -77,14 +77,12 @@ Future<void> showTextDisplayPopup(
 class TextDisplaySection {
   final String title;
   final TextDisplayProfile profile;
-  final bool showAnchorMarkers;
   final ValueChanged<TextDisplayProfile> onChanged;
 
   const TextDisplaySection({
     required this.title,
     required this.profile,
     required this.onChanged,
-    this.showAnchorMarkers = true,
   });
 }
 
@@ -140,7 +138,6 @@ class TextDisplayPopupPanel extends StatelessWidget {
               ...TextDisplayProfileEditor.tiles(
                 context,
                 profile: section.profile,
-                showAnchorMarkers: section.showAnchorMarkers,
                 onChanged: section.onChanged,
               ),
             ],
@@ -263,7 +260,6 @@ class TextBookDisplayPanel extends StatelessWidget {
               TextDisplaySection(
                 title: _titleOf(target),
                 profile: state.displayProfile(target: target),
-                showAnchorMarkers: target == TextTarget.body,
                 onChanged: (next) => _apply(
                   context,
                   target,

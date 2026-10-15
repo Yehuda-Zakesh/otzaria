@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
@@ -137,10 +138,12 @@ void main() {
   Future<void> dragTab(
     WidgetTester tester,
     String title,
-    Offset target,
-  ) async {
+    Offset target, {
+    PointerDeviceKind kind = PointerDeviceKind.mouse,
+  }) async {
     final gesture = await tester.startGesture(
       tester.getCenter(find.text('טאב $title')),
+      kind: kind,
     );
     await tester.pump(const Duration(milliseconds: 20));
     await gesture.moveTo(target);
@@ -161,6 +164,24 @@ void main() {
       tester.getRect(find.byType(SplitPaneView));
 
   group('גרירה משורת הכרטיסיות אל אזור הקריאה', () {
+    for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.stylus]) {
+      testWidgets('גרירה אופקית ב־$kind יוצרת פיצול בפועל', (tester) async {
+        final (bloc, _) = await pumpScreen(tester, [leaf('א'), leaf('ב')]);
+        final area = readingArea(tester);
+        await dragTab(
+          tester,
+          'ב',
+          Offset(area.right - 20, area.center.dy),
+          kind: kind,
+        );
+        expect(bloc.state.tabs, hasLength(1));
+        expect(bloc.state.currentTab, isA<CombinedTab>());
+        expect(titles(bloc.state.currentTab!), ['ב', 'א']);
+        expect(find.text('חלונית א'), findsOneWidget);
+        expect(find.text('חלונית ב'), findsOneWidget);
+      });
+    }
+
     testWidgets('שחרור בחצי הימני ב-RTL מכניס את הנגררת מימין', (tester) async {
       final (bloc, _) = await pumpScreen(tester, [leaf('א'), leaf('ב')]);
 

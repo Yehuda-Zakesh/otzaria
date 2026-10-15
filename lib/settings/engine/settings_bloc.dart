@@ -70,7 +70,6 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
     on<UpdateLibraryViewMode>(_onUpdateLibraryViewMode);
     on<UpdateLibraryShowPreview>(_onUpdateLibraryShowPreview);
     on<UpdateSearchShowPreview>(_onUpdateSearchShowPreview);
-    on<RefreshShortcuts>(_onRefreshShortcuts);
     on<ResetShortcuts>(_onResetShortcuts);
     on<UpdateShortcut>(_onUpdateShortcut);
     on<UpdateEnablePerBookSettings>(_onUpdateEnablePerBookSettings);
@@ -80,7 +79,6 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
     on<UpdateSoftwareAndBookUpdatesEnabled>(
       _onUpdateSoftwareAndBookUpdatesEnabled,
     );
-    on<UpdateEnableHtmlLinks>(_onUpdateEnableHtmlLinks);
     on<UpdatePersonalNotesCollapsedByDefault>(
       _onUpdatePersonalNotesCollapsedByDefault,
     );
@@ -246,14 +244,6 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
   ) async {
     await _repository.updateSoftwareAndBookUpdatesEnabled(event.enabled);
     emit(state.copyWith(softwareAndBookUpdatesEnabled: event.enabled));
-  }
-
-  Future<void> _onUpdateEnableHtmlLinks(
-    UpdateEnableHtmlLinks event,
-    Emitter<SettingsState> emit,
-  ) async {
-    await _repository.updateEnableHtmlLinks(event.enableHtmlLinks);
-    emit(state.copyWith(enableHtmlLinks: event.enableHtmlLinks));
   }
 
   Future<void> _onUpdatePersonalNotesCollapsedByDefault(
@@ -643,17 +633,6 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
   ) async {
     await _repository.updateSearchShowPreview(event.searchShowPreview);
     emit(state.copyWith(searchShowPreview: event.searchShowPreview));
-  }
-
-  Future<void> _onRefreshShortcuts(
-    RefreshShortcuts event,
-    Emitter<SettingsState> emit,
-  ) async {
-    // Toggle a value and back to force a state change
-    // This is a workaround to trigger UI rebuild when shortcuts change
-    emit(state.copyWith(isFullscreen: !state.isFullscreen));
-    await Future.delayed(const Duration(milliseconds: 1));
-    emit(state.copyWith(isFullscreen: state.isFullscreen));
   }
 
   Future<void> _onResetShortcuts(

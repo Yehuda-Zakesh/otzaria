@@ -9,10 +9,9 @@ import 'package:otzaria/models/link_types.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/text_book/models/commentator_group.dart';
+import 'package:otzaria/book_common/models/commentator_group.dart';
 import 'package:otzaria/text_book/view/commentators_list_screen.dart';
 import 'package:otzaria/widgets/lists/commentators_selection_panel.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 void main() {
   testWidgets('בלי מפתחות סוג — ציר הסוגים אינו מוצג', (tester) async {
@@ -110,8 +109,6 @@ TextBookLoaded _state() => TextBookLoaded(
   selectedIndex: 0,
   pinLeftPane: false,
   searchText: '',
-  scrollController: ItemScrollController(),
-  positionsListener: ItemPositionsListener.create(),
 );
 
 class _TestTextBookBloc extends Bloc<TextBookEvent, TextBookState>

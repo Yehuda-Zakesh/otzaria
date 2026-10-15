@@ -92,6 +92,9 @@ List<String> pluginBackgroundActivationReasons(PluginManifest manifest) {
   if (startup.libraryBooks.isNotEmpty) {
     reasons.add('בחירת ספר של התוסף במסך הספרייה');
   }
+  if (startup.searchFieldActions.isNotEmpty) {
+    reasons.add('לחיצה על כפתור התוסף בשדה חיפוש');
+  }
   for (final topic in startup.activationEvents) {
     if (topic == PluginStartupContributions.startupActivationTopic) {
       reasons.add('עליית אוצריא');
@@ -241,13 +244,20 @@ const Map<String, PluginPermissionInfo> _permissionLabels = {
   // ===== חיפוש =====
   'search.fulltext.read': PluginPermissionInfo(
     label: 'חיפוש טקסט מלא',
-    icon: OtzariaIcons.search_in_the_library_24_regular,
+    icon: OtzariaIcons.search_in_library_24_regular,
     description: 'ביצוע חיפושי טקסט ברחבי כל הספרייה',
   ),
   'search.dialog': PluginPermissionInfo(
     label: 'רכיבים בחלון החיפוש',
     icon: FluentIcons.search_24_regular,
     description: 'הוספת שורות סטטיות לדיאלוג החיפוש, ללא הפעלת קוד התוסף ברקע',
+  ),
+  pluginSearchFieldActionsPermission: PluginPermissionInfo(
+    label: 'כפתורים בשדות החיפוש',
+    icon: FluentIcons.search_24_regular,
+    description:
+        'הוספת כפתור לתוך שדות החיפוש. רק אחרי לחיצה שלך על הכפתור, התוסף '
+        'יכול לכתוב טקסט לאותו שדה — עד שתקליד בו בעצמך או שהשדה ייסגר',
   ),
 
   // ===== קורא =====
@@ -280,6 +290,11 @@ const Map<String, PluginPermissionInfo> _permissionLabels = {
   ),
 
   // ===== ניווט =====
+  pluginNewTabPagePermission: PluginPermissionInfo(
+    label: "כפתור לשונית חדשה (+)",
+    icon: FluentIcons.add_24_regular,
+    description: "פתיחת דף התוסף בכפתור '+'. רק תוסף אחד יכול לקבל הרשאה זו.",
+  ),
   'navigation.write': PluginPermissionInfo(
     label: 'ניווט במסכים',
     icon: FluentIcons.navigation_24_regular,
@@ -532,7 +547,7 @@ const Map<String, PluginPermissionInfo> _permissionLabels = {
   ),
   'events.subscribe:reader.sectionContentChanged': PluginPermissionInfo(
     label: 'אירועי שינוי תוכן בקורא',
-    icon: OtzariaIcons.text_continuous_24_regular,
+    icon: OtzariaIcons.text_continuous_rtl_24_regular,
     description: 'קבלת עדכון כאשר נוסח של סעיף או אופן ההצגה שלו משתנים בקורא',
   ),
   'events.subscribe:reader.selection_changed': PluginPermissionInfo(

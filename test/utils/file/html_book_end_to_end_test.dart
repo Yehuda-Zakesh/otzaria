@@ -168,7 +168,7 @@ void main() {
     });
 
     test('טקסט שמפוצל בתגיות עיצוב נמצא כמילה שלמה', () {
-      // ‏`<b>מילה מודגשת</b>` — החיפוש עובד על הטקסט בלי התגיות.
+      // `<b>מילה מודגשת</b>` — החיפוש עובד על הטקסט בלי התגיות.
       final plain = _bookLines().map(text_utils.stripHtmlIfNeeded).join('\n');
       expect(plain, contains('מילה מודגשת'));
     });

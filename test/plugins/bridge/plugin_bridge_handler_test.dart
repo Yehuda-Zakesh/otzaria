@@ -351,6 +351,57 @@ void main() {
       expect(adapter.executeCalls, 0);
     });
 
+    group('search.setFieldText / setFieldActionState / endFieldSession', () {
+      List<dynamic> request(String method) => [
+        {
+          'method': method,
+          'payload': {'sessionId': 's_1', 'text': 'x', 'state': 'idle'},
+        },
+      ];
+      const methods = [
+        'search.setFieldText',
+        'search.setFieldActionState',
+        'search.endFieldSession',
+      ];
+
+      for (final (label, declared, granted) in [
+        ('לא הוצהרה', const <String>[], true),
+        ('הוצהרה ולא הוענקה', const ['search.field_actions'], false),
+      ]) {
+        test('הרשאת search.field_actions $label → permission_denied', () async {
+          for (final method in methods) {
+            final adapter = _FakeAdapter();
+            final handler = buildHandler(
+              declaredPermissions: declared,
+              granted: granted,
+              adapter: adapter,
+            );
+            final resp =
+                await handler.handleRpcForTesting(request(method))
+                    as Map<String, dynamic>;
+            expect(resp['error']['code'], 'permission_denied', reason: method);
+            expect(adapter.executeCalls, 0, reason: method);
+          }
+        });
+      }
+
+      test('עם ההרשאה — מגיע ל-adapter', () async {
+        for (final method in methods) {
+          final adapter = _FakeAdapter(result: true);
+          final handler = buildHandler(
+            declaredPermissions: const ['search.field_actions'],
+            granted: true,
+            adapter: adapter,
+          );
+          final resp =
+              await handler.handleRpcForTesting(request(method))
+                  as Map<String, dynamic>;
+          expect(resp['success'], isTrue, reason: method);
+          expect(adapter.lastDomain, 'search');
+        }
+      });
+    });
+
     test(
       'plugin.openOther עם navigation.write בלבד → permission_denied',
       () async {
@@ -392,6 +443,95 @@ void main() {
         expect(adapter.lastAction, 'openOther');
       },
     );
+
+    group('feedback.submitBookCorrection', () {
+      const request = [
+        {'method': 'feedback.submitBookCorrection', 'payload': {}},
+      ];
+
+      test(
+        'הצהרה חסרה חוסמת את השליחה גם כשההרשאה מוענקת',
+        () async {
+          final adapter = _FakeAdapter();
+          final handler = buildHandler(
+            declaredPermissions: const [],
+            granted: true,
+            adapter: adapter,
+          );
+
+          final response = await handler.handleRpcForTesting(request) as Map;
+
+          expect(response['success'], isFalse);
+          expect(response['error']['code'], 'permission_denied');
+          expect(adapter.executeCalls, 0);
+        },
+      );
+
+      for (final grant in [false, null]) {
+        test(
+          'הרשאה מוצהרת ללא הענקה ($grant) חוסמת את השליחה',
+          () async {
+            final adapter = _FakeAdapter();
+            final handler = buildHandler(
+              declaredPermissions: const ['feedback.send_email'],
+              granted: grant,
+              adapter: adapter,
+            );
+
+            final response = await handler.handleRpcForTesting(request) as Map;
+
+            expect(response['success'], isFalse);
+            expect(response['error']['code'], 'permission_denied');
+            expect(adapter.executeCalls, 0);
+          },
+        );
+      }
+
+      test(
+        'feedback.send_email בלבד מאפשרת שליחה ושומרת את התוצאה',
+        () async {
+          const result = {'status': 'queued', 'reportId': 'stable-id'};
+          final adapter = _FakeAdapter(result: result);
+          final handler = buildHandler(
+            declaredPermissions: const ['feedback.send_email'],
+            granted: true,
+            adapter: adapter,
+          );
+
+          final response = await handler.handleRpcForTesting(request) as Map;
+
+          expect(response['success'], isTrue);
+          expect(response['data'], result);
+          expect(adapter.executeCalls, 1);
+          expect(adapter.lastDomain, 'feedback');
+          expect(adapter.lastAction, 'submitBookCorrection');
+        },
+      );
+
+      for (final code in ['error.source_changed', 'error.report_id_conflict']) {
+        test(
+          'שומרת את קוד השגיאה $code ואת ההודעה',
+          () async {
+            const message = 'הדיווח נדחה';
+            final adapter = _FakeAdapter(
+              errorToThrow: Exception('$code: $message'),
+            );
+            final handler = buildHandler(
+              declaredPermissions: const ['feedback.send_email'],
+              granted: true,
+              adapter: adapter,
+            );
+
+            final response = await handler.handleRpcForTesting(request) as Map;
+
+            expect(response['success'], isFalse);
+            expect(response['error']['code'], code);
+            expect(response['error']['message'], message);
+            expect(adapter.executeCalls, 1);
+          },
+        );
+      }
+    });
 
     test('feedback.report ללא הרשאה כלשהי במניפסט → execute נקרא', () async {
       // גבול האבטחה של report הוא דיאלוג האישור של המשתמש, ולכן היא אינה
@@ -1054,4 +1194,32 @@ void main() {
       }
     });
   });
+  for (final printed in [true, false]) {
+    testWidgets('reader.printRange waits beyond 30 seconds, printed=$printed', (
+      tester,
+    ) async {
+      final dialog = Completer<Map<String, bool>>();
+      final handler = PluginBridgeHandler(
+        _buildInstalledPlugin(permissions: const ['reader.open']),
+        adapter: _FakeAdapter(result: dialog.future),
+        registry: _StubRegistry(true),
+      );
+      Map<String, dynamic>? response;
+      final pending = handler
+          .handleRpcForTesting([
+            {
+              'method': 'reader.printRange',
+              'payload': {'bookId': 'ספר', 'startIndex': 0},
+            },
+          ])
+          .then((value) => response = value as Map<String, dynamic>);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 31));
+      expect(response, isNull);
+      dialog.complete({'printed': printed});
+      await tester.pump();
+      await pending;
+      expect(response!['data'], {'printed': printed});
+    });
+  }
 }

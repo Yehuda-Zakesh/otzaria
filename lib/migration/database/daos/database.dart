@@ -3,11 +3,8 @@ import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
 import 'author_dao.dart';
 import 'book_acronym_dao.dart';
 import 'book_dao.dart';
-import 'book_has_links_dao.dart';
 import 'category_dao.dart';
-import 'connection_type_dao.dart';
 import 'docx_text_cache_dao.dart';
-import 'generation_dao.dart';
 import 'line_dao.dart';
 import 'line_dh_dao.dart';
 import 'line_ref_dao.dart';
@@ -16,7 +13,6 @@ import 'pdf_anchor_cache_dao.dart';
 import 'pdf_outline_cache_dao.dart';
 import 'pub_date_dao.dart';
 import 'pub_place_dao.dart';
-import 'search_dao.dart';
 import 'toc_dao.dart';
 import 'toc_text_dao.dart';
 import 'topic_dao.dart';
@@ -65,133 +61,23 @@ class MyDatabase {
 
   // (no platform initialization required – sqlite3 handles all platforms natively)
 
-  // DAOs
-  AuthorDao? _authorDao;
-  BookAcronymDao? _bookAcronymDao;
-  BookDao? _bookDao;
-  BookHasLinksDao? _bookHasLinksDao;
-  CategoryDao? _categoryDao;
-  ConnectionTypeDao? _connectionTypeDao;
-  DocxTextCacheDao? _docxTextCacheDao;
-  GenerationDao? _generationDao;
-  LineDao? _lineDao;
-  LineDhDao? _lineDhDao;
-  LineRefDao? _lineRefDao;
-  LinkDao? _linkDao;
-  PdfAnchorCacheDao? _pdfAnchorCacheDao;
-  PdfOutlineCacheDao? _pdfOutlineCacheDao;
-  PubDateDao? _pubDateDao;
-  PubPlaceDao? _pubPlaceDao;
-  SearchDao? _searchDao;
-  TocDao? _tocDao;
-  TocTextDao? _tocTextDao;
-  TopicDao? _topicDao;
-
-  AuthorDao get authorDao {
-    _ensureDaosInitialized();
-    return _authorDao!;
-  }
-
-  BookAcronymDao get bookAcronymDao {
-    _ensureDaosInitialized();
-    return _bookAcronymDao!;
-  }
-
-  BookDao get bookDao {
-    _ensureDaosInitialized();
-    return _bookDao!;
-  }
-
-  BookHasLinksDao get bookHasLinksDao {
-    _ensureDaosInitialized();
-    return _bookHasLinksDao!;
-  }
-
-  CategoryDao get categoryDao {
-    _ensureDaosInitialized();
-    return _categoryDao!;
-  }
-
-  ConnectionTypeDao get connectionTypeDao {
-    _ensureDaosInitialized();
-    return _connectionTypeDao!;
-  }
-
-  DocxTextCacheDao get docxTextCacheDao {
-    _ensureDaosInitialized();
-    return _docxTextCacheDao!;
-  }
-
-  GenerationDao get generationDao {
-    _ensureDaosInitialized();
-    return _generationDao!;
-  }
-
-  LineDao get lineDao {
-    _ensureDaosInitialized();
-    return _lineDao!;
-  }
-
-  LineDhDao get lineDhDao {
-    _ensureDaosInitialized();
-    return _lineDhDao!;
-  }
-
-  LineRefDao get lineRefDao {
-    _ensureDaosInitialized();
-    return _lineRefDao!;
-  }
-
-  LinkDao get linkDao {
-    _ensureDaosInitialized();
-    return _linkDao!;
-  }
-
-  PdfAnchorCacheDao get pdfAnchorCacheDao {
-    _ensureDaosInitialized();
-    return _pdfAnchorCacheDao!;
-  }
-
-  PdfOutlineCacheDao get pdfOutlineCacheDao {
-    _ensureDaosInitialized();
-    return _pdfOutlineCacheDao!;
-  }
-
-  PubDateDao get pubDateDao {
-    _ensureDaosInitialized();
-    return _pubDateDao!;
-  }
-
-  PubPlaceDao get pubPlaceDao {
-    _ensureDaosInitialized();
-    return _pubPlaceDao!;
-  }
-
-  SearchDao get searchDao {
-    _ensureDaosInitialized();
-    return _searchDao!;
-  }
-
-  TocDao get tocDao {
-    _ensureDaosInitialized();
-    return _tocDao!;
-  }
-
-  TocTextDao get tocTextDao {
-    _ensureDaosInitialized();
-    return _tocTextDao!;
-  }
-
-  TopicDao get topicDao {
-    _ensureDaosInitialized();
-    return _topicDao!;
-  }
-
-  void _ensureDaosInitialized() {
-    if (_authorDao == null) {
-      _initializeDaos();
-    }
-  }
+  // נוצרים בגישה הראשונה: הבנאי טוען שאילתות מ-QueryLoader.
+  late final AuthorDao authorDao = AuthorDao(this);
+  late final BookAcronymDao bookAcronymDao = BookAcronymDao(this);
+  late final BookDao bookDao = BookDao(this);
+  late final CategoryDao categoryDao = CategoryDao(this);
+  late final DocxTextCacheDao docxTextCacheDao = DocxTextCacheDao(this);
+  late final LineDao lineDao = LineDao(this);
+  late final LineDhDao lineDhDao = LineDhDao(this);
+  late final LineRefDao lineRefDao = LineRefDao(this);
+  late final LinkDao linkDao = LinkDao(this);
+  late final PdfAnchorCacheDao pdfAnchorCacheDao = PdfAnchorCacheDao(this);
+  late final PdfOutlineCacheDao pdfOutlineCacheDao = PdfOutlineCacheDao(this);
+  late final PubDateDao pubDateDao = PubDateDao(this);
+  late final PubPlaceDao pubPlaceDao = PubPlaceDao(this);
+  late final TocDao tocDao = TocDao(this);
+  late final TocTextDao tocTextDao = TocTextDao(this);
+  late final TopicDao topicDao = TopicDao(this);
 
   /// יוצרת מופע MyDatabase שמצביע על נתיב DB ספציפי.
   ///
@@ -222,7 +108,6 @@ class MyDatabase {
     // Initialize QueryLoader before creating DAOs
     await QueryLoader.initialize();
     _database = _initDatabase();
-    _initializeDaos();
     return _database!;
   }
 
@@ -447,31 +332,6 @@ class MyDatabase {
       _readOnly ? db.close() : closeWithCheckpoint(db);
     }
     _database = null;
-  }
-
-  void _initializeDaos() {
-    if (_authorDao != null) return; // Already initialized
-
-    _authorDao = AuthorDao(this);
-    _bookAcronymDao = BookAcronymDao(this);
-    _bookDao = BookDao(this);
-    _bookHasLinksDao = BookHasLinksDao(this);
-    _categoryDao = CategoryDao(this);
-    _connectionTypeDao = ConnectionTypeDao(this);
-    _docxTextCacheDao = DocxTextCacheDao(this);
-    _generationDao = GenerationDao(this);
-    _lineDao = LineDao(this);
-    _lineDhDao = LineDhDao(this);
-    _lineRefDao = LineRefDao(this);
-    _linkDao = LinkDao(this);
-    _pdfAnchorCacheDao = PdfAnchorCacheDao(this);
-    _pdfOutlineCacheDao = PdfOutlineCacheDao(this);
-    _pubDateDao = PubDateDao(this);
-    _pubPlaceDao = PubPlaceDao(this);
-    _searchDao = SearchDao(this);
-    _tocDao = TocDao(this);
-    _tocTextDao = TocTextDao(this);
-    _topicDao = TopicDao(this);
   }
 
   List<String> _getCreateScripts() {

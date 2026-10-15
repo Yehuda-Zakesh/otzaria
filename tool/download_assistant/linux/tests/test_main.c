@@ -1,6 +1,7 @@
 /* Unit tests: the shared contract fixtures, JSON, HTTP parsing, host checks,
- * cache markers and assembly. Run with `make test`. */
+ * cache markers, assembly and the time-left estimate. Run with `make test`. */
 #include <fcntl.h>
+#include <math.h>
 #include <stdlib.h>
 #include <gio/gio.h>
 #include <glib/gstdio.h>
@@ -10,12 +11,15 @@
 
 #include "assemble.h"
 #include "download.h"
+#include "eta.h"
 #include "http.h"
 #include "json.h"
 #include "manifest.h"
 #include "otz_common.h"
+#include "paths.h"
 #include "release.h"
 #include "selection.h"
+#include "texts.h"
 
 /* ------------------------------------------------------------- helpers */
 
@@ -153,6 +157,22 @@ static void check_fixtures(const char *manifest_name, const char *expected_name)
     }
     assert_strings(offered, otz_json_get(entry, "offeredComponents"), label);
 
+    g_autoptr(GPtrArray) custom = otz_custom_choices(manifest, &target);
+    const OtzJson *expected_custom = otz_json_get(entry, "customChoices");
+    g_assert_cmpuint(custom->len, ==, otz_json_array_length(expected_custom));
+    for (guint c = 0; c < custom->len; c++) {
+      const OtzCustomChoice *choice = g_ptr_array_index(custom, c);
+      const OtzJson *want = otz_json_array_get(expected_custom, c);
+      gint64 size = -1;
+      g_assert_cmpstr(choice->component->id, ==, otz_json_get_string(want, "id"));
+      g_assert_true(otz_json_get_int(want, "downloadSize", &size));
+      g_assert_cmpint(otz_custom_choice_size(manifest, choice->component, &target), ==, size);
+      const OtzJson *locked = otz_json_get(want, "locked");
+      g_assert_nonnull(locked);
+      g_assert_cmpint(choice->locked, ==, locked->boolean);
+      g_assert_cmpstr(choice->group, ==, otz_json_get_string(want, "group"));
+    }
+
     g_autoptr(GPtrArray) presets = otz_build_presets(manifest, &target);
     const OtzJson *expected_presets = otz_json_get(entry, "presets");
     g_assert_cmpuint(presets->len, ==, otz_json_array_length(expected_presets));
@@ -169,6 +189,8 @@ static void check_fixtures(const char *manifest_name, const char *expected_name)
       g_autofree char *subfolder =
           otz_planned_output_subfolder(files, target.platform);
       g_assert_cmpstr(subfolder, ==, otz_json_get_string(want, "outputSubfolder"));
+      g_autoptr(GPtrArray) notes = otz_planned_output_notes(manifest, members);
+      assert_strings(notes, otz_json_get(want, "outputNotes"), "outputNotes");
     }
   }
 }
@@ -178,14 +200,14 @@ static void test_fixtures(void) {
 }
 
 /* The Windows FULL installer reached 4 GiB: it cannot run, so "full" falls
- * back to the indexed installer and the library parts it reads. */
+ * back to the regular installer and the library parts it reads. */
 static void test_fixtures_large_full(void) {
   check_fixtures("release-manifest-large-full.json",
                  "expected-selections-large-full.json");
 }
 
-/* A library picked on its own in the custom list comes with the installer
- * that reads it; on ARM64 nothing installs it, so it is not offered at all. */
+/* The index picked on its own in the custom list comes with the library it
+ * depends on and the installer that reads both, on x64 and on ARM64. */
 static void test_library_brings_its_installer(void) {
   gsize length;
   g_autofree char *text = read_fixture("release-manifest.json", &length);
@@ -193,15 +215,21 @@ static void test_library_brings_its_installer(void) {
   g_autoptr(OtzManifest) manifest = otz_manifest_parse(text, length, &error);
   g_assert_no_error(error);
   g_autoptr(GPtrArray) picked = g_ptr_array_new();
-  g_ptr_array_add(picked, (gpointer) "library-full-indexed");
+  g_ptr_array_add(picked, (gpointer) "library-index");
   OtzTarget x64 = {"windows", "x64", ""};
   g_autoptr(GPtrArray) closed = otz_with_dependencies(manifest, picked, &x64);
-  g_assert_cmpuint(closed->len, ==, 2);
-  g_assert_cmpstr(g_ptr_array_index(closed, 0), ==, "otzaria-windows-full-indexed");
-  g_assert_cmpstr(g_ptr_array_index(closed, 1), ==, "library-full-indexed");
+  g_assert_cmpuint(closed->len, ==, 3);
+  g_assert_cmpstr(g_ptr_array_index(closed, 0), ==, "otzaria-windows-x64");
+  g_assert_cmpstr(g_ptr_array_index(closed, 1), ==, "library-full");
+  g_assert_cmpstr(g_ptr_array_index(closed, 2), ==, "library-index");
   OtzTarget arm64 = {"windows", "arm64", ""};
+  g_autoptr(GPtrArray) closed_arm =
+      otz_with_dependencies(manifest, picked, &arm64);
+  g_assert_cmpuint(closed_arm->len, ==, 3);
+  g_assert_cmpstr(g_ptr_array_index(closed_arm, 0), ==, "otzaria-windows-arm64");
+  OtzTarget deb = {"linux", "x64", "deb"};
   g_assert_false(otz_component_is_offered(
-      manifest, otz_manifest_find(manifest, "library-full-indexed"), &arm64));
+      manifest, otz_manifest_find(manifest, "library-full"), &deb));
 }
 
 #define TEST_ASSET(name)                                                     \
@@ -235,6 +263,80 @@ static void test_package_format_any(void) {
   g_assert_cmpstr(g_ptr_array_index(choices, 1), ==, OTZ_PORTABLE_PACKAGE_FORMAT);
 }
 
+static void assert_preset(GPtrArray *presets, guint index, const char *id,
+                          const char *const *members) {
+  g_assert_cmpuint(index, <, presets->len);
+  const OtzPreset *preset = g_ptr_array_index(presets, index);
+  g_assert_cmpstr(preset->id, ==, id);
+  guint count = 0;
+  while (members[count] != NULL) count++;
+  g_assert_cmpuint(preset->members->len, ==, count);
+  for (guint i = 0; i < count; i++)
+    g_assert_cmpstr(g_ptr_array_index(preset->members, i), ==, members[i]);
+}
+
+/* "full-indexed" is the bundle that installs a library, with that library;
+ * both full presets carry the smart-search data. Shown basic, full-indexed,
+ * full, update; pre-selected basic, else full, else the first. */
+static void test_full_indexed_preset(void) {
+  const char *text =
+      "{\"schemaVersion\":1,\"components\":["
+      "{\"id\":\"app\",\"name\":\"n\",\"type\":\"application\",\"platform\":\"windows\","
+      TEST_ASSET("app.exe") "},"
+      "{\"id\":\"runtime\",\"name\":\"n\",\"type\":\"dependency\",\"required\":true,"
+      "\"platform\":\"windows\"," TEST_ASSET("runtime.bin") "},"
+      "{\"id\":\"full\",\"name\":\"n\",\"type\":\"application-bundle\",\"downloadSize\":9,"
+      "\"platform\":\"windows\"," TEST_ASSET("full.exe") "},"
+      "{\"id\":\"indexed\",\"name\":\"n\",\"type\":\"application-bundle\",\"downloadSize\":1,"
+      "\"platform\":\"windows\"," TEST_ASSET("indexed.exe") "},"
+      "{\"id\":\"lib\",\"name\":\"n\",\"type\":\"library\",\"platform\":\"windows\","
+      "\"installedBy\":[\"indexed\"]," TEST_ASSET("lib.bin") "},"
+      "{\"id\":\"model\",\"name\":\"n\",\"type\":\"semantic-model\",\"platform\":\"windows\","
+      TEST_ASSET("model.bin") "},"
+      "{\"id\":\"vectors\",\"name\":\"n\",\"type\":\"semantic-vectors\",\"platform\":\"windows\","
+      "\"dependsOn\":[\"model\"]," TEST_ASSET("vectors.bin") "}]}";
+  g_autoptr(GError) error = NULL;
+  g_autoptr(OtzManifest) manifest = otz_manifest_parse(text, strlen(text), &error);
+  g_assert_no_error(error);
+  OtzTarget x64 = {"windows", "x64", ""};
+  g_autoptr(GPtrArray) presets = otz_build_presets(manifest, &x64);
+  g_assert_cmpuint(presets->len, ==, 4);
+  assert_preset(presets, 0, "basic", (const char *const[]){"app", "runtime", NULL});
+  assert_preset(presets, 1, "full-indexed",
+                (const char *const[]){"indexed", "lib", "model", "vectors", NULL});
+  assert_preset(presets, 2, "full",
+                (const char *const[]){"full", "model", "vectors", NULL});
+  assert_preset(presets, 3, "update", (const char *const[]){"app", NULL});
+
+  g_assert_cmpint(otz_default_preset_index(presets), ==, 0);
+  g_ptr_array_remove_index(presets, 0); /* basic */
+  g_assert_cmpint(otz_default_preset_index(presets), ==, 1); /* not full-indexed */
+  g_ptr_array_remove_index(presets, 1); /* full */
+  g_assert_cmpint(otz_default_preset_index(presets), ==, 0);
+  g_ptr_array_set_size(presets, 0);
+  g_assert_cmpint(otz_default_preset_index(presets), ==, -1);
+
+  /* Android has no bundle: the APK comes with the library and the index. */
+  gsize length;
+  g_autofree char *fixture = read_fixture("release-manifest.json", &length);
+  g_autoptr(OtzManifest) release = otz_manifest_parse(fixture, length, &error);
+  g_assert_no_error(error);
+  OtzTarget android = {"android", "", ""};
+  g_autoptr(GPtrArray) mobile = otz_build_presets(release, &android);
+  g_assert_cmpuint(mobile->len, ==, 3);
+  g_assert_cmpstr(((const OtzPreset *)g_ptr_array_index(mobile, 0))->id, ==,
+                  OTZ_DEFAULT_PRESET_ID);
+  assert_preset(mobile, 1, "full-indexed",
+                (const char *const[]){"otzaria-android", "library-full",
+                                      "library-index", NULL});
+  assert_preset(mobile, 2, "full",
+                (const char *const[]){"otzaria-android", "library-full", NULL});
+  OtzTarget portable = {"linux", "x64", OTZ_PORTABLE_PACKAGE_FORMAT};
+  g_autoptr(GPtrArray) offline = otz_build_presets(release, &portable);
+  g_assert_cmpuint(offline->len, ==, 1);
+  g_assert_cmpint(otz_default_preset_index(offline), ==, 0);
+}
+
 static void test_manifest_rejects(void) {
   static const char *const bad[] = {
       /* schema version from the future */
@@ -252,6 +354,12 @@ static void test_manifest_rejects(void) {
       "{\"schemaVersion\":1,\"components\":[{\"id\":\"a\",\"name\":\"n\","
       "\"assets\":[{\"kind\":\"single\",\"repository\":\"Otzaria/otzaria\","
       "\"releaseTag\":\"1\",\"name\":\"..\",\"size\":1,\"sha256\":"
+      "\"0000000000000000000000000000000000000000000000000000000000000000\"}]}]}",
+      /* outputFolder that leaves the output folder */
+      "{\"schemaVersion\":1,\"components\":[{\"id\":\"a\",\"name\":\"n\","
+      "\"outputFolder\":\"semantic-import/../..\","
+      "\"assets\":[{\"kind\":\"single\",\"repository\":\"Otzaria/otzaria\","
+      "\"releaseTag\":\"1\",\"name\":\"f\",\"size\":1,\"sha256\":"
       "\"0000000000000000000000000000000000000000000000000000000000000000\"}]}]}",
       /* dependsOn on a missing component */
       "{\"schemaVersion\":1,\"components\":[{\"id\":\"a\",\"name\":\"n\","
@@ -694,11 +802,11 @@ static void test_asset_url_and_sizes(void) {
                   "otzaria-0.10.3+143-linux.deb");
   g_assert_true(otz_http_check_url(url, NULL));
   g_autofree char *gb = otz_human_size(G_GINT64_CONSTANT(2012390081));
-  g_assert_cmpstr(gb, ==, "1.8 ג׳יגה");
+  g_assert_cmpstr(gb, ==, "1.8\xC2\xA0GB");
   g_autofree char *mb = otz_human_size(42127056);
-  g_assert_cmpstr(mb, ==, "40 מגה");
+  g_assert_cmpstr(mb, ==, "40\xC2\xA0MB");
   g_autofree char *kb = otz_human_size(1);
-  g_assert_cmpstr(kb, ==, "1 קילו");
+  g_assert_cmpstr(kb, ==, "1\xC2\xA0KB");
 }
 
 /* ------------------------------------------------------------- job */
@@ -747,7 +855,8 @@ static void job_fixture_init(JobFixture *f, const char *const *ids) {
 static OtzJob *job_fixture_job(JobFixture *f) {
   OtzTarget target = {"linux", "x64", ""};
   g_autoptr(GError) error = NULL;
-  OtzJob *job = otz_job_new(f->manifest, f->ids, &target, f->cache, f->out, &error);
+  OtzJob *job =
+      otz_job_new(f->manifest, f->ids, &target, f->cache, f->out, NULL, &error);
   g_assert_no_error(error);
   return job;
 }
@@ -805,7 +914,62 @@ static void test_job_complete_download_promoted(void) {
   g_assert_false(g_file_test(stale, G_FILE_TEST_EXISTS));
   g_assert_cmpint(otz_job_downloaded_bytes(job), ==, 0);
   g_assert_cmpint(otz_job_hashed_bytes(job), ==, 5);
+  OtzProgress progress;
+  otz_job_get_progress(job, &progress);
+  g_assert_cmpint(progress.download_done, ==, 5);
+  g_assert_cmpint(progress.network_bytes, ==, 0);
+  g_assert_cmpuint(progress.workers, ==, 0);
+  g_assert_cmpuint(progress.waiting, ==, 0);
+  otz_progress_clear(&progress);
   job_fixture_clear(&f);
+}
+
+/* A component with outputFolder lands in that folder inside the output, and
+ * its outputNote reaches the finish page. */
+static void test_job_output_folder(void) {
+  static const char *manifest_json =
+      "{\"schemaVersion\":1,\"components\":["
+      "{\"id\":\"data\",\"name\":\"n\",\"type\":\"semantic-vectors\","
+      "\"outputFolder\":\"semantic-import/vectors\",\"outputNote\":\"note\","
+      "\"assets\":[{\"kind\":\"single\",\"repository\":\"Otzaria/SeforimLibrary\","
+      "\"releaseTag\":\"vectors-v30\",\"name\":\"hello.bin\",\"size\":5,"
+      "\"sha256\":\"" HELLO_SHA "\"}]}]}";
+  g_autofree char *root = temp_dir();
+  g_autofree char *cache = g_build_filename(root, "cache", NULL);
+  g_autofree char *out = g_build_filename(root, "out", NULL);
+  g_mkdir_with_parents(cache, 0755);
+  g_autoptr(GError) error = NULL;
+  g_autoptr(OtzManifest) manifest =
+      otz_manifest_parse(manifest_json, strlen(manifest_json), &error);
+  g_assert_no_error(error);
+  otz_set_allowed_owner("SomeoneElse");
+  g_autofree char *download =
+      g_build_filename(cache, "hello.bin.2cf24dba5fb0.download", NULL);
+  write_file(download, "hello", 5);
+  g_autoptr(GPtrArray) ids = g_ptr_array_new();
+  g_ptr_array_add(ids, (gpointer) "data");
+  OtzTarget target = {"linux", "x64", "deb"};
+  g_autoptr(OtzJob) job =
+      otz_job_new(manifest, ids, &target, cache, out, NULL, &error);
+  g_assert_no_error(error);
+  g_assert_true(otz_job_run(job, NULL, &error));
+  g_assert_no_error(error);
+
+  g_autofree char *placed =
+      g_build_filename(out, "semantic-import", "vectors", "hello.bin", NULL);
+  g_assert_true(g_file_test(placed, G_FILE_TEST_EXISTS));
+  GPtrArray *files = otz_job_output_files(job);
+  g_assert_cmpuint(files->len, ==, 1);
+  g_assert_cmpstr(g_ptr_array_index(files, 0), ==,
+                  "semantic-import/vectors/hello.bin");
+  g_assert_cmpstr(otz_job_output_dir(job), ==, out);
+  GPtrArray *notes = otz_job_output_notes(job);
+  g_assert_cmpuint(notes->len, ==, 1);
+  g_assert_cmpstr(g_ptr_array_index(notes, 0), ==, "note");
+
+  g_autofree char *command = g_strdup_printf("rm -rf '%s'", root);
+  g_assert_cmpint(system(command), ==, 0);
+  otz_set_allowed_owner("Otzaria");
 }
 
 /* A full-size .download with the wrong content is not promoted: it is hashed
@@ -922,6 +1086,850 @@ static void test_http_long_header(void) {
   g_string_free(ok, TRUE);
 }
 
+/* An English interface names the multi-file folder in English; Hebrew keeps
+ * the contract's name. */
+static void test_job_subfolder_name(void) {
+  static const char *const ids[] = {"hello", "other", NULL};
+  JobFixture f;
+  job_fixture_init(&f, ids);
+  OtzTarget target = {"linux", "x64", ""};
+  g_autoptr(GError) error = NULL;
+  g_autoptr(OtzJob) hebrew =
+      otz_job_new(f.manifest, f.ids, &target, f.cache, f.out, NULL, &error);
+  g_assert_no_error(error);
+  g_autofree char *contract = g_build_filename(f.out, "אוצריא להתקנה ל-Linux", NULL);
+  g_assert_cmpstr(otz_job_output_dir(hebrew), ==, contract);
+  g_autoptr(OtzJob) english = otz_job_new(f.manifest, f.ids, &target, f.cache,
+                                          f.out, "Otzaria setup for Linux", &error);
+  g_assert_no_error(error);
+  g_autofree char *named = g_build_filename(f.out, "Otzaria setup for Linux", NULL);
+  g_assert_cmpstr(otz_job_output_dir(english), ==, named);
+
+  static const char *const single_ids[] = {"hello", NULL};
+  g_ptr_array_set_size(f.ids, 0);
+  g_ptr_array_add(f.ids, (gpointer)single_ids[0]);
+  g_autoptr(OtzJob) single = otz_job_new(f.manifest, f.ids, &target, f.cache,
+                                         f.out, "Otzaria setup for Linux", &error);
+  g_assert_no_error(error);
+  g_assert_cmpstr(otz_job_output_dir(single), ==, f.out);
+  job_fixture_clear(&f);
+}
+
+/* nameEn/descriptionEn/outputNoteEn, and the Hebrew when one is missing. */
+static void test_manifest_english_text(void) {
+  static const char *json =
+      "{\"schemaVersion\":1,\"components\":["
+      "{\"id\":\"a\",\"name\":\"א\",\"nameEn\":\"A\",\"description\":\"ב\","
+      "\"outputNote\":\"ג\",\"outputNoteEn\":\"C\",\"type\":\"application\","
+      "\"assets\":[{\"kind\":\"single\",\"repository\":\"Otzaria/otzaria\","
+      "\"releaseTag\":\"1\",\"name\":\"hello.bin\",\"size\":5,\"sha256\":\"" HELLO_SHA
+      "\"}]}]}";
+  g_autoptr(GError) error = NULL;
+  g_autoptr(OtzManifest) manifest = otz_manifest_parse(json, strlen(json), &error);
+  g_assert_no_error(error);
+  const OtzComponent *a = otz_manifest_find(manifest, "a");
+  g_assert_cmpstr(otz_component_name(a, TRUE), ==, "A");
+  g_assert_cmpstr(otz_component_name(a, FALSE), ==, "א");
+  g_assert_cmpstr(otz_component_description(a, TRUE), ==, "ב");
+  g_assert_cmpstr(otz_component_output_note(a, TRUE), ==, "C");
+  g_autofree char *hebrew = otz_fallback_output_dir(FALSE);
+  g_autofree char *english = otz_fallback_output_dir(TRUE);
+  g_assert_true(g_str_has_suffix(hebrew, "/אוצריא-להתקנה"));
+  g_assert_true(g_str_has_suffix(english, "/Otzaria setup"));
+}
+
+/* "No internet" is only a request that never reached a server. */
+static void test_offline_errors(void) {
+  g_autoptr(GError) dns = g_error_new_literal(G_RESOLVER_ERROR,
+                                              G_RESOLVER_ERROR_NOT_FOUND, "dns");
+  g_autoptr(GError) unreachable = g_error_new_literal(
+      G_IO_ERROR, G_IO_ERROR_NETWORK_UNREACHABLE, "unreachable");
+  g_autoptr(GError) refused = g_error_new_literal(
+      G_IO_ERROR, G_IO_ERROR_CONNECTION_REFUSED, "refused");
+  g_autoptr(GError) http = g_error_new_literal(OTZ_ERROR, OTZ_ERROR_HTTP, "404");
+  g_autoptr(GError) limited =
+      g_error_new_literal(OTZ_ERROR, OTZ_ERROR_RATE_LIMITED, "403");
+  g_autoptr(GError) cancelled =
+      g_error_new_literal(G_IO_ERROR, G_IO_ERROR_CANCELLED, "cancelled");
+  g_assert_true(otz_error_is_offline(dns));
+  g_assert_true(otz_error_is_offline(unreachable));
+  g_assert_true(otz_error_is_offline(refused));
+  g_assert_false(otz_error_is_offline(http));
+  g_assert_false(otz_error_is_offline(limited));
+  g_assert_false(otz_error_is_offline(cancelled));
+  g_assert_false(otz_error_is_offline(NULL));
+}
+
+static void placeholders(const char *text, int counts[4]) {
+  memset(counts, 0, sizeof(int) * 4);
+  for (const char *at = strchr(text, '%'); at != NULL; at = strchr(at + 1, '%'))
+    if (at[1] >= '1' && at[1] <= '3') counts[at[1] - '0']++;
+}
+
+/* Every text exists in both languages with the same %1..%3. */
+static void test_texts_complete(void) {
+  for (int key = 0; key < S_COUNT; key++) {
+    otz_set_english(FALSE);
+    const char *hebrew = otz_tr(key);
+    otz_set_english(TRUE);
+    const char *english = otz_tr(key);
+    g_assert_cmpstr(hebrew, !=, "");
+    g_assert_cmpstr(english, !=, "");
+    int he[4], en[4];
+    placeholders(hebrew, he);
+    placeholders(english, en);
+    for (int i = 1; i <= 3; i++) g_assert_cmpint(he[i] > 0, ==, en[i] > 0);
+  }
+  otz_set_english(FALSE);
+}
+
+static void test_texts_format(void) {
+  otz_set_english(TRUE);
+  g_autofree char *step = otz_trf(S_STEP_OF, "2", "5", NULL);
+  g_assert_cmpstr(step, ==, "Step 2 of 5");
+  g_autofree char *item = otz_trf(S_DOWNLOADING_ITEM, "A %2", "1", "3", NULL);
+  g_assert_cmpstr(item, ==, "Downloading: A %2 (1 of 3)");
+  g_autofree char *hours = otz_time_left_text(2 * 3600 + 21 * 60);
+  g_assert_cmpstr(hours, ==, "about 2 hours 20 minutes left");
+  g_autofree char *short_time = otz_time_left_text(32);
+  g_assert_cmpstr(short_time, ==, "about 30 seconds left");
+  g_autofree char *few = otz_time_left_text(4);
+  g_assert_cmpstr(few, ==, "a few seconds left");
+  g_autofree char *en_minute = otz_time_left_text(59);
+  g_assert_cmpstr(en_minute, ==, "about 1 minute left");
+  g_autofree char *en_hours = otz_time_left_text(2 * 3600 + 5 * 60);
+  g_assert_cmpstr(en_hours, ==, "about 2 hours 5 minutes left");
+  g_assert_cmpstr(otz_tr_message("לא ניתן לקרוא את רשימת הקבצים של אוצריא."), ==,
+                  "Can't read the list of Otzaria files.");
+  g_autofree char *plain = otz_ltr("37\xC2\xA0MB");
+  g_assert_cmpstr(plain, ==, "37\xC2\xA0MB");
+
+  otz_set_english(FALSE);
+  g_autofree char *minutes = otz_time_left_text(44 * 60);
+  g_assert_cmpstr(minutes, ==, "נותרו כ-44 דקות");
+  g_autofree char *hour = otz_time_left_text(3600 + 15 * 60);
+  g_assert_cmpstr(hour, ==, "נותרו כשעה ו-15 דקות");
+  g_autofree char *minute = otz_time_left_text(94);
+  g_assert_cmpstr(minute, ==, "נותרו כדקה ו-30 שניות");
+  g_autofree char *two = otz_time_left_text(2 * 3600 + 60);
+  g_assert_cmpstr(two, ==, "נותרו כשעתיים");
+  g_autofree char *two_five = otz_time_left_text(2 * 3600 + 5 * 60);
+  g_assert_cmpstr(two_five, ==, "נותרו כשעתיים ו-5 דקות");
+  g_autofree char *one_minute = otz_time_left_text(59);
+  g_assert_cmpstr(one_minute, ==, "נותרה כדקה");
+  g_autofree char *ten = otz_time_left_text(599);
+  g_assert_cmpstr(ten, ==, "נותרו כ-10 דקות");
+  g_autofree char *one_hour = otz_time_left_text(3599);
+  g_assert_cmpstr(one_hour, ==, "נותרה כשעה");
+  g_autofree char *seconds = otz_time_left_text(44);
+  g_assert_cmpstr(seconds, ==, "נותרו כ-45 שניות");
+  g_autofree char *mixed = otz_time_left_text(200);
+  g_assert_cmpstr(mixed, ==, "נותרו כ-3 דקות ו-20 שניות");
+  g_autofree char *he_few = otz_time_left_text(0.4);
+  g_assert_cmpstr(he_few, ==, "עוד כמה שניות");
+  g_autofree char *isolated = otz_ltr("37\xC2\xA0MB");
+  g_assert_cmpstr(isolated, ==, "\xE2\x81\xA6" "37\xC2\xA0MB\xE2\x81\xA9");
+  /* RLM opens each line and follows ", ". */
+  g_autofree char *bidi = otz_bidi("Windows, Linux או Android\nשורה");
+  g_assert_cmpstr(bidi, ==,
+                  "\xE2\x80\x8FWindows,\xE2\x80\x8F Linux או Android\n\xE2\x80\x8Fשורה");
+  g_assert_cmpstr(otz_tr_message("other"), ==, "other");
+}
+
+/* ------------------------------------------------------------- ETA */
+/* The scenarios of test/utils/download_eta_estimator_test.dart, driven the way
+ * ui.c drives the estimator: a poll every 100 ms, as are the network chunks. */
+
+#define MB 1000000LL
+#define POLL_MS 100
+
+static void test_eta_work_rates(void) {
+  OtzWorkRates work;
+  otz_work_init(&work);
+  g_assert_cmpfloat(otz_work_rate(&work, OTZ_WORK_HASH), ==, 150e6);
+  g_assert_cmpfloat(otz_work_rate(&work, OTZ_WORK_COPY), ==, 100e6);
+  g_assert_cmpfloat_with_epsilon(otz_work_seconds(&work, 100000000, 300000000), 3,
+                                 1e-9);
+  otz_work_sample(&work, OTZ_WORK_COPY, 0, 0);
+  otz_work_sample(&work, OTZ_WORK_COPY, 0.5, 25000000);
+  g_assert_cmpfloat(otz_work_rate(&work, OTZ_WORK_COPY), ==, 100e6);
+  otz_work_sample(&work, OTZ_WORK_COPY, 2, 100000000);
+  g_assert_cmpfloat_with_epsilon(otz_work_rate(&work, OTZ_WORK_COPY), 50e6, 1);
+  /* A new step starting lower is a new baseline, not negative work. */
+  otz_work_sample(&work, OTZ_WORK_COPY, 3, 0);
+  g_assert_cmpfloat_with_epsilon(otz_work_rate(&work, OTZ_WORK_COPY), 50e6, 1);
+}
+
+typedef struct {
+  double t, shown;
+  OtzEtaStatus status;
+} EtaRecord;
+
+/* The UI's poll loop with a fake clock, in 50 ms steps. */
+typedef struct {
+  OtzEta eta;
+  int ms;
+  long long net, total, offset, rate, true_rate;
+  double post;
+  gboolean paused;
+  OtzEtaStatus status;
+  double shown;
+  GArray *records;
+} Harness;
+
+static void h_init(Harness *h, long long total) {
+  memset(h, 0, sizeof *h);
+  otz_eta_init(&h->eta);
+  h->total = total;
+  h->true_rate = 10 * MB;
+  h->shown = -1;
+  h->records = g_array_new(FALSE, FALSE, sizeof(EtaRecord));
+}
+
+static void h_clear(Harness *h) { g_array_unref(h->records); }
+
+static void h_poll(Harness *h) {
+  long long remaining = MAX(h->total - h->offset - h->net, 0);
+  h->status = otz_eta_tick(&h->eta, h->ms / 1000.0, h->net, remaining, h->post, FALSE,
+                           FALSE, h->paused, &h->shown);
+  EtaRecord record = {h->ms / 1000.0, h->shown, h->status};
+  g_array_append_val(h->records, record);
+}
+
+static void h_run(Harness *h, double seconds, long long rate) {
+  int steps = (int)lround(seconds * 20);
+  for (int i = 0; i < steps; i++) {
+    h->ms += 50;
+    if (rate > 0 && h->ms % 100 == 0) h->net += rate / 10;
+    if (h->ms % POLL_MS == 0) h_poll(h);
+  }
+}
+
+static void h_feed(Harness *h, double seconds, long long rate) {
+  h->true_rate = rate;
+  h_run(h, seconds, rate);
+}
+
+static double h_exact(const Harness *h) {
+  return (h->total - h->offset - h->net) / (double)h->true_rate;
+}
+
+static void test_eta_warm_up(void) {
+  Harness h;
+  h_init(&h, 1000 * MB);
+  h_feed(&h, 2.5, 10 * MB);
+  g_assert_cmpint(h.status, ==, OTZ_ETA_CALCULATING);
+  g_assert_cmpfloat(h.shown, ==, -1);
+  h_feed(&h, 1, 10 * MB);
+  g_assert_cmpint(h.status, ==, OTZ_ETA_ESTIMATING);
+  g_assert_cmpfloat(fabs(h.shown - h_exact(&h)), <=, h_exact(&h) * 0.05);
+  h_clear(&h);
+
+  /* Before the first poll of the download: calculating, not the steps alone. */
+  OtzEta eta;
+  otz_eta_init(&eta);
+  double shown;
+  g_assert_cmpint(otz_eta_tick(&eta, 2, 0, 1000 * MB, 10, FALSE, FALSE, TRUE, &shown),
+                  ==, OTZ_ETA_CALCULATING);
+  g_assert_cmpfloat(shown, ==, -1);
+
+  /* 100 KB/s for 5 s: under 1 MiB and under 1% of the rest. */
+  h_init(&h, 1000 * MB);
+  h_feed(&h, 5, 100000);
+  g_assert_cmpint(h.status, ==, OTZ_ETA_CALCULATING);
+  h_clear(&h);
+}
+
+static void test_eta_not_network(void) {
+  /* A resumed file: 600 MB were on disk, they only shorten the rest. */
+  Harness h;
+  h_init(&h, 1000 * MB);
+  h.offset = 600 * MB;
+  h_feed(&h, 5, 10 * MB);
+  g_assert_cmpfloat(fabs(h.shown - h_exact(&h)), <=, h_exact(&h) * 0.05);
+  h_clear(&h);
+
+  /* A download that starts again from 0: the rate stays, only the rest grows. */
+  h_init(&h, 1000 * MB);
+  h_feed(&h, 10, 10 * MB);
+  h.offset = -h.net;
+  h_feed(&h, 0.25, 10 * MB);
+  g_assert_cmpint(h.status, ==, OTZ_ETA_ESTIMATING);
+  h_feed(&h, 2, 10 * MB);
+  g_assert_cmpint(h.status, ==, OTZ_ETA_ESTIMATING);
+  g_assert_cmpfloat(h.shown, <=, h_exact(&h) * 1.1);
+  g_assert_cmpfloat(h.shown, >, 50);
+  h_clear(&h);
+}
+
+static void test_eta_known_pause(void) {
+  Harness h;
+  h_init(&h, 1000 * MB);
+  h_feed(&h, 10, 10 * MB);
+  double before = h.shown;
+  h.paused = TRUE;
+  guint from = h.records->len;
+  h_run(&h, 60, 0);
+  for (guint i = from; i < h.records->len; i++) {
+    EtaRecord *r = &g_array_index(h.records, EtaRecord, i);
+    g_assert_cmpint(r->status, ==, OTZ_ETA_ESTIMATING);
+    g_assert_cmpfloat_with_epsilon(r->shown, before, 1e-6);
+  }
+  h.paused = FALSE;
+  h.net += 64 * 1024;
+  h_feed(&h, 2, 10 * MB);
+  g_assert_cmpfloat(h.shown, <=, before);
+  g_assert_cmpfloat(fabs(h.shown - h_exact(&h)), <=, h_exact(&h) * 0.1);
+  h_clear(&h);
+}
+
+static EtaRecord *h_record_at(Harness *h, double t) {
+  for (guint i = 0; i < h->records->len; i++) {
+    EtaRecord *r = &g_array_index(h->records, EtaRecord, i);
+    if (fabs(r->t - t) < 1e-6) return r;
+  }
+  g_assert_not_reached();
+}
+
+static void test_eta_stall_status(void) {
+  Harness h;
+  h_init(&h, 1000 * MB);
+  h_feed(&h, 10, 10 * MB);
+  h_run(&h, 6, 0);
+  g_assert_cmpint(h_record_at(&h, 14)->status, ==, OTZ_ETA_ESTIMATING);
+  EtaRecord *stalled = h_record_at(&h, 16);
+  g_assert_cmpint(stalled->status, ==, OTZ_ETA_STALLED);
+  g_assert_cmpfloat(stalled->shown, ==, -1);
+  h_clear(&h);
+}
+
+/* The displayed speed is the same blended rate with tau 3 s. */
+static void test_eta_speed(void) {
+  Harness h;
+  h_init(&h, 1000 * MB);
+  h_feed(&h, 0.5, 10 * MB);
+  g_assert_cmpfloat(otz_eta_speed(&h.eta), ==, 0);
+  h_feed(&h, 5, 10 * MB);
+  g_assert_cmpfloat(otz_eta_speed(&h.eta), ==, otz_rate_value(&h.eta.speed));
+  g_assert_cmpfloat(fabs(otz_eta_speed(&h.eta) - 10 * MB), <=, 0.02 * 10 * MB);
+  h_feed(&h, 10, 5 * MB);
+  g_assert_cmpfloat(fabs(otz_eta_speed(&h.eta) - 5 * MB), <=, 0.25 * 5 * MB);
+  h_clear(&h);
+}
+
+static void test_eta_short_silences(void) {
+  Harness h;
+  h_init(&h, 3000 * MB);
+  h_feed(&h, 20, 10 * MB);
+  double previous = h.shown;
+  for (int gap = 1; gap <= 4; gap++) {
+    /* Checked once a second, as the text changes at most once a second. */
+    for (int second = 0; second < gap; second++) {
+      h_run(&h, 1, 0);
+      g_assert_cmpfloat(h.shown, <=, previous);
+      previous = h.shown;
+    }
+    h_feed(&h, 5, 10 * MB);
+    previous = h.shown;
+  }
+  h_clear(&h);
+}
+
+static void test_eta_stall_recovery(void) {
+  Harness h;
+  h_init(&h, 2000 * MB);
+  h_feed(&h, 20, 10 * MB);
+  guint from = h.records->len;
+  h_run(&h, 12, 0);
+  for (int i = 0; i < 240; i++) {
+    h_feed(&h, 0.25, 10 * MB);
+    g_assert_cmpfloat(h.shown, <=, (h_exact(&h) + 12) * 1.1);
+  }
+  /* The warm-up latches: a lone stall shows only the stall status, never
+   * "calculating" again. */
+  for (guint i = from; i < h.records->len; i++)
+    g_assert_cmpint(g_array_index(h.records, EtaRecord, i).status, !=,
+                    OTZ_ETA_CALCULATING);
+  h_clear(&h);
+
+  h_init(&h, 2000 * MB);
+  h_feed(&h, 20, 10 * MB);
+  h_run(&h, 45, 0);
+  h_feed(&h, 0.25, 10 * MB);
+  g_assert_cmpint(h.status, ==, OTZ_ETA_CALCULATING);
+  while (h.status == OTZ_ETA_CALCULATING) h_feed(&h, 0.25, 10 * MB);
+  g_assert_cmpfloat(fabs(h.shown - h_exact(&h)), <=, h_exact(&h) * 0.15);
+  h_clear(&h);
+}
+
+static void test_eta_rate_change(void) {
+  static const long long pairs[][2] = {{10, 5}, {5, 10}};
+  for (gsize i = 0; i < G_N_ELEMENTS(pairs); i++) {
+    Harness h;
+    h_init(&h, 3000 * MB);
+    h_feed(&h, 30, pairs[i][0] * MB);
+    h_feed(&h, 45, pairs[i][1] * MB);
+    g_assert_cmpfloat(fabs(h.shown - h_exact(&h)), <=, h_exact(&h) * 0.1);
+    h_clear(&h);
+  }
+}
+
+static void test_eta_planned_steps(void) {
+  /* 1.5 GB to hash at the default 150 MB/s: 10 more seconds. */
+  Harness h;
+  h_init(&h, 1000 * MB);
+  OtzWorkRates work;
+  otz_work_init(&work);
+  h.post = otz_work_seconds(&work, 0, 1500 * MB);
+  h_feed(&h, 10, 10 * MB);
+  g_assert_cmpfloat(fabs(h.shown - (h_exact(&h) + 10)), <=, h_exact(&h) * 0.05);
+  h_clear(&h);
+
+  /* A step that reports progress is measured at its live rate: 10 MB/s, four
+   * times slower than assumed; 400 of 600 MB done leaves 20 s. */
+  OtzEta eta;
+  otz_eta_init(&eta);
+  otz_work_init(&work);
+  double shown = -1;
+  for (int i = 1; i <= 160; i++) {
+    double t = i * 0.25;
+    long long done = (long long)lround(i * 2.5) * MB;
+    otz_work_sample(&work, OTZ_WORK_COPY, t, done);
+    double post = otz_work_seconds(&work, 600 * MB - done, 0);
+    g_assert_cmpint(otz_eta_tick(&eta, t, 0, 0, post, TRUE, TRUE, FALSE, &shown), ==,
+                    OTZ_ETA_PHASE);
+  }
+  g_assert_cmpfloat(fabs(shown - 20), <=, 5);
+}
+
+/* Bursts: `data` seconds of 100 ms samples, then a gap of `silence` between
+ * samples; the rate at the end of each burst of the second half. */
+static void bursty_rates(double data, double silence, double average, double bound) {
+  const double interval = 0.1;
+  int chunks = (int)lround(data / interval);
+  double cycle = (chunks - 1) * interval + silence;
+  long long chunk = llround(average * cycle / chunks);
+  OtzRate rate;
+  otz_rate_init(&rate, 8);
+  double t = 0;
+  long long bytes = 0;
+  otz_rate_add(&rate, 0, 0);
+  for (int c = 0; c < 40; c++) {
+    for (int i = 0; i < chunks; i++) {
+      t += interval;
+      otz_rate_add(&rate, bytes += chunk, t);
+    }
+    if (c >= 20)
+      g_assert_cmpfloat(fabs(otz_rate_value(&rate) - average), <=, bound * average);
+    t += silence - interval;
+  }
+}
+
+static void test_eta_bursty_rate(void) {
+  bursty_rates(0.6, 0.4, 5.0 * MB, 0.05);
+  bursty_rates(0.6, 1.9, 5.0 * MB, 0.10);
+  bursty_rates(0.6, 4.9, 5.0 * MB, 0.10);
+}
+
+static double display_flow(OtzEtaDisplay *d, double raw, double from, double to) {
+  double shown = 0;
+  for (double t = from; t <= to + 1e-9; t += 0.1)
+    shown = otz_eta_display_update(d, raw, t, TRUE);
+  return shown;
+}
+
+static void test_eta_display(void) {
+  /* Data once a second under noise: a steady countdown. */
+  OtzEtaDisplay d = {0};
+  otz_eta_display_update(&d, 300, 0, TRUE);
+  double previous = 300;
+  for (int t = 1; t <= 60; t++) {
+    double raw = 300.0 - t + (t % 2 == 0 ? 12 : -12);
+    double shown = otz_eta_display_update(&d, raw, t, TRUE);
+    g_assert_cmpfloat(shown, <=, previous);
+    g_assert_cmpfloat(fabs(shown - (300.0 - t)), <=, 2);
+    previous = shown;
+  }
+
+  /* Continuous flow: rises slowly, falls fast. */
+  OtzEtaDisplay same = {0}, up = {0}, down = {0};
+  display_flow(&same, 100, 0, 3);
+  display_flow(&up, 100, 0, 3);
+  display_flow(&down, 100, 0, 3);
+  double base = display_flow(&same, 100, 3.1, 5);
+  double rose = display_flow(&up, 150, 3.1, 5) - base;
+  double fell = base - display_flow(&down, 50, 3.1, 5);
+  g_assert_cmpfloat(rose, >, 0);
+  g_assert_cmpfloat(rose, <, 50 * 0.2);
+  g_assert_cmpfloat(fell, >, rose * 2);
+
+  /* Under half: shown at the next correction point. */
+  OtzEtaDisplay snap = {0};
+  display_flow(&snap, 100, 0, 3);
+  g_assert_cmpfloat_with_epsilon(otz_eta_display_update(&snap, 30, 3.1, TRUE), 30, 1e-9);
+
+  /* End of a burst corrects to the raw of its last sample, not the current. */
+  OtzEtaDisplay burst = {0};
+  otz_eta_display_update(&burst, 100, 0, TRUE);
+  otz_eta_display_update(&burst, 30, 0.5, TRUE);
+  g_assert_cmpfloat_with_epsilon(otz_eta_display_update(&burst, 500, 1, FALSE), 99, 1e-9);
+  g_assert_cmpfloat_with_epsilon(otz_eta_display_update(&burst, 500, 1.5, FALSE), 30,
+                                 1e-9);
+  g_assert_cmpfloat_with_epsilon(otz_eta_display_update(&burst, 500, 2.5, FALSE), 29,
+                                 1e-9);
+
+  /* No correction point: countdown only. */
+  OtzEtaDisplay plain = {0};
+  otz_eta_display_update(&plain, 100, 0, TRUE);
+  g_assert_cmpfloat(otz_eta_display_update(&plain, 200, 0.9, TRUE), ==, 99.1);
+}
+
+/* ------------------------------------------- realistic runs (chunk lists) */
+
+typedef struct {
+  int ms;
+  long long bytes;
+} EtaChunk;
+
+typedef struct {
+  GArray *records; /* EtaRecord per poll */
+  GArray *texts;   /* (t, rounded seconds) at each change of the shown text */
+  double end;
+} EtaRun;
+
+static int rounded_seconds(double seconds) {
+  int h, m, s;
+  otz_eta_round(seconds, &h, &m, &s);
+  return h * 3600 + m * 60 + s;
+}
+
+/* The truth is the time of the last chunk; the text changes at most once a
+ * second, at once on a status change (as ui.c does). */
+static EtaRun eta_simulate(GArray *chunks) {
+  long long total = 0;
+  for (guint i = 0; i < chunks->len; i++) total += g_array_index(chunks, EtaChunk, i).bytes;
+  int end_ms = g_array_index(chunks, EtaChunk, chunks->len - 1).ms;
+  EtaRun run = {g_array_new(FALSE, FALSE, sizeof(EtaRecord)),
+                g_array_new(FALSE, FALSE, sizeof(double) * 2), end_ms / 1000.0};
+  OtzEta eta;
+  otz_eta_init(&eta);
+  long long net = 0;
+  guint next = 0;
+  double text_t = -10;
+  int text_status = -1, text_value = -1;
+  for (int ms = POLL_MS; ms <= end_ms + POLL_MS; ms += POLL_MS) {
+    while (next < chunks->len && g_array_index(chunks, EtaChunk, next).ms <= ms)
+      net += g_array_index(chunks, EtaChunk, next++).bytes;
+    double t = ms / 1000.0, shown;
+    OtzEtaStatus status =
+        otz_eta_tick(&eta, t, net, total - net, 0, FALSE, FALSE, FALSE, &shown);
+    EtaRecord record = {t, shown, status};
+    g_array_append_val(run.records, record);
+    if ((int)status == text_status && t - text_t < 1) continue;
+    text_status = status;
+    text_t = t;
+    int value = shown >= 0 ? rounded_seconds(shown) : -1;
+    if (value >= 0 && value != text_value) {
+      double change[2] = {t, value};
+      g_array_append_val(run.texts, change);
+    }
+    text_value = value;
+  }
+  g_array_unref(chunks);
+  return run;
+}
+
+static void eta_run_clear(EtaRun *run) {
+  g_array_unref(run->records);
+  g_array_unref(run->texts);
+}
+
+static double run_error(const EtaRun *run, const EtaRecord *r) {
+  return fabs(r->shown - (run->end - r->t)) / (run->end - r->t);
+}
+
+static double run_first_shown_t(const EtaRun *run) {
+  for (guint i = 0; i < run->records->len; i++) {
+    EtaRecord *r = &g_array_index(run->records, EtaRecord, i);
+    if (r->shown >= 0) return r->t;
+  }
+  g_assert_not_reached();
+}
+
+static double run_first_error(const EtaRun *run) {
+  for (guint i = 0; i < run->records->len; i++) {
+    EtaRecord *r = &g_array_index(run->records, EtaRecord, i);
+    if (r->shown >= 0) return run_error(run, r);
+  }
+  g_assert_not_reached();
+}
+
+/* While at least 60 s remain: in bursts the end is quantized to cycles. */
+static double run_max_error(const EtaRun *run, double from) {
+  double worst = 0;
+  for (guint i = 0; i < run->records->len; i++) {
+    EtaRecord *r = &g_array_index(run->records, EtaRecord, i);
+    if (r->shown >= 0 && r->t >= from && run->end - r->t >= 60)
+      worst = MAX(worst, run_error(run, r));
+  }
+  return worst;
+}
+
+static double run_error_at(const EtaRun *run, double t) {
+  const EtaRecord *last = NULL;
+  for (guint i = 0; i < run->records->len; i++) {
+    EtaRecord *r = &g_array_index(run->records, EtaRecord, i);
+    if (r->shown >= 0 && r->t <= t + 1e-9) last = r;
+  }
+  g_assert_nonnull(last);
+  return run_error(run, last);
+}
+
+static int run_text_increases(const EtaRun *run, double until) {
+  int count = 0;
+  for (guint i = 1; i < run->texts->len; i++) {
+    double *now = &g_array_index(run->texts, double, 2 * i);
+    double *before = &g_array_index(run->texts, double, 2 * (i - 1));
+    if (now[0] > until) break;
+    if (now[1] > before[1]) count++;
+  }
+  return count;
+}
+
+static void add_chunk(GArray *chunks, int ms, long long bytes) {
+  EtaChunk chunk = {ms, bytes};
+  g_array_append_val(chunks, chunk);
+}
+
+/* A chunk every 100 ms at `rate`, with fixed-seed noise of +-jitter. */
+static GArray *steady_chunks(long long total, long long rate, double jitter) {
+  GArray *chunks = g_array_new(FALSE, FALSE, sizeof(EtaChunk));
+  GRand *random = g_rand_new_with_seed(7);
+  long long sent = 0;
+  for (int ms = 100; sent < total; ms += 100) {
+    double factor = 1 + jitter * (2 * g_rand_double(random) - 1);
+    long long bytes = MIN(llround(rate / 10.0 * factor), total - sent);
+    add_chunk(chunks, ms, bytes);
+    sent += bytes;
+  }
+  g_rand_free(random);
+  return chunks;
+}
+
+/* 5 MB/s on average: `on` chunks 100 ms apart, then the next gap of `offs`
+ * (cyclic) until the following chunk. */
+static GArray *bursty_chunks(const double *offs, int n_offs, int on) {
+  const long long total = 2000 * MB;
+  double mean = 0;
+  for (int i = 0; i < n_offs; i++) mean += offs[i] / n_offs;
+  long long chunk = llround(5.0 * MB * ((on - 1) * 0.1 + mean) / on);
+  GArray *chunks = g_array_new(FALSE, FALSE, sizeof(EtaChunk));
+  long long sent = 0;
+  int ms = 0;
+  for (int c = 0; sent < total; c++) {
+    ms += (int)lround(offs[c % n_offs] * 1000);
+    for (int i = 0; i < on && sent < total; i++) {
+      if (i > 0) ms += 100;
+      long long bytes = MIN(chunk, total - sent);
+      add_chunk(chunks, ms, bytes);
+      sent += bytes;
+    }
+  }
+  return chunks;
+}
+
+/* (seconds, rate) segments; rate 0 is silence; the last one runs to the end. */
+static GArray *segment_chunks(const long long (*segments)[2], int count, long long total) {
+  GArray *chunks = g_array_new(FALSE, FALSE, sizeof(EtaChunk));
+  long long sent = 0;
+  int start = 0;
+  for (int s = 0; s < count; s++) {
+    int end = start + (int)segments[s][0] * 1000;
+    for (int ms = start + 100; ms <= end && sent < total; ms += 100) {
+      if (segments[s][1] == 0) continue;
+      long long bytes = MIN(segments[s][1] / 10, total - sent);
+      add_chunk(chunks, ms, bytes);
+      sent += bytes;
+    }
+    start = end;
+  }
+  return chunks;
+}
+
+static void test_eta_sim_steady(void) {
+  EtaRun run = eta_simulate(steady_chunks(3000 * MB, 5 * MB, 0.4));
+  g_test_message("steady 5 MB/s +-40%%: text increases %d, max error %.1f%%",
+                 run_text_increases(&run, INFINITY), run_max_error(&run, 10) * 100);
+  g_assert_cmpint(run_text_increases(&run, INFINITY), ==, 0);
+  g_assert_cmpfloat(run_max_error(&run, 10), <, 0.10);
+  eta_run_clear(&run);
+}
+
+static void test_eta_sim_bursty(void) {
+  static const double off49[] = {4.9}, off19[] = {1.9}, off20[] = {2.0};
+  static const double off60[] = {6.0}, off90[] = {9.0};
+  static const double mixed[] = {4.8, 5.1, 4.9, 5.3};
+
+  EtaRun run = eta_simulate(bursty_chunks(off49, 1, 6));
+  double e49 = run_max_error(&run, run_first_shown_t(&run) + 20);
+  eta_run_clear(&run);
+  run = eta_simulate(bursty_chunks(off19, 1, 6));
+  double e19 = run_max_error(&run, run_first_shown_t(&run) + 20);
+  eta_run_clear(&run);
+  run = eta_simulate(bursty_chunks(off20, 1, 6));
+  double first20 = run_first_error(&run);
+  int up20 = run_text_increases(&run, 120);
+  eta_run_clear(&run);
+  run = eta_simulate(bursty_chunks(off49, 1, 30));
+  int up3_49 = run_text_increases(&run, 120);
+  eta_run_clear(&run);
+  run = eta_simulate(bursty_chunks(off60, 1, 6));
+  double e60 = run_max_error(&run, 60);
+  eta_run_clear(&run);
+  run = eta_simulate(bursty_chunks(off90, 1, 6));
+  double e90 = run_max_error(&run, 60);
+  eta_run_clear(&run);
+  run = eta_simulate(bursty_chunks(mixed, 4, 6));
+  double emixed = run_max_error(&run, 60);
+  eta_run_clear(&run);
+
+  g_test_message("bursty 0.6/4.9 %.1f%%, 0.6/1.9 %.1f%%, 0.6/2.0 first %.1f%% with %d "
+                 "rises, 3/4.9 %d rises, 0.6/6.0 %.1f%%, 0.6/9.0 %.1f%%, mixed %.1f%%",
+                 e49 * 100, e19 * 100, first20 * 100, up20, up3_49, e60 * 100, e90 * 100,
+                 emixed * 100);
+  g_assert_cmpfloat(e49, <, 0.15);
+  g_assert_cmpfloat(e19, <, 0.10);
+  g_assert_cmpfloat(first20, <, 0.20);
+  g_assert_cmpint(up20, <=, 3);
+  g_assert_cmpint(up3_49, <=, 3);
+  g_assert_cmpfloat(e60, <, 0.15);
+  g_assert_cmpfloat(e90, <, 0.15);
+  g_assert_cmpfloat(emixed, <, 0.15);
+}
+
+static void test_eta_once_per_second(void) {
+  const double phases[] = {0, 0.05, 0.95};
+  for (int phase = 0; phase < 3; phase++) {
+    for (int direction = 0; direction < 2; direction++) {
+      long long from = direction ? MB : 5 * MB;
+      long long to = direction ? 5 * MB : MB;
+      long long total = 2000 * MB, bytes = 0;
+      OtzEta eta;
+      otz_eta_init(&eta);
+      double shown;
+      for (int second = 1; second <= 400; second++) {
+        bytes += second <= 20 ? from : to;
+        otz_eta_tick(&eta, second, bytes, total - bytes, 0, 0, 0, 0, &shown);
+        OtzEtaStatus status = otz_eta_tick(&eta, second + phases[phase], bytes,
+                                          total - bytes, 0, 0, 0, 0, &shown);
+        if (second >= 120) {
+          double expected = (double)(total - bytes) / to;
+          g_assert_cmpint(status, ==, OTZ_ETA_ESTIMATING);
+          g_assert_cmpfloat(fabs(shown - expected), <=, expected * 0.15);
+        }
+      }
+    }
+  }
+}
+
+static void test_eta_sim_rate_change(void) {
+  static const long long down[][2] = {{30, 10 * MB}, {100000, 5 * MB}};
+  static const long long up[][2] = {{30, 5 * MB}, {100000, 10 * MB}};
+  EtaRun run = eta_simulate(segment_chunks(down, 2, 3000 * MB));
+  double e_down = run_error_at(&run, 75);
+  eta_run_clear(&run);
+  run = eta_simulate(segment_chunks(up, 2, 3000 * MB));
+  double e_up = run_error_at(&run, 75);
+  eta_run_clear(&run);
+  g_test_message("rate change at +45 s: 10->5 %.1f%%, 5->10 %.1f%%", e_down * 100,
+                 e_up * 100);
+  g_assert_cmpfloat(e_down, <, 0.10);
+  g_assert_cmpfloat(e_up, <, 0.10);
+}
+
+static void test_eta_sim_stalls(void) {
+  static const long long stall12[][2] = {{20, 10 * MB}, {12, 0}, {100000, 10 * MB}};
+  static const long long stall45[][2] = {{20, 10 * MB}, {45, 0}, {100000, 10 * MB}};
+  EtaRun run = eta_simulate(segment_chunks(stall12, 3, 2000 * MB));
+  double worst = 0;
+  for (guint i = 0; i < run.records->len; i++) {
+    EtaRecord *r = &g_array_index(run.records, EtaRecord, i);
+    if (r->t <= 32 || r->shown < 0) continue;
+    worst = MAX(worst, r->shown / (run.end - r->t + 12) - 1);
+    g_assert_cmpfloat(r->shown, <=, (run.end - r->t + 12) * 1.1);
+  }
+  eta_run_clear(&run);
+
+  run = eta_simulate(segment_chunks(stall45, 3, 2000 * MB));
+  const EtaRecord *first = NULL, *back = NULL;
+  for (guint i = 0; i < run.records->len; i++) {
+    EtaRecord *r = &g_array_index(run.records, EtaRecord, i);
+    if (r->t <= 65.05) continue;
+    if (first == NULL) first = r;
+    if (back == NULL && r->shown >= 0) back = r;
+  }
+  g_assert_cmpint(first->status, ==, OTZ_ETA_CALCULATING);
+  double error = run_error(&run, back);
+  g_test_message("12 s stall: worst %+.1f%% over truth+12 s; 45 s stall: back at "
+                 "%.2f s, %.1f%% from truth",
+                 worst * 100, back->t, error * 100);
+  g_assert_cmpfloat(error, <, 0.15);
+  eta_run_clear(&run);
+}
+
+/* The bucket table of formatRemainingTimeHebrew. */
+static void test_eta_format_table(void) {
+  static const struct {
+    double seconds;
+    const char *text;
+  } cases[] = {
+      {0, "עוד כמה שניות"},
+      {4.7, "עוד כמה שניות"},
+      {4.9, "עוד כמה שניות"},
+      {5, "נותרו כ-5 שניות"},
+      {44, "נותרו כ-45 שניות"},
+      {59, "נותרה כדקה"},
+      {60, "נותרה כדקה"},
+      {90, "נותרו כדקה ו-30 שניות"},
+      {200, "נותרו כ-3 דקות ו-20 שניות"},
+      {300, "נותרו כ-5 דקות"},
+      {599, "נותרו כ-10 דקות"},
+      {600, "נותרו כ-10 דקות"},
+      {1830, "נותרו כ-31 דקות"},
+      {3599, "נותרה כשעה"},
+      {3600, "נותרה כשעה"},
+      {4500, "נותרו כשעה ו-15 דקות"},
+      {7200, "נותרו כשעתיים"},
+      {7500, "נותרו כשעתיים ו-5 דקות"},
+      {3 * 3600 + 20 * 60, "נותרו כ-3 שעות ו-20 דקות"},
+  };
+  otz_set_english(FALSE);
+  for (gsize i = 0; i < G_N_ELEMENTS(cases); i++) {
+    g_autofree char *text = otz_time_left_text(cases[i].seconds);
+    g_assert_cmpstr(text, ==, cases[i].text);
+  }
+}
+
+static void test_eta_round(void) {
+  static const struct {
+    double seconds;
+    int h, m, s;
+  } cases[] = {
+      {0, 0, 0, 0},       {4.9, 0, 0, 0},    {5, 0, 0, 5},     {33, 0, 0, 35},
+      {58, 0, 1, 0},      {60, 0, 1, 0},     {94, 0, 1, 30},   {125, 0, 2, 10},
+      {599, 0, 10, 0},    {600, 0, 10, 0},   {2669, 0, 44, 0}, {3599, 1, 0, 0},
+      {3600, 1, 0, 0},    {5000, 1, 25, 0},  {7190, 2, 0, 0},  {9000, 2, 30, 0},
+  };
+  for (gsize i = 0; i < G_N_ELEMENTS(cases); i++) {
+    int h, m, s;
+    otz_eta_round(cases[i].seconds, &h, &m, &s);
+    g_test_message("%.1f -> %d:%d:%d", cases[i].seconds, h, m, s);
+    g_assert_cmpint(h, ==, cases[i].h);
+    g_assert_cmpint(m, ==, cases[i].m);
+    g_assert_cmpint(s, ==, cases[i].s);
+  }
+}
+
 int main(int argc, char **argv) {
   g_test_init(&argc, &argv, NULL);
   g_test_add_func("/selection/fixtures", test_fixtures);
@@ -929,6 +1937,7 @@ int main(int argc, char **argv) {
   g_test_add_func("/selection/library-brings-its-installer",
                   test_library_brings_its_installer);
   g_test_add_func("/selection/package-format-any", test_package_format_any);
+  g_test_add_func("/selection/full-indexed-preset", test_full_indexed_preset);
   g_test_add_func("/manifest/rejects", test_manifest_rejects);
   g_test_add_func("/json/hebrew-escapes", test_json_hebrew_escapes);
   g_test_add_func("/json/values", test_json_values);
@@ -950,7 +1959,32 @@ int main(int argc, char **argv) {
   g_test_add_func("/job/complete-download-promoted",
                   test_job_complete_download_promoted);
   g_test_add_func("/job/complete-download-wrong", test_job_complete_download_wrong);
+  g_test_add_func("/job/output-folder", test_job_output_folder);
   g_test_add_func("/job/partial-bound-to-asset", test_job_partial_bound_to_asset);
   g_test_add_func("/job/space", test_space_verdict);
+  g_test_add_func("/job/subfolder-name", test_job_subfolder_name);
+  g_test_add_func("/manifest/english-text", test_manifest_english_text);
+  g_test_add_func("/release/offline-errors", test_offline_errors);
+  g_test_add_func("/texts/complete", test_texts_complete);
+  g_test_add_func("/texts/format", test_texts_format);
+  g_test_add_func("/eta/work-rates", test_eta_work_rates);
+  g_test_add_func("/eta/warm-up", test_eta_warm_up);
+  g_test_add_func("/eta/not-network", test_eta_not_network);
+  g_test_add_func("/eta/known-pause", test_eta_known_pause);
+  g_test_add_func("/eta/stall-status", test_eta_stall_status);
+  g_test_add_func("/eta/speed", test_eta_speed);
+  g_test_add_func("/eta/short-silences", test_eta_short_silences);
+  g_test_add_func("/eta/stall-recovery", test_eta_stall_recovery);
+  g_test_add_func("/eta/rate-change", test_eta_rate_change);
+  g_test_add_func("/eta/planned-steps", test_eta_planned_steps);
+  g_test_add_func("/eta/bursty-rate", test_eta_bursty_rate);
+  g_test_add_func("/eta/display", test_eta_display);
+  g_test_add_func("/eta/sim-steady", test_eta_sim_steady);
+  g_test_add_func("/eta/sim-bursty", test_eta_sim_bursty);
+  g_test_add_func("/eta/once-per-second", test_eta_once_per_second);
+  g_test_add_func("/eta/sim-rate-change", test_eta_sim_rate_change);
+  g_test_add_func("/eta/sim-stalls", test_eta_sim_stalls);
+  g_test_add_func("/eta/format-table", test_eta_format_table);
+  g_test_add_func("/eta/round", test_eta_round);
   return g_test_run();
 }

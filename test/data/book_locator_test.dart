@@ -276,19 +276,19 @@ void main() {
     });
   });
 
-  group('BookLocator.bookExists / getBookFromDatabase', () {
-    test('bookExists=true עבור ספר ב-DB', () async {
+  group('BookLocator.locateBook / getBookFromDatabase', () {
+    test('locateBook מוצא ספר ב-DB', () async {
       final catId = await insertBookFor(repo: seforimRepo, title: 'ויקרא');
 
-      final exists = await BookLocator.bookExists('ויקרא', categoryId: catId);
+      final location = await BookLocator.locateBook('ויקרא', categoryId: catId);
 
-      expect(exists, isTrue);
+      expect(location, isNotNull);
     });
 
-    test('bookExists=false עבור ספר לא קיים', () async {
-      final exists = await BookLocator.bookExists('לא קיים', categoryId: 1);
+    test('locateBook מחזיר null לספר לא קיים', () async {
+      final location = await BookLocator.locateBook('לא קיים', categoryId: 1);
 
-      expect(exists, isFalse);
+      expect(location, isNull);
     });
 
     test('getBookFromDatabase מחזיר את הרשומה מ-DB', () async {

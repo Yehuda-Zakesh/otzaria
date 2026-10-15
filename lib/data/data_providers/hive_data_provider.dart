@@ -114,8 +114,6 @@ class HiveCache extends CacheProvider {
     };
   }
 
-  Set get keys => getKeys();
-
   @override
   bool? getBool(String key, {bool? defaultValue}) {
     return _preferences?.get(key, defaultValue: defaultValue) ?? defaultValue;

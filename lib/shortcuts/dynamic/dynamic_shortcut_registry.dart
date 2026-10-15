@@ -1,8 +1,10 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:otzaria/shortcuts/dynamic/dynamic_shortcut.dart';
+import 'package:otzaria/shortcuts/shortcut_helper.dart';
 import 'package:otzaria/shortcuts/shortcut_validator.dart';
 
 /// רשימת הקיצורים הדינמיים של המשתמש. נשמרת כ-JSON תחת [settingsKey],
@@ -28,6 +30,11 @@ class DynamicShortcutRegistry extends ChangeNotifier {
     return List.unmodifiable(_shortcuts);
   }
 
+  /// הקיצור ש-[event] מפעיל, אם יש.
+  DynamicShortcut? match(KeyEvent event) => shortcuts
+      .where((s) => ShortcutHelper.matchesShortcut(event, s.key))
+      .firstOrNull;
+
   DynamicShortcut? byId(String id) {
     _ensureLoaded();
     for (final s in _shortcuts) {
@@ -35,11 +42,6 @@ class DynamicShortcutRegistry extends ChangeNotifier {
     }
     return null;
   }
-
-  DynamicShortcut? bySettingKey(String settingKey) =>
-      settingKey.startsWith(DynamicShortcut.settingKeyPrefix)
-      ? byId(settingKey.substring(DynamicShortcut.settingKeyPrefix.length))
-      : null;
 
   /// מוסיף או מחליף (לפי id).
   void put(DynamicShortcut shortcut) {

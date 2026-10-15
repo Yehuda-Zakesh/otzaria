@@ -14,7 +14,6 @@ import 'package:otzaria/personal_notes/widgets/personal_notes_sidebar.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
 
@@ -437,8 +436,6 @@ TextBookLoaded _loadedState({required List<int> visibleIndices}) =>
       selectedIndex: null,
       pinLeftPane: false,
       searchText: '',
-      scrollController: ItemScrollController(),
-      positionsListener: ItemPositionsListener.create(),
     );
 
 class _RecordingNotesBloc extends Bloc<PersonalNotesEvent, PersonalNotesState>

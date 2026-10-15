@@ -1311,7 +1311,7 @@ String ooxmlWordToText(
 
 /// ממיר חבילת OOXML **שכבר נפרסה** לטקסט של אוצריא.
 ///
-/// נקודת הכניסה של פורמט Flat OPC (‎.xml‎), שאין לו ZIP לפרוס: הוא בונה את
+/// נקודת הכניסה של פורמט Flat OPC (.xml), שאין לו ZIP לפרוס: הוא בונה את
 /// אותה [Archive] מתוך רשומות ה-XML ומגיע לאותו מנוע בדיוק.
 String ooxmlWordArchiveToText(
   Archive archive,
@@ -1380,7 +1380,7 @@ String docxToText(Uint8List bytes, String title) =>
 
 // ── WordML 2003 ───────────────────────────────────────────────────────────
 
-/// ממיר מסמך **WordprocessingML 2003** (‎.xml‎ עם שורש `w:wordDocument`).
+/// ממיר מסמך **WordprocessingML 2003** (.xml עם שורש `w:wordDocument`).
 ///
 /// הדיאלקט חולק עם OOXML את כל אוצר-המילים של הגוף (`w:p`, `w:r`, `w:rPr`,
 /// `w:tbl`) ולכן את אותו מנוע רינדור. שונים רק מקורות המשאבים: הסגנונות,

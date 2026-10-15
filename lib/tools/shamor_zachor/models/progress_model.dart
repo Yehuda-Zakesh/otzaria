@@ -83,19 +83,9 @@ class PageProgress {
   /// Check if no progress has been made
   bool get isEmpty => _done.isEmpty;
 
-  /// מספר העמודות המסומנות בפריט זה
-  int get completedCount => _done.length;
-
-  /// תאימות אחורה: הושלם לפי עמודות ברירת המחדל
-  bool get isComplete => learn && review1 && review2 && review3;
-
   /// האם כל העמודות שברשימה מסומנות בפריט זה
   bool isCompleteFor(List<String> columnIds) =>
       columnIds.isNotEmpty && columnIds.every((id) => _done[id] == true);
-
-  /// כמה מבין העמודות שברשימה מסומנות בפריט זה
-  int completedCountFor(List<String> columnIds) =>
-      columnIds.where((id) => _done[id] == true).length;
 
   /// Set a specific column by id
   void setProperty(String columnId, bool value) {
@@ -111,30 +101,6 @@ class PageProgress {
 
   /// מסיר עמודה מההתקדמות (בעת מחיקת עמודה מהספר)
   void removeColumn(String columnId) => _done.remove(columnId);
-
-  /// Create a copy with modified values
-  PageProgress copyWith({
-    bool? learn,
-    bool? review1,
-    bool? review2,
-    bool? review3,
-  }) {
-    final next = Map<String, bool>.from(_done);
-    void apply(String id, bool? value) {
-      if (value == null) return;
-      if (value) {
-        next[id] = true;
-      } else {
-        next.remove(id);
-      }
-    }
-
-    apply('learn', learn);
-    apply('review1', review1);
-    apply('review2', review2);
-    apply('review3', review3);
-    return PageProgress._fromMap(next);
-  }
 
   @override
   bool operator ==(Object other) {
@@ -167,16 +133,8 @@ class PageProgress {
 /// NEW: Progress map by book ID: BookId -> ItemIndex -> Progress
 typedef ProgressMapById = Map<int, Map<String, PageProgress>>;
 
-/// OLD (deprecated): Full progress map: Category -> Book -> Page/Item -> Progress
-/// This will be removed in a future version
-typedef FullProgressMap = Map<String, Map<String, Map<String, PageProgress>>>;
-
 /// NEW: Completion dates by book ID: BookId -> Completion Date (Hebrew)
 typedef CompletionDatesByIdMap = Map<int, String>;
-
-/// OLD (deprecated): Completion dates map: Category -> Book -> Completion Date (Hebrew)
-/// This will be removed in a future version
-typedef CompletionDatesMap = Map<String, Map<String, String>>;
 
 /// Book progress summary for display purposes
 class BookProgressSummary {
@@ -203,12 +161,6 @@ class BookProgressSummary {
   /// Get progress as a percentage (0.0 to 1.0)
   double get progressPercentage =>
       totalItems > 0 ? completedItems / totalItems : 0.0;
-
-  /// Check if the book is completed
-  bool get isCompleted => completedItems == totalItems && totalItems > 0;
-
-  /// Check if the book has any progress
-  bool get hasProgress => completedItems > 0 || inProgressItems > 0;
 
   /// Get status text for display based on current cycle
   String getStatusText(int currentCycle) {
@@ -252,27 +204,6 @@ class BookProgressSummary {
 
   /// Get status text for display (backward compatibility)
   String get statusText => getStatusText(1);
-
-  /// Create a modified copy of this summary.
-  BookProgressSummary copyWith({
-    int? totalItems,
-    int? completedItems,
-    int? inProgressItems,
-    String? completionDate,
-    DateTime? lastAccessed,
-    bool? isActiveReview,
-  }) {
-    return BookProgressSummary(
-      categoryName: categoryName,
-      bookName: bookName,
-      totalItems: totalItems ?? this.totalItems,
-      completedItems: completedItems ?? this.completedItems,
-      inProgressItems: inProgressItems ?? this.inProgressItems,
-      completionDate: completionDate ?? this.completionDate,
-      lastAccessed: lastAccessed ?? this.lastAccessed,
-      isActiveReview: isActiveReview ?? this.isActiveReview,
-    );
-  }
 
   @override
   bool operator ==(Object other) =>

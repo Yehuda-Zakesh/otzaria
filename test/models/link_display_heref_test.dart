@@ -65,13 +65,13 @@ void main() {
   });
 
   group('הפורמט המופרד (פסיק אחרי שם הספר) נמדד לפי רמות המיקום', () {
-    test('רש"י על הגמרא: אינדקס הפירוש יורד, הדף והקטע נשמרים', () {
+    test('רש"י על הגמרא: מספרי הקטע והפירוש שאחרי הדף יורדים', () {
       expect(
         _link(
           heRef: 'רש"י על חולין, ו., ה, ב',
           path2: 'רש"י על חולין',
         ).fallbackDisplayReference,
-        'רש"י על חולין, ו., ה',
+        'רש"י על חולין, ו.',
       );
     });
 
@@ -99,6 +99,90 @@ void main() {
           path2: 'רש"י על חולין',
         ).fallbackDisplayReference,
         'רש"י על חולין ו., ה, ב',
+      );
+    });
+  });
+
+  group('כתובת לפי דף מוצגת עד הדף, בלי מספר הקטע (issue #2480)', () {
+    test('הגמרא ומפרש דו-רמתי עליה', () {
+      expect(
+        _link(
+          heRef: 'עירובין, כו:, יז',
+          path2: 'עירובין',
+        ).fallbackDisplayReference,
+        'עירובין, כו:',
+      );
+      expect(
+        _link(
+          heRef: 'רש"ש על זבחים, ב:, ב',
+          path2: 'רש"ש על זבחים',
+        ).fallbackDisplayReference,
+        'רש"ש על זבחים, ב:',
+      );
+    });
+
+    test('דף בעומק שלוש רמות נשמר אחרי הסרת הקטע', () async {
+      final link = _link(
+        heRef: 'דברי אמת, דברי אמת על הגמרא, שבת,  ה., א',
+        path2: 'דברי אמת',
+      );
+      const expected = 'דברי אמת, דברי אמת על הגמרא, שבת, ה.';
+      expect(link.fallbackDisplayReference, expected);
+      expect(await link.displayReference, expected);
+    });
+
+    test('טווח קטעים באותו דף עמוק אינו מקצר גם את הדף', () {
+      expect(
+        _link(
+          heRef: 'דברי אמת, דברי אמת על הגמרא, שבת,  ה., א',
+          heRefEnd: 'דברי אמת, דברי אמת על הגמרא, שבת,  ה., ב',
+          path2: 'דברי אמת',
+          index2End: 5,
+        ).fallbackDisplayReference,
+        'דברי אמת, דברי אמת על הגמרא, שבת, ה.',
+      );
+    });
+
+    test('טווח דפים בעומק שלוש רמות שומר על שני הדפים', () {
+      expect(
+        _link(
+          heRef: 'דברי אמת, דברי אמת על הגמרא, שבת, ה., א',
+          heRefEnd: 'דברי אמת, דברי אמת על הגמרא, שבת, ה:, ב',
+          path2: 'דברי אמת',
+          index2End: 5,
+        ).fallbackDisplayReference,
+        'דברי אמת, דברי אמת על הגמרא, שבת, ה.–ה:',
+      );
+    });
+
+    test('קישור-טווח באותו דף מוצג כדף אחד', () {
+      expect(
+        _link(
+          heRef: 'כתובות, עט., ג',
+          heRefEnd: 'כתובות, עט., ד',
+          path2: 'כתובות',
+          index2End: 5,
+        ).fallbackDisplayReference,
+        'כתובות, עט.',
+      );
+    });
+
+    test('קישור-טווח בין דפים מציג את שני הדפים בלבד', () {
+      expect(
+        _link(
+          heRef: 'סוטה, יב:, כג',
+          heRefEnd: 'סוטה, יג., א',
+          path2: 'סוטה',
+          index2End: 5,
+        ).fallbackDisplayReference,
+        'סוטה, יב:–יג.',
+      );
+    });
+
+    test('הרמה האחרונה בספר שאינו לפי דף נשמרת', () {
+      expect(
+        _link(heRef: 'יהושע, ב, יג', path2: 'יהושע').fallbackDisplayReference,
+        'יהושע, ב, יג',
       );
     });
   });

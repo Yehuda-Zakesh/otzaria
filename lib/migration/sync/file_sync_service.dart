@@ -2,14 +2,12 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
 
 import '../database/repository/seforim_repository.dart';
 import '../database/database_compaction.dart';
 import '../../settings/services/custom_folders/custom_folder.dart';
-import '../../settings/engine/settings_repository.dart';
 import '../generator/generator.dart';
 import '../models/book.dart';
 import '../models/category.dart';
@@ -104,12 +102,6 @@ class FileSyncService {
   static void resetSingletonForTesting() {
     _instance = null;
   }
-
-  /// Check if sync is currently running
-  bool get isSyncing => _isSyncing;
-
-  /// Get the repository for external access
-  SeforimRepository get repository => _repository;
 
   /// Recursively delete a category and all its contents from the
   /// custom-folders DB (`user_books.db` or fallback to `_repository`).
@@ -634,7 +626,7 @@ class FileSyncService {
     final title = path.basenameWithoutExtension(filePath);
     final format = documentFormatFromExtension(filePath);
     if (format == null) {
-      // ‏[_findNewFiles] כבר סינן מול ה-registry, ולכן זהו באג ולא קלט חוקי.
+      // [_findNewFiles] כבר סינן מול ה-registry, ולכן זהו באג ולא קלט חוקי.
       _log.warning('Unsupported file reached the sync pipeline: $filePath');
       return const _FileProcessResult(wasAdded: false, wasUpdated: false);
     }
@@ -923,42 +915,6 @@ class FileSyncService {
     return result;
   }
 
-  /// Legacy wrapper — reads Settings and delegates to [syncCustomFoldersWithInputs].
-  /// Prefer calling [syncCustomFoldersWithInputs] via a worker isolate instead.
-  Future<FileSyncResult> syncFiles({
-    void Function(double progress, String message)? onProgress,
-  }) async {
-    if (_isSyncing) {
-      _log.warning('Sync already in progress, skipping');
-      return const FileSyncResult(errors: ['Sync already in progress']);
-    }
-
-    final libraryPath = Settings.getValue<String>(
-      SettingsRepository.keyLibraryPath,
-    );
-    if (libraryPath == null || libraryPath.isEmpty) {
-      _log.warning('Library path not set, skipping sync');
-      return const FileSyncResult(errors: ['Library path not set']);
-    }
-
-    final customFoldersJson = Settings.getValue<String>(
-      SettingsRepository.keyCustomFolders,
-    );
-    final customFolders = CustomFoldersManager.loadFolders(customFoldersJson);
-
-    final libraryFolderName =
-        Settings.getValue<String>(SettingsRepository.keyLibraryFolderName) ??
-        '';
-    final result = await syncCustomFoldersWithInputs(
-      libraryPath: libraryPath,
-      customFolders: customFolders,
-      folderName: libraryFolderName,
-      onProgress: onProgress,
-    );
-
-    return result;
-  }
-
   /// Find new or updated files to sync to the database
   /// Returns all supported files - the processing logic will determine if they should be added or updated
   Future<List<String>> _findNewFiles(String basePath) async {
@@ -1068,18 +1024,5 @@ class _PersonalBooksSnapshot {
     required this.personalCategoryId,
     required this.booksByCategory,
     required this.sourceNamesById,
-  });
-}
-
-/// Result of restoring a folder from DB
-class RestoreFolderResult {
-  final int restoredBooks;
-  final int restoredCategories;
-  final List<String> errors;
-
-  const RestoreFolderResult({
-    this.restoredBooks = 0,
-    this.restoredCategories = 0,
-    this.errors = const [],
   });
 }

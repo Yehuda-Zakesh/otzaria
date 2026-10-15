@@ -86,6 +86,28 @@ class SettingsRepository {
 
   /// דיווח אחרי קריסה: `ask` (ברירת מחדל) / `always` / `never`.
   static const String keyAppCrashReportMode = 'key-app-crash-report-mode';
+
+  /// הסכמה לשליחת נתוני שימוש של החיפוש הסמנטי: `granted` / `declined`.
+  static const String keySearchFeedbackConsent = 'key-search-feedback-consent';
+
+  /// גרסת נוסח ההסכמה שעליה הסכים המשתמש.
+  static const String keySearchFeedbackConsentVersion =
+      'key-search-feedback-consent-version';
+
+  /// דיוק מודל השאילתות של החיפוש הסמנטי: `int8` (ברירת מחדל) / `fp32`.
+  static const String keySemanticModelQuantization =
+      'key-semantic-model-quantization';
+
+  /// המשתמש הוריד את נתוני החיפוש הסמנטי, ולכן הם מתעדכנים ברקע.
+  static const String keySemanticDataEnabled = 'key-semantic-data-enabled';
+
+  /// המשתמש עצר את הורדת נתוני החיפוש הסמנטי; עדכונים לא מחדשים אותה.
+  static const String keySemanticDownloadPaused =
+      'key-semantic-download-paused';
+
+  /// תג release וקטורים שהמנוע זיהה כפרסום חוזר של גרסה מותקנת; לא מורידים שוב.
+  static const String keySemanticSkippedVectorsRelease =
+      'key-semantic-skipped-vectors-release';
   static const String keyLibraryPath = 'key-library-path';
   static const String keyIndexPath = 'key-index-path';
   static const String keyDatabasesPath = 'key-databases-path';
@@ -265,6 +287,12 @@ class SettingsRepository {
     keyErrorReportSenderEmail,
     keyQueueErrorReportsWhenOffline,
     keyAppCrashReportMode,
+    keySearchFeedbackConsent,
+    keySearchFeedbackConsentVersion,
+    keySemanticModelQuantization,
+    keySemanticDataEnabled,
+    keySemanticDownloadPaused,
+    keySemanticSkippedVectorsRelease,
     keyLibraryPath,
     keyIndexPath,
     keyDatabasesPath,
@@ -957,13 +985,6 @@ class SettingsRepository {
     await _settings.setValue(keyCalendarNotificationSound, value);
   }
 
-  String getCalendarZmanAlertsJson() {
-    return _settings.getValue<String>(
-      keyCalendarZmanAlerts,
-      defaultValue: '{}',
-    );
-  }
-
   Future<void> updateCalendarZmanAlertsJson(String json) async {
     await _settings.setValue(keyCalendarZmanAlerts, json);
   }
@@ -991,34 +1012,12 @@ class SettingsRepository {
     );
   }
 
-  String getGoogleCalendarClientId() {
-    return _settings.getValue<String>(
-      keyGoogleCalendarClientId,
-      defaultValue: '',
-    );
-  }
-
-  String getGoogleCalendarClientSecret() {
-    return _settings.getValue<String>(
-      keyGoogleCalendarClientSecret,
-      defaultValue: '',
-    );
-  }
-
   Future<void> updateGoogleCalendarEnabled(bool value) async {
     await _settings.setValue(keyGoogleCalendarEnabled, value);
   }
 
   Future<void> updateGoogleCalendarSelectedIds(List<String> value) async {
     await _settings.setValue(keyGoogleCalendarSelectedIds, value.join(','));
-  }
-
-  Future<void> updateGoogleCalendarClientId(String value) async {
-    await _settings.setValue(keyGoogleCalendarClientId, value);
-  }
-
-  Future<void> updateGoogleCalendarClientSecret(String value) async {
-    await _settings.setValue(keyGoogleCalendarClientSecret, value);
   }
 
   Future<void> updateGoogleCalendarCredentialsJson(String value) async {

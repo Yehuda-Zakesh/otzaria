@@ -9,8 +9,15 @@ import 'package:otzaria/plugins/models/plugin_permission_labels.dart';
 import 'package:otzaria/plugins/models/plugin_valid_permissions.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/plugins/services/plugin_user_folder_grants.dart';
+import 'package:otzaria/plugins/services/plugin_new_tab_page_registry.dart';
+import 'package:otzaria/plugins/view/plugin_new_tab_page_choice.dart';
+import 'package:otzaria/plugins/services/plugin_new_tab_page_service.dart';
+import 'package:otzaria/core/messages/plugin_messages.dart';
+import 'package:otzaria/core/ui_snack.dart';
+import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
 import 'package:otzaria/widgets/dialogs/dialogs_exports.dart';
 import 'package:otzaria/settings/widgets/settings_card.dart';
+import 'package:otzaria/theme/theme_exports.dart';
 import 'package:path/path.dart' as p;
 
 /// פונקציה משותפת לדיאלוג אישור מחיקת תוסף — קוראת מ-tools_management_panel
@@ -65,18 +72,46 @@ Future<bool> showResetPluginDataDialog(
 }
 
 /// פונקציה משותפת לפתיחת דיאלוג הגדרות תוסף — קוראת מ-tools_management_panel
-/// ומ-plugin_side_panel.
+/// ומ-tools_launcher_panel.
 Future<bool?> showPluginSettingsDialog(
   BuildContext context,
   InstalledPlugin plugin,
 ) {
   return showDialog<bool>(
     context: context,
-    builder: (_) => BlocProvider<PluginSystemBloc>.value(
-      value: context.read<PluginSystemBloc>(),
-      child: PluginSettingsScreen(plugin: plugin),
+    builder: settingsDialogBuilder(
+      context,
+      (_) => BlocProvider<PluginSystemBloc>.value(
+        value: context.read<PluginSystemBloc>(),
+        child: PluginSettingsScreen(plugin: plugin),
+      ),
     ),
   );
+}
+
+/// סימון "DEV" לתוסף פיתוח — משותף ל-tools_launcher_panel ול-tools_management_panel.
+class PluginDevBadge extends StatelessWidget {
+  const PluginDevBadge({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: cs.tertiary,
+        borderRadius: AppTokens.borderRadiusAll,
+      ),
+      child: Text(
+        'DEV',
+        style: TextStyle(
+          fontSize: 8,
+          fontWeight: FontWeight.bold,
+          color: cs.onTertiary,
+        ),
+      ),
+    );
+  }
 }
 
 class PluginSettingsScreen extends StatefulWidget {
@@ -94,6 +129,7 @@ class _PluginSettingsScreenState extends State<PluginSettingsScreen> {
   late final _folderGrants = PluginUserFolderGrants(_repo);
   Map<String, bool> _permissions = {};
   List<PluginUserFolderGrant> _userFolders = const [];
+  String? _newTabOwnerName;
 
   static String _formatPathForDisplay(String path) =>
       path.replaceAllMapped(_pathSeparatorRegExp, (m) => '${m[0]!}\u200E');
@@ -101,8 +137,15 @@ class _PluginSettingsScreenState extends State<PluginSettingsScreen> {
   @override
   void initState() {
     super.initState();
+    PluginNewTabPageRegistry.instance.addListener(_loadPermissions);
     _loadPermissions();
     _loadUserFolders();
+  }
+
+  @override
+  void dispose() {
+    PluginNewTabPageRegistry.instance.removeListener(_loadPermissions);
+    super.dispose();
   }
 
   Future<void> _loadUserFolders() async {
@@ -130,9 +173,22 @@ class _PluginSettingsScreenState extends State<PluginSettingsScreen> {
       );
       map[p] = granted ?? defaultValue;
     }
+    final newTabPage = await _repo.getPermission(
+      widget.plugin.pluginId,
+      pluginNewTabPagePermission,
+    );
+    String? ownerName;
+    if (newTabPage != null) {
+      map[pluginNewTabPagePermission] = newTabPage;
+      final ownerId = await PluginNewTabPageService.instance.ownerId(_repo);
+      if (ownerId != null) {
+        ownerName = (await _repo.getPlugin(ownerId))?.name ?? ownerId;
+      }
+    }
     if (!mounted) return;
     setState(() {
       _permissions = map;
+      _newTabOwnerName = ownerName;
     });
   }
 
@@ -159,18 +215,25 @@ class _PluginSettingsScreenState extends State<PluginSettingsScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (effectiveManifestPermissions(
-                currentPlugin.manifest.permissions,
-              ).isNotEmpty) ...[
+              if (_permissions.isNotEmpty ||
+                  effectiveManifestPermissions(
+                    currentPlugin.manifest.permissions,
+                  ).isNotEmpty) ...[
                 const SizedBox(height: 16),
                 SettingsCard(
                   title: 'ניהול הרשאות',
                   subtitle: 'אפשר או חסום הרשאות ספציפיות כפי שנדרש במניפסט',
                   children:
                       orderedPluginPermissions(
-                        effectiveManifestPermissions(
-                          currentPlugin.manifest.permissions,
-                        ),
+                        {
+                          ...effectiveManifestPermissions(
+                            currentPlugin.manifest.permissions,
+                          ),
+                          if (_permissions.containsKey(
+                            pluginNewTabPagePermission,
+                          ))
+                            pluginNewTabPagePermission,
+                        }.toList(),
                         isOfflineMode: false,
                       ).map((p) {
                         final info = getPermissionInfo(
@@ -201,10 +264,41 @@ class _PluginSettingsScreenState extends State<PluginSettingsScreen> {
                         return SettingsActionTile.switchTile(
                           icon: iconData,
                           iconColor: iconColor,
-                          title: info.label,
-                          subtitle: info.description,
+                          title: p == pluginNewTabPagePermission
+                              ? context.settingsText('כפתור לשונית חדשה (+)')
+                              : info.label,
+                          subtitle: p == pluginNewTabPagePermission
+                              ? context.settingsText(
+                                  'פתיחת דף התוסף בכפתור "+". רק תוסף אחד יכול לקבל הרשאה זו. בעל הכפתור כעת: {owner}',
+                                  args: {
+                                    'owner':
+                                        _newTabOwnerName ??
+                                        context.settingsText('אין'),
+                                  },
+                                )
+                              : info.description,
                           value: isGranted,
+                          enabled:
+                              p != pluginNewTabPagePermission ||
+                              isGranted ||
+                              (currentPlugin.enabled &&
+                                  _permissions['navigation.write'] == true),
                           onChanged: (val) async {
+                            if (p == pluginNewTabPagePermission && val) {
+                              try {
+                                await choosePluginNewTabPage(
+                                  context,
+                                  currentPlugin,
+                                  _repo,
+                                );
+                                await _loadPermissions();
+                              } catch (error) {
+                                UiSnack.showError(
+                                  PluginMessages.updatePermissionError(error),
+                                );
+                              }
+                              return;
+                            }
                             context.read<PluginSystemBloc>().add(
                               SetPluginPermissionRequested(
                                 pluginId: currentPlugin.pluginId,

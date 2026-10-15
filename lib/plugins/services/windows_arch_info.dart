@@ -13,26 +13,11 @@ import 'package:win32/win32.dart';
 class WindowsArchInfo {
   static const _imageFileMachineArm64 = 0xaa64;
 
-  /// overrides לבדיקות בלבד. העבר `null` לאיפוס.
-  static bool? _emulatedOverride;
-  static bool? _onArmOverride;
-
-  @visibleForTesting
-  static void debugOverrideEmulatedOnArm(bool? value) {
-    _emulatedOverride = value;
-  }
-
-  @visibleForTesting
-  static void debugOverrideWindowsOnArm(bool? value) {
-    _onArmOverride = value;
-  }
-
   /// `true` כשהתהליך הנוכחי הוא x64 אך המעבד עצמו ARM64.
   ///
   /// בתהליך x64 מאומלץ משתני הסביבה מתארים את המעבד המדומה, לכן מקור האמת
   /// הוא [IsWow64Process2] שמחזיר את ארכיטקטורת המארח.
   static bool get isEmulatedOnArm {
-    if (_emulatedOverride != null) return _emulatedOverride!;
     if (!Platform.isWindows) return false;
     return resolveEmulatedOnArm(
       Platform.environment,
@@ -43,7 +28,6 @@ class WindowsArchInfo {
   /// `true` על כל מחשב ARM — בין אם התהליך נייטיבי ובין אם מאומל.
   /// זה הקריטריון לבחירת מתקין העדכון: המעבד קובע, לא התהליך הנוכחי.
   static bool get isWindowsOnArm {
-    if (_onArmOverride != null) return _onArmOverride!;
     if (!Platform.isWindows) return false;
     return resolveWindowsOnArm(
       Platform.environment,

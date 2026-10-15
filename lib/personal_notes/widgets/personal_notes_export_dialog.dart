@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:otzaria/personal_notes/models/personal_note.dart';
 import 'package:otzaria/personal_notes/utils/personal_notes_book_key.dart';
+import 'package:otzaria/utils/calendar_days.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
@@ -69,9 +70,7 @@ class _PersonalNotesExportDialogState extends State<PersonalNotesExportDialog> {
       description = 'הערות לספר $_selectedBookId';
     } else if (_mode == NotesExportMode.byDateRange && _dateRange != null) {
       final start = DateUtils.dateOnly(_dateRange!.start);
-      final endExclusive = DateUtils.dateOnly(
-        _dateRange!.end,
-      ).add(const Duration(days: 1));
+      final endExclusive = addCalendarDays(_dateRange!.end, 1);
       result = notes
           .where(
             (note) =>

@@ -16,17 +16,18 @@ import 'package:otzaria/text_book/view/toc_filter.dart';
 import 'package:otzaria/text_book/view/toc_navigator_internals.dart';
 import 'package:otzaria/widgets/feedback/otzaria_empty_state.dart';
 import 'package:otzaria/widgets/lists/nav_tree_tile.dart';
+import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 
 class TocViewer extends StatefulWidget {
   const TocViewer({
     super.key,
-    required this.scrollController,
+    required this.lines,
     required this.closeLeftPaneCallback,
     required this.focusNode,
   });
 
   final void Function() closeLeftPaneCallback;
-  final ItemScrollController scrollController;
+  final LineScrollController lines;
   final FocusNode focusNode;
 
   @override
@@ -131,7 +132,7 @@ class _TocViewerState extends State<TocViewer>
   void _moveHighlight(int delta) {
     final state = context.read<TextBookBloc>().state;
     if (state is! TextBookLoaded) return;
-    final display = _displayDataFor(state.tableOfContents);
+    final display = _displayDataFor(state);
     if (!display.isSearching) return;
     final flat = _flatItemsFor(display);
     if (flat.isEmpty) return;
@@ -147,7 +148,7 @@ class _TocViewerState extends State<TocViewer>
     setState(() => _highlightedEntryIndex = targetIndex);
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final current = _displayDataFor(state.tableOfContents);
+      final current = _displayDataFor(state);
       _scrollEntryIntoView(
         targetIndex,
         display: current,
@@ -166,13 +167,8 @@ class _TocViewerState extends State<TocViewer>
     if (state is! TextBookLoaded) {
       return;
     }
-    final navigation = scrollToSourceLine(
-      scrollController: widget.scrollController,
-      scrollOffsetController: state.scrollOffsetController,
-      positionsListener: state.positionsListener,
-      segments: state.readingSegments,
-      lineIndex: lineIndex,
-      viewportExtent: context.size?.height ?? MediaQuery.sizeOf(context).height,
+    final navigation = widget.lines.scrollToLine(
+      lineIndex,
       duration: const Duration(milliseconds: 250),
       curve: Curves.ease,
     );
@@ -194,7 +190,7 @@ class _TocViewerState extends State<TocViewer>
   void _openHighlightedEntry() {
     final state = context.read<TextBookBloc>().state;
     if (state is! TextBookLoaded) return;
-    final display = _displayDataFor(state.tableOfContents);
+    final display = _displayDataFor(state);
     if (!display.isSearching) return;
     final flat = _flatItemsFor(display);
     if (flat.isEmpty) return;
@@ -216,7 +212,8 @@ class _TocViewerState extends State<TocViewer>
         changed = true;
       }
     }
-    if (changed) _expandedRevision++;
+    // שורות הענפים שנפתחו צריכות להיבנות לפני שהגלילה מחפשת אותן.
+    if (changed) setState(() => _expandedRevision++);
   }
 
   List<TocEntry> _findPath(List<TocEntry> entries, int targetIndex) {
@@ -233,43 +230,42 @@ class _TocViewerState extends State<TocViewer>
     return [];
   }
 
+  /// הכותרת של השורה הנבחרת, ובהיעדרה של השורה הגלויה הראשונה.
+  int? _activeTocIndex(TextBookLoaded state) {
+    final line = state.selectedIndex ?? state.visibleIndices.firstOrNull;
+    return line == null
+        ? null
+        : closestTocEntryIndex(state.tableOfContents, line);
+  }
+
   void _scrollToActiveItem(TextBookLoaded state) {
     if (_isManuallyScrolling) return;
     // כשהפאנל סגור הגלילה נכשלת (רוחב 0) אך משבשת את _lastScrolledTocIndex
     // ואז חוסמת את הגלילה האמיתית בפתיחה הבאה.
     if (!state.showLeftPane) return;
 
-    final int? activeIndex =
-        state.selectedIndex ??
-        (state.visibleIndices.isNotEmpty
-            ? closestTocEntryIndex(
-                state.tableOfContents,
-                state.visibleIndices.first,
-              )
-            : null);
+    final int? activeIndex = _activeTocIndex(state);
 
     if (activeIndex == null || activeIndex == _lastScrolledTocIndex) return;
 
     _ensureParentsOpen(state.tableOfContents, activeIndex);
 
     SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _isManuallyScrolling) return;
-        // ההחלטה וירטואלי/רקורסיבי נלקחת כאן ולא בזמן התזמון: שני frames
-        // עברו, וניקוי חיפוש בינתיים מחליף מסלול ומנתק את בקר הגלילה.
-        final display = _displayDataFor(state.tableOfContents);
-        final bool useFlat = display.totalCount > _kTocFlattenThreshold;
-        if (_scrollEntryIntoView(
-          activeIndex,
-          display: display,
-          useFlat: useFlat,
-        )) {
-          _lastScrolledTocIndex = activeIndex;
-        }
-      });
+      if (!mounted || _isManuallyScrolling) return;
+      // ההחלטה וירטואלי/רקורסיבי נלקחת כאן ולא בזמן התזמון: ניקוי חיפוש
+      // בינתיים מחליף מסלול ומנתק את בקר הגלילה.
+      final display = _displayDataFor(state);
+      final bool useFlat = display.totalCount > _kTocFlattenThreshold;
+      if (_scrollEntryIntoView(
+        activeIndex,
+        display: display,
+        useFlat: useFlat,
+      )) {
+        _lastScrolledTocIndex = activeIndex;
+      }
     });
+    // addPostFrameCallback אינו מבקש frame; בלעדיו הגלילה ממתינה עד שמשהו אחר יצייר.
+    SchedulerBinding.instance.ensureVisualUpdate();
   }
 
   /// גולל את הערך אל תוך אזור התצוגה אם אינו גלוי במלואו.
@@ -365,13 +361,15 @@ class _TocViewerState extends State<TocViewer>
     return true;
   }
 
-  _TocDisplayData _displayDataFor(List<TocEntry> tableOfContents) {
+  _TocDisplayData _displayDataFor(TextBookLoaded state) {
+    final tableOfContents = state.tableOfContents;
     final query = _appliedQuery;
     if (!identical(_displaySource, tableOfContents) || _displayQuery != query) {
       final isSearching = query.isNotEmpty;
+      final roots = tocRootsBelowTitle(tableOfContents, state.book.title);
       final entries = isSearching
-          ? filterTocEntriesForSearch(tableOfContents, query)
-          : tableOfContents;
+          ? filterTocEntriesForSearch(roots, query)
+          : roots;
       _displaySource = tableOfContents;
       _displayQuery = query;
       _displayResult = _TocDisplayData(
@@ -632,21 +630,11 @@ class _TocViewerState extends State<TocViewer>
         },
         builder: (context, state) {
           if (state is! TextBookLoaded) return const Center();
-          // חישוב יחיד של ה"ערך הפעיל" - מועבר כפרמטר ל-_buildTocItem
-          // במקום שכל פריט יחשב בעצמו (שזה מה שיצר את ה-O(n²)).
-          final int? activeIndex =
-              state.selectedIndex ??
-              (state.visibleIndices.isNotEmpty
-                  ? closestTocEntryIndex(
-                      state.tableOfContents,
-                      state.visibleIndices.first,
-                    )
-                  : null);
+          // מחושב פעם אחת ומועבר לכל הפריטים, כדי שהבנייה לא תהיה O(n²).
+          final int? activeIndex = _activeTocIndex(state);
 
           // גם חיפוש עשוי להציג עשרות אלפי ערכים, ולכן הסף נגזר מהפלט.
-          final display = _displayDataFor(
-            state.tableOfContents,
-          );
+          final display = _displayDataFor(state);
           final bool useFlat = display.totalCount > _kTocFlattenThreshold;
 
           final delegate = NavPanelSearchDelegate(

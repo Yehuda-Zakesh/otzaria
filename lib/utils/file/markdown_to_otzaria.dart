@@ -157,8 +157,7 @@ class MarkdownToOtzaria {
         return 0;
       }
       final bytes = await file.readAsBytes();
-      image.attributes['src'] =
-          'data:$mime;base64,${base64Encode(bytes)}';
+      image.attributes['src'] = 'data:$mime;base64,${base64Encode(bytes)}';
       return bytes.length;
     } on FormatException {
       image.attributes.remove('src');

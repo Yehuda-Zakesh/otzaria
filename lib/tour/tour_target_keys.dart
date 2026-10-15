@@ -51,3 +51,23 @@ final GlobalKey tourTitleBarBookmarkButtonTargetKey = GlobalKey(
 final GlobalKey tourToolsLauncherPanelTargetKey = GlobalKey(
   debugLabel: 'tour_tools_launcher_panel_target',
 );
+
+/// האם יעדי הסיור של הטאב שמתחת פעילים. רק היעדים תלויים בו, ולכן מעבר טאב
+/// אינו בונה מחדש את מסך הספר כולו.
+class TourTargetsScope extends InheritedWidget {
+  final bool enabled;
+
+  const TourTargetsScope({
+    super.key,
+    required this.enabled,
+    required super.child,
+  });
+
+  static bool enabledOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<TourTargetsScope>()?.enabled ??
+      false;
+
+  @override
+  bool updateShouldNotify(TourTargetsScope oldWidget) =>
+      enabled != oldWidget.enabled;
+}

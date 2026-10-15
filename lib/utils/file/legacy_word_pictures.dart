@@ -21,7 +21,7 @@ String? legacyWordPictureTag(
   int offset, {
   required bool embedImages,
 }) {
-  // ‏PICF: ‏lcb (4) + cbHeader (2), ואחרי cbHeader מתחיל עץ ה-OfficeArt.
+  // PICF: lcb (4) + cbHeader (2), ואחרי cbHeader מתחיל עץ ה-OfficeArt.
   if (offset < 0 || offset + 6 > data.length) return null;
   final view = ByteData.sublistView(data);
   final total = view.getUint32(offset, Endian.little);
@@ -71,7 +71,7 @@ const Map<int, String?> _blipTypes = {
   0xF02A: 'image/jpeg',
 };
 
-/// ‏`OfficeArtFBSE` — רשומת ה-BLIP Store Entry שבתוכה מוטמעת התמונה.
+/// `OfficeArtFBSE` — רשומת ה-BLIP Store Entry שבתוכה מוטמעת התמונה.
 const int _fbseRecord = 0xF007;
 const int _fbseHeaderSize = 36;
 const int _fbseNameLengthOffset = 33;
@@ -100,7 +100,7 @@ _Blip? _findBlip(Uint8List data, int from, int to, [int depth = 0]) {
       final found = _findBlip(data, body, body + length, depth + 1);
       if (found != null) return found;
     } else if (recordType == _fbseRecord) {
-      // ‏FBSE הוא אטום ולא מכולה, אך ה-blip מוטמע בתוכו אחרי כותר קבוע בן 36
+      // FBSE הוא אטום ולא מכולה, אך ה-blip מוטמע בתוכו אחרי כותר קבוע בן 36
       // בתים ושם באורך משתנה. בלי הירידה לכאן לא נמצאת אף תמונה.
       if (length > _fbseHeaderSize) {
         final nameLength = data[body + _fbseNameLengthOffset];
@@ -112,7 +112,7 @@ _Blip? _findBlip(Uint8List data, int from, int to, [int depth = 0]) {
       }
     } else if (_blipTypes.containsKey(recordType)) {
       final instance = (versionAndInstance >> 4) & 0x0FFF;
-      // ‏rgbUid בן 16 בתים, ועוד אחד כשה-instance אי-זוגי, ואז בית `tag`.
+      // rgbUid בן 16 בתים, ועוד אחד כשה-instance אי-זוגי, ואז בית `tag`.
       final skip = 16 + (instance.isOdd ? 16 : 0) + 1;
       if (length > skip) {
         return _Blip(body + skip, length - skip, _blipTypes[recordType]);

@@ -91,7 +91,7 @@ extension DocumentFormatProperties on DocumentFormat {
   bool get isLegacyWord =>
       this == DocumentFormat.doc || this == DocumentFormat.dot;
 
-  /// מסמך HTML עצמאי — ‎.html‎ ו-‎.htm‎ עוברים את אותו מנוע המרה.
+  /// מסמך HTML עצמאי — .html ו-.htm עוברים את אותו מנוע המרה.
   bool get isHtmlDocument =>
       this == DocumentFormat.html ||
       this == DocumentFormat.htm ||
@@ -126,7 +126,7 @@ extension DocumentFormatProperties on DocumentFormat {
 
   /// האם *חובה* לזהות את התוכן כדי לנתב — הסיומת לבדה אינה מספיקה.
   ///
-  /// WBK הוא גיבוי של Word ויכול להיות OOXML או בינארי ישן. ‎.xml‎ היא סיומת
+  /// WBK הוא גיבוי של Word ויכול להיות OOXML או בינארי ישן. .xml היא סיומת
   /// גנרית: רוב קובצי ה-XML בעולם אינם מסמכי Word, ובלי בדיקת תוכן כל קובץ
   /// הגדרות בתיקייה היה נאסף כ"ספר".
   bool get needsContentSniffing =>
@@ -228,7 +228,7 @@ DocumentFormat? documentFormatFromExtension(String path) {
 ///
 /// חריג אחד: `txt` הוא ברירת המחדל של העמודה ב-DB (`fileType TEXT DEFAULT
 /// 'txt'`) ולא הצהרה של מישהו, ולכן סיומת שאומרת אחרת גוברת עליו. בלי החריג
-/// ספר ‎.docx‎ שרשומתו נשארה על ברירת המחדל נקרא כטקסט — כלומר ג'יבריש
+/// ספר .docx שרשומתו נשארה על ברירת המחדל נקרא כטקסט — כלומר ג'יבריש
 /// שנראה כספר תקין.
 DocumentFormat? documentFormatOf({String? fileType, String? path}) {
   final byExtension = path == null ? null : documentFormatFromExtension(path);
@@ -269,7 +269,7 @@ const List<int> _rtfSignature = [0x7B, 0x5C, 0x72, 0x74, 0x66]; // {\rtf
 /// אחד מהפורמטים הבינאריים המוכרים (למשל טקסט רגיל).
 ///
 /// הזיהוי הוא ברמת *משפחה* ודי לו בכותרת הקובץ: חתימת OLE מוחזרת כ-`doc`
-/// אף ש-‎.xls‎ ו-‎.msg‎ נושאים אותה חתימה בדיוק. להבחנה מדויקת נדרש פענוח
+/// אף ש-.xls ו-.msg נושאים אותה חתימה בדיוק. להבחנה מדויקת נדרש פענוח
 /// המכולה — ראו `isLegacyWordContainer` ב-`cfb_reader.dart`, שדורש את
 /// הקובץ המלא ולכן אינו חלק מהמסלול המהיר הזה.
 DocumentFormat? detectDocumentFormatFromContentSync(Uint8List bytes) {
@@ -281,7 +281,7 @@ DocumentFormat? detectDocumentFormatFromContentSync(Uint8List bytes) {
   return null;
 }
 
-/// שני הדיאלקטים שבהם Word שומר מסמך כקובץ ‎.xml‎ יחיד.
+/// שני הדיאלקטים שבהם Word שומר מסמך כקובץ .xml יחיד.
 enum WordXmlDialect {
   /// Flat OPC — חבילת OOXML שלמה שנשטחה לקובץ אחד (`pkg:package`).
   flatOpc,
@@ -301,7 +301,7 @@ WordXmlDialect? wordXmlDialectForRootName(String localName) =>
 
 /// מזהה מסמך Word שנשמר כ-XML, בלי לפרסר את הקובץ כולו.
 ///
-/// ‎.xml‎ היא סיומת גנרית, ולכן זהו התנאי היחיד שמכניס קובץ כזה לספרייה:
+/// .xml היא סיומת גנרית, ולכן זהו התנאי היחיד שמכניס קובץ כזה לספרייה:
 /// בלעדיו כל קובץ הגדרות בתיקייה שנסרקת היה נאסף כ"ספר" ונכשל בהמרה.
 WordXmlDialect? sniffWordXmlDialect(Uint8List bytes) {
   // השורש יושב בראש הקובץ, אחרי הצהרת ה-XML וההוראות; חלון קטן מספיק.
@@ -335,7 +335,7 @@ DocumentFormat? resolveDocumentFormat(
   if (declared == null) return detected;
   if (detected == null) {
     // תוכן שאינו מוכר: פורמט שדורש מכולה בינארית שיקר לגבי עצמו, ופורמט
-    // שסיומתו גנרית (‎.xml‎, ‎.wbk‎) לא הוכיח שהוא מסמך בכלל.
+    // שסיומתו גנרית (.xml, .wbk) לא הוכיח שהוא מסמך בכלל.
     return declared.isZipPackage ||
             declared.isLegacyWord ||
             declared.needsContentSniffing

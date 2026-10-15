@@ -4,6 +4,7 @@ import 'package:otzaria/plugins/plugin_constants.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tools/built_in_tools_catalog.dart';
+import 'package:otzaria/tools/tool_query.dart';
 
 /// טאב של כלי מובנה או תוסף, המוצג במסך העיון ככל טאב אחר.
 class ToolTab extends OpenedTab {
@@ -17,17 +18,23 @@ class ToolTab extends OpenedTab {
   /// של אותו כלי לא תמקד אותו במקום לפתוח חדש.
   final bool allowMultipleInstances;
 
+  /// בקשות חיפוש שממתינות למסך הכלי. אינן נשמרות עם הטאב.
+  final ToolQueryInbox queryInbox = ToolQueryInbox();
+
   ToolTab({
     required this.toolId,
     required String title,
     super.isPinned,
     String? instanceId,
     this.allowMultipleInstances = false,
+    ToolQuery? query,
   }) : instanceId = instanceId ?? newInstanceId(),
        super(
          title,
          dedupeKey: allowMultipleInstances ? null : dedupeKeyFor(toolId),
-       );
+       ) {
+    if (query != null) queryInbox.post(query);
+  }
 
   static int _instanceCounter = 0;
   static final Random _instanceRandom = Random();
@@ -53,6 +60,12 @@ class ToolTab extends OpenedTab {
       if (meta.toolId == toolId) return meta.label;
     }
     return 'כלי';
+  }
+
+  @override
+  void dispose() {
+    queryInbox.dispose();
+    super.dispose();
   }
 
   @override
