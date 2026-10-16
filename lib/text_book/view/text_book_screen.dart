@@ -3221,14 +3221,14 @@ bool _handleGlobalKeyEvent(
     return true;
   }
 
-  // העתקת קישורים — קיצורים אופציונליים. האינדקס נלקח מהשורה המסומנת, ואם אין
-  // בחירה — מהמקטע הראשון הנראה (משחזר את מה שתפריט ההקשר היה מייצר).
+  // העתקת קישורים — קיצורים אופציונליים. האינדקס נלקח מהטקסט המסומן או מהמקטע
+  // המודגש (כמו בתפריט ההקשר), ואם אין — מהמקטע הראשון הנראה.
   if (copyBookLinkShortcut.isNotEmpty ||
       copySectionLinkShortcut.isNotEmpty ||
       copySectionMarkLinkShortcut.isNotEmpty ||
       copyTextMarkLinkShortcut.isNotEmpty) {
     final bookId = state.book.id;
-    final index = selectedLineForNote ?? tab.index;
+    final index = selectedLineForNote ?? state.selectedIndex ?? tab.index;
 
     if (ShortcutHelper.matchesShortcut(event, copyBookLinkShortcut)) {
       if (bookId == null) {

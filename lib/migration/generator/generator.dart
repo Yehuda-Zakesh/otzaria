@@ -12,7 +12,6 @@ import '../models/line.dart';
 import '../models/toc_entry.dart';
 import '../models/topic.dart';
 import '../database/repository/seforim_repository.dart';
-import 'link_processor.dart';
 import 'hebrew_text_utils.dart' as hebrew_text_utils;
 import 'package:otzaria/utils/file/document_conversion_exceptions.dart';
 import 'package:otzaria/utils/file/document_converter.dart';
@@ -678,27 +677,6 @@ class DatabaseGenerator {
     if (lastChildIds.isNotEmpty) {
       await repository.bulkUpdateTocEntryIsLastChild(lastChildIds, true);
     }
-  }
-
-  /// Link processor instance for processing link files
-  LinkProcessor? _linkProcessor;
-
-  /// Processes all link files in the links directory.
-  /// Links connect lines between different books.
-  Future<void> processLinks() async {
-    // links directory should be in sourceDirectory (the parent folder)
-    final linksPath = path.join(sourceDirectory, 'links');
-
-    // Create link processor if needed
-    _linkProcessor ??= LinkProcessor(repository, verboseLogging: false);
-
-    // Use the unified processLinksDirectory method
-    await _linkProcessor!.processLinksDirectory(
-      linksPath: linksPath,
-      onProgress: onProgress,
-      updateBookHasLinks: true,
-      batchCommitSize: 50,
-    );
   }
 
   /// Extracts topics from the file path.

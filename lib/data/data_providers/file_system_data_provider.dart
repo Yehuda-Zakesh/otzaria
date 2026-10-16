@@ -10,7 +10,6 @@ import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/utils/file/document_converter.dart';
-import 'package:otzaria/utils/file/toc_parser.dart';
 import 'package:otzaria/external_catalog/repository/external_catalog_repository.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:path/path.dart' as path;
@@ -420,32 +419,6 @@ class FileSystemData {
     await _providerManager.fileSystemProvider.saveBookText(title, content);
   }
 
-  /// Retrieves the table of contents for a book.
-  ///
-  /// Uses LibraryProviderManager to get TOC from the appropriate provider.
-  Future<List<TocEntry>> getBookToc(
-    String title, {
-    int? categoryId,
-    String? fileType,
-  }) async {
-    final toc = await _providerManager.getBookToc(
-      title,
-      categoryId: categoryId,
-      fileType: fileType ?? 'txt',
-    );
-    if (toc != null && toc.isNotEmpty) {
-      return toc;
-    }
-
-    // Fallback to parsing from text
-    debugPrint(
-      '⚠️ Provider manager failed, falling back to text parsing for "$title"',
-    );
-    return _parseToc(
-      getBookText(title, categoryId: categoryId, fileType: fileType),
-    );
-  }
-
   /// Updates the mapping of book titles to their file system paths.
   ///
 
@@ -545,26 +518,6 @@ class FileSystemData {
     }
 
     return 'error: book path not found: $title';
-  }
-
-  /// Parses the table of contents from book content.
-  ///
-  /// Creates a hierarchical structure based on HTML heading levels (h1, h2, etc.).
-  /// Each entry contains the heading text, its level, and its position in the document.
-  Future<List<TocEntry>> _parseToc(Future<String> bookContentFuture) async {
-    final String bookContent = await bookContentFuture;
-
-    // Build the hierarchy using the shared parser in an isolate
-    return Isolate.run(() => TocParser.parseEntriesFromContent(bookContent));
-  }
-
-  /// Checks if a book with the given title exists in the library.
-  Future<bool> bookExists(String title) async {
-    final keyToPath = await _providerManager.fileSystemProvider.keyToPath;
-    for (final key in keyToPath.keys) {
-      if (key.startsWith('$title|')) return true;
-    }
-    return false;
   }
 
   /// Returns true if the book belongs to Tanach (Torah, Neviim or Ketuvim).

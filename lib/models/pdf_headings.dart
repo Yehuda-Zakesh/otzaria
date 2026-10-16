@@ -101,10 +101,9 @@ class PdfHeadings {
     return headingsMap[heading];
   }
 
-  /// מחזיר רשימה של כותרות ממוינות לפי מספר השורה
-  List<MapEntry<String, int>> getSortedHeadings() {
-    final entries = headingsMap.entries.toList();
-    entries.sort((a, b) => a.value.compareTo(b.value));
-    return entries;
-  }
+  /// כותרות ממוינות לפי מספר השורה; נבנות פעם אחת כי [headingsMap] לא משתנה.
+  List<MapEntry<String, int>> getSortedHeadings() => _sortedHeadings;
+  late final List<MapEntry<String, int>> _sortedHeadings = List.unmodifiable(
+    headingsMap.entries.toList()..sort((a, b) => a.value.compareTo(b.value)),
+  );
 }

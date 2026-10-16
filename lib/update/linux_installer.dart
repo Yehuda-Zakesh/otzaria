@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:otzaria/core/app_paths.dart';
 import 'package:path/path.dart' as p;
 
 import 'shell_quote.dart';
@@ -97,7 +98,7 @@ Future<void> installLinuxUpdate({
       ),
       packagePath: packageFile.absolute.path,
       appPid: pid,
-      relaunchExecutable: relaunchApp ? Platform.resolvedExecutable : null,
+      relaunchExecutable: relaunchApp ? AppPaths.launchExecutable : null,
     ),
   );
   await Process.run('chmod', ['+x', scriptFile.path]);

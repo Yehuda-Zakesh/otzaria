@@ -540,6 +540,25 @@ ArchiveFile? _fileNamed(Archive archive, String name) {
   return null;
 }
 
+/// מעביר את `styles.xml` של הארכיון ל-[collect]. קובץ חסר או פגום — וגם
+/// כשל באיסוף ממנו — אינו מפיל את הייבוא; הקורא ממשיך בלעדיו.
+void _collectGlobalStyles(
+  Archive archive,
+  void Function(xml.XmlDocument document) collect,
+) {
+  final globalStyles = _fileNamed(archive, 'styles.xml');
+  if (globalStyles == null) return;
+  try {
+    collect(
+      xml.XmlDocument.parse(
+        _decodeXml(readArchiveEntry(globalStyles, format: DocumentFormat.odt)),
+      ),
+    );
+  } catch (_) {
+    // ממשיכים בלי הסגנונות הגלובליים (§45).
+  }
+}
+
 String _decodeXml(List<int> bytes) {
   try {
     return utf8.decode(bytes);
@@ -564,20 +583,8 @@ Map<String, _OdtStyle> _extractStyles(
     }
   }
 
-  final globalStyles = _fileNamed(archive, 'styles.xml');
-  if (globalStyles != null) {
-    try {
-      collect(
-        xml.XmlDocument.parse(
-          _decodeXml(
-            readArchiveEntry(globalStyles, format: DocumentFormat.odt),
-          ),
-        ),
-      );
-    } catch (_) {
-      // styles.xml פגום — ממשיכים עם הסגנונות המקומיים בלבד (§45).
-    }
-  }
+  // styles.xml פגום — ממשיכים עם הסגנונות המקומיים בלבד (§45).
+  _collectGlobalStyles(archive, collect);
   collect(content);
   return styles;
 }
@@ -686,20 +693,8 @@ Map<String, String> _extractFillImages(
     }
   }
 
-  final globalStyles = _fileNamed(archive, 'styles.xml');
-  if (globalStyles != null) {
-    try {
-      collect(
-        xml.XmlDocument.parse(
-          _decodeXml(
-            readArchiveEntry(globalStyles, format: DocumentFormat.odt),
-          ),
-        ),
-      );
-    } catch (_) {
-      // styles.xml פגום — ממשיכים בלי תמונות מילוי.
-    }
-  }
+  // styles.xml פגום — ממשיכים בלי תמונות מילוי.
+  _collectGlobalStyles(archive, collect);
   collect(content);
   return fills;
 }
@@ -739,20 +734,8 @@ Map<String, Map<int, _OdtListLevel>> _extractListStyles(
     }
   }
 
-  final globalStyles = _fileNamed(archive, 'styles.xml');
-  if (globalStyles != null) {
-    try {
-      collect(
-        xml.XmlDocument.parse(
-          _decodeXml(
-            readArchiveEntry(globalStyles, format: DocumentFormat.odt),
-          ),
-        ),
-      );
-    } catch (_) {
-      // סגנונות רשימה גלובליים פגומים — נופלים לתבליט ברירת מחדל.
-    }
-  }
+  // סגנונות רשימה גלובליים פגומים — נופלים לתבליט ברירת מחדל.
+  _collectGlobalStyles(archive, collect);
   collect(content);
   return lists;
 }
@@ -780,20 +763,8 @@ Map<String, String> _extractNoteFormats(
     }
   }
 
-  final globalStyles = _fileNamed(archive, 'styles.xml');
-  if (globalStyles != null) {
-    try {
-      collect(
-        xml.XmlDocument.parse(
-          _decodeXml(
-            readArchiveEntry(globalStyles, format: DocumentFormat.odt),
-          ),
-        ),
-      );
-    } catch (_) {
-      // הגדרת הערות גלובלית פגומה — המספור נשאר בספרות.
-    }
-  }
+  // הגדרת הערות גלובלית פגומה — המספור נשאר בספרות.
+  _collectGlobalStyles(archive, collect);
   collect(content);
   return formats;
 }

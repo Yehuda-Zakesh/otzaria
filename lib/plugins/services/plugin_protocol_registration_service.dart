@@ -112,7 +112,7 @@ class PluginProtocolRegistrationService {
     await mimePackagesDir.create(recursive: true);
 
     final desktopFile = File(p.join(applicationsDir.path, 'otzaria.desktop'));
-    final executable = Platform.resolvedExecutable;
+    final executable = AppPaths.launchExecutable;
     final iconPath = p.join(
       p.dirname(executable),
       'data',
@@ -256,7 +256,8 @@ class PluginProtocolRegistrationService {
       '[Desktop Entry]',
       'Version=1.0',
       'Type=Application',
-      'Name=אוצריא',
+      'Name=Otzaria',
+      'Name[he]=אוצריא',
       'Exec="$executable" %u',
       'Terminal=false',
       'MimeType=${mimeTypes.join(';')};',

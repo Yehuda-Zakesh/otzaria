@@ -405,12 +405,10 @@ String referenceFromPageNumber(
       final entryPage = entry.dest?.pageNumber;
       if (entryPage == null) continue;
       if (entryPage > pageNumber) return;
-      if (level + 1 > texts.length) {
-        texts.add(entry.title);
-      } else {
-        texts[level] = entry.title;
-        texts = texts.getRange(0, level + 1).toList();
-      }
+      // כאן תמיד texts.length >= level, כך שהקיצור לעולם לא מאריך.
+      texts
+        ..length = level
+        ..add(entry.title);
 
       searchOutline(
         entry.children,

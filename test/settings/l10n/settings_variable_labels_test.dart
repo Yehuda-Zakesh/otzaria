@@ -49,6 +49,14 @@ void main() {
       expect(catalog, contains(kSemanticSearchModeName));
       expect(catalog, contains(kSemanticSearchModeLabel));
       expect(catalog, contains(kSemanticSearchConsentTemplate));
+      expect(
+        kSemanticSearchConsentTemplate,
+        contains('פרטים אישיים אחרים עלולים להישלח'),
+      );
+      expect(
+        catalog[kSemanticSearchConsentTemplate],
+        contains('other personal details may still be sent'),
+      );
     });
 
     test('הודעות הכשל של נתוני החיפוש הסמנטי', () {

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -24,8 +23,8 @@ import 'package:path/path.dart' as p;
 /// גרסת נוסח ההסכמה. הסכמה שנשמרה לגרסה ישנה נקראת כ-`unknown`.
 const int kSearchFeedbackConsentVersion = 1;
 
-/// מפתח מקומי ב-ClientContext של אירועי התצוגה המקדימה בפיתוח; מוסר לפני
-/// שליחה, ומקטע שנושא אותו לעולם אינו נשלח לשרת הייצור.
+/// מפתח מקומי ב-ClientContext של תצוגה מקדימה ושל בנייה שאסור לה לשלוח; מוסר
+/// לפני שליחה, ומקטע שנושא אותו לעולם אינו נשלח לשרת הייצור.
 const String kSearchFeedbackLocalOnlyKey = 'localOnly';
 
 /// יוצר טיימר חד-פעמי (ניתן להחלפה בבדיקות).
@@ -235,6 +234,8 @@ class SearchFeedbackService
   final SearchFeedbackTimerFactory _timerFactory;
   final bool Function() _isSecondaryWindow;
   final Uri _baseUrl;
+
+  static const String _localOnlyMarker = '"$kSearchFeedbackLocalOnlyKey":true';
 
   /// שליחה לשרת הייצור (בלי `SEARCH_FEEDBACK_BASE_URL`).
   bool get _targetsProduction => _baseUrl == defaultBaseUrl;
@@ -460,10 +461,16 @@ class SearchFeedbackService
       if (event == null) return;
       await _ensureIdentityLoaded();
       if (epoch != _epoch || !isCollecting) return;
-      await _queue.append(event, clientContext, recordedAt: recordedAt);
+      final adopted = await _queue.append(
+        event,
+        clientContext,
+        recordedAt: recordedAt,
+      );
       _debounceTimer?.cancel();
       _debounceTimer = _timerFactory(flushDebounce, _flushFromTimer);
       _startSessionFlush();
+      // אחרי הכתיבה, כדי שכשל במפתח לא יאבד את האירוע; flush ינסה שוב.
+      if (adopted && _buildAllowsSending) await _ensureLocalIdentity(epoch);
     } catch (error, stackTrace) {
       _log('enqueue', error, stackTrace);
     }
@@ -476,7 +483,9 @@ class SearchFeedbackService
     'osVersion': _osVersion(),
     'locale': _locale(),
     'engine': searchFeedbackEngineJson(context.engine),
-    if (context.response.fallbackReason == kSemanticDebugPreviewFallbackReason)
+    // המפתח משותף לתיקייה: אירוע מבנייה שאסור לה לשלוח מסומן במקורו.
+    if (!_buildAllowsSending ||
+        context.response.fallbackReason == kSemanticDebugPreviewFallbackReason)
       kSearchFeedbackLocalOnlyKey: true,
   };
 
@@ -503,6 +512,13 @@ class SearchFeedbackService
       if (_isSecondaryWindow()) return;
       await _reloadIdentity();
       if (_blocked || epoch != _epoch || !isCollecting) return;
+      // בתיקייה מאומצת כל מקטע נכתב בגרסה שמסמנת נתוני פיתוח — מותר להכשיר.
+      if (_identity == null &&
+          _buildAllowsSending &&
+          await _queue.adopt(contextMarker: _localOnlyMarker)) {
+        await _ensureLocalIdentity(epoch);
+        if (_blocked || epoch != _epoch || !isCollecting) return;
+      }
       if (!_buildAllowsSending || !_sendingAllowed()) return;
       final block = await _reloadNetworkBlock();
       if (block != null && _clock().isBefore(block.retryAt)) {
@@ -548,9 +564,7 @@ class SearchFeedbackService
       notBefore: _clock().subtract(maxEventAge),
     );
     if (batch == null) return true;
-    final localOnly = batch.contextJson.contains(
-      '"$kSearchFeedbackLocalOnlyKey":true',
-    );
+    final localOnly = batch.contextJson.contains(_localOnlyMarker);
     if (batch.eventLines.isEmpty || (localOnly && _targetsProduction)) {
       await _queue.remove(name);
       return true;
@@ -708,27 +722,33 @@ class SearchFeedbackService
     );
   }
 
-  /// זהות רשומה לשליחה; יוצרת ורושמת בפעם הראשונה. null = לא עכשיו.
+  /// זהות רשומה לשליחה; רושמת בשרת בפעם הראשונה. null = לא עכשיו.
   Future<SearchFeedbackIdentity?> _identityForSending(int epoch) async {
-    var identity = _identity;
-    if (identity == null) {
-      final seed = [
-        for (var i = 0; i < SearchFeedbackIdentity.seedLength; i++)
-          _random.nextInt(256),
-      ];
-      final created = await _newIdentity(seed);
-      final saved = await _identityOp(() async {
-        if (epoch != _epoch) return false;
-        await _identityStore.save(created);
-        _identity = created;
-        return true;
-      });
-      if (!saved) return null;
-      identity = created;
-    }
+    final identity = await _ensureLocalIdentity(epoch);
+    if (identity == null || identity.blocked) return null;
     if (identity.isRegistered) return identity;
     return await _register(identity, epoch) ? identity : null;
   }
+
+  /// זהות מקומית: קיימת, או נוצרת ונשמרת בלי רשת.
+  /// null = ההסכמה בוטלה, או שקובץ הזהות פגום.
+  Future<SearchFeedbackIdentity?> _ensureLocalIdentity(int epoch) =>
+      _identityOp(() async {
+        final existing = _identity;
+        if (existing != null) return existing;
+        final seed = [
+          for (var i = 0; i < SearchFeedbackIdentity.seedLength; i++)
+            _random.nextInt(256),
+        ];
+        final identity = await _identityStore.loadOrCreate(
+          seed,
+          isCurrent: () => epoch == _epoch && isCollecting,
+        );
+        if (identity == null) return null;
+        _identity = identity;
+        _blocked = identity.blocked;
+        return identity;
+      });
 
   Future<bool> _register(SearchFeedbackIdentity identity, int epoch) async {
     final body = searchFeedbackJsonEncode({
@@ -891,6 +911,3 @@ class SearchFeedbackService
     }
   }
 }
-
-Future<SearchFeedbackIdentity> _newIdentity(List<int> seed) =>
-    Isolate.run(() => SearchFeedbackIdentity.fromSeed(seed));

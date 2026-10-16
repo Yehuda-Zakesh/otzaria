@@ -1,3 +1,5 @@
+import 'package:otzaria/indexing/models/indexing_run_result.dart';
+
 /// ריכוז הודעות המערכת (UiSnack) של הספרייה, החיפוש, הניווט והעדכונים.
 abstract class LibraryMessages {
   // ===== ספרייה =====
@@ -47,12 +49,14 @@ abstract class LibraryMessages {
   static const String searchResultContentDrifted =
       'תוכן הספר השתנה מאז עדכון האינדקס — מומלץ לעדכן את אינדקס החיפוש.';
 
-  static String indexingCompletedWithFailures(int count) =>
-      'האינדוקס הסתיים עם $count בעיות. לחץ לפתיחת קובץ השגיאות.';
-
-  static String indexingCompletedWithWarnings(int count) =>
-      'האינדוקס הושלם. ב-$count ספרי PDF נשמטו עמודים בודדים מהחיפוש. '
-      'לחץ לפרטים.';
+  static String indexingCompleted(List<IndexingFailure> failures) {
+    final blocking = failures.where((failure) => failure.preventedIndexing);
+    return blocking.isEmpty
+        ? 'האינדוקס הושלם. ב-${failures.length} ספרי PDF נשמטו עמודים '
+              'בודדים מהחיפוש. לחץ לפרטים.'
+        : 'האינדוקס הסתיים עם ${blocking.length} בעיות; הספר '
+              '"${blocking.first.bookTitle}" לא אונדקס. לחץ לפרטים.';
+  }
 
   static const String emptySearchQuery = 'נא להזין טקסט לחיפוש';
 

@@ -433,12 +433,13 @@ class SearchDimensionFilterButton extends StatelessWidget {
           visualDensity: VisualDensity.compact,
           tooltip: 'סינון לפי מאפיין',
           color: activeCount > 0 ? cs.primary : cs.onSurfaceVariant,
-          icon: activeCount > 0
-              ? Badge(
-                  label: Text('$activeCount'),
-                  child: const Icon(FluentIcons.filter_24_regular, size: 20),
-                )
-              : const Icon(FluentIcons.filter_24_regular, size: 20),
+          icon: Badge.count(
+            count: activeCount,
+            isLabelVisible: activeCount > 0,
+            backgroundColor: cs.primaryContainer,
+            textColor: cs.onPrimaryContainer,
+            child: const Icon(FluentIcons.filter_24_regular, size: 20),
+          ),
           onPressed: () =>
               controller.isOpen ? controller.close() : controller.open(),
         ),

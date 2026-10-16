@@ -102,16 +102,17 @@ class _RtlTextFieldState extends State<RtlTextField> {
     _boundController.addListener(_restartCursorBlink);
     _effectiveFocusNode.addListener(_handleFocusChange);
 
-    // תיקון לבעיית autofocus באנדרואיד
-    // במקום להשתמש ב-autofocus: true ישירות, נבקש פוקוס אחרי שהמסך נבנה
-    if (widget.autofocus && widget.focusNode != null && Platform.isAndroid) {
+    // גם FocusNode שכבר בפוקוס: Flutter פותח מקלדת רק בשינוי פוקוס.
+    if (_effectiveFocusNode.hasPrimaryFocus ||
+        (widget.autofocus && widget.focusNode != null && Platform.isAndroid)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && widget.focusNode != null) {
-          widget.focusNode!.requestFocus();
-        }
+        if (mounted) _editable?.requestKeyboard();
       });
     }
   }
+
+  EditableTextState? get _editable =>
+      _effectiveFocusNode.context?.findAncestorStateOfType<EditableTextState>();
 
   @override
   void didUpdateWidget(RtlTextField oldWidget) {
@@ -251,8 +252,7 @@ class _RtlTextFieldState extends State<RtlTextField> {
         );
       }),
     );
-    final editable = _effectiveFocusNode.context
-        ?.findAncestorStateOfType<EditableTextState>();
+    final editable = _editable;
     if (editable == null) return;
     final raw = _boundController.value;
     if (intent.collapseSelection) {

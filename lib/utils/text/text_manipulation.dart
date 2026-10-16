@@ -178,10 +178,6 @@ bool _isRegExpSpace(int c) => c <= 0x20
                   c == 0x3000 ||
                   c == 0xFEFF));
 
-String truncate(String text, int length) {
-  return text.length > length ? '${text.substring(0, length)}...' : text;
-}
-
 final RegExp _nonLatin1 = RegExp(r'[\u0100-\uFFFF]');
 
 /// מקף, פסק ו-| הופכים לרווח; ניקוד וטעמים (U+0591–U+05C7) נמחקים.

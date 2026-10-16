@@ -24,7 +24,7 @@ abstract class SemanticSearchMessages {
       'רכיב ההרצה של {name} אינו נטען. יש להפעיל מחדש את התוכנה.';
   static const String notSupported = '{name} אינו נתמך בגרסה זו של התוכנה.';
   static const String consentRequired =
-      '{name} מחייב הסכמה לשליחת נתוני שימוש אנונימיים.';
+      '{name} מחייב הסכמה לשליחת נתוני שימוש.';
   static const String offline =
       'מצב לא מקוון פעיל. יש לכבות אותו כדי להוריד את נתוני {name}.';
   static const String network =

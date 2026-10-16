@@ -1047,7 +1047,16 @@ jobs:
           # מבטיחה שגרסת המארח תמיד ≥ מה ש-WPE נבנה מולו (תאימות קדימה).
           # שאר הסגירה (icu/soup/jpeg/webp...) נארזת — sonames שונים בין הפצות
           # (למשל Ubuntu 24.04 = icu74 מול icu72 של bookworm).
+          # כל הסגירה של GTK נטענת מהמארח; עותק bookworm שלה (למשל libmount) גובר
+          # דרך LD_LIBRARY_PATH ושובר את libgio של מארח חדש.
+          host_gtk_closure="$(mktemp)"
+          gtk_so="$(ldconfig -p | awk '/libgtk-3\.so\.0 /{p=$NF} END{print p}')"
+          [ -n "$gtk_so" ] || { echo "::error::libgtk-3.so.0 not found on build host"; exit 1; }
+          LD_LIBRARY_PATH= ldd "$gtk_so" | awk '/=>/{print $1}' > "$host_gtk_closure"
           is_excluded() {
+            # ב-Ubuntu/Arch ה-soname הוא libjpeg.so.8 — את .62 חייבים לארוז.
+            case "$1" in libjpeg.so.*) return 1;; esac
+            grep -qxF "$1" "$host_gtk_closure" && return 0
             case "$1" in
               ld-linux*|libc.so*|libm.so*|libdl.so*|libpthread.so*|librt.so*|libresolv.so*|libutil.so*|libnsl.so*|\
               libstdc++.so*|libgcc_s.so*|\
@@ -1081,7 +1090,7 @@ jobs:
             cp -v "$real" "$LIBDIR/$b"
             copied=$((copied+1))
           done < "$tmp"
-          rm -f "$tmp"
+          rm -f "$tmp" "$host_gtk_closure"
           # dedup: DT_NEEDED מפנה תמיד ל-soname (libX.so.N) — עותק נוסף בשם הגרסה
           # המלאה (libX.so.N.x.y) זהה בייטית ומיותר; חוסך ~162MB על libWPEWebKit.
           for f in "$LIBDIR"/lib*.so.*.*; do
@@ -1098,7 +1107,8 @@ jobs:
             cat > "$APPDIR/otzaria" <<'LAUNCHER'
           #!/usr/bin/env bash
           set -euo pipefail
-          APP_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+          # deb/rpm מפעילים דרך הקישור /usr/bin/otzaria — חובה לפתור אותו.
+          APP_DIR="$(dirname -- "$(readlink -f -- "$0")")"
           export LD_LIBRARY_PATH="$APP_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           export WEBKIT_EXEC_PATH="$APP_DIR/lib"
           export WEBKIT_INJECTED_BUNDLE_PATH="$APP_DIR/lib"
@@ -1339,6 +1349,9 @@ jobs:
           mkdir -p "$DEB_DIR/usr/share/metainfo"
           cp linux/packaging/otzaria.metainfo.xml "$DEB_DIR/usr/share/metainfo/otzaria.metainfo.xml"
 
+          # make_config תומך רק ב-Name אחד — השם העברי נוסף כתרגום.
+          sed -i '/^Name=/a Name[he]=אוצריא' "$DEB_DIR/usr/share/applications/otzaria.desktop"
+
           # שם קובץ מובחן ל-arm64 — אחרת שני ה-deb מתנגשים באותו שם ב-release.
           if [ "${{ matrix.arch }}" = "aarch64" ]; then
             DEB_OUTPUT_FILE="${DEB_OUTPUT_FILE%.deb}-arm64.deb"
@@ -1399,6 +1412,9 @@ jobs:
           RPM_LIB_SO=$(find "$RPM_TOP_DIR_ABS/BUILD" -name 'libWPEWebKit-2.0.so*' -print -quit)
           [ -n "$RPM_LIB_SO" ] || { echo "::error::libWPEWebKit-2.0 לא נמצא בעץ ה-rpm (BUILD)"; exit 1; }
           bash /tmp/bundle_wpe.sh "$(dirname "$RPM_LIB_SO")"
+
+          # ראה שלב ה-deb: השם העברי כתרגום. %install מעתיק את ה-desktop מ-BUILD/.
+          sed -i '/^Name=/a Name[he]=אוצריא' "$RPM_TOP_DIR_ABS/BUILD/otzaria.desktop"
 
           # ארכיוני התוספים המצורפים — ליד ה-executable (ההורה של lib ב-bundle).
           if [ -d installer/bundled_plugins ]; then

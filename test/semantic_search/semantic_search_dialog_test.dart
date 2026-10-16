@@ -924,6 +924,27 @@ void main() {
     expect(clear, findsNothing);
   });
 
+  testWidgets('מעבר מצבים: הקלדה נקלטת בלי לחיצה על השדה (issue #2536)', (
+    tester,
+  ) async {
+    await pumpDialog(tester, _availability(SemanticAvailabilityPhase.ready));
+    await tester.tap(_semanticSegment);
+    await tester.pumpAndSettle();
+    tester.testTextInput.enterText('צדקה');
+    await tester.pump();
+    final field = find.descendant(
+      of: _queryField,
+      matching: find.byType(EditableText),
+    );
+    expect(tester.widget<EditableText>(field).controller.text, 'צדקה');
+
+    await tester.tap(find.text('מדויק'));
+    await tester.pumpAndSettle();
+    tester.testTextInput.enterText('חסד');
+    await tester.pump();
+    expect(find.text('חסד'), findsOneWidget);
+  });
+
   testWidgets('עריכת חיפוש חכם מעדכנת את אותה כרטיסייה', (tester) async {
     final tab = SemanticSearchTab(
       options: const SemanticQueryOptions(

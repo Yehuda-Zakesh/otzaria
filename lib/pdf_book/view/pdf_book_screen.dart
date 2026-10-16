@@ -3034,20 +3034,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
         );
         await navigationFuture;
       } else {
-        await _goToPageWithSpreadLock(targetPage, duration: Duration.zero);
-        if (!mounted) return;
-        await Future<void>.delayed(const Duration(milliseconds: 90));
-        if (!mounted) return;
-
-        final targetCaptureResult = await _capturePdfViewportSnapshot();
-        if (mounted && targetCaptureResult != null) {
-          _updatePageTurnUi(() {
-            _pageTurnTargetSnapshot?.dispose();
-            _pageTurnTargetSnapshot = targetCaptureResult.image;
-          });
-          await WidgetsBinding.instance.endOfFrame;
-        }
-        if (!mounted) return;
+        if (!await _goToPageAndCaptureTarget(targetPage)) return;
 
         await _pageTurnController.animateTo(
           1.0,
@@ -3059,6 +3046,26 @@ class _PdfBookScreenState extends State<PdfBookScreen>
       _abortInteractivePageTurn();
       await _processPendingPageTurnIfNeeded();
     }
+  }
+
+  /// ניווט ל-[targetPage] ולכידת כפולת היעד אחרי ההתייצבות. בזמן ההיפוך
+  /// הצילום מצויר באזור שנחשף, כך שהעמוד החדש נראה מרונדר מהפריים הראשון
+  /// ולא כאריחים שנטענים. מחזיר false אם המסך נסגר בדרך.
+  Future<bool> _goToPageAndCaptureTarget(int targetPage) async {
+    await _goToPageWithSpreadLock(targetPage, duration: Duration.zero);
+    if (!mounted) return false;
+    await Future<void>.delayed(const Duration(milliseconds: 90));
+    if (!mounted) return false;
+
+    final targetCaptureResult = await _capturePdfViewportSnapshot();
+    if (mounted && targetCaptureResult != null) {
+      _updatePageTurnUi(() {
+        _pageTurnTargetSnapshot?.dispose();
+        _pageTurnTargetSnapshot = targetCaptureResult.image;
+      });
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    return mounted;
   }
 
   /// מנקה את מצב הגרירה האינטראקטיבית ואת ה-overlay, ומבטל המשכים תלויים.
@@ -3590,29 +3597,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
         await navigationFuture;
       } else {
         // הרינדור נכשל או בוטל — חוזרים לזרימה הסדרתית מהצפיין החי.
-        await _goToPageWithSpreadLock(targetPage, duration: Duration.zero);
-
-        if (!mounted) return;
-
-        // Capture the target spread after navigation. During the animation we
-        // draw this snapshot in the revealed area, so the new page looks
-        // fully rendered from the very first frame of the curl — instead of
-        // showing pdfrx tile-loading progress that reads as "scrolling in".
-        await Future<void>.delayed(const Duration(milliseconds: 90));
-
-        if (!mounted) return;
-
-        final targetCaptureResult = await _capturePdfViewportSnapshot();
-
-        if (mounted && targetCaptureResult != null) {
-          _updatePageTurnUi(() {
-            _pageTurnTargetSnapshot?.dispose();
-            _pageTurnTargetSnapshot = targetCaptureResult.image;
-          });
-          await WidgetsBinding.instance.endOfFrame;
-        }
-
-        if (!mounted) return;
+        if (!await _goToPageAndCaptureTarget(targetPage)) return;
 
         await _pageTurnController.forward(from: 0);
       }

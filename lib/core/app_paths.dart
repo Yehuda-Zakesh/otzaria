@@ -111,6 +111,15 @@ class AppPaths {
   static String get _resolvedExecutable =>
       _resolvedExecutableOverride ?? Platform.resolvedExecutable;
 
+  /// הקובץ שיש להפעיל מבחוץ (קיצור, הפעלה מחדש). בלינוקס `otzaria.bin` עטוף
+  /// ב-launcher שמגדיר את סביבת WPE, ובלעדיו האפליקציה לא עולה.
+  static String get launchExecutable {
+    final exe = _resolvedExecutable;
+    if (!exe.endsWith('.bin')) return exe;
+    final launcher = exe.substring(0, exe.length - '.bin'.length);
+    return File(launcher).existsSync() ? launcher : exe;
+  }
+
   /// האם האפליקציה רצה במצב נייד — קובץ [portableMarkerFileName] קיים
   /// ליד ה-executable. במובייל תמיד false.
   static bool get isPortable {

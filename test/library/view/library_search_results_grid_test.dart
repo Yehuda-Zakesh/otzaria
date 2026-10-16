@@ -1,4 +1,5 @@
 import 'package:bloc_test/bloc_test.dart';
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -74,6 +75,7 @@ Future<void> _pumpLibraryBrowser(
   required Size size,
   double textScale = 1,
   bool showPreview = true,
+  bool isLibraryEmpty = false,
 }) async {
   final libraryBloc = _MockLibraryBloc();
   final settingsBloc = _MockSettingsBloc();
@@ -96,7 +98,10 @@ Future<void> _pumpLibraryBrowser(
   whenListen(
     navigationBloc,
     const Stream<NavigationState>.empty(),
-    initialState: const NavigationState(currentScreen: Screen.library),
+    initialState: NavigationState(
+      currentScreen: Screen.library,
+      isLibraryEmpty: isLibraryEmpty,
+    ),
   );
   whenListen(
     libraryUpdateBloc,
@@ -243,6 +248,25 @@ void main() {
 
     expect(find.byType(CategoryGridItem), findsOneWidget);
     expect(find.text('דברי חיים'), findsNothing);
+  });
+
+  testWidgets('בלי ספרייה אין כפתור עדכון ספרייה (issue #2028)', (
+    tester,
+  ) async {
+    final library = Library(categories: []);
+    for (final empty in [false, true]) {
+      await _pumpLibraryBrowser(
+        tester,
+        LibraryState(library: library, currentCategory: library),
+        size: const Size(1200, 800),
+        isLibraryEmpty: empty,
+      );
+      // בלי seforim.db העדכון נכשל ב-SqliteException(14); ההורדה במסך ההגדרה.
+      expect(
+        find.byIcon(FluentIcons.arrow_sync_24_regular),
+        empty ? findsNothing : findsOneWidget,
+      );
+    }
   });
 
   for (final width in [

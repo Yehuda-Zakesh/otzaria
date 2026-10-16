@@ -1908,6 +1908,36 @@ void main() {
       expect(p.dirname(cacheDb), p.dirname(plugins));
     });
   });
+
+  group('launchExecutable', () {
+    late Directory dir;
+    setUp(() async => dir = await Directory.systemTemp.createTemp('launch_'));
+    tearDown(() async => dir.delete(recursive: true));
+
+    test('otzaria.bin מוחלף ב-launcher שלידו', () async {
+      final bin = p.join(dir.path, 'otzaria.bin');
+      await File(bin).writeAsString('');
+      await File(p.join(dir.path, 'otzaria')).writeAsString('');
+      AppPaths.debugOverrideResolvedExecutable(bin);
+
+      expect(AppPaths.launchExecutable, p.join(dir.path, 'otzaria'));
+    });
+
+    test('בלי launcher נשאר קובץ ההרצה עצמו', () async {
+      final bin = p.join(dir.path, 'otzaria.bin');
+      await File(bin).writeAsString('');
+      AppPaths.debugOverrideResolvedExecutable(bin);
+
+      expect(AppPaths.launchExecutable, bin);
+    });
+
+    test('קובץ שאינו .bin לא משתנה', () {
+      final exe = p.join(dir.path, 'otzaria.exe');
+      AppPaths.debugOverrideResolvedExecutable(exe);
+
+      expect(AppPaths.launchExecutable, exe);
+    });
+  });
 }
 
 class _MemoryCacheProvider extends CacheProvider {

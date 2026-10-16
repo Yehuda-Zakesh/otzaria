@@ -46,15 +46,3 @@ abstract class TextBookViewStrategy {
   /// Builds the widget tree for this view mode
   Widget buildView(BuildContext context, TextBookViewConfig config);
 }
-
-/// Enum representing available view modes
-enum TextBookViewMode {
-  /// Split view - commentaries shown in a side panel
-  split,
-
-  /// Combined view - commentaries shown below text
-  combined,
-
-  /// Page shape view - traditional Talmud page layout
-  pageShape,
-}

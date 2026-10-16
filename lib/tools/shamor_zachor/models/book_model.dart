@@ -162,16 +162,6 @@ class BookSection {
           .toList(),
     );
   }
-
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'title': title,
-    'level': level,
-    'startPage': startPage,
-    'endPage': endPage,
-    if (children.isNotEmpty)
-      'children': children.map((child) => child.toJson()).toList(),
-  };
 }
 
 /// Represents a part of a book (e.g., volume, section)
@@ -213,17 +203,6 @@ class BookPart {
       sectionId: json['sectionId'] as String?,
     );
   }
-
-  Map<String, dynamic> toJson() => {
-    'name': name,
-    'start': startPage,
-    'end': endPage,
-    if (excludedPages.isNotEmpty) 'exclude': excludedPages,
-    if (children.isNotEmpty)
-      'children': children.map((child) => child.toJson()).toList(),
-    if (level != 1) 'level': level,
-    if (sectionId != null) 'sectionId': sectionId,
-  };
 
   factory BookPart.fromSection(BookSection section) {
     return BookPart(

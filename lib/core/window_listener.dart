@@ -671,18 +671,4 @@ class AppWindowListener extends WindowListener {
     WindowPersistence.scheduleSave();
     onWindowStateChanged?.call();
   }
-
-  /// Clean up the listener when disposing
-  void dispose() {
-    // Remove this listener from window manager
-    if (!kIsWeb &&
-        (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
-      // ⚠️ רשימת ה-listeners של `window_manager` היא פר-isolate, ולכן אין
-      // כאן מה לרשום במקום מרכזי — חלון אינו יכול לרשום listener בחלון
-      // אחר. מה שכן צריך תשומת לב: `dispose` **אינו נקרא** כשחלון נסגר,
-      // כי הוא מוסתר ולא נהרס ועץ ה-widgets אינו מתפרק. ניקוי שחייב
-      // לקרות בסגירת חלון תולים על המסלול שקורא ל-`closeSelf`.
-      windowManager.removeListener(this);
-    }
-  }
 }

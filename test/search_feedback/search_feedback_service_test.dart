@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:otzaria/search_feedback/search_feedback_api.dart';
 import 'package:otzaria/search_feedback/search_feedback_identity.dart';
+import 'package:otzaria/search_feedback/search_feedback_queue.dart';
+import 'package:otzaria/search_feedback/search_feedback_queue_lock.dart';
 import 'package:otzaria/search_feedback/search_feedback_service.dart';
 import 'package:pinenacl/ed25519.dart' as ed;
 
@@ -41,6 +43,7 @@ void main() {
   late DateTime now;
   late bool online;
   late bool buildAllowsSending;
+  Future<void> Function()? beforeStorage;
 
   http.Response json(int status, Object body, {Map<String, String>? headers}) =>
       http.Response(
@@ -57,6 +60,7 @@ void main() {
     now = kStart.add(const Duration(seconds: 5));
     online = true;
     buildAllowsSending = true;
+    beforeStorage = null;
     registerHandler = (request) {
       final body = jsonDecode(request.body) as Map;
       final keyId = SearchFeedbackIdentity.keyIdOf(
@@ -82,7 +86,10 @@ void main() {
         }),
         baseUrl: Uri.parse('https://example.test'),
         clock: () => now,
-        storageDirectory: () async => dir,
+        storageDirectory: () async {
+          await beforeStorage?.call();
+          return dir;
+        },
         consentPersistence: consent,
         sendingAllowed: () => online,
         buildAllowsSending: buildAllowsSending,
@@ -116,6 +123,49 @@ void main() {
 
   bool hasQueueFiles() =>
       dir.existsSync() && dir.listSync().any((e) => e.path.endsWith('.jsonl'));
+
+  test(
+    'legacy queued query is redacted before signed HTTP without changing passages',
+    () async {
+      final service = await grantedService();
+      online = false;
+      await recordOne(service);
+      final name = (await service.queue.sealAndList()).single;
+      final file = File('${dir.path}/$name');
+      final lines = const LineSplitter().convert(await file.readAsString());
+      final event = jsonDecode(lines[1]) as Map<String, dynamic>;
+      event.addAll({
+        'query': 'שו"ת person+private@example.com תורה',
+        'queryLength': 500,
+        'queryWordCount': 99,
+        'result': {'passageText': 'אמר דוד תורה person@example.com'},
+      });
+      await file.writeAsString('${lines.first}\n${jsonEncode(event)}\n');
+      online = true;
+      await service.flush();
+      final request = eventRequests().single;
+      final body = jsonDecode(request.body) as Map;
+      final sent = (body['events'] as List).single as Map;
+      expect(sent['query'], 'שו"ת <email> תורה');
+      expect(sent['queryLength'], 'שו"ת <email> תורה'.length);
+      expect(sent['queryWordCount'], 3);
+      expect(sent['eventId'], event['eventId']);
+      expect(sent['searchSessionId'], event['searchSessionId']);
+      expect(sent['result'], event['result']);
+      final identity = await SearchFeedbackIdentityStore(
+        () async => dir,
+      ).load();
+      expect(
+        ed.VerifyKey(identity!.publicKey).verify(
+          signature: ed.Signature(
+            base64Decode(request.headers['X-Otzaria-Signature']!),
+          ),
+          message: request.bodyBytes,
+        ),
+        isTrue,
+      );
+    },
+  );
 
   group('consent', () {
     test('without consent nothing is queued or sent', () async {
@@ -697,6 +747,352 @@ void main() {
       eventsHandler = (request) => json(503, {'error': 'disabled'});
       await failRepeatedly(service, 10, const Duration(hours: 12));
       expect(service.queue.eventCount, 1);
+    });
+  });
+
+  group('local identity without network', () {
+    SearchFeedbackIdentity? storedIdentity() {
+      if (!keyFile().existsSync()) return null;
+      return SearchFeedbackIdentity.tryParse(keyFile().readAsStringSync());
+    }
+
+    test('offline from first use keeps a local unregistered key', () async {
+      online = false;
+      final service = await grantedService();
+      expect(keyFile().existsSync(), isFalse, reason: 'nothing queued yet');
+      await recordOne(service);
+      final identity = storedIdentity();
+      expect(identity, isNotNull);
+      expect(identity!.isRegistered, isFalse);
+      expect(identity.blocked, isFalse);
+      expect(service.queue.eventCount, 1);
+      expect(requests, isEmpty);
+    });
+
+    test('online: key exists at write time, before any send attempt', () async {
+      final service = await grantedService();
+      await recordOne(service);
+      expect(storedIdentity(), isNotNull);
+      expect(requests, isEmpty);
+    });
+
+    test('online without network keeps the same unregistered key', () async {
+      registerHandler = (_) => throw http.ClientException('no network');
+      final service = await grantedService();
+      await recordOne(service);
+      final before = storedIdentity()!.keyId;
+      await service.flush();
+      now = now.add(const Duration(hours: 7));
+      await service.flush();
+      final after = storedIdentity()!;
+      expect(after.keyId, before);
+      expect(after.isRegistered, isFalse);
+      expect(service.queue.eventCount, 1);
+    });
+
+    test('registration after a local key is created keeps it', () async {
+      online = false;
+      final offline = await grantedService();
+      await recordOne(offline);
+      final keyId = storedIdentity()!.keyId;
+      online = true;
+      await makeService().flush();
+      expect(storedIdentity()!.keyId, keyId);
+      expect(storedIdentity()!.isRegistered, isTrue);
+      expect(eventRequests(), hasLength(1));
+    });
+
+    /// אירועים שמכילים [needle] במקטעים בתור שאינם מסומנים localOnly.
+    int transferable(String needle) {
+      var count = 0;
+      for (final file in dir.listSync().whereType<File>()) {
+        if (!file.path.endsWith('.jsonl')) continue;
+        final lines = file.readAsLinesSync();
+        if (lines.isEmpty || lines.first.contains('"localOnly":true')) continue;
+        count += lines.skip(1).where((line) => line.contains(needle)).length;
+      }
+      return count;
+    }
+
+    Directory held() =>
+        Directory('${dir.path}/${SearchFeedbackQueue.unverifiedDirName}');
+
+    /// תור שנכתב בגרסה שלא סימנה את מקור הנתונים.
+    Future<void> historicalQueue() async {
+      consent
+        ..state = 'granted'
+        ..version = kSearchFeedbackConsentVersion;
+      await SearchFeedbackQueue(() async => dir, clock: () => now).append(
+        {'type': 'search', 'eventId': 'historical_event'},
+        {'app': 'otzaria', 'appVersion': '1.2.3', 'platform': 'windows'},
+      );
+      File('${dir.path}/${SearchFeedbackQueue.originMarkerName}').deleteSync();
+    }
+
+    test('debug events are marked localOnly and get no key', () async {
+      online = false;
+      buildAllowsSending = false;
+      final debug = await grantedService();
+      await recordOne(debug);
+      expect(keyFile().existsSync(), isFalse);
+
+      buildAllowsSending = true;
+      final release = makeService();
+      await release.flush();
+      expect(keyFile().existsSync(), isFalse, reason: 'nothing to transfer');
+      await release.queue.load();
+      expect(release.queue.eventCount, 1, reason: 'the data is kept');
+      expect(transferable('session_abcdefgh'), 0);
+      expect(requests, isEmpty);
+    });
+
+    test('a release event does not certify earlier debug events', () async {
+      online = false;
+      buildAllowsSending = false;
+      final debug = await grantedService();
+      debug.recordSearch(searchContext(id: 'session_debug_origin'));
+      await debug.settle();
+
+      buildAllowsSending = true;
+      final release = makeService();
+      release.recordSearch(searchContext(id: 'session_release_origin'));
+      await release.settle();
+      expect(storedIdentity(), isNotNull);
+      expect(transferable('session_release_origin'), 1);
+      expect(transferable('session_debug_origin'), 0);
+    });
+
+    test(
+      'a historical keyless queue is held, not certified or deleted',
+      () async {
+        online = false;
+        await historicalQueue();
+        final release = makeService();
+        await release.flush();
+        expect(keyFile().existsSync(), isFalse);
+        expect(held().listSync(), hasLength(1));
+
+        await recordOne(release);
+        expect(storedIdentity(), isNotNull);
+        expect(transferable('historical_event'), 0);
+        expect(transferable('session_abcdefgh'), 1);
+        expect(
+          (held().listSync().single as File).readAsStringSync(),
+          contains('historical_event'),
+        );
+        expect(requests, isEmpty);
+
+        await release.revoke();
+        expect(held().existsSync(), isFalse, reason: 'revoke purges held data');
+      },
+    );
+
+    test('a historical queue next to an existing key is left as is', () async {
+      final identity = SearchFeedbackIdentity.generate();
+      await SearchFeedbackIdentityStore(() async => dir).save(identity);
+      await historicalQueue();
+      online = false;
+      await recordOne(makeService());
+      expect(held().existsSync(), isFalse);
+      expect(transferable('historical_event'), 1);
+      expect(transferable('session_abcdefgh'), 1);
+    });
+
+    test('a failed adoption keeps the event and creates no key', () async {
+      online = false;
+      await historicalQueue();
+      final obstruction = File(held().path)..writeAsStringSync('');
+      final release = makeService();
+      await recordOne(release);
+      expect(keyFile().existsSync(), isFalse, reason: 'not adopted yet');
+      expect(transferable('session_abcdefgh'), 1, reason: 'event kept');
+
+      obstruction.deleteSync();
+      await release.flush();
+      expect(keyFile().existsSync(), isFalse);
+      final heldLines = held().listSync().whereType<File>().expand(
+        (file) => file.readAsLinesSync().skip(1),
+      );
+      expect(
+        heldLines,
+        hasLength(2),
+        reason: 'held with the history, not lost',
+      );
+    });
+
+    test('an append skipped by another window revoke creates no key', () async {
+      online = false;
+      final service = await grantedService();
+      await SearchFeedbackQueue(() async => dir, clock: () => now).purge();
+      await recordOne(service);
+      expect(keyFile().existsSync(), isFalse);
+      expect(hasQueueFiles(), isFalse);
+    });
+
+    test('held data is deleted while consent is revoked', () async {
+      final queue = SearchFeedbackQueue(() async => dir, clock: () => now);
+      await queue.purge();
+      // גרסה קודמת מחקה את התור בלי להכיר את unverified.
+      File('${held().path}/seg-old.jsonl')
+        ..createSync(recursive: true)
+        ..writeAsStringSync('{}\n{"eventId":"x"}\n');
+      await queue.load();
+      expect(held().existsSync(), isFalse);
+    });
+
+    test('a failed key write keeps the event; flush retries', () async {
+      online = false;
+      final service = await grantedService();
+      final obstruction = Directory('${keyFile().path}.tmp')..createSync();
+      await recordOne(service);
+      expect(keyFile().existsSync(), isFalse);
+      expect(service.queue.eventCount, 1);
+
+      obstruction.deleteSync();
+      await service.flush();
+      expect(storedIdentity(), isNotNull, reason: 'no new event is needed');
+      expect(service.queue.eventCount, 1);
+      expect(requests, isEmpty);
+    });
+
+    test(
+      'revoke while key creation waits for the lock writes no key',
+      () async {
+        online = false;
+        final service = await grantedService();
+        final lock = await SearchFeedbackQueueLock.acquire(
+          '${keyFile().path}.lock',
+        );
+        service.recordSearch(searchContext());
+        while (!hasQueueFiles()) {
+          await Future<void>.delayed(const Duration(milliseconds: 5));
+        }
+        // מספיק כדי שהעובד יגיע להמתנה לנעילה, אחרי הבדיקה המוקדמת.
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        final revoking = service.revoke();
+        await lock.release();
+        await revoking;
+        expect(keyFile().existsSync(), isFalse);
+        expect(hasQueueFiles(), isFalse);
+      },
+    );
+
+    test('revoke during key creation leaves no new key', () async {
+      online = false;
+      final service = await grantedService();
+      final entered = Completer<void>();
+      final resume = Completer<void>();
+      beforeStorage = () async {
+        beforeStorage = null;
+        entered.complete();
+        await resume.future;
+      };
+      service.recordSearch(searchContext());
+      await entered.future;
+      final revoking = service.revoke();
+      resume.complete();
+      await revoking;
+      await service.settle();
+      expect(keyFile().existsSync(), isFalse);
+      expect(hasQueueFiles(), isFalse);
+    });
+
+    test('decline during key creation leaves no new key', () async {
+      online = false;
+      final service = await grantedService();
+      final entered = Completer<void>();
+      final resume = Completer<void>();
+      beforeStorage = () async {
+        beforeStorage = null;
+        entered.complete();
+        await resume.future;
+      };
+      service.recordSearch(searchContext());
+      await entered.future;
+      await service.decline();
+      resume.complete();
+      await service.settle();
+      expect(keyFile().existsSync(), isFalse);
+    });
+
+    test('a corrupt key file is kept, never replaced', () async {
+      const original = '{"blocked":true,"seed":"broken"}';
+      keyFile().writeAsStringSync(original);
+      final service = await grantedService();
+      await recordOne(service);
+      await service.flush();
+      expect(keyFile().readAsStringSync(), original);
+      expect(service.queue.eventCount, 1, reason: 'the data is kept');
+      expect(requests, isEmpty, reason: 'no new key is registered');
+    });
+
+    test('empty queue or revoked consent create no key', () async {
+      online = false;
+      final service = makeService();
+      await service.grant();
+      await service.flush();
+      expect(keyFile().existsSync(), isFalse);
+
+      service.recordSearch(searchContext());
+      await service.revoke();
+      await service.settle();
+      await service.flush();
+      expect(keyFile().existsSync(), isFalse);
+      expect(service.queue.isEmpty, isTrue);
+    });
+
+    test('blocked key is neither replaced nor bypassed', () async {
+      final blocked = SearchFeedbackIdentity.generate()..blocked = true;
+      await SearchFeedbackIdentityStore(() async => dir).save(blocked);
+      online = false;
+      final service = makeService();
+      await service.grant();
+      await recordOne(service);
+      await service.flush();
+      expect(service.isCollecting, isFalse);
+      expect(storedIdentity()!.keyId, blocked.keyId);
+      expect(storedIdentity()!.blocked, isTrue);
+      expect(hasQueueFiles(), isFalse);
+    });
+
+    test('key blocked by another window after load is not replaced', () async {
+      final service = await grantedService();
+      expect(keyFile().existsSync(), isFalse);
+      final blocked = SearchFeedbackIdentity.generate()..blocked = true;
+      await SearchFeedbackIdentityStore(() async => dir).save(blocked);
+
+      await recordOne(service);
+      await service.flush();
+      expect(storedIdentity()!.keyId, blocked.keyId);
+      expect(storedIdentity()!.blocked, isTrue);
+      expect(service.isCollecting, isFalse);
+      expect(requests, isEmpty);
+    });
+
+    test('two services on one directory end with one key', () async {
+      online = false;
+      final a = makeService();
+      final b = makeService();
+      await a.grant();
+      a.recordSearch(searchContext(id: 'session_aaaaaaaa'));
+      b.recordSearch(searchContext(id: 'session_bbbbbbbb'));
+      await Future.wait([a.settle(), b.settle()]);
+      final keyId = storedIdentity()!.keyId;
+      await a.flush();
+      await b.flush();
+      expect(storedIdentity()!.keyId, keyId);
+      await a.queue.load();
+      expect(a.queue.eventCount, 2);
+    });
+
+    test('store loadOrCreate never overwrites a concurrent key', () async {
+      final store = SearchFeedbackIdentityStore(() async => dir);
+      final results = await Future.wait([
+        for (var i = 1; i <= 4; i++)
+          store.loadOrCreate(List.filled(32, i), isCurrent: () => true),
+      ]);
+      expect({for (final r in results) r!.keyId}, hasLength(1));
+      expect(storedIdentity()!.keyId, results.first!.keyId);
     });
   });
 }

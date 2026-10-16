@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:otzaria/search_feedback/search_feedback_queue_lock.dart';
 import 'package:path/path.dart' as p;
 import 'package:pinenacl/ed25519.dart' as ed;
 
@@ -64,7 +65,7 @@ class SearchFeedbackIdentity {
     'blocked': blocked,
   };
 
-  /// null על קובץ פגום — המתקשר יוצר זהות חדשה.
+  /// null על קובץ פגום.
   static SearchFeedbackIdentity? tryParse(String text) {
     try {
       final json = jsonDecode(text);
@@ -100,13 +101,39 @@ class SearchFeedbackIdentityStore {
     return _parseIdentity(text);
   }
 
-  /// כתיבה לקובץ זמני והחלפה, כדי שקריסה באמצע לא תשאיר קובץ חתוך.
+  /// כתיבה אטומית תחת נעילה בין תהליכים.
   Future<void> save(SearchFeedbackIdentity identity) async {
-    final file = await _file();
-    await file.parent.create(recursive: true);
-    final temp = File('${file.path}.tmp');
-    await temp.writeAsString(jsonEncode(identity.toJson()), flush: true);
-    await temp.rename(file.path);
+    final path = (await _file()).path;
+    final text = jsonEncode(identity.toJson());
+    await Isolate.run(() => _locked(path, () => _writeIdentity(path, text)));
+  }
+
+  /// הזהות הקיימת (גם חסומה) או חדשה מ-[seed]; נעילה בין תהליכים, בלי רשת.
+  /// null = הקובץ פגום (נשמר כמו שהוא), או ש-[isCurrent] נכשל.
+  Future<SearchFeedbackIdentity?> loadOrCreate(
+    List<int> seed, {
+    required bool Function() isCurrent,
+  }) async {
+    final path = (await _file()).path;
+    if (!isCurrent()) return null;
+    // ה-isolate אינו רואה את מצב השירות: הוא שואל כאן שוב אחרי שהשיג את הנעילה.
+    final approvals = ReceivePort()
+      ..listen((reply) => (reply as SendPort).send(_approves(isCurrent)));
+    final port = approvals.sendPort;
+    try {
+      return await _runLoadOrCreate(path, seed, port);
+    } finally {
+      approvals.close();
+    }
+  }
+
+  /// בדיקה שנכשלה אינה אישור; בלי תשובה העובד היה ממתין עם הנעילה לנצח.
+  static bool _approves(bool Function() isCurrent) {
+    try {
+      return isCurrent();
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> delete() async {
@@ -119,3 +146,46 @@ class SearchFeedbackIdentityStore {
 
 Future<SearchFeedbackIdentity?> _parseIdentity(String text) =>
     Isolate.run(() => SearchFeedbackIdentity.tryParse(text));
+
+/// כתיבה לקובץ זמני והחלפה, כדי שקריסה באמצע לא תשאיר קובץ חתוך.
+Future<void> _writeIdentity(String path, String text) async {
+  final temp = File('$path.tmp');
+  await temp.writeAsString(text, flush: true);
+  await temp.rename(path);
+}
+
+/// כל כתיבה של הזהות עוברת כאן, כדי שחלון או תהליך אחר לא ידרוס אותה.
+Future<T> _locked<T>(String path, Future<T> Function() action) async {
+  await File(path).parent.create(recursive: true);
+  final lock = await SearchFeedbackQueueLock.acquire('$path.lock');
+  try {
+    return await action();
+  } finally {
+    await lock.release();
+  }
+}
+
+// פונקציה עליונה, כדי שה-closure לא ילכוד את isCurrent (שאינו ניתן לשליחה).
+Future<SearchFeedbackIdentity?> _runLoadOrCreate(
+  String path,
+  List<int> seed,
+  SendPort approvals,
+) => Isolate.run(() => _loadOrCreateLocked(path, seed, approvals));
+
+Future<SearchFeedbackIdentity?> _loadOrCreateLocked(
+  String path,
+  List<int> seed,
+  SendPort approvals,
+) => _locked(path, () async {
+  final file = File(path);
+  if (await file.exists()) {
+    // קובץ פגום אינו נדרס: ייתכן שהיה בו מפתח חסום.
+    return SearchFeedbackIdentity.tryParse(await file.readAsString());
+  }
+  final answer = ReceivePort();
+  approvals.send(answer.sendPort);
+  if (await answer.first != true) return null;
+  final created = SearchFeedbackIdentity.fromSeed(seed);
+  await _writeIdentity(path, jsonEncode(created.toJson()));
+  return created;
+});

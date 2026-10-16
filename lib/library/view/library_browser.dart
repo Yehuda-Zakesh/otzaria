@@ -1219,7 +1219,7 @@ class _LibraryBrowserState extends State<LibraryBrowser>
             ? null
             : () => _handleNavigateHome(context, state, settingsState),
       ),
-      if (settingsState.canUseSoftwareAndBookUpdates)
+      if (settingsState.canUseSoftwareAndBookUpdates && !isLibraryEmpty)
         _buildSyncActionButton(compact: compact),
       ActionButtonData.simple(
         compact: compact,
@@ -1248,7 +1248,7 @@ class _LibraryBrowserState extends State<LibraryBrowser>
             ? null
             : () => _handleNavigateUp(context, state, settingsState),
       ),
-      if (settingsState.canUseSoftwareAndBookUpdates)
+      if (settingsState.canUseSoftwareAndBookUpdates && !isLibraryEmpty)
         _buildSyncActionButton(compact: compact),
       ActionButtonData.simple(
         compact: compact,

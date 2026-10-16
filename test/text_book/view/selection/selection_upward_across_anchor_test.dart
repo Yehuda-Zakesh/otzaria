@@ -8,6 +8,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/models/books.dart';
+import 'package:otzaria/models/links.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_event.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_state.dart';
@@ -39,6 +40,7 @@ final _content = <String>[
       'לבן שנפל עליו אבק מותר דאין שחרורית כזה בא ממראה אדמומית:',
   '(ג) <b>או ירוק.</b> פי\' אותו שאבדה:',
   '(ד) <b>אין סומכין עליה.</b> לפי שאפשר שיש לה ספק וסברה שהוא טהור:',
+  ...List.filled(6, '(ה) ${List.filled(30, 'עוד מילים בפסקה').join(' ')}:'),
 ];
 
 class _TestTextBookBloc extends Bloc<TextBookEvent, TextBookState>
@@ -46,6 +48,8 @@ class _TestTextBookBloc extends Bloc<TextBookEvent, TextBookState>
   _TestTextBookBloc(super.initialState) {
     on<TextBookEvent>((event, emit) {});
   }
+
+  void emitForTest(TextBookState state) => emit(state);
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -79,9 +83,13 @@ void main() {
     await Settings.init(cacheProvider: MemoryCacheProvider());
   });
 
-  /// פותח את הספר מעוגן בפסקה (א) — כך שהכותרת שלפניה ב-sliver ההפוך —
-  /// וגולל מטה עד שהכותרת כולה מעל החלון (ועדיין בתחום המטמון).
-  Future<TextBookTab> pumpScrolledView(WidgetTester tester) async {
+  /// פותח את הספר מעוגן בפסקה [anchor] וגולל ב-[scrollBy]. כברירת מחדל: עוגן
+  /// ב-(א), והכותרת שלפניה (ב-sliver ההפוך) נגללת כולה מעל החלון, עדיין במטמון.
+  Future<TextBookTab> pumpScrolledView(
+    WidgetTester tester, {
+    int anchor = 1,
+    double scrollBy = 450,
+  }) async {
     tester.view.physicalSize = const Size(700, 500);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -101,7 +109,7 @@ void main() {
       linksByLine: const {},
       tableOfContents: const [],
       removeNikud: false,
-      visibleIndices: const [1],
+      visibleIndices: [anchor],
       selectedIndex: null,
       pinLeftPane: false,
       searchText: '',
@@ -111,7 +119,10 @@ void main() {
       const PersonalNotesState.initial(),
     );
     final settingsBloc = _TestSettingsBloc(SettingsState.initial());
-    final tab = TextBookTab(book: TextBook(title: _title), index: 1);
+    final tab = TextBookTab(
+      book: TextBook(title: _title),
+      index: anchor,
+    );
     addTearDown(textBookBloc.close);
     addTearDown(personalNotesBloc.close);
     addTearDown(settingsBloc.close);
@@ -146,7 +157,7 @@ void main() {
 
     unawaited(
       tab.lines.offsetController.animateScroll(
-        offset: 450,
+        offset: scrollBy,
         duration: const Duration(milliseconds: 100),
       ),
     );
@@ -256,6 +267,30 @@ void main() {
     expect(selected, isNot(contains('או ירוק')));
   });
 
+  testWidgets('גרירה מהשוליים שמימין לפסקה בוחרת את תחילתה (issue #2072)', (
+    tester,
+  ) async {
+    await pumpScrolledView(tester);
+    final bet = lineRect(tester, 2);
+    final y = bet.top + 8;
+
+    final gesture = await tester.startGesture(
+      Offset(bet.right + 4, y),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+    await gesture.moveTo(Offset(bet.right - 60, y));
+    await tester.pump();
+    final selected = scrollableRegistrar(
+      tester,
+    ).selectables.map((s) => s.getSelectedContent()?.plainText ?? '').join();
+    await gesture.up();
+    await tester.pump();
+
+    expect(selected, startsWith('(ב)'));
+    expect(selected, isNot(contains('אדמומית')));
+  });
+
   testWidgets('כל פריט ברשימה עטוף ב-ViewportAlignedSelectionContainer', (
     tester,
   ) async {
@@ -265,4 +300,63 @@ void main() {
       findsAtLeastNWidgets(3),
     );
   });
+
+  // אות מפרש שנוספת בסוף הפסקה בונה אותה מחדש; ב-450 כל ה-sliver ההפוך מעל
+  // החלון, ו-(א) עדיין בתחום המטמון.
+  for (final distance in [100.0, 450.0]) {
+    testWidgets(
+      'בחירה נשארת על הטקסט כשהפסקה נבנית מחדש אחרי גלילה של $distance (issue #2497)',
+      (tester) async {
+        final tab = await pumpScrolledView(tester, anchor: 2, scrollBy: -360);
+        final registrar = scrollableRegistrar(tester);
+        String selected() => registrar.selectables
+            .map((s) => s.getSelectedContent()?.plainText ?? '')
+            .join();
+        final alef = lineRect(tester, 1);
+        final gesture = await tester.startGesture(
+          Offset(alef.right - 60, 200),
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pump();
+        await gesture.moveTo(Offset(alef.left + 80, 260));
+        await gesture.up();
+        await tester.pumpAndSettle();
+        final before = selected();
+        expect(before, isNotEmpty);
+
+        unawaited(
+          tab.lines.offsetController.animateScroll(
+            offset: distance,
+            duration: const Duration(milliseconds: 100),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final bloc =
+            BlocProvider.of<TextBookBloc>(
+                  tester.element(find.byType(CombinedView)),
+                )
+                as _TestTextBookBloc;
+        final alefText = _content[1].replaceAll(RegExp('<[^>]*>'), '');
+        final link = Link(
+          heRef: 'רש"י, ט',
+          index1: 2,
+          path2: 'רש"י',
+          index2: 1,
+          connectionType: 'commentary',
+          anchorStart: alefText.length - 1,
+          anchorLabel: 'ט',
+        );
+        bloc.emitForTest(
+          (bloc.state as TextBookLoaded).copyWith(
+            links: [link],
+            linksByLine: {
+              2: [link],
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(selected(), before);
+      },
+    );
+  }
 }

@@ -53,14 +53,7 @@ class Category {
   Category? parent;
 
   ///returns all the books in this category and its subcategories
-  List<Book> getAllBooks() {
-    List<Book> books = [];
-    books.addAll(this.books);
-    for (Category category in subCategories) {
-      books.addAll(category.getAllBooks());
-    }
-    return books;
-  }
+  List<Book> getAllBooks() => _collect([], (c) => c.books);
 
   /// האם הקטגוריה מכילה ספר כלשהו, ישירות או בתת-קטגוריה.
   /// עוצר בספר הראשון שנמצא — זול מ-[getAllBooks] לבדיקת ריקנות בלבד.
@@ -95,13 +88,15 @@ class Category {
     return hasUser ? BookSource.user : attached;
   }
 
-  List<Category> getAllCategories() {
-    List<Category> categories = [];
-    categories.addAll(subCategories);
-    for (Category category in subCategories) {
-      categories.addAll(category.getAllCategories());
+  List<Category> getAllCategories() => _collect([], (c) => c.subCategories);
+
+  // רשימה אחת לכל העץ — addAll של תת-רשימות מעתיק כל פריט פעם בכל רמה.
+  List<T> _collect<T>(List<T> into, List<T> Function(Category) itemsOf) {
+    into.addAll(itemsOf(this));
+    for (final category in subCategories) {
+      category._collect(into, itemsOf);
     }
-    return categories;
+    return into;
   }
 
   /// Initialize a new [Category] instance.

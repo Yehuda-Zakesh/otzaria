@@ -1,8 +1,9 @@
 import 'dart:convert';
-import 'dart:math';
 import 'dart:isolate';
+import 'dart:math';
 
 import 'package:otzaria/search_feedback/search_feedback_api.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 
 /// מגבלות הפרוטוקול (v1) שנאכפות בצד הלקוח לפני הכנסה לתור.
 abstract final class SearchFeedbackLimits {
@@ -47,6 +48,41 @@ String searchFeedbackJsonEncode(Object? value) {
     }
   }
   return out.toString();
+}
+
+final _queryRedactor = AppReportRedactor(environment: const {});
+final _queryPaths = RegExp(
+  r'"(?:file://|[A-Za-z]:[\\/]|\\\\|/)[^"\r\n]*"'
+  r"|'(?:file://|[A-Za-z]:[\\/]|\\\\|/)[^\r\n]*'"
+  r'|(?<![\p{L}\p{N}_:/])'
+  r'(?:file://|[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/]|/(?=[^\s/]+/))'
+  r'[^\r\n"<>|?*;,]*',
+  unicode: true,
+  caseSensitive: false,
+);
+
+/// מסווה מיילים ונתיבים מוחלטים בשאילתה; שמות ותוכן תורני אינם מסוננים.
+String redactSearchFeedbackQuery(String query) => _queryRedactor.redactText(
+  query.replaceAll(_queryPaths, '<path>'),
+);
+
+/// גם תור מגרסה קודמת חייב לעבור הסתרה לפני העברה או חתימה.
+String redactSearchFeedbackEventLine(String line) {
+  final event = jsonDecode(line) as Map<String, dynamic>;
+  final query = event['query'];
+  if (query is! String) return line;
+  final redacted = truncateForSearchFeedback(
+    redactSearchFeedbackQuery(query),
+    SearchFeedbackLimits.query,
+  );
+  if (redacted == query) return line;
+  event['query'] = redacted;
+  event['queryLength'] = redacted.length;
+  event['queryWordCount'] = redacted
+      .split(RegExp(r'\s+'))
+      .where((word) => word.isNotEmpty)
+      .length;
+  return searchFeedbackJsonEncode(event);
 }
 
 final RegExp _idPattern = RegExp(r'^[A-Za-z0-9_-]{8,64}$');
@@ -120,7 +156,7 @@ class SearchFeedbackEventBuilder {
 
   Map<String, Object?>? search(SemanticSearchContext context) {
     final query = truncateForSearchFeedback(
-      context.query,
+      redactSearchFeedbackQuery(context.query),
       SearchFeedbackLimits.query,
     );
     final params = context.params;

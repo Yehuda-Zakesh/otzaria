@@ -35,6 +35,21 @@ void main() {
   });
 
   group('search event', () {
+    test(
+      'redacts email before truncation and preserves the rest of the query',
+      () {
+        final prefix = 'א' * 490;
+        final event = builder.search(
+          searchContext(
+            query: '$prefix person+private@example.com תורה',
+          ),
+        )!;
+        expect(event['query'], '$prefix <email> ת');
+        expect(event['queryLength'], 500);
+        expect(event['queryWordCount'], 3);
+      },
+    );
+
     test('maps params, response and Amendment A fields', () {
       final event = builder.search(
         searchContext(

@@ -1780,6 +1780,30 @@ void main() {
       expect(tab.index, 1);
     });
 
+    // המקטע המודגש (selectedIndex=0) קודם לשורה הראשונה הנראית (1).
+    testWidgets('קישור עם הדגשת המקטע מהקיצור — למקטע המודגש (issue #2591)', (
+      tester,
+    ) async {
+      await Settings.setValue<String>(
+        ShortcutValidator.copySectionMarkLinkKey,
+        'ctrl+u',
+      );
+      await pumpAfterTocJump(tester);
+      String? copied;
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+      await sendCtrl(tester, LogicalKeyboardKey.keyU);
+      expect(copied, 'otzaria://open/book/7?index=0&mark');
+    });
+
     testWidgets('Home/End לבד קופצים לקצות הספר (issue #2140)', (
       tester,
     ) async {
@@ -2057,7 +2081,7 @@ class _TestBookmarkBloc extends Cubit<BookmarkState> implements BookmarkBloc {
 
 /// תוכן עניינים ריק לספר, כדי ש-refFromIndex לא יפנה לקבצים.
 class _NoTocBook extends TextBook {
-  _NoTocBook() : super(title: 'ספר בדיקה');
+  _NoTocBook() : super(title: 'ספר בדיקה', id: 7);
 
   @override
   Future<List<TocEntry>> get tableOfContents async => const [];

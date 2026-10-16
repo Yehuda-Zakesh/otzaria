@@ -400,7 +400,7 @@ class IndexingRepository {
     bool cancelled = false;
     // כשל כתיבה מרוקן את חוצץ ה-writer; commit אחריו היה חותם מצב חלקי.
     bool writeBufferDiscarded = false;
-    var didStartActualIndexing = false;
+    final onFirstActualIndexing = _callOnce(onActualIndexingStarted);
 
     // חילוץ ה-PDF איטי בסדר גודל מאינדוקס ספר טקסט, ולכן חילוצי ה-PDF הבאים
     // רצים מראש ברקע בזמן שהמנוע מאנדקס את הספרים שלפניהם.
@@ -489,11 +489,7 @@ class IndexingRepository {
               readyBook,
               catalogueOrder: catalogueOrder,
               preExtracted: ready.extraction,
-              onActualIndexingStarted: () {
-                if (didStartActualIndexing) return;
-                didStartActualIndexing = true;
-                onActualIndexingStarted?.call();
-              },
+              onActualIndexingStarted: onFirstActualIndexing,
             );
             if (!_tantivyDataProvider.isIndexing.value) {
               writeBufferDiscarded = !await _discardCancelledBookWrites(
@@ -548,13 +544,7 @@ class IndexingRepository {
               await _indexTextBook(
                 textBookForIndex,
                 catalogueOrder: catalogueOrder,
-                onActualIndexingStarted: () {
-                  if (didStartActualIndexing) {
-                    return;
-                  }
-                  didStartActualIndexing = true;
-                  onActualIndexingStarted?.call();
-                },
+                onActualIndexingStarted: onFirstActualIndexing,
               );
               if (!_tantivyDataProvider.isIndexing.value) {
                 writeBufferDiscarded = !await _discardCancelledBookWrites(book);
@@ -589,13 +579,7 @@ class IndexingRepository {
                 book,
                 catalogueOrder: catalogueOrder,
                 preExtracted: preExtracted,
-                onActualIndexingStarted: () {
-                  if (didStartActualIndexing) {
-                    return;
-                  }
-                  didStartActualIndexing = true;
-                  onActualIndexingStarted?.call();
-                },
+                onActualIndexingStarted: onFirstActualIndexing,
               );
               if (!_tantivyDataProvider.isIndexing.value) {
                 writeBufferDiscarded = !await _discardCancelledBookWrites(book);
@@ -621,11 +605,7 @@ class IndexingRepository {
             commitStopwatch
               ..reset()
               ..start();
-            final index = await _tantivyDataProvider.engine;
-            await index.commit();
-            IndexingCrashCanary.current?.committed(
-              _tantivyDataProvider.indexedFilePaths,
-            );
+            await _commitIndex();
             debugPrint(
               '💾 commit אחרי $indexedSinceCommit ספרים: ${commitStopwatch.elapsedMilliseconds}ms',
             );
@@ -686,14 +666,10 @@ class IndexingRepository {
         debugPrint('   ⏭️ דולגו: $skipped');
         debugPrint('   ❌ שגיאות: $errors');
 
-        final index = await _tantivyDataProvider.engine;
         commitStopwatch
           ..reset()
           ..start();
-        await index.commit();
-        IndexingCrashCanary.current?.committed(
-          _tantivyDataProvider.indexedFilePaths,
-        );
+        final index = await _commitIndex();
         debugPrint('💾 commit סופי: ${commitStopwatch.elapsedMilliseconds}ms');
         _stampCatalogueOrderAfterCommit();
         final optimizeStopwatch = Stopwatch()..start();
@@ -706,11 +682,7 @@ class IndexingRepository {
       )) {
         // בלי commit בביטול, כל מה שאונדקס מאז ה-commit האחרון אבד,
         // וההתקדמות נעצרת במכפלות של סף ה-commit.
-        final index = await _tantivyDataProvider.engine;
-        await index.commit();
-        IndexingCrashCanary.current?.committed(
-          _tantivyDataProvider.indexedFilePaths,
-        );
+        await _commitIndex();
         debugPrint('💾 commit אחרי ביטול: $indexedSinceCommit ספרים');
         _stampCatalogueOrderAfterCommit();
       }
@@ -1571,6 +1543,27 @@ class IndexingRepository {
     }
   }
 
+  /// commit לאינדקס ורישום הספרים שנחתמו בקנרית הקריסות.
+  Future<SearchEngine> _commitIndex() async {
+    final index = await _tantivyDataProvider.engine;
+    await index.commit();
+    IndexingCrashCanary.current?.committed(
+      _tantivyDataProvider.indexedFilePaths,
+    );
+    return index;
+  }
+
+  /// עוטף את [callback] כך שיופעל רק בקריאה הראשונה — דיווח "האינדוקס
+  /// בפועל התחיל" נשלח פעם אחת לריצה, גם כשכל ספר מדווח עליו.
+  static void Function() _callOnce(void Function()? callback) {
+    var called = false;
+    return () {
+      if (called) return;
+      called = true;
+      callback?.call();
+    };
+  }
+
   /// משלים חותם סדר קטלוגי שכתיבתו נכשלה באתחול. בלעדיו האינדקס שזה עתה
   /// נחתם ייראה בהפעלה הבאה כאילו נבנה בסדר ישן, והמשתמש יידרש לבנות מחדש.
   void _stampCatalogueOrderAfterCommit() {
@@ -1821,7 +1814,7 @@ class IndexingRepository {
     bool cancelled = false;
     // כשל כתיבה מרוקן את חוצץ ה-writer; commit אחריו היה חותם מצב חלקי.
     bool writeBufferDiscarded = false;
-    var didStartActualIndexing = false;
+    final onFirstActualIndexing = _callOnce(onActualIndexingStarted);
     final failures = <IndexingFailure>[];
 
     try {
@@ -1842,11 +1835,7 @@ class IndexingRepository {
               await _indexTextBook(
                 textBookForIndex,
                 catalogueOrder: catalogueOrder,
-                onActualIndexingStarted: () {
-                  if (didStartActualIndexing) return;
-                  didStartActualIndexing = true;
-                  onActualIndexingStarted?.call();
-                },
+                onActualIndexingStarted: onFirstActualIndexing,
               );
               if (!_tantivyDataProvider.isIndexing.value) {
                 writeBufferDiscarded = !await _discardCancelledBookWrites(book);
@@ -1865,11 +1854,7 @@ class IndexingRepository {
               final droppedPages = await _indexPdfBook(
                 book,
                 catalogueOrder: catalogueOrder,
-                onActualIndexingStarted: () {
-                  if (didStartActualIndexing) return;
-                  didStartActualIndexing = true;
-                  onActualIndexingStarted?.call();
-                },
+                onActualIndexingStarted: onFirstActualIndexing,
               );
               if (!_tantivyDataProvider.isIndexing.value) {
                 writeBufferDiscarded = !await _discardCancelledBookWrites(book);
@@ -1919,12 +1904,8 @@ class IndexingRepository {
         debugPrint(
           '✅ אינדוקס ספרים ספציפיים הושלם! (מאונדקסים: $actuallyIndexed, שגיאות: $errors)',
         );
-        final index = await _tantivyDataProvider.engine;
         final commitStopwatch = Stopwatch()..start();
-        await index.commit();
-        IndexingCrashCanary.current?.committed(
-          _tantivyDataProvider.indexedFilePaths,
-        );
+        await _commitIndex();
         debugPrint('💾 commit: ${commitStopwatch.elapsedMilliseconds}ms');
         _stampCatalogueOrderAfterCommit();
       } else if (shouldCommitCancelledRun(
@@ -1932,11 +1913,7 @@ class IndexingRepository {
         writeBufferDiscarded: writeBufferDiscarded,
       )) {
         // בלי commit בביטול, כל הספרים שבריצה הזו אבדים ויאונדקסו מאפס.
-        final index = await _tantivyDataProvider.engine;
-        await index.commit();
-        IndexingCrashCanary.current?.committed(
-          _tantivyDataProvider.indexedFilePaths,
-        );
+        await _commitIndex();
         debugPrint('💾 commit אחרי ביטול: $actuallyIndexed ספרים');
         _stampCatalogueOrderAfterCommit();
       }

@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/search_feedback/search_feedback_identity.dart';
+import 'package:otzaria/search_feedback/search_feedback_queue_lock.dart';
 import 'package:pinenacl/ed25519.dart' as ed;
 
 List<int> _hex(String hex) => [
@@ -71,5 +73,58 @@ void main() {
   test('a corrupt key file reads as no identity', () {
     expect(SearchFeedbackIdentity.tryParse('not json'), isNull);
     expect(SearchFeedbackIdentity.tryParse('{"seed":"AAAA"}'), isNull);
+  });
+
+  group('loadOrCreate', () {
+    late Directory dir;
+    late String path;
+
+    setUp(() async {
+      dir = await Directory.systemTemp.createTemp('sf_identity');
+      path = '${dir.path}/${SearchFeedbackIdentityStore.fileName}';
+    });
+    tearDown(() => dir.delete(recursive: true));
+
+    test('invalidation while waiting for the lock prevents writing', () async {
+      final held = await SearchFeedbackQueueLock.acquire('$path.lock');
+      final checked = Completer<void>();
+      var current = true;
+      final creating =
+          SearchFeedbackIdentityStore(
+            () async => dir,
+          ).loadOrCreate(
+            List.filled(32, 7),
+            isCurrent: () {
+              if (!checked.isCompleted) checked.complete();
+              return current;
+            },
+          );
+      await checked.future;
+      current = false;
+      await held.release();
+      expect(await creating, isNull);
+      expect(File(path).existsSync(), isFalse);
+    });
+
+    test(
+      'a throwing validity check refuses to write and releases the lock',
+      () async {
+        var calls = 0;
+        final result =
+            await SearchFeedbackIdentityStore(
+              () async => dir,
+            ).loadOrCreate(
+              List.filled(32, 7),
+              isCurrent: () {
+                if (++calls > 1) throw StateError('consent unreadable');
+                return true;
+              },
+            );
+        expect(result, isNull);
+        expect(File(path).existsSync(), isFalse);
+        final lock = await SearchFeedbackQueueLock.acquire('$path.lock');
+        await lock.release();
+      },
+    );
   });
 }

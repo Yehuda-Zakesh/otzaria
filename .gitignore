@@ -152,3 +152,4 @@ assets/bundled_plugins/*
 # פלט verbose של `flutter build -v` בשורש הפרויקט — נוצר בניפוי באגי בנייה
 # ומגיע לעשרות אלפי שורות. אינו אמור להיכנס לגיט.
 build_log.txt
+isolate.pdf

@@ -5,6 +5,7 @@ import 'dart:isolate';
 
 import 'package:path/path.dart' as p;
 import 'package:otzaria/search_feedback/search_feedback_events.dart';
+import 'package:otzaria/search_feedback/search_feedback_identity.dart';
 import 'package:otzaria/search_feedback/search_feedback_queue_lock.dart';
 
 /// מקטע בתור: קובץ JSONL שהשורה הראשונה בו היא ה-ClientContext.
@@ -84,6 +85,14 @@ class SearchFeedbackQueue {
         SearchFeedbackLimits.batchBytes -
         SearchFeedbackLimits.batchEnvelopeReserve,
   }) : _owner = newSearchFeedbackId();
+
+  /// מקטעים שמקורם לא ידוע (release או debug); שתי התוכנות אינן קוראות מתת-תיקייה.
+  static const String unverifiedDirName = 'unverified';
+
+  /// קיומו מעיד שכל מקטע בתיקייה נכתב בגרסה שמסמנת נתוני פיתוח, או שכבר
+  /// הוכשר במפתח שהיה קיים בעת האימוץ (כפי שגרסה קודמת הייתה שולחת אותו).
+  static const String originMarkerName = 'origin_marked';
+
   // כל האובייקטים באותו isolate משתמשים באותו סדר; ה-OS מסנכרן תהליכים.
   static final Map<String, Future<void>> _tails = {};
   final Future<Directory> Function() _directory;
@@ -140,17 +149,19 @@ class SearchFeedbackQueue {
     await _run('load');
   }
 
-  Future<void> append(
+  /// true = האירוע נכתב לתיקייה מאומצת (ראו [originMarkerName]).
+  Future<bool> append(
     Map<String, Object?> event,
     Map<String, Object?> context, {
     DateTime? recordedAt,
   }) async {
     final stamp = (recordedAt ?? DateTime.now()).microsecondsSinceEpoch;
-    await _run('append', {
-      'event': event,
-      'context': context,
-      'recordedAt': stamp,
-    });
+    return await _run('append', {
+          'event': event,
+          'context': context,
+          'recordedAt': stamp,
+        }) ==
+        true;
   }
 
   Future<List<String>> sealAndList() async =>
@@ -186,6 +197,11 @@ class SearchFeedbackQueue {
   Future<void> resume() async {
     await _run('resume');
   }
+
+  /// מאמץ את התיקייה (ראו [originMarkerName]); true = יש מקטע שאינו נושא
+  /// את [contextMarker], כלומר נתונים שמותר להעביר.
+  Future<bool> adopt({required String contextMarker}) async =>
+      await _run('adopt', {'marker': contextMarker}) as bool;
 
   Future<SearchFeedbackStrikeRecord> addStrike(
     String name,
@@ -284,10 +300,18 @@ Future<Map<String, Object?>> _queueDisk(
         final cutoff = int.tryParse(permission.split(':').last) ?? 0;
         if (!permission.startsWith('revoked:') &&
             (args['recordedAt'] as int) > cutoff) {
+          // כשל באימוץ לא יאבד את האירוע; בלי אימוץ לא נוצר מפתח, וינוסה שוב.
+          var adopted = true;
+          try {
+            await _adopt(path, queue);
+          } on FileSystemException {
+            adopted = false;
+          }
           await queue.append(
             Map<String, Object?>.from(args['event'] as Map),
             Map<String, Object?>.from(args['context'] as Map),
           );
+          value = adopted;
         }
       case 'resume':
         final epoch = File('$path.epoch');
@@ -297,6 +321,9 @@ Future<Map<String, Object?>> _queueDisk(
           await temp.writeAsString(cutoff, flush: true);
           await temp.rename(epoch.path);
         }
+      case 'adopt':
+        await _adopt(path, queue);
+        value = await _hasSegmentWithout(path, args['marker'] as String);
       case 'seal':
         value = await queue.sealAndList();
       case 'claim':
@@ -328,6 +355,7 @@ Future<Map<String, Object?>> _queueDisk(
         );
         await temp.rename('$path.epoch');
         await queue.purge();
+        await _deleteAdoption(path);
     }
     if (modifying) {
       if (op == 'purge') {
@@ -356,6 +384,12 @@ Future<Map<String, Object?>> _queueDisk(
 // A purge journal survives a crash between publishing the cutoff and deletion.
 // Finish deletion before any reader or writer can recover old event files.
 Future<void> _recoverPurge(String path) async {
+  // גרסה קודמת שמחקה את התור אינה מכירה את unverified; ההסכמה בוטלה — מוחקים.
+  final epoch = File('$path.epoch');
+  if (await epoch.exists() &&
+      (await epoch.readAsString()).startsWith('revoked:')) {
+    await _deleteAdoption(path);
+  }
   final dirty = File(p.join(path, '.dirty'));
   if (!await dirty.exists()) return;
   final cutoff = int.tryParse(await dirty.readAsString());
@@ -374,7 +408,48 @@ Future<void> _recoverPurge(String path) async {
       await entity.delete();
     }
   }
+  await _deleteAdoption(path);
   await dirty.delete();
+}
+
+/// ביטול הסכמה מוחק גם נתונים מוחזקים; תיקייה ריקה תאומץ שוב בלי להחזיק דבר.
+Future<void> _deleteAdoption(String path) async {
+  final held = Directory(p.join(path, SearchFeedbackQueue.unverifiedDirName));
+  if (await held.exists()) await held.delete(recursive: true);
+  final marker = File(p.join(path, SearchFeedbackQueue.originMarkerName));
+  if (await marker.exists()) await marker.delete();
+}
+
+/// בפעם הראשונה: בתיקייה בלי מפתח אי אפשר לדעת אם מקטע ישן נכתב ב-release
+/// או ב-debug, ולכן הוא מועבר ל-unverified — לא נמחק ולא מוכשר להעברה.
+Future<void> _adopt(String path, _DiskQueue queue) async {
+  final marker = File(p.join(path, SearchFeedbackQueue.originMarkerName));
+  if (await marker.exists()) return;
+  if (!await File(
+    p.join(path, SearchFeedbackIdentityStore.fileName),
+  ).exists()) {
+    await queue.holdAll(p.join(path, SearchFeedbackQueue.unverifiedDirName));
+  }
+  await marker.writeAsString('1', flush: true);
+}
+
+Future<bool> _hasSegmentWithout(String path, String contextMarker) async {
+  await for (final entity in Directory(path).list()) {
+    if (entity is! File ||
+        !_DiskQueue._isSegmentName(p.basename(entity.path))) {
+      continue;
+    }
+    final context = await entity
+        .openRead()
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .take(1)
+        .toList();
+    if (context.isNotEmpty && !context.first.contains(contextMarker)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /// תור מתמשך בקובצי JSONL (הוספה בלבד); כל מקטע = אצווה אחת עם context אחיד.
@@ -703,7 +778,8 @@ class _DiskQueue {
           contextJson: contextJson,
           eventLines: [
             for (final line in lines.skip(1))
-              if (_isFreshEvent(line, notBefore)) line,
+              if (_isFreshEvent(line, notBefore))
+                redactSearchFeedbackEventLine(line),
           ],
         );
       });
@@ -770,6 +846,23 @@ class _DiskQueue {
       );
     }
     await file.delete();
+  });
+
+  /// מעביר את כל המקטעים ל-[target] בלי למחוק; התור נשאר ריק.
+  Future<void> holdAll(String target) => _serialized(() async {
+    final dir = await _directory();
+    await for (final entity in dir.list()) {
+      final name = p.basename(entity.path);
+      if (entity is File && _isSegmentName(name)) {
+        await Directory(target).create();
+        await entity.rename(p.join(target, name));
+      }
+    }
+    _segments.clear();
+    _strikes.clear();
+    _open = null;
+    _openContext = null;
+    await _saveStrikes(dir);
   });
 
   /// מוחק את כל התור מהדיסק.

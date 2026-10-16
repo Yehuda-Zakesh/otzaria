@@ -164,6 +164,7 @@ void main() {
       );
 
       expect(entry, contains('Icon=/opt/otzaria/icon.png'));
+      expect(entry, contains('Name=Otzaria\nName[he]=אוצריא\n'));
       expect(
         entry.split('\n').where((line) => line.trim().isEmpty).length,
         1,

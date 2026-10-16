@@ -163,7 +163,7 @@ class SystemSettingsTab extends StatefulWidget {
     SettingsSearchEntry(
       id: 'system.searchFeedback.consent',
       title: 'שיפור המנגנון',
-      subtitle: 'שליחת נתוני שימוש אנונימיים לשיפור החיפוש',
+      subtitle: 'שליחת נתוני שימוש לשיפור החיפוש',
       tab: SettingsTab.system,
       cardId: 'system.searchFeedback',
       keywords: ['פרטיות', 'נתוני שימוש', 'אנונימי', 'הסכמה'],

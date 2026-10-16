@@ -494,6 +494,26 @@ double _bomPayloadConfidence(_UnicodeCandidate candidate) =>
 /// שיעור היחידות הפסולות שמעליו הקידוד עצמו נפסל, ולא רק ה-confidence יורד.
 const double _maxInvalidUnitRatio = 0.10;
 
+/// יחידת UTF-16 שמתחילה ב-[i], לפי סדר הבתים.
+int _utf16Unit(Uint8List bytes, int i, bool littleEndian) => littleEndian
+    ? bytes[i] | (bytes[i + 1] << 8)
+    : (bytes[i] << 8) | bytes[i + 1];
+
+/// יחידת UTF-32 שמתחילה ב-[i], לפי סדר הבתים.
+int _utf32Unit(Uint8List bytes, int i, bool littleEndian) => littleEndian
+    ? bytes[i] |
+          (bytes[i + 1] << 8) |
+          (bytes[i + 2] << 16) |
+          (bytes[i + 3] << 24)
+    : (bytes[i] << 24) |
+          (bytes[i + 1] << 16) |
+          (bytes[i + 2] << 8) |
+          bytes[i + 3];
+
+/// יחידת UTF-32 שאינה תו יוניקוד: מחוץ לטווח או חצי זוג תחליפי.
+bool _isInvalidUtf32Unit(int codePoint) =>
+    codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF);
+
 /// מספר היחידות הפסולות בכל המצע: surrogate בודד ב-UTF-16, או נקודת קוד
 /// מחוץ לטווח ב-UTF-32.
 ///
@@ -504,15 +524,11 @@ int _countInvalidUtf16Units(Uint8List bytes, int start, bool littleEndian) {
   var invalid = 0;
   var i = start;
   while (i + 1 < end) {
-    final unit = littleEndian
-        ? bytes[i] | (bytes[i + 1] << 8)
-        : (bytes[i] << 8) | bytes[i + 1];
+    final unit = _utf16Unit(bytes, i, littleEndian);
     i += 2;
     if (unit >= 0xD800 && unit <= 0xDBFF) {
       if (i + 1 < end) {
-        final low = littleEndian
-            ? bytes[i] | (bytes[i + 1] << 8)
-            : (bytes[i] << 8) | bytes[i + 1];
+        final low = _utf16Unit(bytes, i, littleEndian);
         if (low >= 0xDC00 && low <= 0xDFFF) {
           i += 2;
           continue;
@@ -529,16 +545,8 @@ int _countInvalidUtf16Units(Uint8List bytes, int start, bool littleEndian) {
 int _countInvalidUtf32Units(Uint8List bytes, int start, bool littleEndian) {
   var invalid = 0;
   for (var i = start; i + 3 < bytes.length; i += 4) {
-    final codePoint = littleEndian
-        ? bytes[i] |
-              (bytes[i + 1] << 8) |
-              (bytes[i + 2] << 16) |
-              (bytes[i + 3] << 24)
-        : (bytes[i] << 24) |
-              (bytes[i + 1] << 16) |
-              (bytes[i + 2] << 8) |
-              bytes[i + 3];
-    if (codePoint > 0x10FFFF || (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
+    final codePoint = _utf32Unit(bytes, i, littleEndian);
+    if (_isInvalidUtf32Unit(codePoint)) {
       invalid++;
     }
   }
@@ -941,17 +949,13 @@ _UnicodeCandidate _scoreUtf16(
   for (final window in windows) {
     var i = window.start;
     while (i + 1 < window.end) {
-      final unit = littleEndian
-          ? bytes[i] | (bytes[i + 1] << 8)
-          : (bytes[i] << 8) | bytes[i + 1];
+      final unit = _utf16Unit(bytes, i, littleEndian);
       i += 2;
       units++;
       if (_isPreviouslyTrustedUnit(unit)) trusted++;
       if (unit >= 0xD800 && unit <= 0xDBFF) {
         if (i + 1 < window.end) {
-          final low = littleEndian
-              ? bytes[i] | (bytes[i + 1] << 8)
-              : (bytes[i] << 8) | bytes[i + 1];
+          final low = _utf16Unit(bytes, i, littleEndian);
           if (low >= 0xDC00 && low <= 0xDFFF) {
             i += 2;
             units++;
@@ -996,19 +1000,10 @@ _UnicodeCandidate _scoreUtf32(
   for (final window in windows) {
     var i = window.start;
     while (i + 3 < window.end) {
-      final codePoint = littleEndian
-          ? bytes[i] |
-                (bytes[i + 1] << 8) |
-                (bytes[i + 2] << 16) |
-                (bytes[i + 3] << 24)
-          : (bytes[i] << 24) |
-                (bytes[i + 1] << 16) |
-                (bytes[i + 2] << 8) |
-                bytes[i + 3];
+      final codePoint = _utf32Unit(bytes, i, littleEndian);
       i += 4;
       units++;
-      if (codePoint > 0x10FFFF ||
-          (codePoint >= 0xD800 && codePoint <= 0xDFFF)) {
+      if (_isInvalidUtf32Unit(codePoint)) {
         invalid++;
       } else if (_isPreviouslyTrustedUnit(codePoint)) {
         trusted++;
@@ -1383,11 +1378,7 @@ String _decodeUtf16(
 }) {
   final codeUnits = <int>[];
   for (var i = start; i + 1 < end; i += 2) {
-    codeUnits.add(
-      littleEndian
-          ? bytes[i] | (bytes[i + 1] << 8)
-          : (bytes[i] << 8) | bytes[i + 1],
-    );
+    codeUnits.add(_utf16Unit(bytes, i, littleEndian));
   }
   return String.fromCharCodes(codeUnits);
 }
@@ -1400,18 +1391,8 @@ String _decodeUtf32(
 }) {
   final codePoints = <int>[];
   for (var i = start; i + 3 < end; i += 4) {
-    final codePoint = littleEndian
-        ? bytes[i] |
-              (bytes[i + 1] << 8) |
-              (bytes[i + 2] << 16) |
-              (bytes[i + 3] << 24)
-        : (bytes[i] << 24) |
-              (bytes[i + 1] << 16) |
-              (bytes[i + 2] << 8) |
-              bytes[i + 3];
-    final valid =
-        codePoint <= 0x10FFFF && !(codePoint >= 0xD800 && codePoint <= 0xDFFF);
-    codePoints.add(valid ? codePoint : 0xFFFD);
+    final codePoint = _utf32Unit(bytes, i, littleEndian);
+    codePoints.add(_isInvalidUtf32Unit(codePoint) ? 0xFFFD : codePoint);
   }
   return String.fromCharCodes(codePoints);
 }

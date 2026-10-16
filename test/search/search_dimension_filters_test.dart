@@ -86,6 +86,30 @@ Future<void> main() async {
     await tester.pump(const Duration(milliseconds: 50));
   }
 
+  testWidgets(
+    'מונה הסינונים בכפתור הסינון בצבע הנושא ולא באדום (issue #2466)',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SearchDimensionFilterButton(
+            selectedFacets: const ['/era/ראשונים'],
+            onToggle: (_) {},
+          ),
+        ),
+      );
+      final label = find.text('1');
+      final cs = Theme.of(tester.element(label)).colorScheme;
+      final pill = tester.widget<Container>(
+        find.ancestor(of: label, matching: find.byType(Container)).first,
+      );
+      expect((pill.decoration! as ShapeDecoration).color, cs.primaryContainer);
+      expect(
+        DefaultTextStyle.of(tester.element(label)).style.color,
+        cs.onPrimaryContainer,
+      );
+    },
+  );
+
   group(
     'סרגל התוצאות - סינון ממדים דרך כפתור הסינון',
     () {
