@@ -991,14 +991,254 @@ void main() {
     timeout: const Timeout(Duration(seconds: 30)),
   );
 
+  for (final allowWrite in [true, false]) {
+    test(
+      'ACL ${allowWrite ? 'מתיר' : 'חוסם'} כתיבה נבדק בהחלה בלי חסימה מוקדמת שגויה',
+      () async {
+        final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+        final expectedPath = p.join(tmp.path, 'expected.db');
+        final patchPath = p.join(tmp.path, 'patch-1-2.db');
+        _writeSchema4SourceDb(dbPath, version: 1, sourceName: 'old');
+        _writeSchema4SourceDb(expectedPath, version: 2, sourceName: 'new');
+        _writeSourcePatch(
+          patchPath,
+          fromVersion: 1,
+          toVersion: 2,
+          sourceName: 'new',
+        );
+        await _setReadOnly(dbPath, allowWrite);
+        await _setMacWriteAcl(dbPath, allowWrite: allowWrite);
+        var downloaded = false;
+        final before = File(dbPath).readAsBytesSync();
+        final modified = File(dbPath).lastModifiedSync();
+        final repository = LibraryUpdateRepository(
+          discovery: _unusedDiscovery(),
+          downloader: _LocalPatchDownloader(
+            patchPath,
+            beforeReturn: () async {
+              downloaded = true;
+            },
+          ),
+          refreshService: _NoopRefreshService(),
+          dbPathProvider: () => dbPath,
+          dataRootProvider: () async => tmp.path,
+        );
+        final plan = _schema4DeltaPlan([
+          _schema4Edge(
+            fromVersion: 1,
+            toVersion: 2,
+            patchName: 'patch-1-2.db',
+            toHash: _logicalHash(expectedPath),
+          ),
+        ]);
+        try {
+          if (allowWrite) {
+            final result = await repository.applyDeltaPlan(plan);
+            expect(result.appliedSteps, 1);
+            expect(const LocalDbVersionReader().read(dbPath).dbVersion, 2);
+          } else {
+            await expectLater(
+              repository.applyDeltaPlan(plan),
+              throwsA(isA<LibraryUpdateReadOnlyException>()),
+            );
+            expect(File(dbPath).readAsBytesSync(), before);
+            expect(File(dbPath).lastModifiedSync(), modified);
+          }
+          expect(downloaded, isTrue);
+          expect(File('$dbPath-wal').existsSync(), isFalse);
+          expect(File('$dbPath-journal').existsSync(), isFalse);
+        } finally {
+          await _clearMacAcl(dbPath);
+          await _setReadOnly(dbPath, false);
+        }
+      },
+      skip: !Platform.isMacOS,
+    );
+  }
+
+  test('הורדה מלאה מחליפה קובץ קריאה בלבד ב-POSIX', () async {
+    final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+    _writeDb(dbPath, version: 1, marker: 'old');
+    await _setReadOnly(dbPath, true);
+    try {
+      await _localFullDownloadRepository(
+        tmp: tmp,
+        dbPath: dbPath,
+        refreshService: _NoopRefreshService(),
+      ).applyFullDownload(_localFullDownloadPlan());
+      expect(_readMarker(dbPath), 'new');
+    } finally {
+      await _setReadOnly(dbPath, false);
+    }
+  }, skip: Platform.isWindows);
+
+  for (final full in [true, false]) {
+    test('בדיקת ${full ? 'מלאה' : 'דלתא'} אינה יוצרת מסד חסר', () async {
+      final dbPath = p.join(tmp.path, 'missing.db');
+      final stopped = StateError('permissions passed');
+      final repository = LibraryUpdateRepository(
+        discovery: _unusedDiscovery(),
+        downloader: _LocalPatchDownloader(p.join(tmp.path, 'patch.db')),
+        dbPathProvider: () => dbPath,
+        dataRootProvider: () async => tmp.path,
+        diskSpaceProvider: (_) async => throw stopped,
+      );
+      await expectLater(
+        full
+            ? repository.applyFullDownload(_localFullDownloadPlan())
+            : repository.applyDeltaPlan(_deltaPlan()),
+        throwsA(same(stopped)),
+      );
+      expect(File(dbPath).existsSync(), isFalse);
+    });
+  }
+
+  for (final full in [true, false]) {
+    test('תיקייה חסומה עוצרת ${full ? 'מלאה' : 'דלתא'} לפני הורדה', () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      _writeDb(dbPath, version: 1, marker: 'old');
+      final result = await Process.run('chmod', ['555', tmp.path]);
+      expect(result.exitCode, 0);
+      try {
+        final repository = LibraryUpdateRepository(
+          discovery: _unusedDiscovery(),
+          downloader: _LocalPatchDownloader(p.join(tmp.path, 'patch.db')),
+          dbPathProvider: () => dbPath,
+          dataRootProvider: () async => tmp.path,
+          diskSpaceProvider: (_) async => fail('אסור להגיע להכנת ההורדה'),
+        );
+        await expectLater(
+          full
+              ? repository.applyFullDownload(_localFullDownloadPlan())
+              : repository.applyDeltaPlan(_deltaPlan()),
+          throwsA(isA<LibraryUpdateReadOnlyException>()),
+        );
+      } finally {
+        await Process.run('chmod', ['755', tmp.path]);
+      }
+    }, skip: Platform.isWindows);
+  }
+
+  test('ACL שחוסם החלפה מלאה מוצג כשגיאת הרשאות והמקור נשמר', () async {
+    final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+    _writeDb(dbPath, version: 1, marker: 'old');
+    final result = await Process.run('chmod', [
+      '+a',
+      'user:${Platform.environment['USER']!} deny delete',
+      dbPath,
+    ]);
+    expect(result.exitCode, 0);
+    try {
+      await expectLater(
+        _localFullDownloadRepository(
+          tmp: tmp,
+          dbPath: dbPath,
+          refreshService: _NoopRefreshService(),
+        ).applyFullDownload(_localFullDownloadPlan()),
+        throwsA(isA<LibraryUpdateReadOnlyException>()),
+      );
+      expect(_readMarker(dbPath), 'old');
+      expect(File('$dbPath.new').existsSync(), isFalse);
+    } finally {
+      await _clearMacAcl(dbPath);
+    }
+  }, skip: !Platform.isMacOS);
+
+  test('כשל I/O בקאש ה-patch אינו ממופה להרשאות מסד הספרייה', () async {
+    final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+    final patchPath = p.join(tmp.path, 'cache', 'patch.db');
+    _writeDb(dbPath, version: 1, marker: 'old');
+    final error = FileSystemException(
+      'cache I/O failure',
+      patchPath,
+      const OSError('I/O failure', 5),
+    );
+    final repository = LibraryUpdateRepository(
+      discovery: _unusedDiscovery(),
+      downloader: _LocalPatchDownloader(
+        patchPath,
+        beforeReturn: () async => throw error,
+      ),
+      dbPathProvider: () => dbPath,
+      dataRootProvider: () async => tmp.path,
+    );
+    await expectLater(
+      repository.applyDeltaPlan(_deltaPlan()),
+      throwsA(same(error)),
+    );
+  });
+
+  for (final beforeDownload in [true, false]) {
+    test(
+      'SQLITE_READONLY ${beforeDownload ? 'לפני' : 'אחרי'} ההורדה ממופה עם הנתיב (issue #2346)',
+      () async {
+        final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+        final expectedPath = p.join(tmp.path, 'expected.db');
+        final patchPath = p.join(tmp.path, 'patch-1-2.db');
+        _writeSchema4SourceDb(dbPath, version: 1, sourceName: 'old');
+        _writeSchema4SourceDb(expectedPath, version: 2, sourceName: 'new');
+        _writeSourcePatch(
+          patchPath,
+          fromVersion: 1,
+          toVersion: 2,
+          sourceName: 'new',
+        );
+        if (beforeDownload) await _setReadOnly(dbPath, true);
+        final repository = LibraryUpdateRepository(
+          discovery: _unusedDiscovery(),
+          downloader: _LocalPatchDownloader(
+            patchPath,
+            beforeReturn: beforeDownload
+                ? null
+                : () => _setReadOnly(dbPath, true),
+          ),
+          refreshService: _NoopRefreshService(),
+          dbPathProvider: () => dbPath,
+          dataRootProvider: () async => tmp.path,
+        );
+        AppPaths.debugOverrideDataRootPath(tmp.path);
+        try {
+          await expectLater(
+            repository.applyDeltaPlan(
+              _schema4DeltaPlan([
+                _schema4Edge(
+                  fromVersion: 1,
+                  toVersion: 2,
+                  patchName: 'patch-1-2.db',
+                  toHash: _logicalHash(expectedPath),
+                ),
+              ]),
+            ),
+            throwsA(
+              isA<LibraryUpdateReadOnlyException>().having(
+                (e) => e.toString(),
+                'message',
+                allOf(contains('הרשאת כתיבה'), contains(tmp.path)),
+              ),
+            ),
+          );
+          final log = ErrorLogFile.resolveFile().readAsStringSync();
+          expect(log, contains('journal_mode=WAL failed'));
+          expect(log, contains('readonly database'));
+          expect(const LocalDbVersionReader().read(dbPath).dbVersion, 1);
+        } finally {
+          await _setReadOnly(dbPath, false);
+          AppPaths.debugOverrideDataRootPath(null);
+        }
+      },
+    );
+  }
+
   test(
     'נסיגה מ-WAL לסגירת חיבור ה-RO נרשמת ל-errors.txt',
     () async {
       final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
       _writeDb(dbPath, version: 1, marker: 'old');
       AppPaths.debugOverrideDataRootPath(tmp.path);
-      // קובץ לקריאה-בלבד: SQLite פותח אותו RO בשקט וההמרה ל-WAL לא תופסת.
-      await _setReadOnly(dbPath, true);
+      // קורא באמצע transaction מחזיק נעילה משותפת: ההמרה ל-WAL לא תופסת.
+      final reader = sqlite3.sqlite3.open(dbPath)
+        ..execute('BEGIN')
+        ..select('SELECT value FROM marker');
 
       final repository = LibraryUpdateRepository(
         discovery: _unusedDiscovery(),
@@ -1016,9 +1256,9 @@ void main() {
         );
         final log = ErrorLogFile.resolveFile().readAsStringSync();
         expect(log, contains('journal_mode=WAL failed'));
-        expect(log, contains('readonly database'));
+        expect(log, contains('database is locked'));
       } finally {
-        await _setReadOnly(dbPath, false);
+        reader.close();
         AppPaths.debugOverrideDataRootPath(null);
       }
     },
@@ -1808,6 +2048,21 @@ Future<void> _setReadOnly(String path, bool readOnly) async {
   expect(result.exitCode, 0, reason: result.stderr.toString());
 }
 
+Future<void> _setMacWriteAcl(String path, {required bool allowWrite}) async {
+  final user = Platform.environment['USER']!;
+  final result = await Process.run('chmod', [
+    '+a',
+    'user:$user ${allowWrite ? 'allow' : 'deny'} write,append',
+    path,
+  ]);
+  expect(result.exitCode, 0, reason: result.stderr.toString());
+}
+
+Future<void> _clearMacAcl(String path) async {
+  final result = await Process.run('chmod', ['-N', path]);
+  expect(result.exitCode, 0, reason: result.stderr.toString());
+}
+
 String _journalMode(String dbPath) {
   final db = sqlite3.sqlite3.open(dbPath, mode: sqlite3.OpenMode.readOnly);
   try {
@@ -2035,10 +2290,14 @@ class _NoopRefreshService extends LibraryRuntimeRefreshService {
 
 /// downloader עם http.Client אמיתי (IOClient לא-sendable), שמחזיר patch מקומי.
 class _LocalPatchDownloader extends PatchDownloader {
-  _LocalPatchDownloader(this.patchPath, {this.verifyProgress})
-    : super(decompress: (b) async => b);
+  _LocalPatchDownloader(
+    this.patchPath, {
+    this.verifyProgress,
+    this.beforeReturn,
+  }) : super(decompress: (b) async => b);
   final String patchPath;
   final (int, int)? verifyProgress;
+  final Future<void> Function()? beforeReturn;
 
   @override
   Future<String> downloadAndExtract({
@@ -2051,6 +2310,7 @@ class _LocalPatchDownloader extends PatchDownloader {
   }) async {
     final progress = verifyProgress;
     if (progress != null) onVerifyProgress?.call(progress.$1, progress.$2);
+    await beforeReturn?.call();
     return patchPath;
   }
 }

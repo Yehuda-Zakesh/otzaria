@@ -3050,7 +3050,7 @@ void main() {
         lessThan(promoteFinal),
       );
       expect(
-        _routine(_script(_assistant), 'function AppendFileTo('),
+        _routine(_script(_assistant), 'function WriteFileTo('),
         contains('(Copied = Expected)'),
       );
     });
@@ -3163,8 +3163,41 @@ void main() {
       final copy = _routine(script, 'function CopyToOutput(');
       final link = copy.indexOf('CreateHardLink(Dest, CachePath(Name), 0)');
       expect(link, greaterThanOrEqualTo(0));
-      expect(copy.indexOf('CopyFile(CachePath(Name), Dest'), greaterThan(link));
+      expect(
+        copy.indexOf('WriteFileTo(Dest, CachePath(Name)'),
+        greaterThan(link),
+      );
     });
+
+    test(
+      '$_assistant: הכנת היעד מתקדמת לפי בתים, גם באמצע קובץ (issue #2429)',
+      () {
+        final script = _script(_assistant);
+        final prepare = _routine(script, 'function PrepareOutput()');
+        final copy = _routine(script, 'function CopyToOutput(');
+        // לפי מספר קבצים: 4 קבצים קטנים מתוך 7 = 57%, ושם נתקע על הקובץ הענק.
+        expect(prepare, contains('Total := UiSelectedSize();'));
+        expect(prepare, isNot(contains('SetProgress(Produced, Total)')));
+        expect(
+          copy,
+          contains('SetProgress(MegaBytes(Done), MegaBytes(Total))'),
+        );
+        expect(
+          copy,
+          isNot(contains('CopyFile(')),
+          reason: 'אינו מדווח עד סופו',
+        );
+        expect(
+          copy,
+          contains('WriteFileTo(Dest, CachePath(Name), fmCreate, Size, Done,'),
+        );
+        expect(
+          _routine(script, 'function AssembleAsset('),
+          contains('Base + Done, Total,'),
+          reason: 'גם ההרכבה נמדדת מול סך כל העבודה, כמו ב-macOS',
+        );
+      },
+    );
 
     test('$_assistant: פס ההורדה מציג מהירות וזמן, ואינו קופא בלי הסבר', () {
       final script = _script(_assistant);
@@ -3228,12 +3261,12 @@ void main() {
         contains('Bytes := DownloadStatus;'),
       );
       expect(
-        _routine(script, 'function AppendFileTo('),
+        _routine(script, 'function WriteFileTo('),
         contains('WorkPage.SetProgress('),
         reason: 'ההרכבה מדווחת התקדמות בבתים',
       );
       expect(
-        _routine(script, 'function AppendFileTo('),
+        _routine(script, 'function WriteFileTo('),
         contains("' · ' + PostEtaText()"),
         reason: 'גם לחיבור החלקים יש זמן משוער',
       );
@@ -3785,7 +3818,7 @@ void main() {
       );
       expect(sidecar, greaterThanOrEqualTo(0));
       expect(
-        assemble.indexOf('AppendFileTo(TmpPath, PartPath,'),
+        assemble.indexOf('WriteFileTo(TmpPath, PartPath,'),
         greaterThan(sidecar),
         reason: 'חותם הצד נכתב לפני הבית הראשון',
       );
@@ -3900,7 +3933,7 @@ void main() {
 
     test('$_assistant: ההרכבה מוחקת כל חלק מיד אחרי הוספתו', () {
       final assemble = _routine(_script(_assistant), 'function AssembleAsset(');
-      final append = assemble.indexOf('AppendFileTo(TmpPath, PartPath,');
+      final append = assemble.indexOf('WriteFileTo(TmpPath, PartPath,');
       final delete = assemble.indexOf('DeleteFile(PartPath)');
 
       expect(append, greaterThanOrEqualTo(0));

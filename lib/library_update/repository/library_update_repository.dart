@@ -4,6 +4,7 @@ import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/core/directory_writability.dart';
 import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/data/data_providers/database_library_provider.dart';
@@ -75,6 +76,18 @@ class LibraryUpdateDiskSpaceException implements Exception {
 
   @override
   String toString() => message;
+}
+
+/// הרשאות הספרייה אינן מאפשרות את העדכון.
+class LibraryUpdateReadOnlyException implements Exception {
+  final String dir;
+  const LibraryUpdateReadOnlyException(this.dir);
+
+  @override
+  String toString() =>
+      'אין לתוכנה הרשאת כתיבה לתיקיית הספרייה, ולכן אי אפשר לעדכן אותה.'
+      '\n\nהתיקייה: $dir\n\nהעבר את הספרייה למיקום שניתן לכתוב אליו, '
+      'או בטל את סימון "קריאה בלבד" של התיקייה ושל קובצי הספרייה.';
 }
 
 /// תוצאת מסלול דלתא ברמת האפליקציה.
@@ -280,6 +293,7 @@ class LibraryUpdateRepository implements LibraryUpdateService {
     bool Function()? isCancelled,
   }) async {
     final dbPath = dbPathProvider();
+    await _ensureDbDirectoryWritable(dbPath);
     final cacheDir = Directory(
       p.join(await dataRootProvider(), 'library_update_cache'),
     );
@@ -581,6 +595,19 @@ class LibraryUpdateRepository implements LibraryUpdateService {
     } catch (_) {}
   }
 
+  /// בדיקת התיקייה מקדימה; הרשאות קובץ המסד נבדקות בעת ההחלה או ההחלפה.
+  Future<void> _ensureDbDirectoryWritable(String dbPath) async {
+    final dir = p.dirname(dbPath);
+    if (!await isDirectoryWritable(dir)) {
+      throw LibraryUpdateReadOnlyException(dir);
+    }
+  }
+
+  static bool _isPermissionError(FileSystemException error) =>
+      (Platform.isWindows ? const {5, 19} : const {1, 13, 30}).contains(
+        error.osError?.errorCode,
+      );
+
   /// זורק [LibraryUpdateDiskSpaceException] אם אין מקום ל-patch של הצעד:
   /// בקאש — הדחוס והמחולץ; ליד ה-DB — ה-WAL של טרנזקציית ההחלה היחידה.
   Future<void> _ensureDiskSpaceForDeltaStep({
@@ -664,6 +691,7 @@ class LibraryUpdateRepository implements LibraryUpdateService {
       throw StateError('אין DB מלא בתוכנית');
     }
     final dbPath = dbPathProvider();
+    await _ensureDbDirectoryWritable(dbPath);
     final cacheDir = Directory(
       p.join(await dataRootProvider(), 'library_update_cache'),
     );
@@ -889,10 +917,13 @@ class LibraryUpdateRepository implements LibraryUpdateService {
                 'Full DB replacement callback failed: $error\n$stackTrace',
               );
             }
-          } catch (_) {
+          } catch (error) {
             // לפני beginApply אין לפעולה הזו artifacts משלה; rollback בשלב הזה
             // עלול לגעת בטעות בגיבוי ישן שאינו שייך לריצה הנוכחית.
             if (recoveryStarted) await recovery.rollback(dbPath);
+            if (error is FileSystemException && _isPermissionError(error)) {
+              throw LibraryUpdateReadOnlyException(p.dirname(dbPath));
+            }
             rethrow;
           }
         },
@@ -947,8 +978,11 @@ class LibraryUpdateRepository implements LibraryUpdateService {
         DbReadWorker.clearBookCacheIfRunning();
         recovery.finishSuccess(dbPath);
         return booksTouched;
-      } catch (_) {
+      } catch (error) {
         await recovery.rollback(dbPath);
+        if (error is sqlite3.SqliteException && error.resultCode == 8) {
+          throw LibraryUpdateReadOnlyException(p.dirname(dbPath));
+        }
         rethrow;
       } finally {
         try {
