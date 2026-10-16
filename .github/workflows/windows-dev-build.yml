@@ -127,6 +127,7 @@ jobs:
       - name: Build Inno Setup installer
         shell: pwsh
         run: |
+          & ./tool/release/fetch_assistant_art.ps1
           & "$env:ISCC" installer\otzaria.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup build failed" }
           $setup = Get-ChildItem -Recurse -Filter "otzaria-*-windows.exe" |
