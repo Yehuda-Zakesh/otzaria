@@ -97,4 +97,24 @@ void main() {
     expect(code, ReleaseIndexBuilderCliExitCode.buildFailed);
     expect(err.toString(), contains('boom'));
   });
+
+  test('אינדקס להפצה חייב לכלול את מספרי הספרים ואת מיפוי הסדר', () async {
+    final dir = await Directory.systemTemp.createTemp('release_order');
+    addTearDown(() => dir.delete(recursive: true));
+    File(p.join(dir.path, 'otzaria_book_numbers.json')).writeAsStringSync('{}');
+
+    expect(
+      () => ReleaseIndexBuilderCli.verifyBookOrderFiles(dir.path),
+      throwsA(
+        isA<StateError>().having(
+          (e) => e.message,
+          'message',
+          contains('otzaria_book_order.json'),
+        ),
+      ),
+    );
+
+    File(p.join(dir.path, 'otzaria_book_order.json')).writeAsStringSync('{}');
+    ReleaseIndexBuilderCli.verifyBookOrderFiles(dir.path);
+  });
 }

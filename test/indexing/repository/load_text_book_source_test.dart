@@ -11,12 +11,15 @@ import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
+import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
+import 'package:otzaria/search/library_line_source.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 import 'package:path/path.dart' as path;
 
 import '../../test_helpers/memory_cache_provider.dart';
+import '../../support/search_engine_test_init.dart';
 
 /// [IndexingRepository.loadTextBookSource] האמיתי מול seforim.db: רק ספר שהטקסט
 /// שנמסר למנוע הוא בדיוק שורות המסד יכול להיות מאונדקס בלי הטקסט.
@@ -52,6 +55,7 @@ void main() {
       (302, 'מעבר בשורה', ['א\nב', 'ג']),
       (303, 'תמונה בלבד', [imageOnlyRow]),
       (304, 'ספר מצויר', illustratedRows),
+      (305, 'ספר הערות', _notedRows),
     ]) {
       db.execute(
         'INSERT INTO book (id, categoryId, sourceId, title, orderIndex, '
@@ -65,6 +69,16 @@ void main() {
         );
       }
     }
+    db.execute(
+      'CREATE TABLE line_note (lineId INTEGER NOT NULL, '
+      'noteIndex INTEGER NOT NULL, charPos INTEGER NOT NULL, marker TEXT, '
+      'body TEXT NOT NULL, PRIMARY KEY (lineId, noteIndex)) WITHOUT ROWID',
+    );
+    db.execute(
+      'INSERT INTO line_note (lineId, noteIndex, charPos, marker, body) '
+      "SELECT id, 0, 4, 'א', 'מילה_בהערה מילתנסיוןנדירה' FROM line "
+      'WHERE bookId = 305 AND lineIndex = 0',
+    );
     database.close();
 
     await UserBooksDatabaseHolder.instance.close();
@@ -89,12 +103,17 @@ void main() {
     }
   });
 
-  TextStorage storageFor(TextBook book, int? libraryDbBookId) =>
-      IndexingRepository.textStorageFor(
-        filePath: IndexingRepository.buildIndexedBookFilePath(book),
-        libraryDbBookId: libraryDbBookId,
-        hostApiReady: true,
-      );
+  TextStorage storageFor(
+    TextBook book,
+    int? libraryDbBookId, {
+    int? userBooksDbBookId,
+  }) => IndexingRepository.textStorageFor(
+    filePath: IndexingRepository.buildIndexedBookFilePath(book),
+    libraryDbBookId: libraryDbBookId,
+    userBooksDbBookId: userBooksDbBookId,
+    hostApiReady: true,
+    userBooksConfigured: true,
+  );
 
   test('שורות נקיות מהמסד — המנוע יקרא אותן משם', () async {
     final book = TextBook(id: 301, title: 'שורות נקיות', categoryId: 7);
@@ -102,6 +121,7 @@ void main() {
 
     expect(source.bytes, utf8.encode('א\nב'));
     expect(source.libraryDbBookId, 301);
+    expect(source.userBooksDbBookId, isNull);
     expect(storageFor(book, source.libraryDbBookId), TextStorage.libraryDb);
     expect(source.dataUriLines, isNull);
   });
@@ -130,6 +150,88 @@ void main() {
     expect(storageFor(book, source.libraryDbBookId), TextStorage.inIndex);
   });
 
+  test(
+    'ספר מהמסד עם הערות ב-line_note — הגוף מאונדקס, והטקסט נשמר באינדקס',
+    () async {
+      final book = TextBook(id: 305, title: 'ספר הערות', categoryId: 7);
+      final source = await repository.loadTextBookSource(book);
+
+      expect(
+        utf8.decode(source.bytes!),
+        'גוף<sup class="footnote-marker">א</sup>'
+        '<i class="footnote">מילה_בהערה מילתנסיוןנדירה</i> סוף\nב',
+      );
+      // שורות המסד אינן הטקסט המאונדקס, ולכן המנוע אינו קורא אותן משם.
+      expect(source.libraryDbBookId, isNull);
+      expect(storageFor(book, source.libraryDbBookId), TextStorage.inIndex);
+    },
+  );
+
+  test('אינדוקס באצווה משחזר הערות כמו מסלול ספר יחיד', () async {
+    expect(await tryInitSearchEngine(), isTrue, reason: searchEngineSkipReason);
+    expect(await LibraryLineSource.ensureHostSqlite(), isTrue);
+    await LibraryLineSource.configure(path.join(tempDir.path, 'seforim.db'));
+    final index = await Directory(path.join(tempDir.path, 'index')).create();
+    final engine = await SearchEngine.newInstance(path: index.path);
+    final token = IndexingCancellationToken();
+    try {
+      final source = await repository.loadTextBookSource(
+        TextBook(id: 305, title: 'ספר הערות', categoryId: 7),
+      );
+      await engine.openIndexWriter();
+      final result = (await engine.addLibraryBooks(
+        books: const [
+          LibraryBookInput(
+            source: LibraryBookSource.library_,
+            bookId: 305,
+            dbTitle: 'ספר הערות',
+            title: 'ספר הערות',
+            topics: '/test',
+            filePath: 'id:305',
+            textStorage: TextStorage.libraryDb,
+          ),
+        ],
+        cancel: token,
+      )).single;
+      expect(result.status, LibraryBookStatus.indexed);
+      expect(result.textStorage, TextStorage.inIndex);
+      expect(
+        result.textHash,
+        await computeContentFingerprintBytes(text: source.bytes!),
+      );
+      expect(
+        await libraryBookContentFingerprint(
+          source: LibraryBookSource.library_,
+          bookId: 305,
+          dbTitle: 'ספר הערות',
+        ),
+        result.textHash,
+      );
+      await engine.commit();
+      final hits = await engine.searchExact(
+        query: 'מילתנסיוןנדירה',
+        facets: [],
+        limit: 10,
+        offset: 0,
+        order: ResultsOrder.catalogue,
+        matchNikud: false,
+        matchTaamim: false,
+      );
+      expect(hits, hasLength(1));
+      expect(hits.single.text, contains('מילה_בהערה '));
+      expect(
+        hits.single.text,
+        contains('<font color=red>מילתנסיוןנדירה</font>'),
+      );
+      expect(hits.single.textStatus, TextStatus.ok);
+      expect(hits.single.segment, BigInt.zero);
+    } finally {
+      token.dispose();
+      engine.dispose();
+      await LibraryLineSource.closeNow();
+    }
+  });
+
   test('טקסט שנלקח מהקובץ ולא מהמסד — הטקסט נשמר באינדקס', () async {
     final file = File(path.join(tempDir.path, 'תמונה בלבד.html'));
     await file.writeAsString('<html><body><p>מהקובץ</p></body></html>');
@@ -148,7 +250,89 @@ void main() {
     expect(storageFor(book, source.libraryDbBookId), TextStorage.inIndex);
     expect(source.dataUriLines, isNull);
   });
+
+  group('ספרים אישיים מ-user_books.db', () {
+    late File importedFile;
+
+    setUp(() async {
+      await Settings.setValue<String>(
+        SettingsRepository.keyDatabasesPath,
+        path.join(tempDir.path, 'databases'),
+      );
+      importedFile = File(path.join(tempDir.path, 'מקובץ.txt'));
+      await importedFile.writeAsString('מהקובץ');
+      final repo = await UserBooksDatabaseHolder.instance.repository;
+      final db = await repo.database.database;
+      db.execute(
+        "INSERT INTO category (id, title, level) VALUES (50, 'ספרים אישיים', 0)",
+      );
+      db.execute("INSERT OR IGNORE INTO source (id, name) VALUES (1, 'אישי')");
+      for (final (id, title, rows, filePath) in [
+        (7, 'אישי נקי', ['א', 'ב'], null),
+        (8, 'אישי מעבר', ['א\nב', 'ג'], null),
+        (9, 'אישי מקובץ', ['מהסריקה'], importedFile.path),
+        (10, 'אישי מצויר', illustratedRows, null),
+      ]) {
+        db.execute(
+          'INSERT INTO book (id, categoryId, sourceId, title, orderIndex, '
+          'totalLines, filePath) VALUES (?, 50, 1, ?, ?, ?, ?)',
+          [id, title, id, rows.length, filePath],
+        );
+        for (var i = 0; i < rows.length; i++) {
+          db.execute(
+            'INSERT INTO line (bookId, lineIndex, content) VALUES (?, ?, ?)',
+            [id, i, rows[i]],
+          );
+        }
+      }
+    });
+
+    TextBook userBook(int id, String title) =>
+        TextBook(id: id, title: title, categoryId: 50, source: BookSource.user);
+
+    test('שורות נקיות — ה-id של user_books.db ולא של seforim.db', () async {
+      final book = userBook(7, 'אישי נקי');
+      final source = await repository.loadTextBookSource(book);
+
+      expect(source.bytes, utf8.encode('א\nב'));
+      expect(source.libraryDbBookId, isNull);
+      expect(source.userBooksDbBookId, 7);
+      expect(
+        storageFor(book, null, userBooksDbBookId: source.userBooksDbBookId),
+        TextStorage.libraryDb,
+      );
+    });
+
+    test('ספר מצויר — שורות התמונות נמסרות כמו בספר רשמי', () async {
+      final source = await repository.loadTextBookSource(
+        userBook(10, 'אישי מצויר'),
+      );
+
+      expect(source.userBooksDbBookId, 10);
+      expect(source.dataUriLines, [0, 2]);
+    });
+
+    test(r'שורה עם \n פנימי — בלי id', () async {
+      final source = await repository.loadTextBookSource(
+        userBook(8, 'אישי מעבר'),
+      );
+
+      expect(source.bytes, utf8.encode('א\nב\nג'));
+      expect(source.userBooksDbBookId, isNull);
+    });
+
+    test('ספר מקובץ — בלי id גם כשיש לו שורות מהסריקה', () async {
+      final source = await repository.loadTextBookSource(
+        userBook(9, 'אישי מקובץ'),
+      );
+
+      expect(source.userBooksDbBookId, isNull);
+      expect(source.libraryDbBookId, isNull);
+    });
+  });
 }
+
+const _notedRows = ['גוף<sup class="footnote-marker">א</sup> סוף', 'ב'];
 
 class _UnusedTantivyDataProvider implements TantivyDataProvider {
   @override

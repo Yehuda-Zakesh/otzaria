@@ -348,6 +348,33 @@ Future<void> main() async {
       );
     }
 
+    testWidgets('שאילתה חיצונית חדשה: התוצאה הבאה היא הראשונה (#2606)', (
+      tester,
+    ) async {
+      final controller = TextEditingController();
+      addTearDown(controller.dispose);
+      await _pumpWidget(
+        tester,
+        textBookBloc: textBookBloc,
+        settingsBloc: settingsBloc,
+        externalSearchController: controller,
+      );
+      final list = tester.state<CommentaryListBaseState>(
+        find.byType(CommentaryListBase),
+      );
+      final links = (textBookBloc.state as TextBookLoaded).links;
+
+      controller.text = 'עמק';
+      await _pumpSearchCounts(tester);
+      expect(list.totalSearchResultsNotifier.value, 80);
+      expect(list.currentSearchIndexNotifier.value, -1);
+
+      list.navigateSearchNext();
+      await tester.pump();
+      expect(list.currentSearchIndexNotifier.value, 0);
+      expect(_contentFor(tester, links.first).currentSearchIndex, 0);
+    }, skip: !engineReady);
+
     testWidgets('ניווט לתוצאה רחוקה אינו מפיל את הרשימה', (tester) async {
       await _pumpWidget(
         tester,

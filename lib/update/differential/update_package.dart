@@ -1,8 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:archive/archive.dart';
-import 'package:crypto/crypto.dart';
+import 'package:otzaria/utils/file/native_sha256.dart';
 
 import 'managed_paths.dart';
 import 'tree_fs.dart';
@@ -467,17 +468,46 @@ class UpdatePackageManifest {
 }
 
 /// חבילת עדכון פתוחה: המניפסט המאומת וגישה ל-payloads שבתוכה.
+/// ה-ZIP נקרא בזרימה מהדיסק ב-isolate, כך שחבילה של מאות MB אינה נטענת לזיכרון.
 class UpdatePackage {
-  UpdatePackage._(this._archive, this.manifest);
+  UpdatePackage._(this._path, this.manifest);
 
-  final Archive _archive;
+  final String _path;
   final UpdatePackageManifest manifest;
 
   /// פותח חבילה מקובץ ZIP ומאמת את המניפסט שבתוכה.
   static Future<UpdatePackage> open(File file) async {
+    final path = file.path;
+    final decoded = await Isolate.run(() => _readManifestJson(path));
+    return UpdatePackage._(path, UpdatePackageManifest.fromJson(decoded));
+  }
+
+  /// כותב את ה-payload של הערך ל-[output] ומאמת את ה-hash שלו.
+  Future<void> writePayloadTo(UpdatePackageEntry entry, File output) {
+    final package = _path;
+    final entryName = entry.entryName;
+    final entrySha256 = entry.entrySha256;
+    final path = entry.path;
+    final outputPath = output.path;
+    return Isolate.run(
+      () => _extractVerifiedPayload(
+        package,
+        entryName,
+        entrySha256,
+        path,
+        outputPath,
+      ),
+    );
+  }
+}
+
+Object? _readManifestJson(String packagePath) {
+  InputFileStream? input;
+  try {
     final Archive archive;
     try {
-      archive = ZipDecoder().decodeBytes(await file.readAsBytes());
+      input = InputFileStream(packagePath);
+      archive = ZipDecoder().decodeStream(input);
     } catch (error) {
       _invalid('the update package could not be read: $error');
     }
@@ -485,30 +515,45 @@ class UpdatePackage {
     if (entry == null) {
       _invalid('the package has no $kUpdatePackageManifestEntryName');
     }
-    final Object? decoded;
     try {
-      decoded = jsonDecode(utf8.decode(entry.readBytes()!));
+      return jsonDecode(utf8.decode(entry.readBytes()!));
     } catch (error) {
       _invalid('$kUpdatePackageManifestEntryName is not valid JSON: $error');
     }
-    return UpdatePackage._(archive, UpdatePackageManifest.fromJson(decoded));
+  } finally {
+    input?.closeSync();
   }
+}
 
-  /// מחזיר את ה-payload של הערך אחרי אימות ה-hash שלו.
-  List<int> payloadOf(UpdatePackageEntry entry) {
-    final bytes = _archive.findFile(entry.entryName)?.readBytes();
-    if (bytes == null) {
+Future<void> _extractVerifiedPayload(
+  String packagePath,
+  String entryName,
+  String entrySha256,
+  String path,
+  String outputPath,
+) async {
+  final input = InputFileStream(packagePath);
+  try {
+    final file = ZipDecoder().decodeStream(input).findFile(entryName);
+    if (file == null || !file.isFile) {
       _fail(
         UpdateAbortReason.packageCorrupt,
-        '${entry.path}: ${entry.entryName} is missing from the package',
+        '$path: $entryName is missing from the package',
       );
     }
-    if (sha256.convert(bytes).toString() != entry.entrySha256) {
-      _fail(
-        UpdateAbortReason.packageCorrupt,
-        '${entry.path}: the package payload is corrupt',
-      );
+    final output = OutputFileStream(outputPath);
+    try {
+      file.writeContent(output);
+    } finally {
+      output.closeSync();
     }
-    return bytes;
+  } finally {
+    input.closeSync();
+  }
+  if (await sha256OfFileFast(outputPath) != entrySha256) {
+    _fail(
+      UpdateAbortReason.packageCorrupt,
+      '$path: the package payload is corrupt',
+    );
   }
 }

@@ -22,6 +22,7 @@ class BookFacetMetadataCache {
 
   bool _isLoaded = false;
   Future<void>? _loadingFuture;
+  int _generation = 0;
 
   final Map<int, List<String>> _authorsByBookId = <int, List<String>>{};
   final Map<int, List<String>> _authorsByUserBookId = <int, List<String>>{};
@@ -40,15 +41,26 @@ class BookFacetMetadataCache {
   Future<void> warmUp() async {
     if (_isLoaded) return;
     if (_loadingFuture != null) return _loadingFuture;
-    _loadingFuture = _loadInternal();
+    final loading = _loadingFuture = _loadInternal(_generation);
     try {
-      await _loadingFuture;
+      await loading;
     } finally {
-      _loadingFuture = null;
+      if (identical(_loadingFuture, loading)) _loadingFuture = null;
     }
   }
 
-  Future<void> _loadInternal() async {
+  /// מפנה את הנתונים אחרי החלפת מסד; הטעינה הבאה קוראת את המסד החדש.
+  void clear() {
+    _generation++;
+    _isLoaded = false;
+    _loadingFuture = null;
+    _authorsByBookId.clear();
+    _authorsByUserBookId.clear();
+    _baseBookIds.clear();
+    _baseUserBookIds.clear();
+  }
+
+  Future<void> _loadInternal(int generation) async {
     // התקופה מגיעה מ-GenerationCache — מחומם יחד כדי שהאינדוקס לא ירוץ
     // לפני שהדורות נטענו (ואז כל הספרים היו נטבעים בלי /era).
     await GenerationCache.instance.warmUp();
@@ -58,16 +70,20 @@ class BookFacetMetadataCache {
       debugPrint('[BookFacetMetadataCache] DB not initialized; skipping');
       return;
     }
+    final authors = <int, List<String>>{};
+    final userAuthors = <int, List<String>>{};
+    final baseIds = <int>{};
+    final userBaseIds = <int>{};
     try {
       final db = await repository.database.database;
       final capabilities = await repository.database.capabilities;
       if (capabilities.hasAuthors) {
-        _accumulateAuthors(db.select(_authorsSql), _authorsByBookId);
+        _accumulateAuthors(db.select(_authorsSql), authors);
       }
       if (capabilities.hasColumn('book', 'isBaseBook')) {
         for (final row in db.select(_baseBooksSql)) {
           final id = row['id'] as int?;
-          if (id != null) _baseBookIds.add(id);
+          if (id != null) baseIds.add(id);
         }
       }
 
@@ -76,27 +92,30 @@ class BookFacetMetadataCache {
       if (userRepo != null) {
         try {
           final userDb = await userRepo.database.database;
-          _accumulateAuthors(userDb.select(_authorsSql), _authorsByUserBookId);
+          _accumulateAuthors(userDb.select(_authorsSql), userAuthors);
           for (final row in userDb.select(_baseBooksSql)) {
             final id = row['id'] as int?;
-            if (id != null) _baseUserBookIds.add(id);
+            if (id != null) userBaseIds.add(id);
           }
         } catch (e) {
           debugPrint('[BookFacetMetadataCache] user_books skipped: $e');
         }
       }
-      _isLoaded = true;
-      debugPrint(
-        '[BookFacetMetadataCache] Loaded authors for '
-        '${_authorsByBookId.length} books, ${_baseBookIds.length} base books',
-      );
     } catch (e) {
       debugPrint('[BookFacetMetadataCache] warmup failed: $e');
-      _authorsByBookId.clear();
-      _authorsByUserBookId.clear();
-      _baseBookIds.clear();
-      _baseUserBookIds.clear();
+      return;
     }
+    // מסד שהוחלף באמצע הטעינה ([clear]) — הנתונים שנקראו כבר אינם שלו.
+    if (generation != _generation) return;
+    _authorsByBookId.addAll(authors);
+    _authorsByUserBookId.addAll(userAuthors);
+    _baseBookIds.addAll(baseIds);
+    _baseUserBookIds.addAll(userBaseIds);
+    _isLoaded = true;
+    debugPrint(
+      '[BookFacetMetadataCache] Loaded authors for '
+      '${_authorsByBookId.length} books, ${_baseBookIds.length} base books',
+    );
   }
 
   static void _accumulateAuthors(Iterable rows, Map<int, List<String>> into) {

@@ -26,10 +26,7 @@ class PersonalNotesBloc extends Bloc<PersonalNotesEvent, PersonalNotesState> {
     on<CancelCreatingPersonalNote>(_onCancelCreatingNote);
     on<UpdateSearchQuery>(_onUpdateSearchQuery);
     // debounce לעדכוני גלילה - מעבד רק את האירוע האחרון תוך 100ms
-    on<UpdateVisibleLines>(
-      _onUpdateVisibleLines,
-      transformer: restartable(),
-    );
+    on<UpdateVisibleLines>(_onUpdateVisibleLines, transformer: restartable());
     on<ToggleShowOnlyVisible>(_onToggleShowOnlyVisible);
     on<_StoredNotesChanged>(_onStoredNotesChanged, transformer: restartable());
     _changesSubscription = PersonalNotesChanges.stream.listen((bookId) {
@@ -161,6 +158,8 @@ class PersonalNotesBloc extends Bloc<PersonalNotesEvent, PersonalNotesState> {
         contentFormat: event.contentFormat,
         selectedText: event.selectedText,
         selectionColumn: event.selectionColumn,
+        sourceSelectedText: event.sourceSelectedText,
+        sourceSelectionOffset: event.sourceSelectionOffset,
         punctuationHidden: event.punctuationHidden,
         categoryId: state.categoryId,
       );
@@ -249,11 +248,14 @@ class PersonalNotesBloc extends Bloc<PersonalNotesEvent, PersonalNotesState> {
     emit(
       state.copyWith(
         isCreatingNewNote: true,
+        clearNewNoteSourceSelection: true,
         newNoteBookId: event.bookId,
         newNoteLineNumber: event.lineNumber,
         newNoteReferenceText: event.referenceText,
         newNoteSelectedText: event.selectedText,
         newNoteSelectionColumn: event.selectionColumn,
+        newNoteSourceSelectedText: event.sourceSelectedText,
+        newNoteSourceSelectionOffset: event.sourceSelectionOffset,
         newNotePunctuationHidden: event.punctuationHidden,
         newNoteInitialContent: event.initialContent,
         newNoteInitialFormat: event.initialFormat,

@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'package:otzaria/semantic_search/models/semantic_vectors_family.dart';
 
 /// קובץ להורדה מתוך release הוקטורים, כפי שהמניפסט מתאר אותו.
 class SemanticVectorsFile extends Equatable {
@@ -30,7 +31,7 @@ class SemanticVectorsRelease extends Equatable {
   /// תג הספרייה, למשל `v30-20260930165019`.
   final String libraryTag;
 
-  /// תג ה-release, `vectors-<libraryTag>`.
+  /// תג ה-release: תחילית המשפחה ואחריה [libraryTag].
   final String releaseTag;
 
   /// גרסת הספרייה שהסט מביא אליה (`toLibraryVersion`).
@@ -51,6 +52,15 @@ class SemanticVectorsRelease extends Equatable {
   /// גודל ה-segment הפרוס — המקום שההתקנה תתפוס.
   final int segmentUncompressedSize;
 
+  /// `identityDigest` מהמניפסט; ריק כשאינו.
+  final String identityDigest;
+
+  /// `identity.model.chunking_identity` מהמניפסט; `null` כשאינו.
+  final int? chunkingIdentity;
+
+  /// המשפחה שה-release נמצא בה; לפיה ה-model.json שבהתקנה.
+  final SemanticVectorsFamily family;
+
   const SemanticVectorsRelease({
     required this.libraryTag,
     required this.releaseTag,
@@ -60,7 +70,24 @@ class SemanticVectorsRelease extends Equatable {
     required this.publishedManifestSha256,
     required this.files,
     required this.segmentUncompressedSize,
+    this.identityDigest = '',
+    this.chunkingIdentity,
+    this.family = SemanticVectorsFamily.anchor,
   });
+
+  /// [identityDigest] ו-[chunkingIdentity] כפי שהם במניפסט [manifest].
+  static ({String identityDigest, int? chunkingIdentity}) identityOf(
+    Map<String, dynamic> manifest,
+  ) => (
+    identityDigest: switch (manifest['identityDigest']) {
+      final String digest => digest,
+      _ => '',
+    },
+    chunkingIdentity: switch (manifest['identity']) {
+      {'model': {'chunking_identity': final int chunking}} => chunking,
+      _ => null,
+    },
+  );
 
   /// סך הבתים להורדה.
   int get downloadSize => files.fold(0, (sum, file) => sum + file.size);
@@ -80,5 +107,8 @@ class SemanticVectorsRelease extends Equatable {
     publishedManifestSha256,
     files,
     segmentUncompressedSize,
+    identityDigest,
+    chunkingIdentity,
+    family,
   ];
 }

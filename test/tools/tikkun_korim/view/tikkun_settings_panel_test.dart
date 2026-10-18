@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/tools/tikkun_korim/models/tikkun_models.dart';
+import 'package:otzaria/tools/tikkun_korim/models/tikkun_vav_ketia.dart';
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_settings.dart';
 import 'package:otzaria/tools/tikkun_korim/view/widgets/tikkun_settings_panel.dart';
 
@@ -31,6 +32,16 @@ Future<TikkunSettings?> _pumpPanel(
 }
 
 void main() {
+  testWidgets('בחירת צורת וי״ו בחלונית מעדכנת את ההגדרות', (tester) async {
+    TikkunSettings? updated;
+    await _pumpPanel(tester, onChanged: (s) => updated = s);
+    await tester.ensureVisible(find.text('לפי המסורת'));
+    await tester.tap(find.text('לפי המסורת'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('זעירא — כל האות קטנה'));
+    await tester.pumpAndSettle();
+    expect(updated?.vavKetia, TikkunVavKetia.small);
+  });
   testWidgets('כיבוי מתג "הצגת טור המנוקד" מסתיר את הטור', (tester) async {
     TikkunSettings? updated;
     await _pumpPanel(tester, onChanged: (s) => updated = s);

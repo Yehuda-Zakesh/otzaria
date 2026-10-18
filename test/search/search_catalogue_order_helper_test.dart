@@ -33,20 +33,19 @@ void main() {
       ]);
     });
 
-    test('מזהה המסמך באינדקס עולה מהמדרש למפרשיו (issue #649)', () {
+    test('סדר הקטלוג במנוע עולה מהמדרש למפרשיו (issue #649)', () async {
       final library = _buildMidrashLibrary();
-      final orderByTitle = SearchCatalogueOrderHelper.buildKeyOrderMap<String>(
-        library,
-        keyOf: (book) => book.title as String,
-      );
+      final order = {
+        for (final entry in await IndexingRepository.buildBookOrder(library))
+          entry.filePath: entry.catalogueOrder,
+      };
+      int orderOf(String title) =>
+          order[IndexingRepository.buildIndexedBookFilePath(
+            library.getAllBooks().singleWhere((book) => book.title == title),
+          )]!;
 
-      BigInt idFor(String title) => IndexingRepository.buildCatalogueDocumentId(
-        catalogueOrder: orderByTitle[title]!,
-        ordinal: 0,
-      );
-
-      expect(idFor('ספרא'), lessThan(idFor('ראבד על ספרא')));
-      expect(idFor('בראשית רבה'), lessThan(idFor('מתנות כהונה')));
+      expect(orderOf('ספרא'), lessThan(orderOf('ראבד על ספרא')));
+      expect(orderOf('בראשית רבה'), lessThan(orderOf('מתנות כהונה')));
     });
   });
 }

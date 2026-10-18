@@ -5,11 +5,14 @@ import 'dart:isolate';
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:otzaria/attached_libraries/models/attached_library.dart';
 import 'package:otzaria/attached_libraries/repository/attached_library_store.dart';
+import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/find_ref/repository/attached_find_ref_worker.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
 import 'package:otzaria/migration/database/untrusted_database.dart';
 import 'package:otzaria/models/book_source.dart';
+import 'package:otzaria_search_engine/otzaria_search_engine.dart'
+    show configureAttachedLineSource;
 
 class _OpenLibrary {
   _OpenLibrary(this.path, this.repository);
@@ -44,6 +47,35 @@ class AttachedLibraryRegistry {
 
   /// null — בלי סגירה אוטומטית.
   final Duration? idleTimeout;
+
+  /// חלון משני מחזיק את הקובץ בתהליך נפרד, שהסרה או עדכון בחלון הראשי אינם
+  /// יכולים לשחרר — לכן שם הוא משוחרר מהר יותר.
+  static const secondaryWindowIdleTimeout = Duration(seconds: 30);
+
+  Duration? get _idleTimeout {
+    final timeout = idleTimeout;
+    if (timeout == null || !WindowRole.isSecondary) return timeout;
+    return timeout < secondaryWindowIdleTimeout
+        ? timeout
+        : secondaryWindowIdleTimeout;
+  }
+
+  /// ניתן להחלפה בבדיקות שאינן טוענות את המנוע.
+  @visibleForTesting
+  static Future<void> Function({
+    required String slug,
+    String? dbPath,
+    required bool immutable,
+  })
+  configureEngineSource = configureAttachedLineSource;
+
+  /// מה שהוגדר במנוע לכל slug. המנוע מחזיק את הקובץ פתוח אחרי קריאה ממנו.
+  final Map<String, (String, bool)> _engineSources = {};
+  bool _engineSyncEnabled = false;
+  Future<void> _engineQueue = Future.value();
+
+  /// null — המנוע לא נגע במסדים מאז ששוחררו.
+  DateTime? _lastEngineUse;
 
   List<AttachedLibrary>? _libraries;
   final Map<String, _OpenLibrary> _open = {};
@@ -93,6 +125,94 @@ class AttachedLibraryRegistry {
         _closeEntry(slug);
       }
     }
+    if (_engineSyncEnabled) unawaited(syncEngineSources());
+  }
+
+  /// האם ספרי [slug] נקראים במנוע מהמסד (מקור שורות מוגדר).
+  bool isEngineSourceConfigured(String slug) =>
+      _engineSources.containsKey(slug);
+
+  /// נקרא כשהמנוע נטען: מכאן והלאה [update] ו-[syncEngineSources] מגדירים
+  /// בו את המסדים. זול — המנוע פותח את הקובץ רק בקריאה הראשונה ממנו.
+  Future<void> enableEngineSources() {
+    _engineSyncEnabled = true;
+    return syncEngineSources();
+  }
+
+  /// מגדיר במנוע את מקור השורות של כל מסד תקין ומבטל את השאר.
+  Future<void> syncEngineSources() {
+    if (!_engineSyncEnabled) return Future.value();
+    return _enqueueEngine(() async {
+      final wanted = {
+        for (final library in libraries)
+          if (library.isOk) library.slug: (library.path, library.immutable),
+      };
+      for (final slug in _engineSources.keys.toList()) {
+        if (wanted[slug] != _engineSources[slug]) await _unconfigure(slug);
+      }
+      for (final MapEntry(key: slug, value: source) in wanted.entries) {
+        if (_engineSources.containsKey(slug)) continue;
+        try {
+          await configureEngineSource(
+            slug: slug,
+            dbPath: source.$1,
+            immutable: source.$2,
+          );
+          _engineSources[slug] = source;
+        } catch (e) {
+          debugPrint('[AttachedLibraryRegistry] engine source $slug: $e');
+        }
+      }
+      if (_lastEngineUse != null && _engineSources.isNotEmpty) {
+        _scheduleIdleCheck();
+      }
+    });
+  }
+
+  Future<void> _unconfigure(String slug) async {
+    if (!_engineSources.containsKey(slug)) return;
+    try {
+      await configureEngineSource(slug: slug, dbPath: null, immutable: false);
+    } catch (e) {
+      debugPrint('[AttachedLibraryRegistry] engine source $slug close: $e');
+    }
+    _engineSources.remove(slug);
+  }
+
+  /// נקרא בכל גישה למנוע. מסד שהמנוע לא נגע בו [idleTimeout] משוחרר בו,
+  /// ונשאר מוגדר — המנוע יפתח אותו שוב בקריאה הבאה.
+  void noteEngineUse() {
+    _lastEngineUse = DateTime.now();
+    if (_engineSources.isNotEmpty) _scheduleIdleCheck();
+  }
+
+  /// מסתיים אחרי כל שינוי שכבר נשלח למנוע — חיפוש שממתין לו לא יקרא מסד
+  /// באמצע שחרור.
+  Future<void> get engineSourcesSettled => _engineQueue;
+
+  // הגדרה מחדש של אותו נתיב אינה סוגרת חיבור פתוח במנוע — רק null ואז הנתיב.
+  Future<void> _releaseEngineFiles() => _enqueueEngine(() async {
+    for (final MapEntry(key: slug, value: source)
+        in _engineSources.entries.toList()) {
+      try {
+        await configureEngineSource(slug: slug, dbPath: null, immutable: false);
+        await configureEngineSource(
+          slug: slug,
+          dbPath: source.$1,
+          immutable: source.$2,
+        );
+      } catch (e) {
+        debugPrint('[AttachedLibraryRegistry] engine source $slug release: $e');
+        _engineSources.remove(slug);
+      }
+    }
+  });
+
+  /// הקורא מקבל את תוצאת הפעולה שלו; כשלה אינו עוצר את הפעולות שאחריה.
+  Future<void> _enqueueEngine(Future<void> Function() action) {
+    final result = _engineQueue.then((_) => action());
+    _engineQueue = result.then((_) {}, onError: (Object _) {});
+    return result;
   }
 
   /// המאגר של מסד [slug], או null כשהמסד אינו תקין או שהקובץ אינו נגיש.
@@ -169,7 +289,7 @@ class AttachedLibraryRegistry {
       });
 
   void _scheduleIdleCheck() {
-    final timeout = idleTimeout;
+    final timeout = _idleTimeout;
     if (timeout == null || _idleTimer != null) return;
     _idleTimer = Timer.periodic(timeout ~/ 2, (_) => closeIdle());
   }
@@ -178,7 +298,7 @@ class AttachedLibraryRegistry {
   /// ייפתח מחדש בשאילתה הבאה.
   @visibleForTesting
   void closeIdle({DateTime? now}) {
-    final timeout = idleTimeout;
+    final timeout = _idleTimeout;
     if (timeout == null) return;
     final cutoff = (now ?? DateTime.now()).subtract(timeout);
     for (final entry in _open.values) {
@@ -186,16 +306,23 @@ class AttachedLibraryRegistry {
         entry.repository.database.close();
       }
     }
-    if (_open.values.every((e) => !e.repository.database.isOpen)) {
+    if (_lastEngineUse?.isBefore(cutoff) ?? false) {
+      _lastEngineUse = null;
+      unawaited(_releaseEngineFiles());
+    }
+    if (_lastEngineUse == null &&
+        _open.values.every((e) => !e.repository.database.isOpen)) {
       _idleTimer?.cancel();
       _idleTimer = null;
     }
   }
 
   /// משחרר את הקובץ של [slug] — החיבור נסגר ונשכח. גישה הבאה פותחת מחדש.
+  /// גם המנוע משחרר את הקובץ, עד הסנכרון הבא ([update] או [syncEngineSources]).
   Future<void> close(String slug) async {
     AttachedFindRefWorker.instance.reset();
     _closeEntry(slug);
+    if (_engineSyncEnabled) await _enqueueEngine(() => _unconfigure(slug));
   }
 
   /// סוגר את כל החיבורים (איפוס runtime, יציאה).
@@ -204,6 +331,14 @@ class AttachedLibraryRegistry {
     for (final slug in _open.keys.toList()) {
       _closeEntry(slug);
     }
+    if (_engineSyncEnabled) {
+      await _enqueueEngine(() async {
+        for (final slug in _engineSources.keys.toList()) {
+          await _unconfigure(slug);
+        }
+      });
+    }
+    _lastEngineUse = null;
     _idleTimer?.cancel();
     _idleTimer = null;
   }
@@ -212,6 +347,8 @@ class AttachedLibraryRegistry {
   Future<void> reset() async {
     await closeAll();
     _libraries = null;
+    // המנוע אינו מאותחל מחדש באיפוס; בלי זה ספרי המסדים לא זמינים עד שינוי ברשימה.
+    await syncEngineSources();
   }
 
   /// המאגרים שהחיבור שלהם פתוח כרגע — בלי לפתוח מסד שעדיין סגור.

@@ -40,6 +40,7 @@ class PdfShapedFont extends PdfFont {
     this.defaultScript = 'hebr',
     this.defaultRtl = true,
     this.faceIndex = 0,
+    this.textForExtraction,
   }) : super.create(document, subtype: '/Type0') {
     _file = PdfObjectStream(document, isBinary: true);
     _toUnicode = PdfObjectStream(document);
@@ -64,6 +65,9 @@ class PdfShapedFont extends PdfFont {
 
   /// The face of a collection that [shaper] was registered from.
   final int faceIndex;
+
+  /// מאפשר לגליף פרטי לייצג אות רגילה בשכבת הטקסט הניתנת להעתקה ולחיפוש.
+  final String Function(String)? textForExtraction;
 
   late final PdfObjectStream _file;
   late final PdfObjectStream _toUnicode;
@@ -309,19 +313,15 @@ class PdfShapedFont extends PdfFont {
     return value.toStringAsFixed(3);
   }
 
-  /// Remembers which characters a glyph stands for, for the text layer.
-  ///
-  /// When a cluster produced as many glyphs as it had characters, the glyphs
-  /// pair up with the characters in reverse of the storage order, because a
-  /// right-to-left run stores a cluster's marks before its base. Otherwise a
-  /// rule combined or split characters, and the whole cluster is attributed to
-  /// the glyph that carries the advance so extraction yields the text once.
+  /// Maps cluster characters to glyphs in RTL storage order; a merged cluster
+  /// is attributed once, to its advancing glyph, for text extraction.
   void _recordGlyphText(ShapedRun run) {
     if (!_recordedRuns.add(run)) {
       return;
     }
     for (final cluster in run.clusters()) {
-      final source = run.text.substring(cluster.textStart, cluster.textEnd);
+      final raw = run.text.substring(cluster.textStart, cluster.textEnd);
+      final source = textForExtraction?.call(raw) ?? raw;
       final characters = source.runes.toList();
 
       if (characters.length == cluster.glyphCount) {

@@ -17,6 +17,12 @@ class AppSurfaces {
   static Color readerBackground(BuildContext context) =>
       _cs(context).isDark ? AppColors.darkScaffold : _cs(context).surface;
 
+  /// צבע קישורי ספר; בסכמה נייטרלית מובחן מהטקסט בלי לשנות את צבעי הממשק.
+  static Color readerLink(ColorScheme cs) =>
+      HSLColor.fromColor(cs.primary).saturation < 0.1
+      ? (cs.isDark ? const Color(0xFFA0A0A0) : const Color(0xFF5E5E5E))
+      : cs.primary;
+
   /// רקע מסכי לוח — הגדרות, ספריה, כלים וכל מסך משני
   static Color panelBackground(BuildContext context) {
     final cs = _cs(context);

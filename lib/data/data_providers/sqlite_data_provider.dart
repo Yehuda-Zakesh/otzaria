@@ -435,8 +435,18 @@ class SqliteDataProvider {
   /// מאוחים ב-`\n` — מסלול האינדוקס מעביר אותם למנוע כמות-שהם
   /// (addTextBookBytes) בלי פענוח ל-String וקידוד חוזר על גשר ה-FFI.
   /// [officialBookId] — ה-id ב-seforim.db כשהשורות נקראו משם, אחרת null.
-  /// גם null כששורה מכילה `\n`: מספרי השורות במנוע לא יתאימו לרשומות.
-  Future<({Uint8List bytes, int? officialBookId})?> getBookTextBytesFromDb(
+  /// [userBookId] — כמוהו ב-user_books.db, רק לספר שתוכנו בשורות ולא בקובץ;
+  /// [attachedBookId] — במסד מצורף. כולם null כששורה מכילה `\n`: מספרי
+  /// השורות במנוע לא יתאימו לרשומות.
+  Future<
+    ({
+      Uint8List bytes,
+      int? officialBookId,
+      int? userBookId,
+      int? attachedBookId,
+    })?
+  >
+  getBookTextBytesFromDb(
     String title, [
     int? categoryId,
     String? fileType,
@@ -461,11 +471,17 @@ class SqliteDataProvider {
         resolvedBook.book,
       );
       if (read == null || read.bytes.isEmpty) return null;
+      final book = resolvedBook.book;
+      final source = resolvedBook.source;
+      final rowsAreLines = !read.rowHasNewline;
       return (
         bytes: read.bytes,
-        officialBookId: resolvedBook.source.isOfficial && !read.rowHasNewline
-            ? resolvedBook.book.id
+        officialBookId: source.isOfficial && rowsAreLines ? book.id : null,
+        // שורות ספר מקובץ נבנות בסריקה, והתצוגה קוראת את הקובץ עצמו.
+        userBookId: source.isUser && rowsAreLines && !book.isFileBacked
+            ? book.id
             : null,
+        attachedBookId: source.isAttached && rowsAreLines ? book.id : null,
       );
     } catch (e, st) {
       debugPrint(
@@ -534,37 +550,6 @@ class SqliteDataProvider {
     } catch (e, st) {
       debugPrint(
         '[SqliteDataProvider] getBookTocFromDb failed for '
-        '"$title": $e\n$st',
-      );
-      return null;
-    }
-  }
-
-  /// Retrieves source name for a book from DB source table.
-  Future<String?> getBookSourceNameFromDb(
-    String title, [
-    int? categoryId,
-    String? fileType,
-  ]) async {
-    if (!_isInitialized) {
-      await initialize();
-    }
-    if (!_isInitialized) return null;
-
-    try {
-      final resolvedBook = await _resolveBookRecord(
-        title,
-        categoryId: categoryId,
-        fileType: fileType,
-      );
-      if (resolvedBook == null) return null;
-      final source = await resolvedBook.repository.getSourceById(
-        resolvedBook.book.sourceId,
-      );
-      return source?.name;
-    } catch (e, st) {
-      debugPrint(
-        '[SqliteDataProvider] getBookSourceNameFromDb failed for '
         '"$title": $e\n$st',
       );
       return null;

@@ -120,9 +120,14 @@ class _LifecycleFakeController extends Fake implements InAppWebViewController {
   int pauseCalls = 0;
   int resumeCalls = 0;
   final List<String> jsEvents = [];
+  final List<MemoryUsageTargetLevel> memoryLevels = [];
 
   @override
   Future<void> pause() async => pauseCalls++;
+
+  @override
+  Future<void> setMemoryUsageTargetLevel(MemoryUsageTargetLevel level) async =>
+      memoryLevels.add(level);
 
   @override
   Future<void> resume() async => resumeCalls++;
@@ -818,6 +823,11 @@ void main() {
       expect(a.pauseCalls, 1);
       expect(a.jsEvents, contains(contains('plugin.suspended')));
       expect(b.resumeCalls, 1);
+      expect(a.memoryLevels, [
+        MemoryUsageTargetLevel.NORMAL,
+        MemoryUsageTargetLevel.LOW,
+      ]);
+      expect(b.memoryLevels, [MemoryUsageTargetLevel.NORMAL]);
     });
 
     test('בפלטפורמה ללא pause native נשלחים רק אירועי lifecycle', () async {
@@ -832,6 +842,7 @@ void main() {
 
       expect(a.resumeCalls, 0);
       expect(a.pauseCalls, 0);
+      expect(a.memoryLevels, isEmpty);
       expect(a.jsEvents, contains(contains('plugin.resumed')));
       expect(a.jsEvents, contains(contains('plugin.suspended')));
     });

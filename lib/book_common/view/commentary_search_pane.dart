@@ -49,8 +49,12 @@ class CommentarySearchPane extends StatelessWidget {
               hintText: hintText,
               isNoResults: hasQuery && total == 0,
               resetSearchCallback: controller.clear,
+              onSubmitted: onNext,
+              // -1: שאילתה חדשה שעוד לא נווטה, כך ש-Enter מגיע לתוצאה הראשונה.
               resultCountString: hasQuery && total > 0
-                  ? 'תוצאה ${current + 1} מתוך $total'
+                  ? (current >= 0
+                        ? 'תוצאה ${current + 1} מתוך $total'
+                        : 'נמצאו $total תוצאות')
                   : null,
               resultToolbar: hasQuery && total > 0
                   ? Row(

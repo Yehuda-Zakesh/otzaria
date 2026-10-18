@@ -25,3 +25,7 @@ const Map<String, String> kTikkunBundledFontAssets = {
 /// משפחות שיש בהן גליף לנו"ן מנוזרת (U+05C6). בשאר מהפכים נו"ן רגילה.
 bool tikkunFamilyHasNunHafukha(String? family) =>
     family == AppFonts.ashuritFont || family == AppFonts.ashuritNikudFont;
+
+bool tikkunFamilyHasVavKetia(String? family) =>
+    family == kTikkunNikudFallbackFamily ||
+    kTikkunBundledFontAssets.containsKey(family);

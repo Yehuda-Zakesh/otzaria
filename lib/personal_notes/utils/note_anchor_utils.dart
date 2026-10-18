@@ -32,6 +32,10 @@ bool _isDiacritic(int code) =>
 // פיסוק שעשוי להיות מוסתר בתצוגה (כמו _isIgnored ב-html_slice): הבחירה מגיעה
 // בלעדיו, ולכן מתעלמים ממנו בשני צידי ההשוואה.
 final _punctuation = RegExp('[!"\',\\-.:;?\u05F3\u05F4\u2013\u2014]');
+final _htmlEntity = RegExp(
+  r'&(?:#[0-9]+|#x[0-9a-f]+|[a-z]+);',
+  caseSensitive: false,
+);
 bool _isPunctuation(int code) => switch (code) {
   0x21 || 0x22 || 0x27 || 0x2C || 0x2D || 0x2E || 0x3A || 0x3B || 0x3F => true,
   0x05F3 || 0x05F4 || 0x2013 || 0x2014 => true,
@@ -59,6 +63,7 @@ LineProjection projectLine(
   String rawLine, {
   bool keepPunctuation = false,
   bool omitInjectedAnchorMarkers = false,
+  bool plainText = false,
 }) {
   final buffer = StringBuffer();
   final rawIndex = <int>[];
@@ -82,10 +87,27 @@ LineProjection projectLine(
     }
   }
 
+  void appendCode(int code, int rawOffset) {
+    if (_isDiacritic(code) || (!keepPunctuation && _isPunctuation(code))) {
+      return;
+    }
+    final isWhitespace =
+        code == 0x05BE ||
+        ((code < 0x05D0 || code > 0x05EA) &&
+            String.fromCharCode(code).trim().isEmpty);
+    if (isWhitespace) {
+      markWhitespace(rawOffset);
+      return;
+    }
+    flushWhitespace();
+    rawIndex.add(rawOffset);
+    buffer.writeCharCode(code);
+  }
+
   for (int i = 0; i < rawLine.length; i++) {
     final code = rawLine.codeUnitAt(i);
 
-    if (omitInjectedAnchorMarkers && !inTag && code == 0x3C) {
+    if (!plainText && omitInjectedAnchorMarkers && !inTag && code == 0x3C) {
       final isAnchor = rawLine.startsWith('<a class="link-anchor ', i);
       final isSpan = rawLine.startsWith('<span class="link-anchor ', i);
       if (isAnchor || isSpan) {
@@ -98,7 +120,7 @@ LineProjection projectLine(
       }
     }
 
-    if (inTag) {
+    if (!plainText && inTag) {
       if (code == 0x3E) {
         inTag = false;
         // <br> הוא שבירת שורה — הרינדור מציג אותו כרווח, לכן גם כאן, אחרת
@@ -107,31 +129,23 @@ LineProjection projectLine(
       }
       continue;
     }
-    if (code == 0x3C) {
+    if (!plainText && code == 0x3C) {
       inTag = true;
       tagStart = i;
       continue;
     }
-
-    // ניקוד, טעמים ופיסוק — מושמטים לחלוטין.
-    if (_isDiacritic(code) || (!keepPunctuation && _isPunctuation(code))) {
-      continue;
+    if (!plainText && code == 0x26) {
+      final entity = _htmlEntity.matchAsPrefix(rawLine, i);
+      if (entity != null) {
+        for (final decodedCode
+            in text_utils.decodeHtmlEntities(entity[0]!).codeUnits) {
+          appendCode(decodedCode, i);
+        }
+        i = entity.end - 1;
+        continue;
+      }
     }
-
-    // מקף עברי (מקף) ורווחים — מכווצים לרווח יחיד.
-    // אותיות עבריות אינן רווח — בלי להקצות להן מחרוזת.
-    final isWhitespace =
-        code == 0x05BE ||
-        ((code < 0x05D0 || code > 0x05EA) &&
-            String.fromCharCode(code).trim().isEmpty);
-    if (isWhitespace) {
-      markWhitespace(i);
-      continue;
-    }
-
-    flushWhitespace();
-    rawIndex.add(i);
-    buffer.writeCharCode(code);
+    appendCode(code, i);
   }
 
   // רווח בסוף נשמר במפה (כדי שאורך המפה יהיה עקבי) אך לא נכלל בטקסט —
@@ -217,13 +231,13 @@ int _pickBestOccurrence(
   int bestIdx = occurrences.first;
   int bestScore = -1;
   for (final idx in occurrences) {
-    final before = normalized.substring(0, idx);
-    final after = normalized.substring(idx + needleLen);
     int score = 0;
     if (prefix != null && prefix.isNotEmpty) {
+      final before = normalized.substring(0, idx);
       score += _contextScore(before, prefix, matchTail: true);
     }
     if (suffix != null && suffix.isNotEmpty) {
+      final after = normalized.substring(idx + needleLen);
       score += _contextScore(after, suffix, matchTail: false);
     }
     // שובר שוויון: קרבה לרמז המיקום (ככל שקרוב יותר — עדיף).
@@ -241,7 +255,9 @@ int _pickBestOccurrence(
 
 /// סוף הטווח הגולמי: אחרי התו האחרון שהתאים והניקוד שלו, בלי הפיסוק שאחריו.
 int _rawEnd(LineProjection p, String rawLine, int matchEnd) {
-  var end = p.rawIndex[matchEnd - 1] + 1;
+  final lastRawStart = p.rawIndex[matchEnd - 1];
+  final entity = _htmlEntity.matchAsPrefix(rawLine, lastRawStart);
+  var end = entity?.end ?? lastRawStart + 1;
   while (end < rawLine.length && _isDiacritic(rawLine.codeUnitAt(end))) {
     end++;
   }
@@ -323,6 +339,8 @@ ComputedAnchor? computeAnchorForSelection({
   required String rawLine,
   required String selectedText,
   int? selectionColumnHint,
+  int? sourceSelectionOffset,
+  String? sourceSelectionText,
   bool punctuationHidden = false,
 }) {
   final needle = normalizeAnchorText(selectedText);
@@ -333,7 +351,16 @@ ComputedAnchor? computeAnchorForSelection({
   if (occurrences.isEmpty) return null;
 
   int matchStart = occurrences.first;
-  if (selectionColumnHint != null && occurrences.length > 1) {
+  int? normalizedHint;
+  if (sourceSelectionOffset != null && sourceSelectionText != null) {
+    final source = projectLine(sourceSelectionText, plainText: true);
+    final offset = p.normalized.indexOf(source.normalized);
+    if (source.normalized.isNotEmpty && offset >= 0) {
+      normalizedHint =
+          offset + _rawToNormalizedIndex(source, sourceSelectionOffset);
+    }
+  }
+  if (normalizedHint == null && selectionColumnHint != null) {
     final displayedLine = punctuationHidden
         ? text_utils.removePunctuation(rawLine)
         : rawLine;
@@ -351,6 +378,15 @@ ComputedAnchor? computeAnchorForSelection({
         matchStart = idx;
       }
     }
+  } else if (normalizedHint != null && occurrences.length > 1) {
+    matchStart = _pickBestOccurrence(
+      p.normalized,
+      occurrences,
+      needle.length,
+      null,
+      null,
+      normalizedHint,
+    );
   }
   final matchEnd = matchStart + needle.length;
 

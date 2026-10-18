@@ -13,6 +13,8 @@ abstract class PdfMessages {
       'ניתן לחפש בגרסת הטקסט של המסכת, ולפתוח משם את התוצאה.';
   static const String bookNotInSearchIndex =
       'הספר אינו נמצא באינדקס החיפוש, ולכן חיפוש מתקדם אינו זמין בו. עדכון האינדקס מתבצע בהגדרות הספרייה.';
+  static const String personalBookNotInSearchIndex =
+      'ספרים אישיים אינם נכללים באינדקס החיפוש לפי הגדרת "עדכון אינדקס אוטומטי", ולכן חיפוש מתקדם אינו זמין בספר זה.';
   static const String pageRangeRenderFailed = 'עיבוד טווח העמודים שנבחר נכשל';
   static const String multiPageSheetRenderFailed =
       'עיבוד עמודים מרובים בגיליון נכשל';
@@ -23,6 +25,13 @@ abstract class PdfMessages {
 
   static const String editableExportRestricted =
       'ספר זה אינו ניתן לייצוא לפורמט הניתן לעריכה. ניתן להדפיסו או לשמרו כ-PDF.';
+  static const String exportFormatRestrictedByPublisher =
+      'לבקשת המו"ל, לא ניתן לשמור ספר זה בפורמט זה. ניתן להדפיסו.';
+
+  static String printLimitedByPublisher(int maxLines) =>
+      'לבקשת המו"ל, ניתן להדפיס מספר זה עד $maxLines שורות בכל פעם';
+  static String commentaryPrintLimitedByPublisher(int maxLines) =>
+      'לבקשת המו"ל, מפרשים מסוימים יודפסו עד $maxLines קטעים בכל פעם';
 
   static const String saferModeNoPrinter =
       'במצב סייפר ניתן להדפיס רק למדפסת נייר, ולא נמצאה מדפסת כזו. '

@@ -796,7 +796,12 @@ List<TikkunLine> paginateAllTokens(
       if (currentLineStartTokenIdx < 0) currentLineStartTokenIdx = i;
       currentMeta.add(consumePendingMarkers(i));
       currentLine.add(
-        LayoutWord(stam: ketivStam, nikud: qere, tokenIdx: i),
+        LayoutWord(
+          stam: ketivStam,
+          nikud: qere,
+          tokenIdx: i,
+          vavKetiaTradition: tok.vavKetiaTradition,
+        ),
       );
       lineWidth += baseWidth;
       continue;
@@ -828,7 +833,14 @@ List<TikkunLine> paginateAllTokens(
     }
     if (currentLineStartTokenIdx < 0) currentLineStartTokenIdx = i;
     currentMeta.add(consumePendingMarkers(i));
-    currentLine.add(LayoutWord(stam: wordStam, nikud: word, tokenIdx: i));
+    currentLine.add(
+      LayoutWord(
+        stam: wordStam,
+        nikud: word,
+        tokenIdx: i,
+        vavKetiaTradition: tok.vavKetiaTradition,
+      ),
+    );
     lineWidth += wordWidth;
   }
 

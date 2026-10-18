@@ -58,6 +58,27 @@ void main() {
       },
     );
 
+    // #2164: הסנכרון פותח את seforim.db ואת user_books.db ומעכב את הרענון.
+    test('RescanCustomFolders בלי תיקיות מרענן בלי להריץ סנכרון', () async {
+      var syncCalls = 0;
+      final recordedEvents = <LibraryEvent>[];
+      final bloc = CustomFoldersBloc(
+        addLibraryEvent: recordedEvents.add,
+        syncFolders: (folders, {String? onlyFolderPath}) async {
+          syncCalls++;
+          return const FileSyncResult();
+        },
+      );
+
+      bloc.add(const RescanCustomFolders(showNoChangesMessage: false));
+      await bloc.stream.firstWhere((state) => !state.isSyncing);
+
+      expect(syncCalls, 0);
+      expect(recordedEvents.whereType<RefreshLibrary>(), hasLength(1));
+
+      await bloc.close();
+    });
+
     test(
       'RescanCustomFolders מעביר onlyFolderPath לסנכרון (סריקה ממוקדת)',
       () async {

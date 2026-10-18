@@ -635,6 +635,7 @@ class BookViewLayoutMemo {
 class _PdfBookScreenState extends State<PdfBookScreen>
     with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
   final _bookViewLayoutMemo = BookViewLayoutMemo();
+  final _thumbnailCache = createPdfThumbnailCache();
   static const int _defaultPdfLineRange = 50;
 
   /// צל העמוד — מוגדר במפורש (ולא נשען על ברירת המחדל של pdfrx) כי הצילום
@@ -3890,6 +3891,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
     _stopContinuousScroll();
     _disposePageTurnSnapshot();
     _disposeAllSpreadCache();
+    _thumbnailCache.dispose();
     _pendingPageTurns.clear();
     _pageTurnController.dispose();
     _pageTurnUi.dispose();
@@ -4133,6 +4135,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
   /// הטאב נשמר חי ברקע; תמונות העמודים שמחוץ למסך ומטמון הדפדוף מתרנדרים מחדש בחזרה.
   void _releaseImagesWhileHidden() {
     _disposeAllSpreadCache();
+    _thumbnailCache.clear();
     final controller = widget.tab.pdfViewerController;
     if (controller.isReady) controller.releaseCachedImages();
   }
@@ -4662,6 +4665,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
                       controller: widget.tab.pdfViewerController,
                       onNavigateToPage: _goToPageWithSpreadLock,
                       shownPagesFor: _spreadPageRangeFor,
+                      thumbnailCache: _thumbnailCache,
                     ),
                   ),
                 ),
@@ -5334,6 +5338,8 @@ class _PdfBookScreenState extends State<PdfBookScreen>
       nextMinorTooltip: 'הבא',
       nextMajorTooltip:
           'סוף הספר (${ShortcutHelper.formatShortcutForDisplay('ctrl+end')})',
+      prevMajorIcon: FluentIcons.arrow_previous_24_filled,
+      nextMajorIcon: FluentIcons.arrow_next_24_filled,
       onPrevMajor: () => _goToPageWithSpreadLock(1),
       onPrevMinor: _goPreviousPage,
       onNextMinor: _goNextPage,

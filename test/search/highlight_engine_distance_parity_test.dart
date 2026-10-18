@@ -38,7 +38,7 @@ Future<void> main() async {
       var id = 1;
       for (final entry in samples.entries) {
         await engine.addDocument(
-          id: BigInt.from(id),
+          ordinal: id - 1,
           title: entry.key,
           reference: entry.key,
           topics: '/parity/${entry.key}',

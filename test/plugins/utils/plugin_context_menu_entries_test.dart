@@ -215,4 +215,79 @@ void main() {
       ['Both', 'Page only'],
     );
   });
+
+  group('divider between plugins', () {
+    const a1 = PluginContextMenuItem(id: 'a1', label: 'A1');
+    const a2 = PluginContextMenuItem(id: 'a2', label: 'A2');
+    const b1 = PluginContextMenuItem(id: 'b1', label: 'B1');
+    const selection = {'text': 'selected'};
+
+    List<String> shape(List<(String, PluginContextMenuItem)> records) => [
+      for (final entry in buildPluginContextMenuEntries(
+        records: records,
+        selection: selection,
+      ))
+        entry.isDivider ? '|' : entry.label!,
+    ];
+
+    test('separates the item groups of different plugins by default', () {
+      expect(shape(const [('a', a1), ('b', b1)]), ['A1', '|', 'B1']);
+    });
+
+    test('adds no divider around a single plugin', () {
+      expect(shape(const [('a', a1), ('a', a2)]), ['A1', 'A2']);
+      expect(shape(const [('a', a1)]), ['A1']);
+    });
+
+    test('keeps a plugin items together when registrations interleave', () {
+      expect(shape(const [('a', a1), ('b', b1), ('a', a2)]), [
+        'A1',
+        'A2',
+        '|',
+        'B1',
+      ]);
+    });
+
+    test('a plugin opts out on its first item', () {
+      const noDivider = PluginContextMenuItem(
+        id: 'b1',
+        label: 'B1',
+        separatorBefore: false,
+      );
+      expect(shape(const [('a', a1), ('b', noDivider)]), ['A1', 'B1']);
+    });
+
+    test('opting out leaves the divider before the next plugin', () {
+      const noDivider = PluginContextMenuItem(
+        id: 'b1',
+        label: 'B1',
+        separatorBefore: false,
+      );
+      const c1 = PluginContextMenuItem(id: 'c1', label: 'C1');
+      expect(shape(const [('a', a1), ('b', noDivider), ('c', c1)]), [
+        'A1',
+        'B1',
+        '|',
+        'C1',
+      ]);
+    });
+
+    test('plugin hidden in this context leaves no stray divider', () {
+      const other = PluginContextMenuItem(
+        id: 'b1',
+        label: 'B1',
+        contexts: ['reader-highlight'],
+      );
+      expect(shape(const [('a', a1), ('b', other)]), ['A1']);
+    });
+
+    test('does not double a divider the plugin supplied itself', () {
+      const leading = PluginContextMenuItem(id: 'sep', type: 'separator');
+      const trailing = PluginContextMenuItem(id: 'sep2', type: 'separator');
+      expect(
+        shape(const [('a', a1), ('a', trailing), ('b', leading), ('b', b1)]),
+        ['A1', '|', 'B1'],
+      );
+    });
+  });
 }

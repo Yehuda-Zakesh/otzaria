@@ -4,6 +4,7 @@ import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
+import 'package:otzaria/data/repository/book_search_worker.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/library/bloc/library_bloc.dart';
 import 'package:otzaria/library/bloc/library_event.dart';
@@ -31,6 +32,7 @@ class _Repository extends DataRepository {
   _Repository(FileSystemData files) : super(fileSystemData: files);
 
   int searches = 0;
+  int superseded = 0;
   Completer<void>? searchGate;
 
   @override
@@ -44,18 +46,26 @@ class _Repository extends DataRepository {
     bool includeLocalHebrewBooks = true,
     List<Book> extraBooks = const [],
     bool sortByRatio = true,
+    Object? supersedeKey,
   }) async {
     searches++;
-    final found = await super.findBooksAndCategories(
-      query,
-      category,
-      topics: topics,
-      includeOtzar: includeOtzar,
-      includeHebrewBooks: includeHebrewBooks,
-      includeLocalHebrewBooks: includeLocalHebrewBooks,
-      extraBooks: extraBooks,
-      sortByRatio: sortByRatio,
-    );
+    final ({List<Book> books, List<Category> categories}) found;
+    try {
+      found = await super.findBooksAndCategories(
+        query,
+        category,
+        topics: topics,
+        includeOtzar: includeOtzar,
+        includeHebrewBooks: includeHebrewBooks,
+        includeLocalHebrewBooks: includeLocalHebrewBooks,
+        extraBooks: extraBooks,
+        sortByRatio: sortByRatio,
+        supersedeKey: supersedeKey,
+      );
+    } on BookSearchSupersededException {
+      superseded++;
+      rethrow;
+    }
     await searchGate?.future;
     return found;
   }
@@ -118,6 +128,7 @@ void main() {
     final gate = repo.searchGate;
     if (gate != null && !gate.isCompleted) gate.complete();
     await bloc.close();
+    repo.bookSearchWorkerForTesting.dispose();
     TantivyDataProvider.instance = previous;
   });
   Future<void> navigate() async {
@@ -129,6 +140,26 @@ void main() {
     expect(bloc.state.searchResults, isNull);
   }
 
+  test('איתור שהוחלף באיתור חדש אינו מציג שגיאה', () async {
+    final states = <LibraryState>[];
+    final sub = bloc.stream.listen(states.add);
+    final done = bloc.stream.firstWhere(
+      (s) =>
+          s.searchQuery == 'מבחן ב' &&
+          s.searchResults != null &&
+          !s.isSearching,
+    );
+    bloc.add(const UpdateSearchQuery('מבחן א'));
+    bloc.add(const SearchBooks(showLocalHebrewBooks: false));
+    bloc.add(const UpdateSearchQuery('מבחן ב'));
+    bloc.add(const SearchBooks(showLocalHebrewBooks: false));
+    final last = await done;
+    await sub.cancel();
+
+    expect(repo.superseded, 1);
+    expect(states.where((s) => s.error != null), isEmpty);
+    expect(last.searchResults!.first.title, 'מבחן ב ספר');
+  });
   test(
     'ניווט בזמן רענון משאיר את תיקיית היעד בלי תוצאות איתור',
     () async {

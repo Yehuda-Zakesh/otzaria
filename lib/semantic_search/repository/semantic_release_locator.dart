@@ -4,12 +4,13 @@ import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:otzaria/library_update/services/github_rate_limit.dart';
 import 'package:otzaria/semantic_search/models/semantic_failure.dart';
+import 'package:otzaria/semantic_search/models/semantic_vectors_family.dart';
 import 'package:otzaria/semantic_search/models/semantic_vectors_release.dart';
 
 /// מאתר ב-SeforimLibrary את release הוקטורים של גרסת ספרייה.
 ///
-/// ה-release נקרא `vectors-<תג הספרייה>` ואינו מסומן latest, ולכן הוא נמצא
-/// לפי התג בלבד. GitHub שחסם מכסה זורק [GithubRateLimitException].
+/// ה-release נקרא בתחילית המשפחה ואחריה תג הספרייה, ואינו מסומן latest, ולכן
+/// הוא נמצא לפי התג בלבד. GitHub שחסם מכסה זורק [GithubRateLimitException].
 class SemanticVectorsReleaseLocator {
   static const String defaultApiBase =
       'https://api.github.com/repos/Otzaria/SeforimLibrary';
@@ -29,14 +30,17 @@ class SemanticVectorsReleaseLocator {
     this._apiBase = defaultApiBase,
   }) : _clientFactory = clientFactory ?? http.Client.new;
 
-  /// ה-release של גרסת הספרייה [libraryVersion], או `null` כשהוא עוד לא
-  /// פורסם. [libraryTag] חוסך את סריקת ה-releases כשהתג ידוע.
+  /// ה-release של גרסת הספרייה [libraryVersion] מהמועמד הראשון ב-[candidates]
+  /// שנמצא תקין, או `null` כשאף אחד לא פורסם. [libraryTag] חוסך את סריקת
+  /// ה-releases כשהתג ידוע.
   ///
-  /// זורק [SemanticFailure] על release פגום או מניפסט שאינו תואם ל-digest
-  /// שפורסם, ו-[http.ClientException] על כשל רשת.
+  /// כשל במועמד (רשת, release פגום, digest או chunking שאינם תואמים) עובר
+  /// למועמד הבא. כשאף מועמד לא נמצא תקין נזרק הכשל האחרון: של המועמד הרחב
+  /// ביותר, או של קודמו כשהרחב לא פורסם — אז release קיים ולא הושג.
   Future<SemanticVectorsRelease?> findForLibraryVersion(
     int libraryVersion, {
     String? libraryTag,
+    required List<SemanticVectorsCandidate> candidates,
   }) async {
     final client = GithubRateLimitAwareClient(_clientFactory());
     try {
@@ -46,28 +50,65 @@ class SemanticVectorsReleaseLocator {
           : null;
       final tag = hint ?? await _findLibraryTag(client, libraryVersion);
       if (tag == null) return null;
-      final releaseTag = 'vectors-$tag';
-      final release = await _getJson(
-        client,
-        '$_apiBase/releases/tags/${Uri.encodeComponent(releaseTag)}',
-      );
-      if (release == null) return null;
-      if (release is! Map<String, dynamic>) {
-        throw const SemanticFailure(
-          SemanticFailureKind.releaseMalformed,
-          'release JSON is not an object',
-        );
+      (Object, StackTrace)? failure;
+      for (final candidate in candidates) {
+        try {
+          final release = await _findCandidate(
+            client,
+            candidate,
+            tag,
+            libraryVersion,
+          );
+          if (release != null) return release;
+        } catch (error, stackTrace) {
+          if (error is Error) rethrow;
+          failure = (error, stackTrace);
+        }
       }
-      return await _parseRelease(
-        client,
-        release,
-        tag,
-        releaseTag,
-        libraryVersion,
-      );
+      if (failure != null) Error.throwWithStackTrace(failure.$1, failure.$2);
+      return null;
     } finally {
       client.close();
     }
+  }
+
+  /// ה-release של [candidate]; `null` כשלא פורסם.
+  Future<SemanticVectorsRelease?> _findCandidate(
+    http.Client client,
+    SemanticVectorsCandidate candidate,
+    String tag,
+    int libraryVersion,
+  ) async {
+    final releaseTag = '${candidate.family.releaseTagPrefix}$tag';
+    final release = await _getJson(
+      client,
+      '$_apiBase/releases/tags/${Uri.encodeComponent(releaseTag)}',
+    );
+    if (release == null) return null;
+    if (release is! Map<String, dynamic>) {
+      throw const SemanticFailure(
+        SemanticFailureKind.releaseMalformed,
+        'release JSON is not an object',
+      );
+    }
+    final parsed = await _parseRelease(
+      client,
+      release,
+      tag,
+      releaseTag,
+      libraryVersion,
+      candidate.family,
+    );
+    // נבדק לפני הורדת ה-segment: סט של chunking אחר לא היה מותקן.
+    if (parsed.chunkingIdentity != candidate.chunkingIdentity) {
+      throw SemanticFailure(
+        SemanticFailureKind.artifactIncompatible,
+        '$releaseTag is chunking ${parsed.chunkingIdentity}, '
+            'expected ${candidate.chunkingIdentity}',
+        'model.chunking_identity',
+      );
+    }
+    return parsed;
   }
 
   /// גרסת הספרייה של תג כמו `v30-20260930165019`, או `null`.
@@ -119,9 +160,12 @@ class SemanticVectorsReleaseLocator {
     String libraryTag,
     String releaseTag,
     int libraryVersion,
+    SemanticVectorsFamily family,
   ) async {
+    final releaseAssets = release['assets'];
+    if (releaseAssets is! List) throw _malformed('release assets');
     final assets = <String, Map<String, dynamic>>{
-      for (final asset in (release['assets'] as List?) ?? const [])
+      for (final asset in releaseAssets)
         if (asset is Map<String, dynamic> && asset['name'] is String)
           asset['name'] as String: asset,
     };
@@ -135,12 +179,14 @@ class SemanticVectorsReleaseLocator {
 
     final manifestBytes = await _getBytes(
       client,
-      manifestAsset['browser_download_url'] as String? ?? '',
+      _string(manifestAsset['browser_download_url'], 'manifest download URL'),
     );
     final manifestSha = sha256.convert(manifestBytes).toString();
     final assetDigest = _assetSha256(manifestAsset);
+    final body = release['body'];
+    if (body != null && body is! String) throw _malformed('release body');
     final notesDigest = parsePublishedManifestSha256(
-      release['body'] as String?,
+      body as String?,
       manifestName,
     );
     // בלי digest שפורסם מחוץ למניפסט אין הבדל בין הרשמי לבין מה שנבנה מחדש.
@@ -186,6 +232,9 @@ class SemanticVectorsReleaseLocator {
       );
     }
 
+    final segment = manifest['segment'];
+    if (segment is! Map<String, dynamic>) throw _malformed('manifest segment');
+    final identity = SemanticVectorsRelease.identityOf(manifest);
     return SemanticVectorsRelease(
       libraryTag: libraryTag,
       releaseTag: releaseTag,
@@ -196,10 +245,10 @@ class SemanticVectorsReleaseLocator {
       files: [
         for (final entry in files) _file(entry, assets),
       ],
-      segmentUncompressedSize: _int(
-        (manifest['segment'] as Map<String, dynamic>?)?['size'],
-        'segment.size',
-      ),
+      segmentUncompressedSize: _int(segment['size'], 'segment.size'),
+      identityDigest: identity.identityDigest,
+      chunkingIdentity: identity.chunkingIdentity,
+      family: family,
     );
   }
 
@@ -215,7 +264,7 @@ class SemanticVectorsReleaseLocator {
     if (asset == null) throw _malformed('asset $name missing from release');
     return SemanticVectorsFile(
       name: name,
-      downloadUrl: asset['browser_download_url'] as String? ?? '',
+      downloadUrl: _string(asset['browser_download_url'], '$name download URL'),
       size: _int(entry['size'], '$name.size'),
       sha256: sha.toLowerCase(),
       assetId: asset['id']?.toString() ?? '',
@@ -228,6 +277,11 @@ class SemanticVectorsReleaseLocator {
           digest.substring('sha256:'.length).toLowerCase(),
         _ => null,
       };
+
+  static String _string(Object? value, String field) {
+    if (value is String) return value;
+    throw _malformed('$field missing');
+  }
 
   static int _int(Object? value, String field) {
     if (value is int) return value;

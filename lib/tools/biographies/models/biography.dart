@@ -63,8 +63,6 @@ class Biography extends Equatable {
     if (field is Map<String, dynamic>) {
       final he = field['he'];
       if (he is String && he.trim().isNotEmpty) return he.trim();
-      final first = field.values.whereType<String>().firstOrNull;
-      if (first != null && first.trim().isNotEmpty) return first.trim();
     }
     return null;
   }

@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
+import 'package:otzaria/search/library_line_source.dart';
 
 /// סינגלטון שמחזיק את ה-DB וה-repository של ספרי המשתמש (תיקיות
 /// מותאמות אישית).
@@ -19,6 +23,7 @@ class UserBooksDatabaseHolder {
 
   MyDatabase? _database;
   SeforimRepository? _repository;
+  String? _dbPath;
   Future<SeforimRepository>? _initFuture;
 
   /// מחזיר את ה-repository של ספרי המשתמש, מאתחל אם צריך.
@@ -39,6 +44,16 @@ class UserBooksDatabaseHolder {
   /// PRAGMA זמני בזמן אינדוקס, רק על חיבור שכבר פתוח.
   SeforimRepository? get repositoryIfInitialized => _repository;
 
+  /// נתיב המסד הפתוח, או null כשהוא סגור.
+  String? get openDbPath => _repository == null ? null : _dbPath;
+
+  /// מקור השורות של המנוע גלובלי לתהליך: רק החלון הראשי, שבו רץ האינדוקס,
+  /// מגדיר אותו — סגירה בחלון משני הייתה מנתקת אותו גם לראשי.
+  static Future<void> configureSearchLineSource(String? dbPath) async {
+    if (WindowRole.isSecondary) return;
+    await LibraryLineSource.configureUserBooks(dbPath);
+  }
+
   /// נתיב ה-DB. שימושי בזרימות isolate שצריכות לפתוח את הקובץ ישירות.
   static Future<String> resolveDbPath() => AppPaths.resolveUserBooksDbPath();
 
@@ -52,23 +67,29 @@ class UserBooksDatabaseHolder {
     await repo.backfillMissingLineRefIndexes();
     _database = db;
     _repository = repo;
+    _dbPath = dbPath;
+    await configureSearchLineSource(dbPath);
     return repo;
   }
 
-  final Set<void Function()> _closeListeners = {};
+  final Set<FutureOr<void> Function()> _closeListeners = {};
 
-  /// נקרא ב-[close] — לחיבורים נוספים לקובץ (למשל ב-isolate) שחייבים לשחרר אותו.
-  void addCloseListener(void Function() listener) =>
+  /// נקרא ב-[close] — לחיבורים נוספים לקובץ (למשל ב-isolate) שחייבים לשחרר
+  /// אותו; [close] ממתין להם, כדי שהקובץ ישוחרר כשהוא מסתיים.
+  void addCloseListener(FutureOr<void> Function() listener) =>
       _closeListeners.add(listener);
 
   /// סוגר את ה-DB ומודיע ל-[addCloseListener] כדי שהקובץ ישוחרר.
   Future<void> close() async {
-    for (final listener in _closeListeners) {
-      listener();
+    // המנוע מחזיק את הקובץ פתוח לקריאה; בלי זה החלפתו נכשלת ב-Windows.
+    await configureSearchLineSource(null);
+    for (final listener in _closeListeners.toList()) {
+      await listener();
     }
     _database?.close();
     _database = null;
     _repository = null;
+    _dbPath = null;
     _initFuture = null;
   }
 }

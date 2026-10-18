@@ -98,6 +98,30 @@ void main() {
       expect(single, isNot(equals(multi)));
     });
 
+    test('search result lines compare by content regardless of order', () {
+      final a = _loadedState(searchResultLines: {1, 2, 3});
+      final b = _loadedState(searchResultLines: {3, 2, 1});
+
+      expect(a, equals(b));
+      expect(a.hashCode, b.hashCode);
+      expect(a, isNot(equals(_loadedState(searchResultLines: {1, 2, 4}))));
+      expect(
+        _loadedState(searchResultLines: const {}),
+        isNot(equals(_loadedState())),
+      );
+    });
+
+    test('compares thousands of search result lines in linear time', () {
+      // השוואה ריבועית של 40,000 שורות נמשכת שניות ארוכות.
+      final lines = List<int>.generate(40000, (i) => i);
+      final a = _loadedState(searchResultLines: lines.toSet());
+      final b = _loadedState(searchResultLines: lines.reversed.toSet());
+
+      final stopwatch = Stopwatch()..start();
+      expect(a == b, isTrue);
+      expect(stopwatch.elapsed, lessThan(const Duration(seconds: 1)));
+    });
+
     test('selectedIndices defaults to empty', () {
       expect(_loadedState().selectedIndices, isEmpty);
     });
@@ -180,6 +204,7 @@ TextBookLoaded _loadedState({
   SearchMatchPolicy matchPolicy = SearchMatchPolicy.standard,
   Set<int> selectedIndices = const {},
   Set<String> selectedLinkTypes = const {},
+  Set<int>? searchResultLines,
   String? heCategories,
   bool removeNikud = false,
   bool nikudExemptByTanach = false,
@@ -212,5 +237,6 @@ TextBookLoaded _loadedState({
     spacingValues: spacingValues,
     searchMode: searchMode,
     matchPolicy: matchPolicy,
+    searchResultLines: searchResultLines,
   );
 }

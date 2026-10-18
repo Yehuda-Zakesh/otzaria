@@ -46,15 +46,19 @@ SearchResult _result(int id, {String path = 'book'}) => SearchResult(
   continuesToNextLine: false,
 );
 
-Future<List<SearchResult>> _search(_PagedEngine engine, {int limit = 2}) =>
-    searchSmartLexicalInBook(
-      SearchRepository(engineProvider: () async => engine),
-      query: '"ברא אלהים" "הארץ"',
-      bookPath: '/book',
-      limit: limit,
-      distance: 0,
-      phrases: const ['ברא אלהים', 'הארץ'],
-    );
+Future<List<SearchResult>> _search(
+  _PagedEngine engine, {
+  int limit = 2,
+  Map<String, int> bookOrder = const {},
+}) => searchSmartLexicalInBook(
+  SearchRepository(engineProvider: () async => engine),
+  query: '"ברא אלהים" "הארץ"',
+  bookPath: '/book',
+  limit: limit,
+  distance: 0,
+  phrases: const ['ברא אלהים', 'הארץ'],
+  bookOrder: bookOrder,
+);
 
 Future<void> main() async {
   final ready = await tryInitSearchEngine();
@@ -103,6 +107,36 @@ Future<void> main() async {
       final results = await _search(engine, limit: 1);
       expect(results.map((r) => r.filePath), ['a']);
       expect(engine.calls.every((call) => call.limit == 1), isTrue);
+    });
+
+    // מספרי הספרים נקבעים בסדר הכתיבה; המנוע ממיין לפי מיפוי הקטלוג.
+    test('ספרים שחולקים נתיב נחתכים בסדר המיפוי ולא בסדר המספרים', () async {
+      final late = _result((1 << 32) + 5, path: 'late');
+      final early = _result((2 << 32) + 7, path: 'early');
+      final engine = _PagedEngine((stream, offset, limit) async {
+        // בסדר הקטלוג: 'early' (מספר 2) לפני 'late' (מספר 1).
+        final source = [early, late];
+        return source.skip(offset).take(limit).toList();
+      });
+      final results = await _search(
+        engine,
+        bookOrder: const {'early': 0, 'late': 1},
+      );
+      expect(results.map((r) => r.filePath), ['early', 'late']);
+    });
+
+    test('ספר שאינו במיפוי אחרי כל הממופים — גם אחרי ספרים אישיים', () async {
+      final personal = _result((9 << 32) + 1, path: 'uid:5');
+      final unmapped = _result((1 << 32) + 1, path: 'new');
+      final engine = _PagedEngine((stream, offset, limit) async {
+        // המנוע ממיין ספר שאינו במיפוי אחרי כל הספרים שבו.
+        return [personal, unmapped].skip(offset).take(limit).toList();
+      });
+      final results = await _search(
+        engine,
+        bookOrder: const {'uid:5': (1 << 23) + 5},
+      );
+      expect(results.map((r) => r.filePath), ['uid:5', 'new']);
     });
   }, skip: ready ? false : searchEngineSkipReason);
 }

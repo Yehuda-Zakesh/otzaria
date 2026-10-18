@@ -9,6 +9,7 @@ import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/theme/app_fonts.dart';
 import 'package:otzaria/tools/calendar/models/calendar_location.dart';
 import 'package:otzaria/tools/tikkun_korim/models/tikkun_models.dart';
+import 'package:otzaria/tools/tikkun_korim/models/tikkun_vav_ketia.dart';
 import 'package:otzaria/tools/tikkun_korim/repository/tikkun_contracts.dart';
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_stam_fonts.dart';
 
@@ -26,6 +27,7 @@ abstract class TikkunSettingsKeys {
   static const startupMode = 'key-tikkun-startup-mode';
   static const nusach = 'key-tikkun-nusach';
   static const decalogueTaam = 'key-tikkun-decalogue-taam';
+  static const vavKetia = 'key-tikkun-vav-ketia';
   static const nusachLand = 'key-tikkun-nusach-land';
   static const navState = 'key-tikkun-nav-state';
   static const bookmarks = 'key-tikkun-bookmarks';
@@ -99,6 +101,7 @@ class TikkunSettings extends Equatable {
 
   /// מערכת הטעמים של עשרת הדברות.
   final TikkunDecalogueTaam decalogueTaam;
+  final TikkunVavKetia vavKetia;
 
   /// הגדלת התצוגה. אינה משנה את הפריסה, ואינה משפיעה על הייצוא ל-PDF.
   final double zoom;
@@ -118,6 +121,7 @@ class TikkunSettings extends Equatable {
     String? nusachLand,
     String calendarLand = 'israel',
     this.decalogueTaam = TikkunDecalogueTaam.merged,
+    this.vavKetia = TikkunVavKetia.auto,
     this.zoom = 1.0,
   }) : _nusachLandOverride = nusachLand,
        _defaultNusachLand = calendarLand;
@@ -159,6 +163,7 @@ class TikkunSettings extends Equatable {
     String? nusach,
     String? nusachLand,
     TikkunDecalogueTaam? decalogueTaam,
+    TikkunVavKetia? vavKetia,
     double? zoom,
   }) => TikkunSettings(
     stamFont: stamFont ?? this.stamFont,
@@ -175,6 +180,7 @@ class TikkunSettings extends Equatable {
     nusachLand: nusachLand ?? _nusachLandOverride,
     calendarLand: _defaultNusachLand,
     decalogueTaam: decalogueTaam ?? this.decalogueTaam,
+    vavKetia: vavKetia ?? this.vavKetia,
     zoom: zoom ?? this.zoom,
   );
 
@@ -194,6 +200,7 @@ class TikkunSettings extends Equatable {
     nusachLand,
     _nusachLandOverride,
     decalogueTaam,
+    vavKetia,
     zoom,
   ];
 }
@@ -237,6 +244,9 @@ class TikkunSettingsStore {
       calendarLand: _calendarLand() ?? d.nusachLand,
       decalogueTaam: TikkunDecalogueTaam.byId(
         Settings.getValue<String>(TikkunSettingsKeys.decalogueTaam),
+      ),
+      vavKetia: TikkunVavKetia.byId(
+        Settings.getValue<String>(TikkunSettingsKeys.vavKetia),
       ),
       zoom: (Settings.getValue<double>(TikkunSettingsKeys.zoom) ?? d.zoom)
           .clamp(kTikkunMinZoom, kTikkunMaxZoom),
@@ -284,6 +294,7 @@ class TikkunSettingsStore {
       TikkunSettingsKeys.decalogueTaam,
       s.decalogueTaam.id,
     );
+    await Settings.setValue<String>(TikkunSettingsKeys.vavKetia, s.vavKetia.id);
   }
 
   /// מנהג הקריאות לפי העיר שנבחרה בלוח השנה, אם נבחרה.

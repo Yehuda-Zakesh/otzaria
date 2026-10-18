@@ -119,6 +119,7 @@ void main() {
       ),
     ], source: 'test');
     db.close();
+    await UserBooksDatabaseHolder.instance.repository;
   });
 
   tearDown(() async {

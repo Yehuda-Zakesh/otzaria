@@ -1,7 +1,11 @@
 //
 // Super simple thumbnails view
 //
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:otzaria/pdf_book/utils/bounded_image_cache.dart';
 import 'package:otzaria/theme/app_tokens.dart';
 import 'package:pdfrx/pdfrx.dart';
 
@@ -11,6 +15,7 @@ class ThumbnailsView extends StatefulWidget {
     required this.controller,
     this.onNavigateToPage,
     this.shownPagesFor,
+    this.thumbnailCache,
     super.key,
   });
 
@@ -24,6 +29,9 @@ class ThumbnailsView extends StatefulWidget {
   final ({int startPage, int endPageExclusive}) Function(int pageNumber)?
   shownPagesFor;
 
+  /// מטמון של הבעלים, שמרוקן אותו כשהטאב מוסתר; בלעדיו לתצוגה יש מטמון משלה.
+  final PdfThumbnailCache? thumbnailCache;
+
   @override
   State<ThumbnailsView> createState() => _ThumbnailsViewState();
 }
@@ -34,6 +42,12 @@ class _ThumbnailsViewState extends State<ThumbnailsView>
   bool _isManuallyScrolling = false;
   int? _lastScrolledPage;
   int? _lastKnownPage;
+
+  PdfThumbnailCache? _ownCache;
+
+  /// פריט שנגלל מחוץ למסך נבנה מחדש בחזרה; בלי המטמון העמוד היה מרונדר שוב.
+  PdfThumbnailCache get _thumbnailCache =>
+      widget.thumbnailCache ?? (_ownCache ??= createPdfThumbnailCache());
 
   /// גובה הפריט (250) ועוד השוליים (8 מכל צד) — גם לגלילה אל העמוד הנוכחי.
   static const double _itemExtent = 266;
@@ -61,6 +75,7 @@ class _ThumbnailsViewState extends State<ThumbnailsView>
       _lastKnownPage = _currentPage;
     }
     if (oldWidget.documentRef != widget.documentRef) {
+      _thumbnailCache.clear();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() {});
         _scrollToActiveItem();
@@ -72,6 +87,7 @@ class _ThumbnailsViewState extends State<ThumbnailsView>
   void dispose() {
     widget.controller?.removeListener(_onControllerChanged);
     _scrollController.dispose();
+    _ownCache?.dispose();
     super.dispose();
   }
 
@@ -165,11 +181,12 @@ class _ThumbnailsViewState extends State<ThumbnailsView>
                             pageNumber: index + 1,
                             anchor: PdfPageAnchor.top,
                           ),
-                      child: PdfPageView(
-                        document: document,
-                        pageNumber: index + 1,
-                        alignment: Alignment.center,
-                      ),
+                      child: document == null
+                          ? const SizedBox()
+                          : _PageThumbnail(
+                              page: document.pages[index],
+                              cache: _thumbnailCache,
+                            ),
                     ),
                   ),
                   Text('${index + 1}'),
@@ -180,5 +197,127 @@ class _ThumbnailsViewState extends State<ThumbnailsView>
         ),
       ),
     );
+  }
+}
+
+/// עמוד שנמדד מחדש הוא אובייקט [PdfPage] חדש, ולכן תמונה ישנה לא תוחזר עבורו.
+typedef PdfThumbnailCache =
+    BoundedImageCache<(PdfPage page, int width, int height)>;
+
+PdfThumbnailCache createPdfThumbnailCache() =>
+    PdfThumbnailCache(maxBytes: 32 * 1024 * 1024);
+
+typedef _ThumbnailKey = (PdfPage page, int width, int height);
+
+class _PageThumbnail extends StatefulWidget {
+  const _PageThumbnail({required this.page, required this.cache});
+
+  final PdfPage page;
+  final PdfThumbnailCache cache;
+
+  @override
+  State<_PageThumbnail> createState() => _PageThumbnailState();
+}
+
+class _PageThumbnailState extends State<_PageThumbnail> {
+  static const double _maximumDpi = 300;
+  static const BoxShadow _pageShadow = BoxShadow(
+    color: Colors.black54,
+    blurRadius: 4,
+    offset: Offset(2, 2),
+  );
+
+  ui.Image? _image;
+  _ThumbnailKey? _requestedKey;
+  PdfPageRenderCancellationToken? _cancellationToken;
+
+  @override
+  void dispose() {
+    _cancellationToken?.cancel();
+    _image?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final page = widget.page;
+        if (page.width <= 0 || page.height <= 0) return const SizedBox();
+        final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+        final scale = math.min(
+          _maximumDpi / 72,
+          math.min(
+            constraints.maxWidth * pixelRatio / page.width,
+            constraints.maxHeight * pixelRatio / page.height,
+          ),
+        );
+        final width = (page.width * scale).round();
+        final height = (page.height * scale).round();
+        if (width <= 0 || height <= 0) return const SizedBox();
+        _requestImage((page, width, height));
+
+        final image = _image;
+        return Align(
+          child: AspectRatio(
+            aspectRatio: page.width / page.height,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: image == null ? Colors.white : null,
+                boxShadow: const [_pageShadow],
+              ),
+              child: image == null
+                  ? null
+                  : RawImage(image: image, fit: BoxFit.fill),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// נקרא מתוך build: פגיעה במטמון מוצגת באותה בנייה, ורינדור מסתיים ב-setState.
+  void _requestImage(_ThumbnailKey key) {
+    if (key == _requestedKey) return;
+    _requestedKey = key;
+    _cancellationToken?.cancel();
+    _cancellationToken = null;
+    final cached = widget.cache.lookup(key);
+    if (cached != null) {
+      _image?.dispose();
+      _image = cached;
+      return;
+    }
+    _render(key);
+  }
+
+  Future<void> _render(_ThumbnailKey key) async {
+    final (page, width, height) = key;
+    // אחרי clear() רינדור שהתחיל קודם שייך למסמך או לטאב שכבר שוחררו.
+    final generation = widget.cache.generation;
+    final token = _cancellationToken = page.createCancellationToken();
+    final pageImage = await page.render(
+      fullWidth: width.toDouble(),
+      fullHeight: height.toDouble(),
+      cancellationToken: token,
+    );
+    if (pageImage == null) return;
+    try {
+      final image = await pageImage.createImage();
+      widget.cache.put(key, image, generation: generation);
+      if (!mounted || key != _requestedKey) {
+        image.dispose();
+        return;
+      }
+      setState(() {
+        _image?.dispose();
+        _image = image;
+      });
+    } catch (_) {
+      // בלי איפוס הבקשה העמוד היה נשאר ריק עד שגודלו ישתנה.
+      if (key == _requestedKey) _requestedKey = null;
+    } finally {
+      pageImage.dispose();
+    }
   }
 }

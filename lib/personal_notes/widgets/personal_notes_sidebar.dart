@@ -33,7 +33,9 @@ import 'package:otzaria/settings/settings_exports.dart';
 class PersonalNotesSidebar extends StatefulWidget {
   final String bookId;
   final int? categoryId;
-  final ValueChanged<int> onNavigateToLine;
+
+  /// [note] — ההערה שאליה מנווטים, לגלילה אל המילים שעליהן נכתבה.
+  final void Function(int lineNumber, {PersonalNote? note}) onNavigateToLine;
   final bool isPdf;
   final List<int>? visibleLineIndices;
   final int? focusLineNumber;
@@ -182,6 +184,8 @@ class PersonalNotesSidebarState extends State<PersonalNotesSidebar>
         referenceText: draft.referenceText,
         selectedText: currentState.newNoteSelectedText,
         selectionColumn: currentState.newNoteSelectionColumn,
+        sourceSelectedText: currentState.newNoteSourceSelectedText,
+        sourceSelectionOffset: currentState.newNoteSourceSelectionOffset,
         punctuationHidden: currentState.newNotePunctuationHidden,
         initialContent: draft.content,
         initialFormat: draft.contentFormat,
@@ -211,6 +215,8 @@ class PersonalNotesSidebarState extends State<PersonalNotesSidebar>
         contentFormat: result.contentFormat,
         selectedText: selectedText?.trim(),
         selectionColumn: selectionColumn,
+        sourceSelectedText: bloc.state.newNoteSourceSelectedText,
+        sourceSelectionOffset: bloc.state.newNoteSourceSelectionOffset,
         punctuationHidden: bloc.state.newNotePunctuationHidden,
       ),
     );
@@ -412,7 +418,7 @@ class PersonalNotesSidebarState extends State<PersonalNotesSidebar>
         filtered.locatedNotes.map(
           (note) => NoteTile(
             note: note,
-            onTap: () => widget.onNavigateToLine(note.lineNumber!),
+            onTap: () => widget.onNavigateToLine(note.lineNumber!, note: note),
             onSave: (result) => _saveInline(context, note, result),
             onDelete: () => _confirmDelete(context, note),
             onLinkTap: (url) => _handleNoteLinkTap(context, url),
@@ -434,10 +440,7 @@ class PersonalNotesSidebarState extends State<PersonalNotesSidebar>
               icon: const Icon(FluentIcons.pin_24_regular, size: 18),
               iconSize: 18,
               padding: const EdgeInsets.all(8),
-              constraints: const BoxConstraints(
-                minWidth: 32,
-                minHeight: 32,
-              ),
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               onPressed: () => _reanchorNote(context, note, selectedLineNumber),
             ),
           ),
@@ -491,10 +494,7 @@ class PersonalNotesSidebarState extends State<PersonalNotesSidebar>
               icon: const Icon(FluentIcons.location_24_regular, size: 18),
               iconSize: 18,
               padding: const EdgeInsets.all(8),
-              constraints: const BoxConstraints(
-                minWidth: 32,
-                minHeight: 32,
-              ),
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               onPressed: () => _reposition(context, note),
             ),
           ),
@@ -566,10 +566,7 @@ class PersonalNotesSidebarState extends State<PersonalNotesSidebar>
         initialFormat:
             state.newNoteInitialFormat ?? PersonalNoteContentFormat.plain,
         draftLineNumber: state.newNoteLineNumber,
-        linkableNotes: [
-          ...state.locatedNotes,
-          ...state.missingNotes,
-        ],
+        linkableNotes: [...state.locatedNotes, ...state.missingNotes],
         cancelRequest: _newNoteCancelRequest,
         onSave: _saveNewNote,
         onCancel: _cancelNewNote,
@@ -636,7 +633,7 @@ class PersonalNotesSidebarState extends State<PersonalNotesSidebar>
         }
         if (note == null) return;
         if (note.lineNumber != null) {
-          widget.onNavigateToLine(note.lineNumber!);
+          widget.onNavigateToLine(note.lineNumber!, note: note);
           return;
         }
         await showDialog<void>(
@@ -677,12 +674,7 @@ class PersonalNotesSidebarState extends State<PersonalNotesSidebar>
 
     if (shouldDelete == true) {
       if (!mounted) return;
-      bloc.add(
-        DeletePersonalNote(
-          bookId: widget.bookId,
-          noteId: note.id,
-        ),
-      );
+      bloc.add(DeletePersonalNote(bookId: widget.bookId, noteId: note.id));
     }
   }
 
@@ -744,19 +736,12 @@ class PersonalNotesSidebarState extends State<PersonalNotesSidebar>
             label: 'שייך לשורה נבחרת ($selectedLineNumber)',
             value: 'selected',
           ),
-          const SelectionItem(
-            label: 'הקלד מספר שורה',
-            value: 'manual',
-          ),
+          const SelectionItem(label: 'הקלד מספר שורה', value: 'manual'),
         ],
       );
       if (!mounted) return;
       if (choice == 'selected') {
-        _reanchorToSelectedLineWith(
-          bloc,
-          note,
-          selectedLineNumber,
-        );
+        _reanchorToSelectedLineWith(bloc, note, selectedLineNumber);
         return;
       }
       if (choice == null) return;
@@ -778,11 +763,7 @@ class PersonalNotesSidebarState extends State<PersonalNotesSidebar>
 
     final newLine = result != null ? int.tryParse(result) : null;
     if (newLine != null) {
-      _reanchorToSelectedLineWith(
-        bloc,
-        note,
-        newLine,
-      );
+      _reanchorToSelectedLineWith(bloc, note, newLine);
     }
   }
 }

@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import 'package:otzaria/indexing/models/index_check_scope.dart';
 import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/models/books.dart';
 
@@ -20,47 +21,44 @@ class IndexingWorkBarrier extends IndexingWorkEvent {
   const IndexingWorkBarrier({super.onSettled});
 }
 
-class StartIndexing extends IndexingWorkEvent {
+/// ריצת אינדוקס אחת: בדיקה ([check]) ← אינדוקס ספרים חדשים ושהשתנו יחד ←
+/// commit ואיחוד אחד בסוף.
+class RunIndexing extends IndexingWorkEvent {
   final Library library;
 
-  const StartIndexing(this.library, {super.onSettled});
+  /// הספרים החדשים לאינדוקס; null — כל ספרי הספרייה שחסרים באינדקס.
+  final List<Book>? books;
+
+  /// ספרים שתוכנם השתנה — מסמכיהם הישנים מוחלפים.
+  final List<Book> changedBooks;
+
+  final IndexCheckScope check;
+
+  const RunIndexing(
+    this.library, {
+    this.books,
+    this.changedBooks = const [],
+    this.check = IndexCheckScope.none,
+    super.onSettled,
+  });
+
+  @override
+  List<Object?> get props => [library, books, changedBooks, check];
+}
+
+/// אינדוקס כל הספרייה בבקשת המשתמש או בעלייה.
+class StartIndexing extends RunIndexing {
+  const StartIndexing(super.library, {super.onSettled});
+}
+
+/// מעדכן במנוע את סדר הקטלוג והדורות של העץ המלא, בלי פליטת מצב.
+class SyncBookOrder extends IndexingWorkEvent {
+  final Library library;
+
+  const SyncBookOrder(this.library);
 
   @override
   List<Object?> get props => [library];
-}
-
-class IndexSpecificBooks extends IndexingWorkEvent {
-  final List<Book> books;
-  final Library library;
-
-  const IndexSpecificBooks(this.books, this.library);
-
-  @override
-  List<Object?> get props => [books, library];
-}
-
-/// אינדוקס מחדש של ספרים שתוכנם השתנה — רשומותיהם הישנות מוסרות תחילה.
-class ReindexChangedBooks extends IndexingWorkEvent {
-  final List<Book> books;
-  final Library library;
-
-  const ReindexChangedBooks(this.books, this.library);
-
-  @override
-  List<Object?> get props => [books, library];
-}
-
-/// השוואת טביעות-האצבע שבאינדקס מול תוכן הספרייה, ואינדוקס מחדש של
-/// הספרים שנמצאו שונים — למסלולים בהם איש לא דיווח מה השתנה (הורדה מלאה).
-/// עם [books] הסריקה מוגבלת לספרים אלה (למשל ספרי מסד מצורף שהקובץ שלו השתנה).
-class ReconcileIndex extends IndexingWorkEvent {
-  final Library library;
-  final List<Book>? books;
-
-  const ReconcileIndex(this.library, {this.books});
-
-  @override
-  List<Object?> get props => [library, books];
 }
 
 /// ניקוי רשומות יתומות מהאינדקס — ספרים שכבר אינם בספרייה (ספר אישי

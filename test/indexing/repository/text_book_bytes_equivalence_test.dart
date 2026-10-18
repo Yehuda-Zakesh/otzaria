@@ -31,8 +31,6 @@ void main() {
         title: 'ספר $i',
         topics: '/a',
         filePath: 'string:$i',
-        catalogueOrder: i,
-        generationOrder: 1,
         text: texts[i],
         textStorage: TextStorage.inIndex,
       );
@@ -40,8 +38,6 @@ void main() {
         title: 'ספר $i',
         topics: '/a',
         filePath: 'bytes:$i',
-        catalogueOrder: i,
-        generationOrder: 1,
         text: utf8.encode(texts[i]),
         textStorage: TextStorage.inIndex,
       );

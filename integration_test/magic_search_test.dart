@@ -60,7 +60,7 @@ void main() {
     await Directory(indexDir).create(recursive: true);
     final engine = await SearchEngine.newInstance(path: indexDir);
     await engine.addDocument(
-      id: BigInt.one,
+      ordinal: 0,
       title: 'a',
       reference: 'a',
       topics: '/root',
@@ -70,7 +70,7 @@ void main() {
       filePath: '/books/a.txt',
     );
     await engine.addDocument(
-      id: BigInt.two,
+      ordinal: 1,
       title: 'b',
       reference: 'b',
       topics: '/root',

@@ -41,6 +41,7 @@ bool openPluginSearchTab({
         proximityScope: resolved.proximityScope,
         wordMatchMode: resolved.wordMatchMode,
         wordMatchCount: resolved.wordMatchCount,
+        anyOrder: resolved.anyOrder,
         pluginSearchSelections: pluginSearchSelections,
       ),
     ),

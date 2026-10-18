@@ -1172,6 +1172,9 @@ jobs:
           dart run tool/generate_search_index.dart
           dart run tool/generate_settings_l10n.dart
 
+      # The container's glibc decides compatibility, so native code is compiled
+      # here instead of downloaded: the user define reaches the engine's build
+      # hook, cargokit_options.yaml the cargokit plugins (super_native_extensions).
       - name: Build the search engine inside the compatibility container
         shell: bash
         run: |
@@ -1180,6 +1183,13 @@ jobs:
             'use_precompiled_binaries: false' \
             'verbose_logging: true' \
             > cargokit_options.yaml
+          printf '%s\n' \
+            '' \
+            'hooks:' \
+            '  user_defines:' \
+            '    otzaria_search_engine:' \
+            '      build_from_source: true' \
+            >> pubspec.yaml
 
       # התוסף קורא ל-webkit_web_view_get_theme_color (קיים רק מ-WebKit 2.50) בלי guard גרסה;
       # ה-SDK הוא 2.48 — עוטפים ב-WEBKIT_CHECK_VERSION עד שיתוקן בחבילה.
@@ -1627,9 +1637,8 @@ jobs:
           # בין בניות של האפליקציה.
           #
           # כרכי התלמוד המצורפים אינם מאונדקסים ממילא — isIndexableBook מחריגה
-          # אותם מאז 9b67127, כי הטקסט שלהם כבר באינדקס מה-DB. הם כן נוכחים
-          # בבניית האינדקס בצד השני, כי catalogueOrder הוא מיקום בעץ הקטלוג
-          # כולו; הסקריפט מאמת שזה אותו ארכיון תלמוד בדיוק.
+          # אותם מאז 9b67127, כי הטקסט שלהם כבר באינדקס מה-DB. סדר הקטלוג אינו
+          # במזהי המסמכים (האפליקציה דוחפת אותו למנוע), ולכן הסט שלהם אינו נבדק.
           LIBRARY_ROOT="$GITHUB_WORKSPACE/full_installer/otzaria-library"
           mkdir -p "$LIBRARY_ROOT"
           cp -al "$GITHUB_WORKSPACE/$BUNDLE_ROOT/אוצריא" "$LIBRARY_ROOT/books"
@@ -1650,7 +1659,6 @@ jobs:
             bash tool/release/fetch_prebuilt_library_index.sh \
               "$LIBRARY_ROOT/index" \
               full_installer/library_db/seforim.db.zst \
-              full_installer/library_db/talmud_bavli_latest.tar.zst \
               pubspec.lock || fetch_status=$?
           if [ "$fetch_status" = 3 ]; then
             rebuild_tag=$(cat "$rebuild_tag_file")
@@ -2145,7 +2153,6 @@ jobs:
 
       # התקנת Rust יציבה לפני flutter build
       - name: Install Rust (stable)
-      # מחליף את ההתקנה האוטומטית של cargokit
         uses: dtolnay/rust-toolchain@stable
 
       - name: Add cargo to PATH & verify toolchain

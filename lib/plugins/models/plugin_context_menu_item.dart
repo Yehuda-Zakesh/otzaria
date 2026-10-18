@@ -56,6 +56,11 @@ class PluginContextMenuItem implements PluginRegistryItem {
   /// מנוע התוסף. סותר את [onClickEvent] ואת [openPlugin].
   final Map<String, dynamic>? action;
 
+  /// האם להפריד בקו חוצץ בין קבוצת הפריטים של התוסף לקבוצה שמעליה בתפריט.
+  /// ברירת המחדל היא קו חוצץ בין תוספים שונים; `false` מבטל אותו.
+  /// נקרא רק מהפריט העליון הראשון של התוסף בתפריט.
+  final bool separatorBefore;
+
   const PluginContextMenuItem({
     required this.id,
     this.type = 'item',
@@ -72,6 +77,7 @@ class PluginContextMenuItem implements PluginRegistryItem {
     this.showWhenContainsAny = const [],
     this.when,
     this.action,
+    this.separatorBefore = true,
   }) : title = title ?? label;
 
   /// האם להציג את הפריט עבור [selectedText] לפי [showWhenContainsAny].
@@ -101,6 +107,7 @@ class PluginContextMenuItem implements PluginRegistryItem {
       'showWhen': {'selectionContainsAny': showWhenContainsAny},
     if (when != null) 'when': when!.toJson(),
     if (action != null) 'action': action,
+    if (!separatorBefore) 'separatorBefore': false,
   };
 }
 

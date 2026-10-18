@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/messages/library_messages.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/update/my_update_widget.dart';
-import 'package:updat/updat.dart';
+import 'package:otzaria/update/updat_compat.dart';
 
 void main() {
   group('InitialSoftwareCheck', () {

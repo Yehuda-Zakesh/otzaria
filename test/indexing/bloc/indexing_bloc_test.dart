@@ -14,6 +14,7 @@ import 'package:otzaria/core/messages/settings_messages.dart';
 import 'package:otzaria/indexing/bloc/indexing_bloc.dart';
 import 'package:otzaria/indexing/bloc/indexing_event.dart';
 import 'package:otzaria/indexing/bloc/indexing_state.dart';
+import 'package:otzaria/indexing/models/index_check_scope.dart';
 import 'package:otzaria/indexing/models/indexing_run_result.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/library/models/library.dart';
@@ -56,6 +57,8 @@ void main() {
   group('StartIndexing', () {
     test('callback משלים גם כשאין ספרים ולא נפלט InProgress', () async {
       final bloc = _FakeIndexingBloc();
+      final states = <IndexingState>[];
+      final subscription = bloc.stream.listen(states.add);
       final settled = Completer<void>();
       bloc.add(
         StartIndexing(
@@ -64,7 +67,8 @@ void main() {
         ),
       );
       await settled.future.timeout(const Duration(seconds: 2));
-      expect(bloc.repository.indexAllCalls, 0);
+      expect(states.whereType<IndexingInProgress>(), isEmpty);
+      await subscription.cancel();
       await bloc.close();
     });
 
@@ -201,11 +205,13 @@ void main() {
     );
 
     blocTest<IndexingBloc, IndexingState>(
-      'ספרייה ריקה נשארת במצב התחלתי ואינה קוראת ל-repository',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(StartIndexing(Library(categories: []))),
-      expect: () => [isA<IndexingInitial>()],
-      verify: (bloc) => expect(repositoryOf(bloc).indexAllCalls, 0),
+      'אין עבודה — בלי InProgress, ישר להשלמה',
+      build: () => _FakeIndexingBloc(
+        _FakeIndexingRepository()..allBooksIndexed = true,
+      ),
+      act: (bloc) => bloc.add(StartIndexing(libraryWithBooks(3))),
+      expect: () => [const IndexingComplete()],
+      verify: (bloc) => expect(repositoryOf(bloc).indexAllCalls, 1),
     );
 
     blocTest<IndexingBloc, IndexingState>(
@@ -534,30 +540,20 @@ void main() {
     );
 
     blocTest<IndexingBloc, IndexingState>(
-      'אינדוקס ספרים חדשים אינו מגיע למאגר',
+      'ריצת אינדוקס של רענון אינה מגיעה למאגר',
       build: _FakeIndexingBloc.new,
       act: (bloc) {
         final library = libraryWithBooks();
-        bloc.add(IndexSpecificBooks(library.books, library));
+        bloc.add(
+          RunIndexing(
+            library,
+            books: library.books,
+            changedBooks: library.books,
+            check: IndexCheckScope.library,
+          ),
+        );
       },
-      verify: (bloc) => expect(repositoryOf(bloc).indexBooksCalls, 0),
-    );
-
-    blocTest<IndexingBloc, IndexingState>(
-      'אינדוקס ספרים שהשתנו אינו מגיע למאגר',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) {
-        final library = libraryWithBooks();
-        bloc.add(ReindexChangedBooks(library.books, library));
-      },
-      verify: (bloc) => expect(repositoryOf(bloc).reindexCalls, 0),
-    );
-
-    blocTest<IndexingBloc, IndexingState>(
-      'התאמת האינדקס אינה מגיעה למאגר',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(ReconcileIndex(libraryWithBooks())),
-      verify: (bloc) => expect(repositoryOf(bloc).reconcileCalls, 0),
+      verify: (bloc) => expect(repositoryOf(bloc).runs, isEmpty),
     );
 
     blocTest<IndexingBloc, IndexingState>(
@@ -584,19 +580,12 @@ void main() {
     );
 
     blocTest<IndexingBloc, IndexingState>(
-      'אינדוקס ספרים חדשים נחסם בשקט — בלי פליטת מצב',
+      'ריצת אינדוקס של רענון נחסמת בשקט — בלי פליטת מצב',
       build: _FakeIndexingBloc.new,
       act: (bloc) {
         final library = libraryWithBooks();
-        bloc.add(IndexSpecificBooks(library.books, library));
+        bloc.add(RunIndexing(library, books: library.books));
       },
-      expect: () => <IndexingState>[],
-    );
-
-    blocTest<IndexingBloc, IndexingState>(
-      'התאמת האינדקס נחסמת בשקט — בלי פליטת מצב',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(ReconcileIndex(libraryWithBooks())),
       expect: () => <IndexingState>[],
     );
 
@@ -642,7 +631,9 @@ void main() {
     blocTest<IndexingBloc, IndexingState>(
       'עבודת רקע אינה נשלחת למארח',
       build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(ReconcileIndex(libraryWithBooks())),
+      act: (bloc) => bloc.add(
+        RunIndexing(libraryWithBooks(), check: IndexCheckScope.library),
+      ),
       wait: const Duration(milliseconds: 100),
       verify: (_) => expect(owner.receivedOps, isEmpty),
     );
@@ -684,7 +675,7 @@ void main() {
     }
 
     blocTest<IndexingBloc, IndexingState>(
-      'IndexSpecificBooks מפיץ כשל מפורט',
+      'ריצה על ספרים מסוימים מפיצה כשל מפורט',
       build: () {
         final repository = _FakeIndexingRepository()
           ..result = const IndexingRunResult.completed(
@@ -697,7 +688,7 @@ void main() {
       },
       act: (bloc) {
         final library = libraryWithBooks();
-        bloc.add(IndexSpecificBooks(library.books, library));
+        bloc.add(RunIndexing(library, books: library.books));
       },
       expect: () => [
         const IndexingInProgress(
@@ -714,88 +705,71 @@ void main() {
     );
 
     blocTest<IndexingBloc, IndexingState>(
-      'ReindexChangedBooks משתמש במסלול reindex ולא במסלול ספרים חדשים',
+      'ריצת רענון מעבירה ספרים חדשים, שהשתנו ובדיקה בקריאה אחת',
       build: _FakeIndexingBloc.new,
       act: (bloc) {
-        final library = libraryWithBooks();
-        bloc.add(ReindexChangedBooks(library.books, library));
+        final library = libraryWithBooks(3);
+        bloc.add(
+          RunIndexing(
+            library,
+            books: [library.books[0]],
+            changedBooks: [library.books[1]],
+            check: IndexCheckScope.books([library.books[2]]),
+          ),
+        );
       },
       expect: () => [
-        const IndexingInProgress(
-          booksProcessed: 0,
-          totalBooks: 1,
-          isCreatingIndex: false,
-        ),
+        const IndexingInProgress(booksProcessed: 0, totalBooks: 2),
         const IndexingComplete(),
       ],
       verify: (bloc) {
-        expect(repositoryOf(bloc).reindexCalls, 1);
-        expect(repositoryOf(bloc).indexBooksCalls, 0);
+        final run = repositoryOf(bloc).runs.single;
+        expect(run.books!.map((b) => b.title), ['ספר 0']);
+        expect(run.changedBooks.map((b) => b.title), ['ספר 1']);
+        expect(run.check.books.map((b) => b.title), ['ספר 2']);
       },
     );
 
     blocTest<IndexingBloc, IndexingState>(
-      'ReconcileIndex מעביר כשל לדוח ולמצב הסופי',
-      build: () {
-        final repository = _FakeIndexingRepository()
-          ..result = const IndexingRunResult.completed(
-            processedBooks: 1,
-            totalBooks: 1,
-            indexedBooks: 0,
-            failures: [failure],
-          );
-        return _FakeIndexingBloc(repository);
-      },
-      act: (bloc) => bloc.add(ReconcileIndex(libraryWithBooks())),
-      expect: () => [
-        const IndexingInProgress(
-          booksProcessed: 0,
-          totalBooks: 1,
-          isCreatingIndex: false,
-          isScanning: true,
-        ),
-        const IndexingComplete(failures: [failure]),
-      ],
-      verify: (bloc) {
-        expect(repositoryOf(bloc).reconcileCalls, 1);
-        expect(repositoryOf(bloc).reportedResults, hasLength(1));
-      },
-    );
-
-    blocTest<IndexingBloc, IndexingState>(
-      'שלב הסריקה של ReconcileIndex נפלט עם isScanning להצגה בחיווי',
+      'שלב הבדיקה נפלט עם isScanning, ואחריו רשימת העבודה בלבד',
       build: () => _FakeIndexingBloc(
-        _FakeIndexingRepository()..scanProgressReports = [(1, 2), (2, 2)],
+        _FakeIndexingRepository()..scanProgressReports = [(0, 5), (5, 5)],
       ),
-      act: (bloc) => bloc.add(ReconcileIndex(libraryWithBooks(2))),
+      act: (bloc) => bloc.add(
+        RunIndexing(libraryWithBooks(2), check: IndexCheckScope.library),
+      ),
       expect: () => [
         const IndexingInProgress(
           booksProcessed: 0,
-          totalBooks: 2,
+          totalBooks: 5,
           isScanning: true,
         ),
         const IndexingInProgress(
-          booksProcessed: 1,
-          totalBooks: 2,
+          booksProcessed: 5,
+          totalBooks: 5,
           isScanning: true,
         ),
-        const IndexingInProgress(
-          booksProcessed: 2,
-          totalBooks: 2,
-          isScanning: true,
-        ),
+        const IndexingInProgress(booksProcessed: 0, totalBooks: 2),
         const IndexingComplete(),
       ],
     );
 
     blocTest<IndexingBloc, IndexingState>(
-      'רשימת ספרים ריקה אינה מתחילה עבודה',
+      'עדכון סדר הספרים עובר למאגר בלי פליטת מצב',
+      build: _FakeIndexingBloc.new,
+      act: (bloc) => bloc.add(SyncBookOrder(libraryWithBooks(2))),
+      expect: () => <IndexingState>[],
+      verify: (bloc) =>
+          expect(repositoryOf(bloc).syncedOrders.single.books, hasLength(2)),
+    );
+
+    blocTest<IndexingBloc, IndexingState>(
+      'ריצה בלי עבודה אינה פולטת InProgress',
       build: _FakeIndexingBloc.new,
       act: (bloc) => bloc.add(
-        IndexSpecificBooks(const [], Library(categories: [])),
+        RunIndexing(Library(categories: []), books: const []),
       ),
-      expect: () => <IndexingState>[],
-      verify: (bloc) => expect(repositoryOf(bloc).indexBooksCalls, 0),
+      expect: () => [const IndexingComplete()],
     );
   });
 
@@ -807,6 +781,45 @@ void main() {
       expect: () => [isA<IndexingStopped>()],
       verify: (bloc) => expect(repositoryOf(bloc).cancelCalls, 1),
     );
+
+    test('ביטול מנקז ריצות שבתור, ושומר את מה שהיו מחליפות ובודקות', () async {
+      final repository = _FakeIndexingRepository()..runGate = Completer<void>();
+      final bloc = _FakeIndexingBloc(repository);
+      final library = libraryWithBooks(2);
+      final changed = [library.books.first];
+      final checked = [library.books.last];
+      final settled = Completer<void>();
+      bloc.add(StartIndexing(library));
+      bloc.add(
+        RunIndexing(
+          library,
+          books: const [],
+          changedBooks: changed,
+          check: IndexCheckScope.books(checked),
+        ),
+      );
+      bloc.add(RunIndexing(library, check: IndexCheckScope.library));
+      bloc.add(IndexingWorkBarrier(onSettled: settled.complete));
+      await Future<void>.delayed(Duration.zero);
+      expect(repository.runs, hasLength(1));
+
+      bloc.add(CancelIndexing());
+      await Future<void>.delayed(Duration.zero);
+      repository.runGate!.complete();
+      await settled.future.timeout(const Duration(seconds: 2));
+
+      expect(repository.runs, hasLength(1));
+      // ספר שנשלח לבדיקה נזכר כשונה, ובקשת הבדיקה המלאה נדחית לריצה הבאה.
+      expect(repository.rememberedChanged, [...changed, ...checked]);
+      expect(repository.rememberedLibraryCheck, isTrue);
+
+      // ריצה שנשלחה אחרי הביטול רצה כרגיל.
+      final after = Completer<void>();
+      bloc.add(StartIndexing(library, onSettled: after.complete));
+      await after.future.timeout(const Duration(seconds: 2));
+      expect(repository.runs, hasLength(2));
+      await bloc.close();
+    });
 
     blocTest<IndexingBloc, IndexingState>(
       'ClearIndex מנקה ומחזיר למצב התחלתי',
@@ -1044,10 +1057,15 @@ class _FakeIndexingRepository extends IndexingRepository {
   bool allBooksIndexed = false;
   bool manualReindex = false;
   final reportedResults = <IndexingRunResult>[];
-  int indexAllCalls = 0;
-  int indexBooksCalls = 0;
-  int reindexCalls = 0;
-  int reconcileCalls = 0;
+  final runs =
+      <({List<Book>? books, List<Book> changedBooks, IndexCheckScope check})>[];
+  int get indexAllCalls => runs.where((run) => run.books == null).length;
+  int get indexBooksCalls => runs.where((run) => run.books != null).length;
+  final rememberedChanged = <Book>[];
+  bool rememberedLibraryCheck = false;
+
+  /// כשהוא מסופק — כל ריצה ממתינה לו לפני שהיא מתחילה.
+  Completer<void>? runGate;
   int dropOrphanedCalls = 0;
   int dropHiddenCalls = 0;
   bool dropHiddenSucceeded = true;
@@ -1063,7 +1081,7 @@ class _FakeIndexingRepository extends IndexingRepository {
   /// כשהוא מסופק — הריצה מדווחת על שלב האיחוד ונעצרת בו עד לשחרור.
   Completer<void>? finalizeGate;
 
-  /// דיווחי onScanProgress שהסריקה ב-reconcile תפלוט לפני הסיום.
+  /// דיווחי onScanProgress ששלב הבדיקה יפלוט לפני הסיום.
   List<(int, int)> scanProgressReports = const [];
   int clearCalls = 0;
   int awaitReadyCalls = 0;
@@ -1078,14 +1096,28 @@ class _FakeIndexingRepository extends IndexingRepository {
   }
 
   @override
-  Future<IndexingRunResult> indexAllBooks(
+  Future<IndexingRunResult> runIndexing(
     Library library, {
+    List<Book>? books,
+    List<Book> changedBooks = const [],
+    IndexCheckScope check = IndexCheckScope.none,
+    bool includePdfBooks = true,
+    void Function(int processed, int total)? onScanProgress,
+    void Function(int total)? onWorkListReady,
     void Function()? onActualIndexingStarted,
     required void Function(int processed, int total) onProgress,
     void Function()? onFinalizing,
-    bool includePdfBooks = true,
   }) async {
-    indexAllCalls++;
+    runs.add((books: books, changedBooks: changedBooks, check: check));
+    final gateBeforeRun = runGate;
+    if (gateBeforeRun != null) await gateBeforeRun.future;
+    for (final (processed, total) in scanProgressReports) {
+      onScanProgress?.call(processed, total);
+    }
+    final total = allBooksIndexed
+        ? 0
+        : (books ?? library.getIndexableBooks()).length + changedBooks.length;
+    if (total > 0) onWorkListReady?.call(total);
     final gate = finalizeGate;
     if (gate != null) {
       onFinalizing?.call();
@@ -1095,44 +1127,19 @@ class _FakeIndexingRepository extends IndexingRepository {
     return _finish(onProgress);
   }
 
-  @override
-  Future<IndexingRunResult> indexBooks(
-    List<Book> books,
-    Library library, {
-    void Function()? onActualIndexingStarted,
-    required void Function(int processed, int total) onProgress,
-  }) {
-    indexBooksCalls++;
-    return _finish(onProgress);
-  }
+  final syncedOrders = <Library>[];
 
   @override
-  Future<IndexingRunResult> reindexChangedBooks(
-    List<Book> changedBooks,
-    Library library, {
-    void Function()? onActualIndexingStarted,
-    required void Function(int processed, int total) onProgress,
-  }) {
-    reindexCalls++;
-    return _finish(onProgress);
-  }
+  Future<void> syncBookOrder(Library library) async =>
+      syncedOrders.add(library);
 
   @override
-  Future<IndexingRunResult> reconcileIndexWithLibrary(
-    Library library, {
-    List<Book>? onlyBooks,
-    void Function(int processed, int total)? onScanProgress,
-    void Function()? onActualIndexingStarted,
-    required void Function(int processed, int total) onProgress,
-    Future<String?> Function(TextBook book)? loadText,
-    Future<BigInt> Function(TextBook book, String text)? fingerprintOf,
-    String? fingerprintLibraryPath,
-  }) {
-    reconcileCalls++;
-    for (final (processed, total) in scanProgressReports) {
-      onScanProgress?.call(processed, total);
-    }
-    return _finish(onProgress);
+  Future<void> rememberChangedBooks(
+    List<Book> books, {
+    bool checkLibrary = false,
+  }) async {
+    rememberedChanged.addAll(books);
+    rememberedLibraryCheck |= checkLibrary;
   }
 
   @override
@@ -1141,6 +1148,7 @@ class _FakeIndexingRepository extends IndexingRepository {
     List<CustomFolder>? customFolders,
     Set<String>? preservedHiddenUserBookKeys,
     List<AttachedLibrary>? attachedLibraries,
+    String? libraryRoot,
   }) async {
     dropOrphanedCalls++;
     return 0;

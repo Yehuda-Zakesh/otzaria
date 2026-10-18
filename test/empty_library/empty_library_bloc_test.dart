@@ -573,14 +573,26 @@ void main() {
         expect(checkedSizes.single, whole.length + parts.last.length + 15);
         expect(extractedDb, whole);
         expect(requested, contains('https://example.com/v31/part1'));
-        // שום שריד של החלקים או של הארכיון המחובר אינו נשאר ב-temp.
+        // רק קובצי הנעילה הקבועים נשארים, כדי לשמור על אותו inode
+        // בין בעלי נעילה; אין חלקים, sidecars של חידוש או ארכיון מחובר.
+        final leftovers = Directory.systemTemp
+            .listSync()
+            .where((e) => path.basename(e.path).startsWith('otzaria_$name'))
+            .toList();
         expect(
-          Directory.systemTemp
-              .listSync()
-              .map((e) => path.basename(e.path))
-              .where((n) => n.startsWith('otzaria_$name')),
-          isEmpty,
+          leftovers.map((e) => path.basename(e.path)),
+          unorderedEquals([
+            for (var i = 0; i < parts.length; i++)
+              'otzaria_${partName(i)}.lock',
+          ]),
         );
+        for (final lock in leftovers) {
+          expect(
+            FileSystemEntity.typeSync(lock.path, followLinks: false),
+            FileSystemEntityType.file,
+          );
+          expect(File(lock.path).lengthSync(), 0);
+        }
       },
     );
 

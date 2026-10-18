@@ -30,7 +30,8 @@ class _MockPluginSystemBloc
 class _FakeSettingsEvent extends Fake implements SettingsEvent {}
 
 // קיצורים שאינם בשימוש כברירת מחדל על ידי אף הגדרה
-const String _unusedShortcut1 = 'ctrl+y';
+// Ctrl+Y שייך להיסטוריה ב-macOS; הצירוף הזה פנוי בכל הפלטפורמות.
+const String _unusedShortcut1 = 'ctrl+alt+y';
 const String _unusedShortcut2 = 'ctrl+shift+y';
 
 Widget _buildTile({
@@ -40,7 +41,7 @@ Widget _buildTile({
   Map<String, String> allShortcuts = const {
     'ctrl+l': 'Ctrl+L',
     'ctrl+f': 'Ctrl+F',
-    _unusedShortcut1: 'Ctrl+Y',
+    _unusedShortcut1: 'Ctrl+Alt+Y',
     _unusedShortcut2: 'Ctrl+Shift+Y',
   },
 }) {
@@ -57,6 +58,17 @@ Widget _buildTile({
         ),
       ),
     ),
+  );
+}
+
+void _expectUnusedShortcut(String shortcut) {
+  expect(
+    [
+      for (final key in ShortcutValidator.shortcutKeys)
+        if (ShortcutValidator.getShortcutValue(key) == shortcut) key,
+    ],
+    isEmpty,
+    reason: 'הקיצור במתקן הבדיקה חייב להיות פנוי: $shortcut',
   );
 }
 
@@ -119,6 +131,7 @@ void main() {
     });
 
     testWidgets('שומר קיצור שאינו בשימוש על ידי אף הגדרה', (tester) async {
+      _expectUnusedShortcut(_unusedShortcut1);
       await tester.pumpWidget(
         _buildTile(
           bloc: settingsBloc,
@@ -134,9 +147,13 @@ void main() {
       field.onSelected?.call(_unusedShortcut1);
       await tester.pump();
 
-      verify(
-        () => settingsBloc.add(any(that: isA<UpdateShortcut>())),
-      ).called(1);
+      final saved = verify(
+        () => settingsBloc.add(captureAny(that: isA<UpdateShortcut>())),
+      );
+      saved.called(1);
+      final event = saved.captured.single as UpdateShortcut;
+      expect(event.key, 'key-shortcut-search-current-window');
+      expect(event.value, _unusedShortcut1);
     });
 
     testWidgets('מאפשר שיתוף קיצור בין הגדרות מקבוצה תואמת', (tester) async {
@@ -147,7 +164,10 @@ void main() {
           bloc: settingsBloc,
           settingKey: 'key-shortcut-add-note',
           selectedShortcut: 'ctrl+n',
-          allShortcuts: const {'ctrl+n': 'Ctrl+N', _unusedShortcut1: 'Ctrl+Y'},
+          allShortcuts: const {
+            'ctrl+n': 'Ctrl+N',
+            _unusedShortcut1: 'Ctrl+Alt+Y',
+          },
         ),
       );
       await tester.pump();
@@ -367,10 +387,12 @@ void main() {
     });
 
     testWidgets('שומר קיצור מוקלט שאינו בשימוש', (tester) async {
+      _expectUnusedShortcut(_unusedShortcut1);
       await openCustomDialog(tester);
 
-      // הקלטת ctrl+y — אינו בשימוש
+      // הקלטת ctrl+alt+y — פנוי גם ב-macOS.
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.keyY);
       await tester.pump();
 
@@ -379,9 +401,13 @@ void main() {
       await tester.tap(find.text('אישור'));
       await tester.pumpAndSettle();
 
-      verify(
-        () => settingsBloc.add(any(that: isA<UpdateShortcut>())),
-      ).called(1);
+      final saved = verify(
+        () => settingsBloc.add(captureAny(that: isA<UpdateShortcut>())),
+      );
+      saved.called(1);
+      final event = saved.captured.single as UpdateShortcut;
+      expect(event.key, 'key-shortcut-open-commentators-tab');
+      expect(event.value, _unusedShortcut1);
     });
   });
 }

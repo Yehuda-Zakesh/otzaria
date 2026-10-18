@@ -2546,6 +2546,8 @@ class _RecordingNotesRepository extends PersonalNotesRepository {
     required PersonalNoteContentFormat contentFormat,
     String? selectedText,
     int? selectionColumn,
+    String? sourceSelectedText,
+    int? sourceSelectionOffset,
     bool punctuationHidden = false,
     int? categoryId,
   }) async {

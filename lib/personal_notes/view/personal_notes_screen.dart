@@ -1238,8 +1238,7 @@ class _PersonalNotesManagerScreenState
             ),
           ],
           const SizedBox(height: 8),
-          // QuillEditor לא נגלל מחשב פריסה לכל הטקסט, לכן מקצרים את התוכן
-          // ומגבילים את גובה התצוגה המקדימה בתוך הכרטיס.
+          // מקצרים את התוכן ומגבילים את גובה התצוגה המקדימה בתוך הכרטיס.
           Expanded(
             child: ClipRect(
               child: OverflowBox(
@@ -1250,6 +1249,7 @@ class _PersonalNotesManagerScreenState
                   child: PersonalNoteContentView(
                     note: note,
                     maxPreviewChars: 280,
+                    interactive: false,
                     textStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: cs.onSurfaceVariant,
                       height: 1.45,

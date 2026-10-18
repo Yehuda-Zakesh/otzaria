@@ -421,8 +421,6 @@ Future<void> main() async {
         title: 'ספר',
         topics: '/root/ספר',
         filePath: 'id:1',
-        catalogueOrder: 5,
-        generationOrder: 5,
         text: text,
         textStorage: TextStorage.inIndex,
       );

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/theme/app_surfaces.dart';
 import 'package:otzaria/widgets/layout/adaptive_side_pane.dart';
@@ -931,6 +932,23 @@ void main() {
       await tester.tapAt(const Offset(200, 300));
       expect(closed, 1);
     });
+
+    for (final float in [true, false]) {
+      testWidgets('Esc סוגר רק חלונית מרחפת (float=$float)', (tester) async {
+        var closed = 0;
+        await tester.pumpWidget(pane(float: float, onClose: () => closed++));
+        await tester.pumpAndSettle();
+
+        for (final key in ['pane', 'main']) {
+          Focus.of(
+            tester.element(inPane(key, find.text('increment'))),
+          ).requestFocus();
+          await tester.pump();
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        }
+        expect(closed, float ? 2 : 0);
+      });
+    }
 
     testWidgets('נעיצה וביטולה אינם בונים מחדש את החלונית ואת התוכן', (
       tester,

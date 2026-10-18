@@ -223,6 +223,54 @@ void main() {
       expect(output, contains('שניים'));
     });
 
+    test('קישור ישיר לספר (otzaria://open/book|pdf) נשמר — #2516', () {
+      expect(
+        _convert(
+          '<p><a href="otzaria://open/book/12?index=3">ספר</a></p>',
+        ).single,
+        '<a href="otzaria://open/book/12?index=3">ספר</a>',
+      );
+      expect(
+        _convert(
+          '<p><a href="otzaria://open/pdf/5?source=user">PDF</a></p>',
+        ).single,
+        '<a href="otzaria://open/pdf/5?source=user">PDF</a>',
+      );
+    });
+
+    for (final href in const [
+      'otzaria://open/book/%FF',
+      'otzaria://open/pdf/%FF',
+      'otzaria://open/book/%D7',
+      'otzaria://open/b%FFok/12',
+    ]) {
+      test('נתיב קישור פגום נשאר כטקסט בלי לפגוע בהמרה: $href', () {
+        expect(
+          _convert(
+            '<p>לפני</p><p><a href="$href"><b>קישור</b></a></p>'
+            '<p><a href="otzaria://open/book/12?index=3">תקין</a></p>'
+            '<p>אחרי</p>',
+          ),
+          [
+            'לפני',
+            '<b>קישור</b>',
+            '<a href="otzaria://open/book/12?index=3">תקין</a>',
+            'אחרי',
+          ],
+        );
+      });
+    }
+
+    test('שאר פעולות otzaria:// נחסמות גם ב-HTML', () {
+      final output = _joined(
+        '<p><a href="otzaria://plugin/install?url=x">התקנה</a>'
+        '<a href="otzaria://library/reindex">רענון</a></p>',
+      );
+      expect(output, isNot(contains('otzaria://')));
+      expect(output, contains('התקנה'));
+      expect(output, contains('רענון'));
+    });
+
     test('book:// מותרת — היא הדרך המתועדת לקשר בין ספרי אוצריא', () {
       expect(
         _convert('<p><a href="book://ברכות#דף ב:">קישור</a></p>').single,

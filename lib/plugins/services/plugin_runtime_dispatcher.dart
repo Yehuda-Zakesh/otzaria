@@ -494,6 +494,7 @@ class PluginRuntimeDispatcher {
     // בפלטפורמות שבהן pause נייטיב אינו נתמך (macOS/iOS/Linux).
     await _dispatchLifecycleEvent(controller, key.pluginId, 'plugin.suspended');
     if (_supportsNativePauseResume) {
+      await _setMemoryTarget(controller, key, MemoryUsageTargetLevel.LOW);
       try {
         await controller.pause();
       } catch (e) {
@@ -501,6 +502,22 @@ class PluginRuntimeDispatcher {
           'PluginRuntimeDispatcher: pause failed for ${key.pluginId}: $e',
         );
       }
+    }
+  }
+
+  /// WebView2 בלבד: מופע מושהה מתבקש לפנות זיכרון, ובחידוש חוזר לרגיל.
+  Future<void> _setMemoryTarget(
+    InAppWebViewController controller,
+    PluginInstanceKey key,
+    MemoryUsageTargetLevel level,
+  ) async {
+    if (defaultTargetPlatform != TargetPlatform.windows) return;
+    try {
+      await controller.setMemoryUsageTargetLevel(level);
+    } catch (e) {
+      debugPrint(
+        'PluginRuntimeDispatcher: memory target failed for ${key.pluginId}: $e',
+      );
     }
   }
 
@@ -516,6 +533,7 @@ class PluginRuntimeDispatcher {
           'PluginRuntimeDispatcher: resume failed for ${key.pluginId}: $e',
         );
       }
+      await _setMemoryTarget(controller, key, MemoryUsageTargetLevel.NORMAL);
     }
     instance.suspended = false;
     _eventTimedOutControllers.remove(controller);

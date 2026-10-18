@@ -147,6 +147,7 @@ class TikkunToken {
   /// המסורת שבספריה אין כאן פרשה — רק לסמני פתוחה/סתומה שהמסד תלה בהם
   /// הערת שוליים ("אין פרשה בספרי תימן").
   final TikkunTradition? excludedTradition;
+  final TikkunTradition? vavKetiaTradition;
 
   const TikkunToken({
     required this.type,
@@ -158,9 +159,10 @@ class TikkunToken {
     this.openingVerse,
     this.suppressFlush = false,
     this.excludedTradition,
+    this.vavKetiaTradition,
   });
 
-  const TikkunToken.word(String this.value)
+  const TikkunToken.word(String this.value, {this.vavKetiaTradition})
     : type = TikkunTokenType.word,
       chapterNum = null,
       verseNum = null,
@@ -178,6 +180,7 @@ class TikkunToken {
 class LayoutWord extends Equatable {
   final String stam;
   final String nikud;
+  final TikkunTradition? vavKetiaTradition;
 
   /// מספר הפסוק שאליו המילה שייכת — ידוע רק בקטעים מיוחדים.
   final int? verseNum;
@@ -191,6 +194,7 @@ class LayoutWord extends Equatable {
   const LayoutWord({
     required this.stam,
     required this.nikud,
+    this.vavKetiaTradition,
     this.verseNum,
     this.tokenIdx,
     this.gapFraction = 1,
@@ -205,10 +209,18 @@ class LayoutWord extends Equatable {
     verseNum: verseNum,
     tokenIdx: tokenIdx,
     gapFraction: gapFraction,
+    vavKetiaTradition: vavKetiaTradition,
   );
 
   @override
-  List<Object?> get props => [stam, nikud, verseNum, tokenIdx, gapFraction];
+  List<Object?> get props => [
+    stam,
+    nikud,
+    verseNum,
+    tokenIdx,
+    gapFraction,
+    vavKetiaTradition,
+  ];
 }
 
 /// פריסת שורה רגילה או מיוחדת.

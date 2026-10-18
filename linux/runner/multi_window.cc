@@ -17,7 +17,6 @@
 // יחיד ב-namespace scope (`printing_plugin.cc:37`) שרישום שני דורס, והשני
 // מגדיר את ה-registrar **בתוך הכותרת** — הכללתו בשני קבצי מקור היא הגדרה
 // כפולה בקישור. ראו הטבלה למטה.
-#include <custom_mouse_cursor/custom_mouse_cursor_plugin.h>
 #include <file_selector_linux/file_selector_plugin.h>
 #include <flutter_inappwebview_linux/flutter_inappwebview_linux_plugin.h>
 #include <irondash_engine_context/irondash_engine_context_plugin.h>
@@ -111,8 +110,6 @@ struct PluginEntry {
 // שהדפסה מחלון משני תיכשל מיד מאשר שתשבור את החלון הראשון.
 // `SentryFlutterPlugin` הוא stub ריק (ראו ההערה בהכללות).
 const PluginEntry kSecondaryWindowPlugins[] = {
-    {"CustomMouseCursorPlugin",
-     custom_mouse_cursor_plugin_register_with_registrar},
     {"FileSelectorPlugin", file_selector_plugin_register_with_registrar},
     {"FlutterInappwebviewLinuxPlugin",
      flutter_inappwebview_linux_plugin_register_with_registrar},

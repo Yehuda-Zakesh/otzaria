@@ -370,10 +370,7 @@ Future<void> main() async {
         seed: () => seededState(
           results: [
             SearchResult(
-              id: IndexingRepository.buildCatalogueDocumentId(
-                catalogueOrder: 0,
-                ordinal: 0,
-              ),
+              id: (BigInt.one << 32) + BigInt.one,
               title: 'ספר שהוסר מהספרייה',
               reference: 'סימן א',
               text: query,
@@ -449,10 +446,7 @@ SearchResult _result({
   int segment = 1,
 }) {
   return SearchResult(
-    id: IndexingRepository.buildCatalogueDocumentId(
-      catalogueOrder: staleCatalogueOrder,
-      ordinal: 0,
-    ),
+    id: (BigInt.from(staleCatalogueOrder + 1) << 32) + BigInt.one,
     title: book.title,
     reference: '${book.title}, סימן א',
     text: 'שיעור הילוך מיל',

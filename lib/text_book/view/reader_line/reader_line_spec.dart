@@ -367,9 +367,9 @@ class ReaderParagraphRun extends StatelessWidget {
             ),
         ],
         baseStyle: baseStyle,
-        // אותו עיצוב קישורים כמו במצב הרגיל (HtmlWidget): primary + קו תחתון.
+        // אותו עיצוב קישורים כמו במצב הרגיל (HtmlWidget).
         linkStyle: TextStyle(
-          color: colorScheme.primary,
+          color: AppSurfaces.readerLink(colorScheme),
           decoration: TextDecoration.underline,
         ),
         anchorActiveBackground: colorScheme.primaryContainer,

@@ -17,6 +17,7 @@ import 'package:otzaria/theme/app_fonts.dart';
 import 'package:otzaria/tools/tikkun_korim/export/tikkun_pdf_exporter.dart';
 import 'package:otzaria/tools/tikkun_korim/export/tikkun_vector_ops.dart';
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_stam_fonts.dart';
+import 'package:otzaria/tools/tikkun_korim/models/tikkun_vav_ketia.dart';
 import 'package:pdf/pdf.dart';
 
 /// מחזיר את קובץ הגופן של [family] במשקל המבוקש, או null כשאין כזה.
@@ -363,7 +364,12 @@ class TikkunVectorPdfWriter {
       final shaper = ShaperFont.register(bytes);
       font = _ExportFont(
         shaper,
-        PdfShapedFont(_document, shaper: shaper, fontBytes: bytes),
+        PdfShapedFont(
+          _document,
+          shaper: shaper,
+          fontBytes: bytes,
+          textForExtraction: restoreTikkunVavKetiaText,
+        ),
       );
     }
     return _fonts[key] = font;

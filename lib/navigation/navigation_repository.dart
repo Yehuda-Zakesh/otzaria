@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:otzaria/data/cache/acronyms_cache.dart';
 import 'package:otzaria/data/cache/generation_cache.dart';
+import 'package:otzaria/indexing/utils/book_facet_metadata_cache.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/data/cache/books_cache.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
@@ -14,6 +15,8 @@ import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
 import 'package:otzaria/data/data_providers/database_library_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
+import 'package:otzaria/divine_names/repository/divine_names_repository.dart';
+import 'package:otzaria/text_book/repository/book_notes_repository.dart';
 import 'package:otzaria/find_ref/repository/find_ref_repository.dart';
 import 'package:otzaria/services/commentary_service.dart';
 import 'package:otzaria/services/target_line_links_service.dart';
@@ -92,11 +95,14 @@ class NavigationRepository {
       BooksCache.instance.clear();
       AcronymsCache.instance.clear();
       GenerationCache.instance.clear();
+      BookFacetMetadataCache.instance.clear();
       // ה-FindRefRepository מחזיק caches פנימיים (מפרשים, AltToc שטוח) שלא
       // ניזונים מהקאשים שלמעלה. בלי איפוס יזום הם ישרדו עד restart מלא.
       FindRefRepository.clearAllCaches();
       CommentaryService.clearEraCache();
       TargetLineLinksService.instance.clearCache();
+      DivineNamesRepository.instance.clear();
+      BookNotesRepository.instance.clear();
 
       // עדכון נתיב הספרייה
       FileSystemData.instance.libraryPath = libraryPath;

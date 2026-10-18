@@ -33,6 +33,7 @@ LayoutWord? _wordFromToken(TikkunToken tok, int? verseNum, int tokenIdx) {
     return LayoutWord(
       stam: ketivStam,
       nikud: qereRaw,
+      vavKetiaTradition: tok.vavKetiaTradition,
       verseNum: verseNum,
       tokenIdx: tokenIdx,
     );
@@ -42,6 +43,7 @@ LayoutWord? _wordFromToken(TikkunToken tok, int? verseNum, int tokenIdx) {
   return LayoutWord(
     stam: wordStam,
     nikud: word,
+    vavKetiaTradition: tok.vavKetiaTradition,
     verseNum: verseNum,
     tokenIdx: tokenIdx,
   );

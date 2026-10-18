@@ -198,6 +198,28 @@ class ReleaseIndexBuilderCli {
     )) {
       throw StateError('האינדקס נוצר, אך חסרים בו ספרים הניתנים לאינדוקס');
     }
+    // האינדוקס כבר דחף את המיפוי; כאן כשל נכשל את הבנייה במקום להיבלע.
+    final engine = await TantivyDataProvider.instance.engine;
+    await engine.setBookOrder(
+      entries: await IndexingRepository.buildBookOrder(library),
+    );
+    verifyBookOrderFiles(
+      TantivyDataProvider.instance.activeIndexPath ?? config.indexPath,
+    );
+  }
+
+  /// קבצי מספרי הספרים ומיפוי הסדר נארזים עם האינדקס; בלעדיהם מיון לפי
+  /// הקטלוג שגוי עד שהתוכנה דוחפת מיפוי משלה.
+  @visibleForTesting
+  static void verifyBookOrderFiles(String indexPath) {
+    for (final name in const [
+      'otzaria_book_order.json',
+      'otzaria_book_numbers.json',
+    ]) {
+      if (!File(p.join(indexPath, name)).existsSync()) {
+        throw StateError('האינדקס נוצר בלי $name');
+      }
+    }
   }
 
   static void printUsage(StringSink out) {

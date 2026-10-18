@@ -27,6 +27,8 @@ class AddPersonalNote extends PersonalNotesEvent {
 
   /// עמודת ההתחלה המשוערת של הבחירה (לזיהוי המופע הנכון כשהטקסט חוזר בשורה).
   final int? selectionColumn;
+  final String? sourceSelectedText;
+  final int? sourceSelectionOffset;
   final bool punctuationHidden;
 
   const AddPersonalNote({
@@ -37,6 +39,8 @@ class AddPersonalNote extends PersonalNotesEvent {
     required this.contentFormat,
     this.selectedText,
     this.selectionColumn,
+    this.sourceSelectedText,
+    this.sourceSelectionOffset,
     this.punctuationHidden = false,
   });
 
@@ -49,6 +53,8 @@ class AddPersonalNote extends PersonalNotesEvent {
     contentFormat,
     selectedText,
     selectionColumn,
+    sourceSelectedText,
+    sourceSelectionOffset,
     punctuationHidden,
   ];
 }
@@ -82,10 +88,7 @@ class DeletePersonalNote extends PersonalNotesEvent {
   final String bookId;
   final String noteId;
 
-  const DeletePersonalNote({
-    required this.bookId,
-    required this.noteId,
-  });
+  const DeletePersonalNote({required this.bookId, required this.noteId});
 
   @override
   List<Object?> get props => [bookId, noteId];
@@ -123,6 +126,8 @@ class StartCreatingPersonalNote extends PersonalNotesEvent {
   final String? referenceText;
   final String? selectedText;
   final int? selectionColumn;
+  final String? sourceSelectedText;
+  final int? sourceSelectionOffset;
   final bool punctuationHidden;
   final String? initialContent;
   final PersonalNoteContentFormat? initialFormat;
@@ -133,6 +138,8 @@ class StartCreatingPersonalNote extends PersonalNotesEvent {
     this.referenceText,
     this.selectedText,
     this.selectionColumn,
+    this.sourceSelectedText,
+    this.sourceSelectionOffset,
     this.punctuationHidden = false,
     this.initialContent,
     this.initialFormat,
@@ -145,6 +152,8 @@ class StartCreatingPersonalNote extends PersonalNotesEvent {
     referenceText,
     selectedText,
     selectionColumn,
+    sourceSelectedText,
+    sourceSelectionOffset,
     punctuationHidden,
     initialContent,
     initialFormat,

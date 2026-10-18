@@ -62,7 +62,13 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('התאמות נוספות'));
+    final advancedSettings = find.text('התאמות נוספות');
+    // The profile can extend below the test viewport. Open this section through
+    // the same scrollable surface as a user, rather than tapping off screen.
+    await tester.ensureVisible(advancedSettings);
+    await tester.pumpAndSettle();
+    expect(advancedSettings.hitTestable(), findsOneWidget);
+    await tester.tap(advancedSettings);
     await tester.pumpAndSettle();
     return bloc;
   }

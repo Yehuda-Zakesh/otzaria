@@ -8,6 +8,7 @@ import 'package:otzaria/tools/tikkun_korim/engine/stam_width_model.dart';
 import 'package:otzaria/tools/tikkun_korim/models/tikkun_models.dart';
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_settings.dart';
 import 'package:otzaria/tools/tikkun_korim/view/tikkun_render_metrics.dart';
+import 'package:otzaria/tools/tikkun_korim/view/vav_ketia_text.dart';
 import 'package:otzaria/tools/tikkun_korim/view/widgets/nikud_word.dart';
 import 'package:otzaria/tools/tikkun_korim/view/widgets/stam_word.dart';
 
@@ -556,7 +557,12 @@ List<Widget> buildTikkunWordWidgets({
       widgets.add(SizedBox(width: contentWidth * kTikkunBigGapFraction));
       continue;
     }
-    final text = isStam ? word.stam : word.nikud;
+    final text = tikkunVavKetiaText(
+      isStam ? word.stam : word.nikud,
+      tradition: word.vavKetiaTradition,
+      form: metrics.vavKetia,
+      family: style.fontFamily,
+    );
     if (text.isEmpty) continue;
     final shown = maskDivineName ? maskTikkunDivineName(text) : text;
     widgets.add(

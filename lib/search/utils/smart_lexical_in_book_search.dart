@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/search/search_repository.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
@@ -42,6 +43,7 @@ Future<List<SearchResult>> searchSmartLexicalInBook(
   required int limit,
   required int distance,
   required List<String> phrases,
+  @visibleForTesting Map<String, int>? bookOrder,
 }) async {
   if (limit <= 0) return const [];
   if (phrases.length == 1 &&
@@ -56,10 +58,13 @@ Future<List<SearchResult>> searchSmartLexicalInBook(
       includeAdjacentLine: true,
     );
   }
+  final order = bookOrder ?? await IndexingRepository.bookOrderRanks();
+  int compare(SearchResult a, SearchResult b) => _compare(order, a, b);
   final exact = [
     for (final phrase in phrases.toSet())
       StreamIterator(
         _catalogueResults(
+          compare,
           (offset) => repository.searchLiteralPhrase(
             phrase,
             [bookPath],
@@ -72,6 +77,7 @@ Future<List<SearchResult>> searchSmartLexicalInBook(
   ];
   final fuzzy = StreamIterator(
     _catalogueResults(
+      compare,
       (offset) => repository.searchTexts(
         SearchEngineRequest(
           query: query,
@@ -96,10 +102,10 @@ Future<List<SearchResult>> searchSmartLexicalInBook(
       final candidate = fuzzy.current;
       var matches = true;
       for (final iterator in exact) {
-        while (_compare(iterator.current, candidate) < 0) {
+        while (compare(iterator.current, candidate) < 0) {
           if (!await iterator.moveNext()) return results;
         }
-        if (_compare(iterator.current, candidate) != 0) matches = false;
+        if (compare(iterator.current, candidate) != 0) matches = false;
       }
       if (matches) results.add(candidate);
     }
@@ -112,13 +118,20 @@ Future<List<SearchResult>> searchSmartLexicalInBook(
   }
 }
 
-int _compare(SearchResult a, SearchResult b) {
+// כסדר הקטלוג במנוע: מיקום הספר במיפוי (ספר שאינו בו — אחרי כולם לפי מספרו),
+// ובתוך ספר לפי id. בלי זה ספרים שחולקים נתיב נחתכים בסדר שונה מזה של הזרמים.
+int _compare(Map<String, int> order, SearchResult a, SearchResult b) {
+  // מיפוי הסדר הוא u32; ספר שאינו בו ממוין אחרי כולם, לפי מספרו.
+  int rank(SearchResult r) =>
+      order[r.filePath] ?? (1 << 32) + (r.id >> 32).toInt();
+  final book = rank(a).compareTo(rank(b));
+  if (book != 0) return book;
   final id = a.id.compareTo(b.id);
   return id != 0 ? id : a.filePath.compareTo(b.filePath);
 }
 
-// הקטלוג במנוע מסודר לפי id. סדר נתיבים קבוע מונע חיתוך בין ספרים בעלי id זהה.
 Stream<SearchResult> _catalogueResults(
+  int Function(SearchResult a, SearchResult b) compare,
   Future<List<SearchResult>> Function(int offset) fetch,
   int pageSize,
 ) async* {
@@ -128,7 +141,7 @@ Stream<SearchResult> _catalogueResults(
     final page = await fetch(offset);
     for (final result in page) {
       if (tied.isNotEmpty && tied.first.id != result.id) {
-        tied.sort(_compare);
+        tied.sort(compare);
         for (final result in tied) {
           yield result;
         }
@@ -137,7 +150,7 @@ Stream<SearchResult> _catalogueResults(
       tied.add(result);
     }
     if (page.length < pageSize) {
-      tied.sort(_compare);
+      tied.sort(compare);
       for (final result in tied) {
         yield result;
       }

@@ -30,7 +30,7 @@ class SearchCatalogueOrderHelper {
   }) {
     final orderedKeys = <T>[];
     // ספרי מסד מצורף תמיד בסוף — גם כשהם ממוזגים לקטגוריות הספרייה — כדי
-    // שצירוף מסד לא יזיז את סדר כל שאר הספרים (ויחייב אינדוקס מחדש).
+    // שצירוף מסד לא יזיז את סדר כל שאר הספרים בתוצאות.
     final attachedKeys = <T>[];
 
     void collectBooks(Category category) {

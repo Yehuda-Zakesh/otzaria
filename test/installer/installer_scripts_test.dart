@@ -3092,6 +3092,28 @@ void main() {
       expect(hash, contains('Log('));
     });
 
+    test('$_assistant: SHA-256 קורא גודל של 64 סיביות ומתחיל בבית הראשון', () {
+      final hash = _routine(
+        _script(_assistant),
+        'function WindowsSha256OfFile(',
+      );
+      expect(
+        hash,
+        isNot(contains('Stream.Size')),
+        reason:
+            'Size ב-Inno הוא Longint: קבצים מעל 2 GiB נחתכים או נהיים שליליים',
+      );
+      final size = hash.indexOf('Left := Stream.Seek(Int64(0), soFromEnd);');
+      final rewind = hash.indexOf('Stream.Seek(Int64(0), soFromBeginning);');
+      expect(size, isNonNegative);
+      expect(rewind, greaterThan(size));
+      expect(rewind, lessThan(hash.indexOf('while Left > 0 do')));
+      expect(
+        hash.indexOf('Stream.ReadBuffer(Buffer, Count)'),
+        greaterThan(rewind),
+      );
+    });
+
     test('$_assistant: קובץ שכבר במטמון נסמך על החותם ולא יורד שוב', () {
       final script = _script(_assistant);
       final matches = _routine(script, 'function FileMatchesMarker(');

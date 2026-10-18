@@ -13,8 +13,11 @@ import 'package:otzaria_search_engine/otzaria_search_engine.dart'
         HighlightPattern,
         HighlightMatcher,
         HighlightMatch,
+        UserRegexKind,
+        UserRegexMatcher,
         generateHighlightPattern,
         splitQueryWords;
+import 'package:otzaria/search/utils/user_regex_query.dart';
 
 /// רגקס להסרת תגי HTML.
 final RegExp _htmlStripper = RegExp(r'<[^>]*>');
@@ -559,12 +562,20 @@ class _CompiledHighlightPattern {
   final List<RegExp> words;
   final List<bool> boundaryEligible;
 
+  /// שאילתת `/…/`: ההתאמות כולן מהמתאם של המנוע, בלי פרמטרי החיפוש.
+  final UserRegexMatcher? userRegex;
+
+  /// רצף מילים של `/…/` יכול להימשך לשורה הבאה, כמו בחיפוש בספרייה.
+  final bool userRegexCrossesLines;
+
   const _CompiledHighlightPattern(
     this.matcher,
     this.combined,
     this.words,
-    this.boundaryEligible,
-  );
+    this.boundaryEligible, {
+    this.userRegex,
+    this.userRegexCrossesLines = false,
+  });
 }
 
 /// ההדגשה רצה פר-פסקה ברינדור, עם אותם פרמטרי חיפוש — לכן התבנית נבנית
@@ -628,6 +639,7 @@ Future<void> primeHighlightPattern({
   required Map<String, String> spacingValues,
   required int searchDistance,
   required bool isFuzzy,
+  bool anyOrder = false,
   required Future<HighlightPattern?> Function() fetch,
 }) async {
   final key = _highlightRequestKey(
@@ -637,6 +649,7 @@ Future<void> primeHighlightPattern({
     spacingValues,
     searchDistance,
     isFuzzy,
+    anyOrder,
   );
   if (_primedHighlightCache.containsKey(key) ||
       !_primedHighlightInFlight.add(key)) {
@@ -669,12 +682,14 @@ String _highlightRequestKey(
   Map<String, String> spacingValues,
   int searchDistance,
   bool isFuzzy,
+  bool anyOrder,
 ) {
   // מצב fuzzy מפיק תבנית שונה מהותית (וריאנטי מרחק-עריכה וצורות מילון) גם
   // עבור אותם query/distance — בלעדי הסמן, חיפוש advanced ו-fuzzy עם אותם
   // פרמטרים היו חולקים רשומת מטמון בטעות.
   final buffer = StringBuffer()
     ..write(isFuzzy ? 'f' : 'a')
+    ..write(anyOrder ? 'u' : 'o')
     ..write(' ')
     ..write(searchDistance)
     ..write(' ')
@@ -719,8 +734,21 @@ _CompiledHighlightPattern? _resolveHighlightPattern(
   Map<int, List<String>> alternativeWords,
   Map<String, String> spacingValues,
   int searchDistance,
-  bool isFuzzy,
-) {
+  bool isFuzzy, {
+  bool anyOrder = false,
+}) {
+  final userRegex = UserRegexQuery.matcher(searchQuery);
+  if (userRegex != null) {
+    return _CompiledHighlightPattern(
+      null,
+      null,
+      const [],
+      const [],
+      userRegex: userRegex,
+      userRegexCrossesLines:
+          UserRegexQuery.plan(searchQuery)?.kind == UserRegexKind.wordSequence,
+    );
+  }
   if (!isFuzzy) {
     alternativeWords = withHolyNameAlternatives(searchQuery, alternativeWords);
   }
@@ -731,6 +759,7 @@ _CompiledHighlightPattern? _resolveHighlightPattern(
     spacingValues,
     searchDistance,
     isFuzzy,
+    anyOrder,
   );
   // תבנית מבוססת-אינדקס שהוזנה מראש קודמת ל-fallback: היא מדגישה את
   // הווריאנטים שהחיפוש באמת התאים, לא רק את צורת השאילתה.
@@ -749,6 +778,7 @@ _CompiledHighlightPattern? _resolveHighlightPattern(
       customSpacing: spacingValues,
       alternativeWords: alternativeWords,
       searchOptions: searchOptions,
+      anyOrder: anyOrder,
     ),
   );
 
@@ -956,6 +986,13 @@ List<_HighlightMatch> _findHighlightMatches(
   bool isSearchResultLine = false,
   bool isFuzzy = false,
 }) {
+  final userRegex = compiled.userRegex;
+  if (userRegex != null) {
+    return userRegex
+        .findMatches(data: data)
+        .map(_HighlightMatch.fromNative)
+        .toList();
+  }
   if (!matchPolicy.hasStandardWordMatching) {
     if (!isSearchResultLine) return const [];
     return _findPerWordHighlightMatches(
@@ -1138,7 +1175,8 @@ List<_HighlightMatch> _crossLineMatches(
   required List<bool> requireTokenBoundaries,
 }) {
   final matcher = compiled.matcher;
-  if (matcher == null) return const [];
+  final userRegex = compiled.userRegexCrossesLines ? compiled.userRegex : null;
+  if (matcher == null && userRegex == null) return const [];
   final left = lineFirst ? line : neighbour;
   final right = lineFirst ? neighbour : line;
   final leftEnd = crossLineContentRange(left).end;
@@ -1146,10 +1184,13 @@ List<_HighlightMatch> _crossLineMatches(
   final joined = '${left.substring(0, leftEnd)} ${right.substring(rightStart)}';
   final rightOffset = leftEnd + 1 - rightStart;
   final result = <_HighlightMatch>[];
-  for (final match in matcher.findMatches(
-    data: joined,
-    requireTokenBoundaries: requireTokenBoundaries,
-  )) {
+  final found =
+      userRegex?.findMatches(data: joined) ??
+      matcher!.findMatches(
+        data: joined,
+        requireTokenBoundaries: requireTokenBoundaries,
+      );
+  for (final match in found) {
     if (match.start >= leftEnd || match.end <= leftEnd + 1) continue;
     final words = <(int, int)>[
       for (final range in match.wordRanges)
@@ -1213,6 +1254,7 @@ String highLight(
     spacingValues,
     searchDistance,
     isFuzzy,
+    anyOrder: matchPolicy.anyOrder && !isFuzzy,
   );
   if (compiled == null) return data;
 
@@ -1234,8 +1276,9 @@ String highLight(
   // מילה בודדת מותאמת בתוך טוקן אחד ולא יכולה לחצות את המעבר בין השורות.
   if (currentIndex == -1 &&
       !yellowBackground &&
-      matchPolicy.hasStandardWordMatching &&
-      compiled.boundaryEligible.length > 1) {
+      (compiled.userRegexCrossesLines ||
+          (matchPolicy.hasStandardWordMatching &&
+              compiled.boundaryEligible.length > 1))) {
     final crossing = [
       if (nextLine != null)
         ..._crossLineMatches(
@@ -1330,6 +1373,7 @@ List<List<int>> computeHighlightRanges(
     spacingValues,
     searchDistance,
     isFuzzy,
+    anyOrder: matchPolicy.anyOrder && !isFuzzy,
   );
   if (compiled == null) return const [];
   final requireTokenBoundaries = [
@@ -1683,41 +1727,55 @@ enum HolyNameStyle {
   kufKuf('kuf'),
 
   /// החלפה ב"ה'" — הניקוד והטעמים של השם עצמו מושמטים.
-  hehApostrophe('heh');
+  hehApostrophe('heh'),
+
+  /// החלפה ב"יי": ניקוד ה-ו וה-ה האחרונה עובר ל-י השנייה (יְיָ).
+  doubleYod('yy');
 
   final String storageKey;
   const HolyNameStyle(this.storageKey);
 
-  static HolyNameStyle fromStorage(String? key) =>
-      key == HolyNameStyle.hehApostrophe.storageKey
-      ? HolyNameStyle.hehApostrophe
-      : HolyNameStyle.kufKuf;
+  static HolyNameStyle fromStorage(String? key) => HolyNameStyle.values
+      .firstWhere((s) => s.storageKey == key, orElse: () => kufKuf);
 }
 
 String replaceHolyNames(
   String s, {
   HolyNameStyle style = HolyNameStyle.kufKuf,
 }) {
+  final matches = findReplaceableHolyNames(s);
+  if (matches.isEmpty) return s;
+
+  final out = StringBuffer();
+  var copied = 0;
+  for (final match in matches) {
+    out
+      ..write(s.substring(copied, match.start))
+      ..write(switch (style) {
+        HolyNameStyle.kufKuf =>
+          'י${match[1]}ק${match[2]}ו${match[3]}ק${match[4]}',
+        HolyNameStyle.hehApostrophe => "ה'",
+        HolyNameStyle.doubleYod => 'י${match[1]}י${match[3]}${match[4]}',
+      });
+    copied = match.end;
+  }
+  return (out..write(s.substring(copied))).toString();
+}
+
+/// שמות הקודש ש-[replaceHolyNames] תחליף, בטווחי התווים המקוריים.
+List<Match> findReplaceableHolyNames(String s) {
+  List<Match>? matches;
   // סריקת RegExp על כל השורה יקרה בשורות ארוכות, לכן מנסים
   // התאמה רק כשאחרי ה-י באות "הוה", בדילוג על כל מה שעשוי להיות Mn.
-  StringBuffer? out;
-  var copied = 0;
   for (var i = s.indexOf('י'); i >= 0; i = s.indexOf('י', i + 1)) {
     if (!_mayBeHolyName(s, i)) continue;
     final match = _holyName.matchAsPrefix(s, i);
     if (match == null) continue;
     i = match.end - 1;
     if (_hasThreeContiguousHebrewLettersBeforeMatch(s, match.start)) continue;
-    (out ??= StringBuffer())
-      ..write(s.substring(copied, match.start))
-      ..write(
-        style == HolyNameStyle.hehApostrophe
-            ? "ה'"
-            : 'י${match[1]}ק${match[2]}ו${match[3]}ק${match[4]}',
-      );
-    copied = match.end;
+    (matches ??= <Match>[]).add(match);
   }
-  return out == null ? s : (out..write(s.substring(copied))).toString();
+  return matches ?? const <Match>[];
 }
 
 /// מסנן מקדים ל-[_holyName]: "הוה" אחרי ה-י, בדילוג על כל יחידה שעשויה להיות

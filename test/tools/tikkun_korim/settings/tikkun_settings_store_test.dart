@@ -5,6 +5,7 @@ import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_settings.dart';
+import 'package:otzaria/tools/tikkun_korim/models/tikkun_vav_ketia.dart';
 
 import '../../../test_helpers/memory_cache_provider.dart';
 
@@ -13,6 +14,21 @@ void main() {
 
   setUp(() async {
     await Settings.init(cacheProvider: MemoryCacheProvider());
+  });
+
+  for (final form in TikkunVavKetia.values) {
+    test('בחירת וי״ו קטיעא ${form.id} נשמרת ונטענת', () async {
+      final chosen = store.load().copyWith(vavKetia: form);
+      await store.save(chosen);
+      expect(store.load(), chosen);
+      expect(Settings.getValue<String>(TikkunSettingsKeys.vavKetia), form.id);
+    });
+  }
+
+  test('וי״ו קטיעא חסרה או לא מוכרת חוזרת לבחירה לפי המסורת', () async {
+    expect(store.load().vavKetia, TikkunVavKetia.auto);
+    await Settings.setValue<String>(TikkunSettingsKeys.vavKetia, 'unknown');
+    expect(store.load().vavKetia, TikkunVavKetia.auto);
   });
 
   test('בלי עיר בלוח — ארץ ישראל', () {

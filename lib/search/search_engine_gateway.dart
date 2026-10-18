@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:otzaria/search/models/search_configuration.dart';
+import 'package:otzaria/search/search_query_builder.dart';
+import 'package:otzaria/search/utils/user_regex_query.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as text_utils;
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 
@@ -57,6 +60,14 @@ class SearchEngineRequest {
   /// חוצה-ספרים. limit/offset נספרים בקבוצות כשהאיחוד פעיל.
   final ResultGrouping? grouping;
 
+  /// מילות השאילתה בכל סדר בתוך חלון המרווח (גם בשאילתה השלילית). המנוע
+  /// מתעלם ממנו כשיש מרווחים ידניים; הבונה מעביר את הערך האפקטיבי.
+  final bool anyOrder;
+
+  /// מזהה הבקשה שמבטל במנוע את כל קריאות החיפוש הזה
+  /// ([SearchEngineOperations.cancelLexicalSearch]); null — אין ביטול.
+  final int? cancelRequestId;
+
   const SearchEngineRequest({
     required this.query,
     required this.facets,
@@ -80,6 +91,8 @@ class SearchEngineRequest {
     this.grouping,
     this.wordMatchMode = WordMatchMode.all,
     this.wordMatchCount,
+    this.anyOrder = false,
+    this.cancelRequestId,
   });
 
   SearchEngineRequest copyWith({
@@ -105,8 +118,10 @@ class SearchEngineRequest {
     Object? grouping = _unset,
     WordMatchMode? wordMatchMode,
     Object? wordMatchCount = _unset,
+    bool? anyOrder,
   }) {
     return SearchEngineRequest(
+      cancelRequestId: cancelRequestId,
       query: query ?? this.query,
       facets: facets ?? this.facets,
       limit: limit ?? this.limit,
@@ -136,6 +151,7 @@ class SearchEngineRequest {
       wordMatchCount: identical(wordMatchCount, _unset)
           ? this.wordMatchCount
           : wordMatchCount as int?,
+      anyOrder: anyOrder ?? this.anyOrder,
     );
   }
 }
@@ -205,6 +221,71 @@ abstract interface class SemanticSearchEngineOperations {
   Future<SemanticResetResult> resetSemanticIndex();
 }
 
+/// מזהי בקשה לביטול חיפוש במנוע, ייחודיים בתהליך: המנוע זוכר מזהים שבוטלו,
+/// ומזהה שחוזר היה מבטל מראש חיפוש חדש.
+abstract final class LexicalSearchRequestIds {
+  static int _last = 0;
+
+  static int next() => _last = _last >= 0xFFFFFFFF ? 1 : _last + 1;
+}
+
+/// האם [error] הוא כשל של חיפוש שבוטל — לא תקלה להציג למשתמש.
+bool isSearchCancelledError(Object error) {
+  final message = error.toString();
+  return message.contains('lexical search cancelled') ||
+      message.contains('user regex search cancelled');
+}
+
+class _SharedRegexToken {
+  final token = UserRegexCancellationToken();
+  int users = 0;
+}
+
+/// אסימוני הביטול של חיפושי `/…/` לפי מזהה הבקשה, כך שביטול המזהה עוצר גם
+/// אותם. כל קריאות אותה בקשה חולקות אסימון אחד.
+abstract final class _UserRegexCancellations {
+  static const int _rememberedLimit = 1024;
+  static final Map<int, _SharedRegexToken> _active = {};
+  static final LinkedHashSet<int> _cancelled = LinkedHashSet();
+
+  static UserRegexCancellationToken acquire(int? id) {
+    if (id == null) return UserRegexCancellationToken();
+    final entry = _active.putIfAbsent(id, _SharedRegexToken.new);
+    if (_cancelled.contains(id)) entry.token.cancel();
+    entry.users++;
+    return entry.token;
+  }
+
+  static void release(int? id, UserRegexCancellationToken token) {
+    final entry = id == null ? null : _active[id];
+    if (entry != null) {
+      if (--entry.users > 0) return;
+      _active.remove(id);
+    }
+    token.dispose();
+  }
+
+  static void cancel(int id) {
+    _active[id]?.token.cancel();
+    _cancelled.add(id);
+    while (_cancelled.length > _rememberedLimit) {
+      _cancelled.remove(_cancelled.first);
+    }
+  }
+
+  static Future<T> run<T>(
+    int? id,
+    Future<T> Function(UserRegexCancellationToken token) call,
+  ) async {
+    final token = acquire(id);
+    try {
+      return await call(token);
+    } finally {
+      release(id, token);
+    }
+  }
+}
+
 /// ממשק קטן וניתן לבדיקה מעל ה-API של `search_engine`.
 abstract class SearchEngineOperations {
   Future<List<SearchResult>> searchExact(SearchEngineRequest request);
@@ -252,6 +333,27 @@ abstract class SearchEngineOperations {
     SearchEngineRequest request, {
     required String facetPrefix,
   });
+
+  /// עוצר במנוע את כל קריאות החיפוש שנשאו את [requestId] (ראו
+  /// [SearchEngineRequest.cancelRequestId]), גם כאלה שעוד לא התחילו.
+  void cancelLexicalSearch(int requestId) {}
+
+  /// חיפוש `/…/` ([SearchEngineRequest.query] היא השאילתה הגולמית).
+  Stream<UserRegexStreamUpdate> searchUserRegexStream(
+    SearchEngineRequest request, {
+    required int chunkSize,
+  }) => throw UnsupportedError('המנוע אינו תומך בחיפוש רג\'קס');
+
+  Future<CountResult> countUserRegex(SearchEngineRequest request) =>
+      throw UnsupportedError('המנוע אינו תומך בחיפוש רג\'קס');
+
+  Future<BookCountResult> countByBookUserRegex(SearchEngineRequest request) =>
+      throw UnsupportedError('המנוע אינו תומך בחיפוש רג\'קס');
+
+  Future<FacetCountsResult> getFacetCountsUserRegex(
+    SearchEngineRequest request, {
+    required String facetPrefix,
+  }) => throw UnsupportedError('המנוע אינו תומך בחיפוש רג\'קס');
 
   /// מזין מראש את תבנית הדגשת-הספר-הפתוח מבוססת-האינדקס לפרמטרי החיפוש —
   /// כך שכשהמשתמש יפתח תוצאה, `utils.highLight` ימצא תבנית שמדגישה את
@@ -313,6 +415,7 @@ class RustSearchEngineOperations
   /// שאילתה שלילית, scope) מרוקנים במפורש, כדי ששאריות ממצב מתקדם קודם
   /// לא יזלגו פנימה.
   ///
+  /// "בכל סדר" בשאילתה מרובת מילים קיים רק במסלול המתקדם, ולכן גם הוא מנותב.
   /// מחזיר null כשאין מה לנתב (מרווח 0 ובלי אפשרויות — המסלול המדויק
   /// המהיר נשאר).
   static SearchEngineRequest? _exactWithParametersAsAdvanced(
@@ -324,7 +427,9 @@ class RustSearchEngineOperations
     final hasOptions = request.searchOptions.values.any(
       (options) => options.values.any((enabled) => enabled),
     );
-    if (request.distance <= 0 && !hasOptions) {
+    final reordersWords =
+        request.anyOrder && SearchQueryBuilder.hasMultipleWords(request.query);
+    if (request.distance <= 0 && !hasOptions && !reordersWords) {
       return null;
     }
     return exactAsAdvanced(request);
@@ -401,6 +506,7 @@ class RustSearchEngineOperations
       grouping: request.grouping,
       wordMatchMode: request.wordMatchMode,
       wordMatchCount: request.wordMatchCount,
+      anyOrder: request.anyOrder,
     );
   }
 
@@ -514,6 +620,7 @@ class RustSearchEngineOperations
       grouping: request.grouping,
       wordMatchMode: request.wordMatchMode,
       wordMatchCount: request.wordMatchCount,
+      anyOrder: request.anyOrder,
     );
   }
 
@@ -551,6 +658,7 @@ class RustSearchEngineOperations
       matchNikud: request.matchNikud,
       matchTaamim: request.matchTaamim,
       grouping: request.grouping,
+      cancelRequestId: request.cancelRequestId,
     );
   }
 
@@ -582,6 +690,8 @@ class RustSearchEngineOperations
       grouping: request.grouping,
       wordMatchMode: request.wordMatchMode,
       wordMatchCount: request.wordMatchCount,
+      anyOrder: request.anyOrder,
+      cancelRequestId: request.cancelRequestId,
     );
   }
 
@@ -601,6 +711,7 @@ class RustSearchEngineOperations
       matchNikud: request.matchNikud,
       matchTaamim: request.matchTaamim,
       grouping: request.grouping,
+      cancelRequestId: request.cancelRequestId,
     );
   }
 
@@ -613,6 +724,7 @@ class RustSearchEngineOperations
       facets: request.facets,
       matchNikud: request.matchNikud,
       matchTaamim: request.matchTaamim,
+      cancelRequestId: request.cancelRequestId,
     );
   }
 
@@ -636,6 +748,8 @@ class RustSearchEngineOperations
       negativeScope: request.negativeScope,
       wordMatchMode: request.wordMatchMode,
       wordMatchCount: request.wordMatchCount,
+      anyOrder: request.anyOrder,
+      cancelRequestId: request.cancelRequestId,
     );
   }
 
@@ -647,6 +761,7 @@ class RustSearchEngineOperations
       maxDistance: _fuzzyDistance(request.distance),
       matchNikud: request.matchNikud,
       matchTaamim: request.matchTaamim,
+      cancelRequestId: request.cancelRequestId,
     );
   }
 
@@ -659,6 +774,7 @@ class RustSearchEngineOperations
       facets: request.facets,
       matchNikud: request.matchNikud,
       matchTaamim: request.matchTaamim,
+      cancelRequestId: request.cancelRequestId,
     );
   }
 
@@ -682,6 +798,8 @@ class RustSearchEngineOperations
       negativeScope: request.negativeScope,
       wordMatchMode: request.wordMatchMode,
       wordMatchCount: request.wordMatchCount,
+      anyOrder: request.anyOrder,
+      cancelRequestId: request.cancelRequestId,
     );
   }
 
@@ -693,6 +811,7 @@ class RustSearchEngineOperations
       maxDistance: _fuzzyDistance(request.distance),
       matchNikud: request.matchNikud,
       matchTaamim: request.matchTaamim,
+      cancelRequestId: request.cancelRequestId,
     );
   }
 
@@ -738,6 +857,7 @@ class RustSearchEngineOperations
       negativeScope: request.negativeScope,
       wordMatchMode: request.wordMatchMode,
       wordMatchCount: request.wordMatchCount,
+      anyOrder: request.anyOrder,
     );
   }
 
@@ -779,6 +899,7 @@ class RustSearchEngineOperations
           matchNikud: request.matchNikud,
           matchTaamim: request.matchTaamim,
           grouping: request.grouping,
+          cancelRequestId: request.cancelRequestId,
         );
       case SearchMode.advanced:
         return _engine.searchAdvancedStreamWithCounts(
@@ -804,6 +925,8 @@ class RustSearchEngineOperations
           grouping: request.grouping,
           wordMatchMode: request.wordMatchMode,
           wordMatchCount: request.wordMatchCount,
+          anyOrder: request.anyOrder,
+          cancelRequestId: request.cancelRequestId,
         );
       case SearchMode.fuzzy:
         return _engine.searchFuzzyStreamWithCounts(
@@ -817,9 +940,74 @@ class RustSearchEngineOperations
           matchNikud: request.matchNikud,
           matchTaamim: request.matchTaamim,
           grouping: request.grouping,
+          cancelRequestId: request.cancelRequestId,
         );
     }
   }
+
+  @override
+  void cancelLexicalSearch(int requestId) {
+    _UserRegexCancellations.cancel(requestId);
+    _engine.cancelLexicalSearch(requestId: requestId);
+  }
+
+  @override
+  Stream<UserRegexStreamUpdate> searchUserRegexStream(
+    SearchEngineRequest request, {
+    required int chunkSize,
+  }) async* {
+    final id = request.cancelRequestId;
+    final token = _UserRegexCancellations.acquire(id);
+    try {
+      yield* _engine.searchUserRegexStream(
+        raw: request.query,
+        facets: request.facets,
+        limit: request.limit,
+        offset: request.offset,
+        order: request.order,
+        chunkSize: chunkSize,
+        cancellation: token,
+      );
+    } finally {
+      _UserRegexCancellations.release(id, token);
+    }
+  }
+
+  @override
+  Future<CountResult> countUserRegex(SearchEngineRequest request) =>
+      _UserRegexCancellations.run(
+        request.cancelRequestId,
+        (token) => _engine.countUserRegex(
+          raw: request.query,
+          facets: request.facets,
+          cancellation: token,
+        ),
+      );
+
+  @override
+  Future<BookCountResult> countByBookUserRegex(SearchEngineRequest request) =>
+      _UserRegexCancellations.run(
+        request.cancelRequestId,
+        (token) => _engine.countByBookUserRegex(
+          raw: request.query,
+          facets: request.facets,
+          cancellation: token,
+        ),
+      );
+
+  @override
+  Future<FacetCountsResult> getFacetCountsUserRegex(
+    SearchEngineRequest request, {
+    required String facetPrefix,
+  }) => _UserRegexCancellations.run(
+    request.cancelRequestId,
+    (token) => _engine.getFacetCountsUserRegex(
+      raw: request.query,
+      facets: request.facets,
+      facetPrefix: facetPrefix,
+      cancellation: token,
+    ),
+  );
 
   static int _fuzzyDistance(int distance) {
     return distance.clamp(0, kMaxFuzzyDistance).toInt();
@@ -835,6 +1023,8 @@ class RustSearchEngineOperations
   /// צריכה לשאת את אותו מרווח — לכן הוא מוזן כבקשה מתקדמת.
   @override
   void primeHighlightPattern(SearchEngineRequest request) {
+    // ההדגשה של `/…/` נעשית במתאם של המנוע עצמו (UserRegexQuery.matcher).
+    if (UserRegexQuery.isValid(request.query)) return;
     final gapped = _exactWithParametersAsAdvanced(request);
     if (gapped != null) return primeHighlightPattern(gapped);
     if (request.query.trim().isEmpty ||
@@ -849,6 +1039,7 @@ class RustSearchEngineOperations
         spacingValues: request.customSpacing,
         searchDistance: request.distance,
         isFuzzy: request.searchMode == SearchMode.fuzzy,
+        anyOrder: request.anyOrder,
         fetch: () => switch (request.searchMode) {
           SearchMode.advanced => _engine.generateIndexHighlightPattern(
             query: request.query,
@@ -856,6 +1047,7 @@ class RustSearchEngineOperations
             customSpacing: request.customSpacing,
             alternativeWords: request.alternativeWords,
             searchOptions: request.searchOptions,
+            anyOrder: request.anyOrder,
           ),
           SearchMode.fuzzy => _engine.generateIndexFuzzyHighlightPattern(
             query: request.query,
@@ -948,6 +1140,9 @@ class SearchEngineGateway {
     SearchEngineOperations engine,
     SearchEngineRequest request,
   ) async {
+    if (UserRegexQuery.isValid(request.query)) {
+      return (await _userRegexPage(engine, request)).results;
+    }
     request = _withHolyNames(request);
     // בזמן שהחיפוש רץ, תבנית ההדגשה לספר-פתוח נבנית ברקע מאותם פרמטרים —
     // עד שהמשתמש יפתח תוצאה היא כבר במטמון.
@@ -966,6 +1161,9 @@ class SearchEngineGateway {
     SearchEngineOperations engine,
     SearchEngineRequest request,
   ) async {
+    if (UserRegexQuery.isValid(request.query)) {
+      return _userRegexPage(engine, request);
+    }
     request = _withHolyNames(request);
     engine.primeHighlightPattern(request);
     switch (request.searchMode) {
@@ -985,6 +1183,11 @@ class SearchEngineGateway {
     SearchEngineRequest request, {
     required int chunkSize,
   }) {
+    if (UserRegexQuery.isValid(request.query)) {
+      return _userRegexAsSearchUpdates(
+        engine.searchUserRegexStream(request, chunkSize: chunkSize),
+      );
+    }
     request = _withHolyNames(request);
     engine.primeHighlightPattern(request);
     return engine.searchStreamWithCounts(request, chunkSize: chunkSize);
@@ -994,6 +1197,9 @@ class SearchEngineGateway {
     SearchEngineOperations engine,
     SearchEngineRequest request,
   ) async {
+    if (UserRegexQuery.isValid(request.query)) {
+      return (await engine.countUserRegex(request)).count;
+    }
     request = _withHolyNames(request);
     switch (request.searchMode) {
       case SearchMode.exact:
@@ -1009,6 +1215,9 @@ class SearchEngineGateway {
     SearchEngineOperations engine,
     SearchEngineRequest request,
   ) async {
+    if (UserRegexQuery.isValid(request.query)) {
+      return (await engine.countByBookUserRegex(request)).counts;
+    }
     request = _withHolyNames(request);
     switch (request.searchMode) {
       case SearchMode.exact:
@@ -1025,6 +1234,13 @@ class SearchEngineGateway {
     SearchEngineRequest request, {
     required String facetPrefix,
   }) async {
+    if (UserRegexQuery.isValid(request.query)) {
+      final result = await engine.getFacetCountsUserRegex(
+        request,
+        facetPrefix: facetPrefix,
+      );
+      return result.counts;
+    }
     request = _withHolyNames(request);
     switch (request.searchMode) {
       case SearchMode.exact:
@@ -1042,6 +1258,57 @@ class SearchEngineGateway {
           request,
           facetPrefix: facetPrefix,
         );
+    }
+  }
+
+  /// עמוד אחד של חיפוש `/…/`, עם הספירה הכוללת שבאירוע האחרון.
+  static Future<SearchPageResult> _userRegexPage(
+    SearchEngineOperations engine,
+    SearchEngineRequest request,
+  ) async {
+    final results = <SearchResult>[];
+    var totalCount = 0;
+    var truncated = false;
+    await for (final update in engine.searchUserRegexStream(
+      request,
+      chunkSize: request.limit > 0 ? request.limit : 50,
+    )) {
+      results.addAll(update.results);
+      totalCount = update.totalCount ?? totalCount;
+      truncated = truncated || update.truncated;
+    }
+    return SearchPageResult(
+      totalCount: totalCount,
+      results: results,
+      truncated: truncated,
+    );
+  }
+
+  /// אירועי `/…/` כ-stream המשולב; בסריקה חוצת-רווחים, עד הספירה הסופית
+  /// מדווח מה שנמצא עד כה. חיפוש שבוטל מסתיים בלי אירוע, כמו הלקסיקלי.
+  static Stream<SearchStreamUpdate> _userRegexAsSearchUpdates(
+    Stream<UserRegexStreamUpdate> updates,
+  ) async* {
+    await for (final update in updates) {
+      if (update.cancelled) return;
+      final total = update.totalCount;
+      if (total != null) {
+        yield SearchStreamUpdate(
+          totalCount: total,
+          bookCounts: update.bookCounts,
+          results: const [],
+          truncated: update.truncated,
+        );
+      } else if (!update.done && update.progressTotal > 0) {
+        yield SearchStreamUpdate(
+          totalCount: update.foundSoFar,
+          results: const [],
+          truncated: update.truncated,
+        );
+      }
+      if (update.results.isNotEmpty) {
+        yield SearchStreamUpdate(results: update.results, truncated: false);
+      }
     }
   }
 }

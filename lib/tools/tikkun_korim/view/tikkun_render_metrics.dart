@@ -1,6 +1,8 @@
 /// המידות שמהן נגזרת כל שורה בעמוד התיקון — התרגום של משתני ה-CSS של התוסף.
 library;
 
+import 'package:otzaria/tools/tikkun_korim/models/tikkun_vav_ketia.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
@@ -77,6 +79,7 @@ class TikkunRenderMetrics {
   final double rowPitch;
   final String stamFontFamily;
   final String nikudFontFamily;
+  final TikkunVavKetia vavKetia;
 
   /// רוחב העמוד שהמידות נגזרו ממנו, בלי הזום.
   final double pageWidth;
@@ -90,6 +93,7 @@ class TikkunRenderMetrics {
     required this.stamFontFamily,
     required this.nikudFontFamily,
     required this.pageWidth,
+    this.vavKetia = TikkunVavKetia.auto,
   });
 
   /// רוחב הייחוס, שהוא גם רוחב העמוד המרבי, לפי פריסת הטורים.
@@ -145,6 +149,7 @@ class TikkunRenderMetrics {
       rowPitch: fontSize * lineHeight,
       stamFontFamily: settings.stamFontFamily,
       nikudFontFamily: settings.nikudFontFamily,
+      vavKetia: settings.vavKetia,
     );
   }
 
@@ -158,6 +163,7 @@ class TikkunRenderMetrics {
     rowPitch: rowPitch,
     stamFontFamily: stamFontFamily,
     nikudFontFamily: nikudFontFamily,
+    vavKetia: vavKetia,
   );
 
   /// גופן הבסיס של השורה — יחידת ה-em של הרווחים והמסמנים.

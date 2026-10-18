@@ -9,6 +9,11 @@ import 'package:otzaria/attached_libraries/repository/attached_library_probe.dar
 import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/attached_libraries/repository/attached_library_store.dart';
 import 'package:path/path.dart' as p;
+import 'package:otzaria/models/book_source.dart';
+import 'package:otzaria/text_book/models/book_notes.dart';
+import 'package:otzaria/text_book/repository/book_notes_repository.dart';
+import 'package:otzaria/divine_names/models/divine_name_spans.dart';
+import 'package:otzaria/divine_names/repository/divine_names_repository.dart';
 import 'package:sqlite3/sqlite3.dart' as sqlite3;
 
 import '../helpers/seforim_fixture_db.dart';
@@ -70,6 +75,72 @@ void main() {
       await tempDir.delete(recursive: true);
     } catch (_) {}
   });
+
+  test(
+    'installUpdate מאפס נתוני שורות של מסד מצורף לפני הפתיחה הבאה',
+    () async {
+      final repository = build();
+      final path = fixture(
+        Directory(p.join(tempDir.path, 'old')),
+        'extra',
+        libraryId: 'extra',
+      );
+      final imported = await repository.importFile(path);
+      final library = imported.library!;
+      final source = BookSource.attached(library.slug);
+      final notes = BookNotesRepository.instance;
+      final names = DivineNamesRepository.instance;
+      notes
+        ..clear()
+        ..debugLoader = (title, {categoryId, required source}) async =>
+            (BookNotesBuilder()..add(0, 0, null, 'ישן')).build();
+      names
+        ..clear()
+        ..debugLoader = (title, {categoryId, required source}) async =>
+            (DivineNameSpansBuilder()..add(0, 0, 5, DivineNameKind.elohim))
+                .build();
+      addTearDown(() {
+        notes
+          ..debugLoader = null
+          ..clear();
+        names
+          ..debugLoader = null
+          ..clear();
+      });
+      expect(
+        (await notes.notesFor('ספר', source: source)).notesAt(0).single.body,
+        'ישן',
+      );
+      expect((await names.spansFor('ספר', source: source)).isEmpty, isFalse);
+      final staged = fixture(
+        Directory(p.join(tempDir.path, 'new')),
+        'extra',
+        libraryId: 'extra',
+      );
+      final stagedDb = sqlite3.sqlite3.open(staged);
+      stagedDb.execute("UPDATE line SET content = 'בראשית ב' WHERE id = 1");
+      stagedDb.close();
+      File(staged).setLastModifiedSync(File(path).lastModifiedSync());
+      expect(
+        AttachedLibraryProbe.probeSync(staged).fingerprint,
+        library.fingerprint,
+      );
+      notes.debugLoader = (title, {categoryId, required source}) async =>
+          (BookNotesBuilder()..add(0, 0, null, 'חדש')).build();
+      names.debugLoader = (title, {categoryId, required source}) async =>
+          DivineNameSpans.empty;
+      await repository.installUpdate(
+        library,
+        staged,
+        accept: (result) => result.isOk,
+      );
+      expect(
+        (await notes.notesFor('ספר', source: source)).notesAt(0).single.body,
+        'חדש',
+      );
+      expect((await names.spansFor('ספר', source: source)).isEmpty, isTrue);
+    },
+  );
 
   group('צירוף קובץ', () {
     test('קישור: נשמר בהגדרות, ב-registry, ומשודר', () async {

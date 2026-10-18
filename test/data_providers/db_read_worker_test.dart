@@ -913,6 +913,43 @@ void main() {
       targetCategoryId: 7,
     );
 
+    test('שורות קישור שומרות br פנימי בשאילתת טווח', () async {
+      final db = sqlite3.sqlite3.open(dbPath);
+      db.execute(
+        "UPDATE line SET content = ? WHERE bookId = ? AND lineIndex = ?",
+        ['פירוש<br>המשך', 2, 0],
+      );
+      db.close();
+      expect(
+        await DatabaseLibraryProvider.instance.getLinkContentLines(
+          link('מפרש', 1, index2End: 2),
+        ),
+        [
+          (lineIndex: 0, content: 'פירוש<br>המשך'),
+          (lineIndex: 1, content: 'פירוש 1'),
+        ],
+      );
+    });
+
+    test('טווח דליל שומר את האינדקסים המקוריים ולא מזיז נתוני הערות', () async {
+      final db = sqlite3.sqlite3.open(dbPath);
+      db.execute('DELETE FROM line WHERE bookId = 2 AND lineIndex = 1');
+      db.close();
+      final lines = await DatabaseLibraryProvider.instance.getLinkContentLines(
+        link('מפרש', 1, index2End: 3),
+      );
+      expect(lines, [
+        (lineIndex: 0, content: 'פירוש 0'),
+        (lineIndex: 2, content: 'פירוש 2'),
+      ]);
+      expect(
+        await DatabaseLibraryProvider.instance.getLinkContent(
+          link('מפרש', 2, index2End: 3),
+        ),
+        'שגיאה: אינדקס מחוץ לטווח',
+      );
+    });
+
     test('getLinkContent מחזיר את אותן מחרוזות כמו קודם', () async {
       final provider = DatabaseLibraryProvider.instance;
       expect(await provider.getLinkContent(link('מפרש', 2)), 'פירוש 1');

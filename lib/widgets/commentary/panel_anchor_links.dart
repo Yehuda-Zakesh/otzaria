@@ -1,6 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
+import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
+import 'package:otzaria/text_book/utils/inline_notes_utils.dart';
+import 'package:otzaria/text_book/repository/book_notes_repository.dart';
+import 'package:otzaria/text_book/models/book_notes.dart';
+import 'package:otzaria/divine_names/models/divine_name_spans.dart';
+import 'package:otzaria/divine_names/repository/divine_names_repository.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/services/target_line_links_service.dart';
 import 'package:otzaria/tabs/models/tab.dart';
@@ -21,6 +27,12 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
   /// המיקום ברשימה הזו, ולכן [anchorLinkFromUrl] חייב לקרוא את אותה רשימה.
   List<Link> _anchorLinks = const [];
   List<Link> _noteLinks = const [];
+
+  /// הערות השוליים מהמסד של ספר הקטע (`line_note`) — במסד חדש הן מחליפות
+  /// את קישורי FOOTNOTES של "הערות על ...", למשל בחברותא.
+  BookNotes _targetNotes = BookNotes.empty;
+  DivineNameSpans _targetNames = DivineNameSpans.empty;
+  List<LinkContentLine>? _targetLines;
   int _anchorHoverGeneration = 0;
 
   /// הקישור שהקטע שלו מוצג — [Link.path2]/[Link.index2] הם הספר והשורה.
@@ -29,7 +41,23 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
   /// כיבוי לפי פרופיל התצוגה של הכרטיסייה.
   bool get anchorLinksEnabled;
 
-  bool get hasPanelLinks => _anchorLinks.isNotEmpty || _noteLinks.isNotEmpty;
+  bool get hasPanelLinks =>
+      _anchorLinks.isNotEmpty || _noteLinks.isNotEmpty || _hasStoredNotes;
+
+  bool get _isSingleLine =>
+      (anchorSourceLink.index2End ?? anchorSourceLink.index2) <=
+      anchorSourceLink.index2;
+
+  bool get _hasStoredNotes {
+    for (
+      var i = anchorSourceLink.index2 - 1;
+      i < (anchorSourceLink.index2End ?? anchorSourceLink.index2);
+      i++
+    ) {
+      if (_targetNotes.notesAt(i).isNotEmpty) return true;
+    }
+    return false;
+  }
 
   void startAnchorLinks() {
     _anchorSubscription = TargetLineLinksService.instance.refreshStream.listen(
@@ -42,6 +70,9 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
     _cancelAnchorHoverTimer();
     _anchorLinks = const [];
     _noteLinks = const [];
+    _targetNotes = BookNotes.empty;
+    _targetNames = DivineNameSpans.empty;
+    _targetLines = null;
     _requestAnchorLinks();
   }
 
@@ -70,13 +101,27 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
     _cancelAnchorHoverTimer();
     final generation = _anchorHoverGeneration;
     final isNoteMarker = url.startsWith('otzaria://note-marker');
-    final anchorLink = isNoteMarker ? null : anchorLinkFromUrl(url);
-    if (!isNoteMarker && anchorLink == null) return;
+    final isBookNote = url.startsWith('otzaria://book-note');
+    final anchorLink = isNoteMarker || isBookNote
+        ? null
+        : anchorLinkFromUrl(url);
+    if (!isNoteMarker && !isBookNote && anchorLink == null) return;
     if (anchorLink != null) prefetchLinkPreview(anchorLink);
     _anchorHoverTimer = Timer(const Duration(milliseconds: 280), () async {
-      final link = anchorLink ?? await numberedNoteLinkFromUrl(url, _noteLinks);
-      if (!mounted || link == null) return;
-      if (generation != _anchorHoverGeneration) return;
+      final lineIndex = int.tryParse(
+        Uri.tryParse(url)?.queryParameters['line'] ?? '',
+      );
+      final link =
+          anchorLink ??
+          await numberedNoteLinkFromUrl(url, [
+            for (final candidate in _noteLinks)
+              if (candidate.index1 == (lineIndex ?? -1) + 1) candidate,
+          ]);
+      if (!mounted || generation != _anchorHoverGeneration) return;
+      if (link == null) {
+        _showBookNotePreview(url, globalPosition, displayProfile);
+        return;
+      }
       LinkPreviewOverlay.show(
         context,
         link: link,
@@ -91,6 +136,49 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
     });
   }
 
+  void _showBookNotePreview(
+    String url,
+    Offset globalPosition,
+    TextDisplayProfile? displayProfile,
+  ) {
+    final lineIndex = int.tryParse(
+      Uri.tryParse(url)?.queryParameters['line'] ?? '',
+    );
+    if (lineIndex == null ||
+        lineIndex < anchorSourceLink.index2 - 1 ||
+        lineIndex >= (anchorSourceLink.index2End ?? anchorSourceLink.index2)) {
+      return;
+    }
+    final lineNotes = _targetNotes.notesAt(lineIndex);
+    if (lineNotes.isEmpty) return;
+    final String? note;
+    if (url.startsWith('otzaria://book-note')) {
+      note = inlineNoteFromPreviewUrl(const [], url, dbNotes: _targetNotes);
+    } else {
+      final match = numberedBookNoteFromUrl(url, lineNotes);
+      note = match == null
+          ? null
+          : BookNotes.toInlineHtml(
+              match,
+              body: bookNoteBodyWithDivineNames(
+                _targetNotes,
+                lineIndex,
+                match,
+              ),
+            );
+    }
+    if (note == null) return;
+    LinkPreviewOverlay.showContent(
+      context,
+      globalPosition: globalPosition,
+      hoverMode: true,
+      contentBuilder: (_) => InlineBookNotePreviewContent(
+        content: note!,
+        displayProfile: displayProfile,
+      ),
+    );
+  }
+
   void handleAnchorHoverExit(String url) {
     _cancelAnchorHoverTimer();
     LinkPreviewOverlay.scheduleHide();
@@ -103,9 +191,34 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
   }
 
   void _requestAnchorLinks() {
+    _loadTargetNotes();
     if (!anchorLinksEnabled) return;
     TargetLineLinksService.instance.prefetch(anchorSourceLink);
     _syncAnchorLinks();
+  }
+
+  Future<void> _loadTargetNotes() async {
+    final link = anchorSourceLink;
+    if (link.path2.isEmpty) return;
+    final notes = await BookNotesRepository.instance.notesFor(
+      utils.getTitleFromPath(link.path2),
+      categoryId: link.targetCategoryId,
+      source: link.targetSource,
+      fileType: link.targetFileType,
+    );
+    final names = await DivineNamesRepository.instance.spansFor(
+      utils.getTitleFromPath(link.path2),
+      categoryId: link.targetCategoryId,
+      source: link.targetSource,
+      fileType: link.targetFileType,
+    );
+    final lines = _isSingleLine ? null : await link.contentLines;
+    if (!mounted || !identical(anchorSourceLink, link)) return;
+    setState(() {
+      _targetNotes = notes;
+      _targetNames = names;
+      _targetLines = lines;
+    });
   }
 
   void _syncAnchorLinks() {
@@ -116,11 +229,16 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
     final line = anchorSourceLink.index2;
     final next = [
       for (final link in cached.anchored)
-        if (link.index1 == line && _hasRangeSpan(link)) link,
+        if (link.index1 >= line &&
+            link.index1 <= (anchorSourceLink.index2End ?? line) &&
+            _hasRangeSpan(link))
+          link,
     ];
     final nextNotes = numberedNoteLinks([
       for (final link in cached.commentaries)
-        if (link.index1 == line) link,
+        if (link.index1 >= line &&
+            link.index1 <= (anchorSourceLink.index2End ?? line))
+          link,
     ]);
     // הזרם משותף לכל הפריטים; בלי ההשוואה כל טעינה של פריט אחד הייתה בונה
     // מחדש את כולם.
@@ -152,24 +270,49 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
   /// מזריק את הסימון לשורה הגולמית — חייב לרוץ *לפני* כל עיבוד שמוסיף תוכן
   /// גלוי (סימוני הערות), כי אופסטי העוגן נמדדים על הטקסט כפי שנשמר.
   String injectAnchorLinks(String rawLine) {
-    final lineIndex = anchorSourceLink.index2 - 1;
-    final html = _anchorLinks.isEmpty
+    final lines = _targetLines;
+    if (lines == null) {
+      return _isSingleLine
+          ? _injectLineLinks(rawLine, anchorSourceLink.index2 - 1)
+          : rawLine;
+    }
+    return [
+      for (final line in lines) _injectLineLinks(line.content, line.lineIndex),
+    ].join('<br>');
+  }
+
+  List<Link> _anchorsAt(int lineIndex) => [
+    for (final link in _anchorLinks)
+      if (link.index1 == lineIndex + 1) link,
+  ];
+
+  String _injectLineLinks(String rawLine, int lineIndex) {
+    final anchors = _anchorsAt(lineIndex);
+    final html = anchors.isEmpty
         ? rawLine
         : injectLinkAnchorMarkers(
             rawLine: rawLine,
-            anchorLinks: _anchorLinks,
+            anchorLinks: anchors,
             styleIndexByCommentator: const {},
             lineIndex: lineIndex,
             rangesOnly: true,
           );
-    // אחרי הציטוטים: אופסטי קישור-משתמש נמדדים על השורה הגולמית.
-    // HTML של טווח אינו שומר גבולות שורות מקור; מספר הערה יכול לחזור.
-    if (_noteLinks.isEmpty ||
-        (anchorSourceLink.index2End ?? anchorSourceLink.index2) >
-            anchorSourceLink.index2) {
-      return html;
+    final marked = injectDivineNameMarkers(html, _targetNames, lineIndex);
+    if (!anchorLinksEnabled) return marked;
+    final lineNotes = _targetNotes.notesAt(lineIndex);
+    var result = lineNotes.isEmpty
+        ? marked
+        : addInlineNotePreviewLinks(
+            marked,
+            lineIndex: lineIndex,
+            dbNotes: _targetNotes,
+          );
+    // סמן מודפס כמו (9) בלי <sup> — ההערה שלו נשמרה בלי אות-הפניה.
+    if (_noteLinks.any((link) => link.index1 == lineIndex + 1) ||
+        lineNotes.any((n) => n.marker == null)) {
+      result = addNumberedNoteMarkerLinks(result, lineIndex: lineIndex);
     }
-    return addNumberedNoteMarkerLinks(html, lineIndex: lineIndex);
+    return result;
   }
 
   /// פענוח `otzaria://anchor?ref=<line>_<i>` לקישור שממנו נוצר הסימון.
@@ -177,9 +320,11 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
     final ref = Uri.tryParse(url)?.queryParameters['ref'];
     final parts = ref?.split('_');
     if (parts == null || parts.length != 2) return null;
+    final lineIndex = int.tryParse(parts[0]);
     final index = int.tryParse(parts[1]);
-    if (index == null || index < 0 || index >= _anchorLinks.length) return null;
-    return _anchorLinks[index];
+    if (lineIndex == null || index == null || index < 0) return null;
+    final anchors = _anchorsAt(lineIndex);
+    return index < anchors.length ? anchors[index] : null;
   }
 }
 
@@ -226,7 +371,9 @@ class _PanelAnchoredTextState extends State<PanelAnchoredText>
   @override
   void didUpdateWidget(PanelAnchoredText oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.link != widget.link) restartAnchorLinks();
+    if (oldWidget.link != widget.link || oldWidget.enabled != widget.enabled) {
+      restartAnchorLinks();
+    }
   }
 
   @override

@@ -6,6 +6,8 @@ import 'package:otzaria/settings/l10n/settings_text.dart';
 import 'package:otzaria/settings/search/settings_search_models.dart';
 import 'package:otzaria/settings/view/settings_screen.dart';
 import 'package:otzaria/settings/widgets/settings_widgets_exports.dart';
+import 'package:otzaria/settings/widgets/tikkun_vav_ketia_setting.dart';
+import 'package:otzaria/tools/tikkun_korim/models/tikkun_vav_ketia.dart';
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_settings.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
 
@@ -16,6 +18,14 @@ class TikkunKorimSettingsTab extends StatefulWidget {
 
   /// פריטי חיפוש בהגדרות. נסרק על-ידי tool/generate_search_index.dart.
   static const List<SettingsSearchEntry> searchEntries = [
+    SettingsSearchEntry(
+      id: 'tools.tikkun_korim.vav_ketia',
+      title: 'וי״ו קטיעא',
+      subtitle: 'בתיבת שלום; בגופני סת״ם, אשורית וכתר',
+      tab: SettingsTab.tools,
+      cardId: 'tools.tikkun_korim',
+      keywords: ['תיקון קוראים', 'שלום', 'ויו', 'קטיעא', 'מסורת'],
+    ),
     SettingsSearchEntry(
       id: 'tools.tikkun_korim.startup_mode',
       title: 'פתיחה בהפעלה',
@@ -59,6 +69,7 @@ class _TikkunKorimSettingsTabState extends State<TikkunKorimSettingsTab> {
   late String nusach;
   late String nusachLand;
   late bool hideDivineName;
+  late TikkunVavKetia vavKetia;
 
   @override
   void initState() {
@@ -70,6 +81,9 @@ class _TikkunKorimSettingsTabState extends State<TikkunKorimSettingsTab> {
     nusach =
         Settings.getValue<String>(TikkunSettingsKeys.nusach) ?? defaults.nusach;
     nusachLand = const TikkunSettingsStore().load().nusachLand;
+    vavKetia = TikkunVavKetia.byId(
+      Settings.getValue<String>(TikkunSettingsKeys.vavKetia),
+    );
     hideDivineName =
         Settings.getValue<bool>(TikkunSettingsKeys.hideDivineName) ??
         defaults.hideDivineName;
@@ -84,6 +98,16 @@ class _TikkunKorimSettingsTabState extends State<TikkunKorimSettingsTab> {
           cardId: 'tools.tikkun_korim',
           title: context.settingsText('תיקון קוראים'),
           children: [
+            TikkunVavKetiaSetting(
+              value: vavKetia,
+              onChanged: (value) {
+                setState(() => vavKetia = value);
+                Settings.setValue<String>(
+                  TikkunSettingsKeys.vavKetia,
+                  value.id,
+                );
+              },
+            ),
             SettingsActionTile.segmentedTile<String>(
               icon: FluentIcons.book_open_24_regular,
               title: context.settingsText('פתיחה בהפעלה'),

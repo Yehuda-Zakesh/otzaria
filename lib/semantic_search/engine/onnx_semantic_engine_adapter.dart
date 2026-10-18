@@ -19,6 +19,9 @@ class OnnxSemanticEngineAdapter implements SemanticEngineBackend {
   final SemanticCancellationToken Function() _newToken;
 
   @override
+  bool get supportsLongLineWindows => true;
+
+  @override
   Future<SemanticBackendStatus> status() async =>
       mapStatus(await (await _engine()).semanticStatus());
 
@@ -229,6 +232,7 @@ class OnnxSemanticEngineAdapter implements SemanticEngineBackend {
       candidateWindowMultiplier: config.candidateWindowMultiplier,
       foundationalBonus: config.foundationalBonus,
       foundationalCandidateShare: config.foundationalCandidateShare,
+      windowPenalty: config.windowPenalty,
     );
   }
 

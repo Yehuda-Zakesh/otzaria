@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:collection/collection.dart';
 import 'package:convert/convert.dart';
@@ -9,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
+import 'package:otzaria/utils/file/native_sha256.dart';
 import 'package:otzaria/utils/http_redirect_download.dart';
 
 /// מידע על ה-release האחרון של מילון המורפולוגיה (`lexical.db`).
@@ -295,7 +297,7 @@ class MagicDictionaryDownloader {
   /// ה-sha256 של [path] בזרימה — בלי לטעון 57MB לזיכרון. `null` בכשל קריאה.
   static Future<String?> _fileSha256(String path) async {
     try {
-      return (await sha256.bind(File(path).openRead()).first).toString();
+      return await Isolate.run(() => sha256OfFileFast(path));
     } catch (_) {
       return null;
     }

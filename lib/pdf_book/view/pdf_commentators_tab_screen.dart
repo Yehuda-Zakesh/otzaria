@@ -158,7 +158,9 @@ class _PdfCommentatorsTabScreenState extends State<PdfCommentatorsTabScreen>
   /// הפרופיל הגלובלי של [slot] עם עקיפת הכרטיסייה.
   TextDisplayProfile _profileFor(BuildContext context, TextDisplaySlot slot) =>
       _displayOverride.value.applyTo(
-        context.watch<SettingsBloc>().state.textDisplayPolicy.resolve(slot),
+        context.select(
+          (SettingsBloc bloc) => bloc.state.textDisplayPolicy.resolve(slot),
+        ),
       );
 
   TextDisplayProfile get _commentaryProfile => _displayOverride.value.applyTo(
@@ -732,7 +734,7 @@ class _PdfCommentatorsTabScreenState extends State<PdfCommentatorsTabScreen>
   }) {
     final textMaxWidth = textColumnMaxWidthOf(
       context,
-      setting: context.watch<SettingsBloc>().state.textMaxWidth,
+      setting: context.select((SettingsBloc bloc) => bloc.state.textMaxWidth),
       availableWidth: availableWidth,
     );
     // הרוחב עובר לתוך הרשימה ולא עוטף אותה מבחוץ, כדי שפס הגלילה יישאר
@@ -758,7 +760,9 @@ class _PdfCommentatorsTabScreenState extends State<PdfCommentatorsTabScreen>
         TextDisplaySlot.commentaryDisplay.copyWith(channel: TextChannel.copy),
       ),
       openBookCallback: (tab) => openPreparedTab(context, tab),
-      fontSize: context.watch<SettingsBloc>().state.commentatorsFontSize,
+      fontSize: context.select(
+        (SettingsBloc bloc) => bloc.state.commentatorsFontSize,
+      ),
       externalSearchController: _searchController,
       externalTotalResultsNotifier: _totalResultsNotifier,
       externalCurrentIndexNotifier: _currentIdxNotifier,

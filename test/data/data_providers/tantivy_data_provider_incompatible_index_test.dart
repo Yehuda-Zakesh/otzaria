@@ -111,7 +111,7 @@ Future<void> main() async {
 Future<void> _writeIncompatibleIndex(Directory indexDir) async {
   final engine = await SearchEngine.newInstance(path: indexDir.path);
   await engine.addDocument(
-    id: BigInt.one,
+    ordinal: 0,
     title: 'ספר',
     reference: 'ספר א',
     topics: '/ספר',

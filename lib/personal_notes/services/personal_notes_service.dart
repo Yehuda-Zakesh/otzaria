@@ -6,16 +6,15 @@ import 'package:otzaria/personal_notes/utils/note_anchor_utils.dart';
 import 'package:otzaria/personal_notes/utils/note_collection_utils.dart';
 import 'package:otzaria/personal_notes/utils/note_text_utils.dart';
 import 'package:otzaria/personal_notes/utils/personal_notes_book_key.dart';
+import 'package:otzaria/utils/text/text_manipulation.dart' as text_utils;
 
 class PersonalNotesService {
   final PersonalNotesDatabase _database;
   final Random _random;
 
-  PersonalNotesService({
-    PersonalNotesDatabase? database,
-    Random? random,
-  }) : _database = database ?? PersonalNotesDatabase.instance,
-       _random = random ?? Random();
+  PersonalNotesService({PersonalNotesDatabase? database, Random? random})
+    : _database = database ?? PersonalNotesDatabase.instance,
+      _random = random ?? Random();
 
   Future<List<PersonalNote>> loadNotes({
     required String bookId,
@@ -52,6 +51,8 @@ class PersonalNotesService {
     required PersonalNoteContentFormat contentFormat,
     String? selectedText,
     int? selectionColumn,
+    String? sourceSelectedText,
+    int? sourceSelectionOffset,
     bool punctuationHidden = false,
   }) async {
     final lines = splitBookContentIntoLines(bookContent);
@@ -85,12 +86,18 @@ class PersonalNotesService {
       final rawLine = lines[normalizedLineNumber - 1];
       final computed = computeAnchorForSelection(
         rawLine: rawLine,
-        selectedText: trimmedSelectedText,
+        selectedText: sourceSelectedText ?? trimmedSelectedText,
         selectionColumnHint: selectionColumn,
+        sourceSelectionOffset: sourceSelectionOffset,
+        sourceSelectionText: sourceSelectedText == null
+            ? null
+            : text_utils.stripHtmlIfNeeded(rawLine),
         punctuationHidden: punctuationHidden,
       );
       if (computed != null) {
-        anchorText = normalizeAnchorText(trimmedSelectedText);
+        anchorText = normalizeAnchorText(
+          sourceSelectedText ?? trimmedSelectedText,
+        );
         anchorPrefix = computed.prefix;
         anchorSuffix = computed.suffix;
         anchorStart = computed.start;
@@ -213,10 +220,7 @@ class PersonalNotesService {
       if (previousLine != null &&
           previousLine > 0 &&
           previousLine <= lines.length &&
-          _displayTitleExistsInLine(
-            note.displayTitle,
-            lines[previousLine - 1],
-          )) {
+          _noteMatchesLine(note, lines[previousLine - 1])) {
         return note.copyWith(
           lineNumber: previousLine,
           status: PersonalNoteStatus.located,
@@ -237,26 +241,28 @@ class PersonalNotesService {
 
     // Check if displayTitle exists in the current line (anywhere, not just at the start)
     // This handles cases where user selected text from the middle of the line
-    if (_displayTitleExistsInLine(note.displayTitle, lines[lineIndex])) {
+    if (_noteMatchesLine(note, lines[lineIndex])) {
       // Location is still valid - no change needed
       return note;
     }
 
     // Fallback: check if line start matches (for notes without selected text)
-    final actualDisplayTitle = extractDisplayTextFromLines(
-      lines,
-      note.lineNumber!,
-      excludeBookTitle: _bookTitle(bookId),
-    );
-    if (_displayTitleMatches(note.displayTitle, actualDisplayTitle)) {
-      return note;
+    if (!_hasAnchor(note)) {
+      final actualDisplayTitle = extractDisplayTextFromLines(
+        lines,
+        note.lineNumber!,
+        excludeBookTitle: _bookTitle(bookId),
+      );
+      if (_displayTitleMatches(note.displayTitle, actualDisplayTitle)) {
+        return note;
+      }
     }
 
-    // Try to find the note in nearby lines using displayTitle
+    // הערות מעוגנות יחפשו nearby לפי טקסט המקור; ישנות לפי כותרת.
     final match = _searchNearby(
       lines,
       note.lineNumber!,
-      note.displayTitle,
+      note,
       bookId,
     );
     if (match != null) {
@@ -282,10 +288,11 @@ class PersonalNotesService {
     int lineNumber,
     String bookId,
   ) {
+    if (lineNumber < 1 || lineNumber > lines.length) return false;
+    if (_noteMatchesLine(note, lines[lineNumber - 1])) return true;
+    if (_hasAnchor(note)) return false;
     final title = note.displayTitle;
     if (title == null || title.isEmpty) return false;
-    if (lineNumber < 1 || lineNumber > lines.length) return false;
-    if (_displayTitleExistsInLine(title, lines[lineNumber - 1])) return true;
     return _displayTitleMatches(
       title,
       extractDisplayTextFromLines(
@@ -294,6 +301,18 @@ class PersonalNotesService {
         excludeBookTitle: _bookTitle(bookId),
       ),
     );
+  }
+
+  bool _hasAnchor(PersonalNote note) =>
+      note.anchorText != null && note.anchorText!.isNotEmpty;
+
+  bool _noteMatchesLine(PersonalNote note, String lineContent) {
+    if (_hasAnchor(note)) {
+      final anchor = normalizeAnchorText(note.anchorText!);
+      return anchor.isNotEmpty &&
+          projectLine(lineContent).normalized.contains(anchor);
+    }
+    return _displayTitleExistsInLine(note.displayTitle, lineContent);
   }
 
   /// Check if the displayTitle text exists anywhere in the line
@@ -313,9 +332,21 @@ class PersonalNotesService {
   _LineMatch? _searchNearby(
     List<String> lines,
     int centerLine,
-    String? referenceTitle,
+    PersonalNote note,
     String bookId,
   ) {
+    final referenceTitle = note.displayTitle;
+    if (_hasAnchor(note)) {
+      for (int offset = -5; offset <= 5; offset++) {
+        if (offset == 0) continue;
+        final candidateLine = centerLine + offset;
+        if (candidateLine < 1 || candidateLine > lines.length) continue;
+        if (_noteMatchesLine(note, lines[candidateLine - 1])) {
+          return _LineMatch(line: candidateLine);
+        }
+      }
+      return null;
+    }
     if (referenceTitle == null || referenceTitle.isEmpty) {
       return null;
     }
@@ -385,7 +416,5 @@ class PersonalNotesService {
 class _LineMatch {
   final int line;
 
-  _LineMatch({
-    required this.line,
-  });
+  _LineMatch({required this.line});
 }

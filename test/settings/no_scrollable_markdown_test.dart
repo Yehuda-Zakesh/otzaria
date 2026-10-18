@@ -2,12 +2,7 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
-/// בדיקה סטטית: אסור להשתמש ב-Markdown הגלילתי של flutter_markdown ב-lib.
-///
-/// Markdown בונה ListView עצל שאומד את היקף הגלילה מגובה הפריטים הבנויים
-/// בלבד, וכשגובהי הבלוקים שונים האומדן משתנה תוך כדי גלילה והאגודל "רוקד"
-/// (קופץ אחורה-קדימה). תוכן markdown מוצג עם MarkdownBody בתוך scrollable
-/// בעל היקף מדויק (SingleChildScrollView או דיאלוג scrollable).
+// MarkdownBody שומר היקף תוכן מדויק בתוך הגולל החיצוני.
 void main() {
   test('אין שימוש ב-Markdown הגלילתי ב-lib — רק MarkdownBody', () {
     final pattern = RegExp(r'(?<![\w.])Markdown\(');

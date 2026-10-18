@@ -1,10 +1,10 @@
-import 'dart:isolate';
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
-import 'package:fuzzywuzzy/fuzzywuzzy.dart';
+import 'package:flutter/foundation.dart' show listEquals, visibleForTesting;
 import 'package:otzaria/data/cache/acronyms_cache.dart';
 import 'package:otzaria/data/cache/generation_cache.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
+import 'package:otzaria/data/repository/book_search_worker.dart';
 import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/library/models/library.dart';
@@ -68,7 +68,14 @@ class DataRepository {
   void invalidateLibraryCache() {
     _libraryFuture = null;
     _lastSuccessfulLibrary = null;
+    _bookSearchWorker.dispose();
   }
+
+  final BookSearchWorker _bookSearchWorker = BookSearchWorker();
+  final Map<Object, Object> _pendingBookSearches = {};
+
+  @visibleForTesting
+  BookSearchWorker get bookSearchWorkerForTesting => _bookSearchWorker;
 
   // הקטלוגים החיצוניים נטענים רק בחיפוש כדי שלא יעכבו את העלייה.
   Future<List<Book>>? _hebrewBooksFuture;
@@ -191,6 +198,7 @@ class DataRepository {
 
   /// כמו [findBooks], ובנוסף מחזיר את הקטגוריות שכותרתן תואמת לשאילתה —
   /// לתצוגת קבוצת "תיקיות" אחרי הספרים בתוצאות האיתור (issue #956).
+  /// חיפוש חדש עם אותו [supersedeKey] מבטל את הקודם ב-[BookSearchSupersededException].
   Future<({List<Book> books, List<Category> categories})>
   findBooksAndCategories(
     String query,
@@ -201,93 +209,107 @@ class DataRepository {
     bool includeLocalHebrewBooks = true,
     List<Book> extraBooks = const [],
     bool sortByRatio = true,
+    Object? supersedeKey,
   }) async {
-    const empty = (books: <Book>[], categories: <Category>[]);
-    final normalizedQuery = _normalizeForSearch(query);
-    final queryWords = normalizedQuery
-        .split(RegExp(r'\s+'))
-        .where((w) => w.isNotEmpty)
-        .toList();
-    if (queryWords.isEmpty) {
-      return empty;
-    }
+    final request = Object();
+    if (supersedeKey != null) _pendingBookSearches[supersedeKey] = request;
+    try {
+      const empty = (books: <Book>[], categories: <Category>[]);
+      final normalizedQuery = _normalizeForSearch(query);
+      final queryWords = normalizedQuery
+          .split(RegExp(r'\s+'))
+          .where((w) => w.isNotEmpty)
+          .toList();
+      if (queryWords.isEmpty) {
+        return empty;
+      }
 
-    final allBooks = <Book>[
-      ...(category?.getAllBooks() ?? (await library).getAllBooks()),
-    ];
+      final allBooks = <Book>[
+        ...(category?.getAllBooks() ?? (await library).getAllBooks()),
+      ];
 
-    if (includeOtzar) {
-      allBooks.addAll(await otzarBooks);
-    }
-    if (includeHebrewBooks) {
-      allBooks.addAll(await hebrewBooks);
-    } else if (includeLocalHebrewBooks) {
-      // ספרי היברובוקס שיש להם PDF מקומי הם ספרים שכבר נמצאים במחשב, ולכן
-      // מוצגים גם כשהצגת הקטלוג החיצוני כבויה — עד שהמשתמש מכבה זאת.
-      allBooks.addAll(await localHebrewBooks);
-    }
-    // ספרים מבחוץ (של תוספים) אחרונים ברשימה.
-    allBooks.addAll(extraBooks);
+      if (includeOtzar) {
+        allBooks.addAll(await otzarBooks);
+      }
+      if (includeHebrewBooks) {
+        allBooks.addAll(await hebrewBooks);
+      } else if (includeLocalHebrewBooks) {
+        // ספרי היברובוקס שיש להם PDF מקומי הם ספרים שכבר נמצאים במחשב, ולכן
+        // מוצגים גם כשהצגת הקטלוג החיצוני כבויה — עד שהמשתמש מכבה זאת.
+        allBooks.addAll(await localHebrewBooks);
+      }
+      // ספרים מבחוץ (של תוספים) אחרונים ברשימה.
+      allBooks.addAll(extraBooks);
 
-    // no-op אם הקאשים כבר חוממו בעליית האפליקציה
-    await AcronymsCache.instance.warmUp();
-    // מסד מצורף איטי (כונן רשת) אינו מעכב את החיפוש — הקריאה נמשכת ב-isolate.
-    await AcronymsCache.instance.warmUpAttached().timeout(
-      attachedAcronymsWait,
-      onTimeout: () {},
-    );
-    await GenerationCache.instance.warmUp();
-
-    final searchEntries = <BookSearchEntry>[
-      for (var i = 0; i < allBooks.length; i++)
-        buildBookSearchEntry(
-          i,
-          allBooks[i],
-          acronymsFor: AcronymsCache.instance.acronymsFor,
-          eraOrderForId: GenerationCache.instance.getOrderForBook,
-        ),
-    ];
-
-    // הקטגוריות מצטרפות לאותה ריצת isolate; מזוהות באינדקסים שמעל הספרים.
-    final allCategories =
-        category?.getAllCategories() ?? (await library).getAllCategories();
-    for (var i = 0; i < allCategories.length; i++) {
-      searchEntries.add(
-        BookSearchEntry(
-          index: allBooks.length + i,
-          title: allCategories[i].title,
-          author: '',
-          topics: '',
-        ),
+      // no-op אם הקאשים כבר חוממו בעליית האפליקציה
+      await AcronymsCache.instance.warmUp();
+      // מסד מצורף איטי (כונן רשת) אינו מעכב את החיפוש — הקריאה נמשכת ב-isolate.
+      await AcronymsCache.instance.warmUpAttached().timeout(
+        attachedAcronymsWait,
+        onTimeout: () {},
       );
-    }
+      await GenerationCache.instance.warmUp();
 
-    final matchingIndices = await Isolate.run(
-      () => filterBookSearchEntries(
-        entries: searchEntries,
-        queryWords: queryWords,
-        topics: topics ?? const <String>[],
-        sortByRatio: sortByRatio,
-        normalizedQuery: normalizedQuery,
-      ),
-    );
+      final searchEntries = <BookSearchEntry>[
+        for (var i = 0; i < allBooks.length; i++)
+          buildBookSearchEntry(
+            i,
+            allBooks[i],
+            acronymsFor: AcronymsCache.instance.acronymsFor,
+            eraOrderForId: GenerationCache.instance.getOrderForBook,
+          ),
+      ];
 
-    final books = <Book>[];
-    final categories = <Category>[];
-    for (final index in matchingIndices) {
-      if (index < allBooks.length) {
-        books.add(allBooks[index]);
-      } else {
-        categories.add(allCategories[index - allBooks.length]);
+      // הקטגוריות מצטרפות לאותה ריצת isolate; מזוהות באינדקסים שמעל הספרים.
+      final allCategories =
+          category?.getAllCategories() ?? (await library).getAllCategories();
+      for (var i = 0; i < allCategories.length; i++) {
+        searchEntries.add(
+          BookSearchEntry(
+            index: allBooks.length + i,
+            title: allCategories[i].title,
+            author: '',
+            topics: '',
+          ),
+        );
+      }
+
+      if (supersedeKey != null &&
+          !identical(_pendingBookSearches[supersedeKey], request)) {
+        throw const BookSearchSupersededException();
+      }
+      final matchingIndices = await _bookSearchWorker.search(
+        searchEntries,
+        BookSearchQuery(
+          queryWords: queryWords,
+          topics: topics ?? const <String>[],
+          sortByRatio: sortByRatio,
+          normalizedQuery: normalizedQuery,
+        ),
+        supersedeKey: supersedeKey,
+      );
+
+      final books = <Book>[];
+      final categories = <Category>[];
+      for (final index in matchingIndices) {
+        if (index < allBooks.length) {
+          books.add(allBooks[index]);
+        } else {
+          categories.add(allCategories[index - allBooks.length]);
+        }
+      }
+      // סינון נושאים פעיל מסתיר את קבוצת התיקיות — לקטגוריה אין נושאים.
+      return (
+        books: books,
+        categories: (topics?.isNotEmpty ?? false)
+            ? const <Category>[]
+            : categories,
+      );
+    } finally {
+      if (identical(_pendingBookSearches[supersedeKey], request)) {
+        _pendingBookSearches.remove(supersedeKey);
       }
     }
-    // סינון נושאים פעיל מסתיר את קבוצת התיקיות — לקטגוריה אין נושאים.
-    return (
-      books: books,
-      categories: (topics?.isNotEmpty ?? false)
-          ? const <Category>[]
-          : categories,
-    );
   }
 
   String _normalizeForSearch(String input) => _normalizeBookSearchText(input);
@@ -319,7 +341,7 @@ BookSearchEntry buildBookSearchEntry(
   );
 }
 
-@visibleForTesting
+/// רשומת חיפוש של ספר או תיקייה, בצורה שאפשר לשלוח ל-isolate.
 class BookSearchEntry {
   final int index;
   final String title;
@@ -351,6 +373,34 @@ class BookSearchEntry {
     this.isExternalCatalog = false,
     this.categoryPath = '',
   });
+
+  /// השוואת תוכן — כך מזוהה שאינדקס ה-worker כבר מעודכן.
+  bool sameAs(BookSearchEntry other) =>
+      index == other.index &&
+      eraOrder == other.eraOrder &&
+      isExternalCatalog == other.isExternalCatalog &&
+      title == other.title &&
+      author == other.author &&
+      topics == other.topics &&
+      categoryPath == other.categoryPath &&
+      source == other.source &&
+      (identical(acronyms, other.acronyms) ||
+          listEquals(acronyms, other.acronyms));
+}
+
+/// השאילתה המנורמלת של חיפוש הספרייה; נשלחת כהודעה ל-[BookSearchWorker].
+class BookSearchQuery {
+  final List<String> queryWords;
+  final List<String> topics;
+  final bool sortByRatio;
+  final String normalizedQuery;
+
+  const BookSearchQuery({
+    required this.queryWords,
+    required this.topics,
+    required this.sortByRatio,
+    required this.normalizedQuery,
+  });
 }
 
 @visibleForTesting
@@ -360,54 +410,85 @@ List<int> filterBookSearchEntries({
   required List<String> topics,
   required bool sortByRatio,
   required String normalizedQuery,
-}) {
-  // סינון הנושאים כמעט תמיד כבוי, ואז אף אחד לא קורא את קבוצת הנושאים של
-  // הרשומה — פיצול ובניית Set לכל ספר בכל הקלדה יהיו עבודה לאשפה.
-  final filtersByTopic = topics.isNotEmpty;
+}) => PreparedBookSearchIndex(entries).search(
+  BookSearchQuery(
+    queryWords: queryWords,
+    topics: topics,
+    sortByRatio: sortByRatio,
+    normalizedQuery: normalizedQuery,
+  ),
+);
 
+/// רשומות החיפוש אחרי נרמול. נבנה פעם אחת לכל גרסת ספרייה ומשרת כל הקלדה.
+class PreparedBookSearchIndex {
+  PreparedBookSearchIndex(List<BookSearchEntry> entries)
+    : _entries = _prepareBookSearchEntries(entries);
+
+  final List<_PreparedBookSearchEntry> _entries;
+
+  List<int> search(BookSearchQuery query) => _searchPreparedEntries(
+    _entries,
+    queryWords: query.queryWords,
+    topics: query.topics,
+    sortByRatio: query.sortByRatio,
+    normalizedQuery: query.normalizedQuery,
+  );
+}
+
+List<_PreparedBookSearchEntry> _prepareBookSearchEntries(
+  List<BookSearchEntry> entries,
+) {
   // כל הספרים בקטגוריה חולקים נתיב — נרמול פר-ספר הוסיף ~25ms לחיפוש.
   final categoryWordsByPath = <String, Set<String>>{};
 
-  final preparedEntries = entries.map((entry) {
-    final normalizedTitle = _normalizeBookSearchText(entry.title);
-    final normalizedAuthor = _normalizeBookSearchText(entry.author);
-    final entryTopics = filtersByTopic
-        ? entry.topics
-              .split(',')
-              .map((topic) => topic.trim())
-              .where((topic) => topic.isNotEmpty)
-              .toSet()
-        : const <String>{};
+  return [
+    for (final entry in entries) _prepareEntry(entry, categoryWordsByPath),
+  ];
+}
 
-    // כל המילים שמולן נבדקת השאילתה — כותרת, מחבר וכינויים יחד
-    final searchWords = <String>{
-      ...normalizedTitle.split(' '),
-      if (normalizedAuthor.isNotEmpty) ...normalizedAuthor.split(' '),
-      for (final acronym in entry.acronyms) ...acronym.split(' '),
-    }..remove('');
+_PreparedBookSearchEntry _prepareEntry(
+  BookSearchEntry entry,
+  Map<String, Set<String>> categoryWordsByPath,
+) {
+  final normalizedTitle = _normalizeBookSearchText(entry.title);
+  final normalizedAuthor = _normalizeBookSearchText(entry.author);
 
-    final categoryWords = entry.categoryPath.isEmpty
-        ? const <String>{}
-        : categoryWordsByPath.putIfAbsent(
-            entry.categoryPath,
-            () => <String>{
-              ..._normalizeBookSearchText(entry.categoryPath).split(' '),
-            }..remove(''),
-          );
+  // כל המילים שמולן נבדקת השאילתה — כותרת, מחבר וכינויים יחד
+  final searchWords = <String>{
+    ...normalizedTitle.split(' '),
+    if (normalizedAuthor.isNotEmpty) ...normalizedAuthor.split(' '),
+    for (final acronym in entry.acronyms) ...acronym.split(' '),
+  }..remove('');
 
-    return _PreparedBookSearchEntry(
-      index: entry.index,
-      normalizedTitle: normalizedTitle,
-      searchWords: searchWords,
-      categoryWords: categoryWords,
-      topics: entryTopics,
-      acronyms: entry.acronyms,
-      eraOrder: entry.eraOrder,
-      source: entry.source,
-      isExternalCatalog: entry.isExternalCatalog,
-    );
-  });
+  final categoryWords = entry.categoryPath.isEmpty
+      ? const <String>{}
+      : categoryWordsByPath.putIfAbsent(
+          entry.categoryPath,
+          () => <String>{
+            ..._normalizeBookSearchText(entry.categoryPath).split(' '),
+          }..remove(''),
+        );
 
+  return _PreparedBookSearchEntry(
+    index: entry.index,
+    normalizedTitle: normalizedTitle,
+    searchWords: searchWords,
+    categoryWords: categoryWords,
+    rawTopics: entry.topics,
+    acronyms: entry.acronyms,
+    eraOrder: entry.eraOrder,
+    source: entry.source,
+    isExternalCatalog: entry.isExternalCatalog,
+  );
+}
+
+List<int> _searchPreparedEntries(
+  List<_PreparedBookSearchEntry> preparedEntries, {
+  required List<String> queryWords,
+  required List<String> topics,
+  required bool sortByRatio,
+  required String normalizedQuery,
+}) {
   // מטמון לזוגות (מילת שאילתה, מילת טקסט) — מילים נפוצות ('מסכת', 'על')
   // חוזרות באלפי ספרים ומחושבות פעם אחת בלבד.
   final pairMemo = {
@@ -480,7 +561,7 @@ List<int> filterBookSearchEntries({
               eraOrder: entry.eraOrder,
               source: entry.source,
               isExternalCatalog: entry.isExternalCatalog,
-              ratio: ratio(normalizedQuery, entry.normalizedTitle),
+              ratio: bookSearchRatio(normalizedQuery, entry.normalizedTitle),
             ),
         ]..sort((a, b) {
           if (a.isExternalCatalog != b.isExternalCatalog) {
@@ -529,18 +610,25 @@ class _PreparedBookSearchEntry {
 
   /// מילות נתיב התיקיות שאינן מופיעות כבר ב-[searchWords].
   final Set<String> categoryWords;
-  final Set<String> topics;
+  final String rawTopics;
+
+  /// נבנה רק כשמסננים לפי נושא — בדרך כלל הסינון כבוי.
+  late final Set<String> topics = rawTopics
+      .split(',')
+      .map((topic) => topic.trim())
+      .where((topic) => topic.isNotEmpty)
+      .toSet();
   final List<String> acronyms;
   final int eraOrder;
   final BookSource source;
   final bool isExternalCatalog;
 
-  const _PreparedBookSearchEntry({
+  _PreparedBookSearchEntry({
     required this.index,
     required this.normalizedTitle,
     required this.searchWords,
     required this.categoryWords,
-    required this.topics,
+    required this.rawTopics,
     required this.acronyms,
     required this.eraOrder,
     required this.source,
@@ -608,6 +696,52 @@ bool _editDistanceAtMost(String a, String b, int k) {
     prevMin = rowMin;
   }
   return prev[lb] <= k;
+}
+
+/// דמיון 0–100 בין שתי מחרוזות: 2·LCS / (אורך כולל), מעוגל. שובר-השוויון
+/// האחרון במיון; שינוי בחישוב או בעיגול משנה את סדר התוצאות.
+@visibleForTesting
+int bookSearchRatio(String a, String b) {
+  final lengthSum = a.length + b.length;
+  if (lengthSum == 0) return 0;
+  return ((2 * _commonSubsequenceLength(a, b)) / lengthSum * 100).round();
+}
+
+/// אורך תת-הסדרה המשותפת הארוכה ביותר, לפי code units.
+int _commonSubsequenceLength(String a, String b) {
+  var start = 0;
+  var endA = a.length;
+  var endB = b.length;
+  while (start < endA &&
+      start < endB &&
+      a.codeUnitAt(start) == b.codeUnitAt(start)) {
+    start++;
+  }
+  while (endA > start &&
+      endB > start &&
+      a.codeUnitAt(endA - 1) == b.codeUnitAt(endB - 1)) {
+    endA--;
+    endB--;
+  }
+  final shared = start + (a.length - endA);
+  final lengthB = endB - start;
+  if (endA == start || lengthB == 0) return shared;
+
+  final row = Int32List(lengthB + 1);
+  for (var i = start; i < endA; i++) {
+    final ca = a.codeUnitAt(i);
+    var diagonal = 0;
+    for (var j = 1; j <= lengthB; j++) {
+      final above = row[j];
+      if (ca == b.codeUnitAt(start + j - 1)) {
+        row[j] = diagonal + 1;
+      } else if (row[j - 1] > above) {
+        row[j] = row[j - 1];
+      }
+      diagonal = above;
+    }
+  }
+  return shared + row[lengthB];
 }
 
 // Allowed edit distance by word length:

@@ -10,7 +10,6 @@ import 'package:flutter/foundation.dart'
         visibleForTesting;
 import 'package:flutter/services.dart' show FontLoader;
 import 'package:path/path.dart' as p;
-import 'package:system_fonts/system_fonts.dart' show SystemFonts;
 import 'package:otzaria/utils/file/font_file_reader.dart';
 import 'package:otzaria/utils/file/sfnt_bytes.dart';
 import 'package:otzaria/utils/file/sfnt_metadata_reader.dart';
@@ -208,7 +207,7 @@ class AppFonts {
       : family;
 
   /// רשימת כל הגופנים הזמינים לבחירה ב-UI.
-  /// בדסקטופ: מתווספים גם גופנים שמותקנים במערכת (באמצעות system_fonts).
+  /// בדסקטופ: מתווספים גם גופנים שמותקנים במערכת.
   /// בשאר הפלטפורמות: נשארים עם הרשימה המובנית.
   static List<FontInfo> get availableFonts {
     final fonts = <FontInfo>[..._bundledFonts];
@@ -779,7 +778,7 @@ class AppFonts {
           await _loadFamilyFaces(fontFamily, family);
           return;
         }
-        // תאימות לאחור: ערך שמור מגרסה קודמת הוא שם קובץ במפת system_fonts —
+        // תאימות לאחור: ערך שמור מגרסה קודמת הוא שם קובץ של גופן מערכת —
         // נטען רק אם הסריקה קיבלה את הקובץ.
         if (_systemFontAliasCache?.containsKey(fontFamily.toLowerCase()) !=
             true) {
@@ -831,7 +830,10 @@ class AppFonts {
   /// לעולם לא זורק — כישלון כאן אינו משפיע על טעינת ה-face הרגיל.
   static Future<void> _augmentSystemFontWeights(String fontFamily) async {
     try {
-      final map = SystemFonts().getFontMap();
+      final map = await (_systemFontFileMap ??= compute(
+        _buildSystemFontFileMap,
+        null,
+      ));
       final selfPath = map[fontFamily];
       if (selfPath == null) return;
       final selfBytes = SfntMetadataReader.readSync(selfPath);
@@ -867,6 +869,14 @@ class AppFonts {
     }
   }
 
+  /// קובצי הגופנים המותקנים לפי שם הקובץ בלי סיומת (למשל "arialbd").
+  static Future<Map<String, String>>? _systemFontFileMap;
+
+  static Map<String, String> _buildSystemFontFileMap(Object? _) => {
+    for (final path in SystemFontLocator.installedFontPaths())
+      p.basenameWithoutExtension(path): path,
+  };
+
   /// סיומות בסיס-שם נפוצות ל-face בולד ב-Windows (אחרי נרמול): arial→arialbd,
   /// segoeui→segoeuib, times→timesbd.
   static const List<String> _boldBasenameSuffixes = ['bold', 'bd', 'b'];
@@ -896,7 +906,7 @@ class AppFonts {
   }
 
   /// קורא מטבלאות ה-SFNT את שם המשפחה, מחלקת המשקל וסימוני בולד/נטוי/ציר-wght.
-  /// מחזיר null אם המבנה פגום. אינו תומך ב-TTC (system_fonts מחזיר ttf/otf בלבד).
+  /// מחזיר null אם המבנה פגום. אינו תומך ב-TTC (המאתר מחזיר ttf/otf בלבד).
   static _FontFaceInfo? _sfntFaceInfo(Uint8List data) {
     if (data.length < 12) return null;
     final numTables = data.sfntU16(4);
@@ -1067,6 +1077,7 @@ class AppFonts {
     _pluginSystemFamiliesCache = null;
     _systemFontAliasCache = null;
     _warmUpFuture = null;
+    _systemFontFileMap = null;
     _earlySystemFamilies.clear();
     _loadingSystemFonts.clear();
     debugScanFamily = null;

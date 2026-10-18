@@ -9,6 +9,7 @@ import 'package:otzaria/semantic_search/models/semantic_failure.dart';
 import 'package:otzaria/semantic_search/models/semantic_model_identity.dart';
 import 'package:otzaria/semantic_search/models/semantic_model_release.dart';
 import 'package:otzaria/semantic_search/models/semantic_paths.dart';
+import 'package:otzaria/semantic_search/models/semantic_vectors_family.dart';
 import 'package:otzaria/semantic_search/repository/semantic_search_repository.dart';
 import 'package:otzaria/semantic_search/repository/semantic_data_ownership.dart';
 import 'package:otzaria/semantic_search/repository/semantic_settings_store.dart';
@@ -27,10 +28,10 @@ Future<void> waitFor(bool Function() condition) async {
   }
 }
 
-/// טקסט ה-model.json שמצורף לאפליקציה.
-String bundledModelJson() => File(
-  'assets/semantic/meivin-round2-onnx/model.json',
-).readAsStringSync();
+/// טקסט ה-model.json של [family] שמצורף לאפליקציה.
+String bundledModelJson([
+  SemanticVectorsFamily family = SemanticVectorsFamily.anchor,
+]) => File(family.identityAsset).readAsStringSync();
 
 class FakeConsentStore implements SearchFeedbackConsentStore {
   FakeConsentStore([this.current = SearchFeedbackConsent.granted]);
@@ -88,6 +89,11 @@ class FakeSettingsStore implements SemanticSettingsStore {
 
 /// מנוע מזויף שרושם קריאות. חיפוש ממתין ל-[searchGate] כשהוא מוגדר.
 class FakeBackend implements SemanticEngineBackend {
+  @override
+  bool supportsLongLineWindows = false;
+
+  /// ה-identity digest של הסט שההתקנה הבאה משאירה.
+  String installedIdentityDigest = '';
   SemanticBackendStatus statusValue = const SemanticBackendStatus(
     state: SemanticBackendState.notConfigured,
     rawState: 'notConfigured',
@@ -128,11 +134,12 @@ class FakeBackend implements SemanticEngineBackend {
     installRequests.add(request);
     if (installFailures.isNotEmpty) throw installFailures.removeAt(0);
     vectorsInfoFailure = null;
-    vectors = const SemanticVectorsSummary(
+    vectors = SemanticVectorsSummary(
       present: true,
+      identityDigest: installedIdentityDigest,
       libraryVersion: 30,
       libraryReleaseTag: 'v30-20260930165019',
-      segments: [
+      segments: const [
         SemanticSegmentSummary(
           id: 'f834cebcb6f8c72ece8884c9ce42a936',
           kind: 'base',
@@ -206,6 +213,7 @@ class FakeBackend implements SemanticEngineBackend {
   }
 
   final List<SemanticCancelHandle> highlightHandles = [];
+  final List<SemanticHighlightTarget> highlightTargets = [];
 
   @override
   Future<List<SemanticPassageHighlight>> passageHighlights(
@@ -214,6 +222,7 @@ class FakeBackend implements SemanticEngineBackend {
     required SemanticCancelHandle cancel,
   }) async {
     calls.add('highlight:$query:${targets.length}');
+    highlightTargets.addAll(targets);
     highlightHandles.add(cancel);
     final gate = searchGate;
     if (gate != null) await gate.future;
@@ -245,22 +254,29 @@ SemanticSearchResponse emptyResponse() => SemanticSearchResponse(
   truncated: false,
 );
 
-/// מאתר מזויף: מחזיר [release] (או `null` = לא פורסם) ורושם את הגרסאות.
+/// מאתר מזויף: מחזיר [release] כשהמשפחה שלו בין המועמדים (אחרת `null` = לא
+/// פורסם), ורושם את הגרסאות.
 class FakeLocator extends SemanticVectorsReleaseLocator {
   FakeLocator([this.release]);
 
   SemanticVectorsRelease? release;
   final List<int> lookups = [];
   final List<String?> tags = [];
+  final List<List<SemanticVectorsCandidate>> candidates = [];
 
   @override
   Future<SemanticVectorsRelease?> findForLibraryVersion(
     int libraryVersion, {
     String? libraryTag,
+    required List<SemanticVectorsCandidate> candidates,
   }) async {
     lookups.add(libraryVersion);
     tags.add(libraryTag);
-    return release;
+    this.candidates.add(candidates);
+    final found = release;
+    return found != null && candidates.any((c) => c.family == found.family)
+        ? found
+        : null;
   }
 }
 
@@ -315,13 +331,15 @@ SemanticSearchRepository buildRepository({
   Map<SemanticQuantization, SemanticModelRelease?>? modelReleases,
   bool secondaryWindow = false,
   Duration busyRetryDelay = const Duration(milliseconds: 20),
+  Future<String> Function(SemanticVectorsFamily family)? identityLoader,
 }) {
   return SemanticSearchRepository(
     backend: backend ?? FakeBackend(),
     consent: () => consent ?? FakeConsentStore(),
     settings: settings ?? FakeSettingsStore(),
     paths: () async => SemanticPaths(p.join(root.path, 'otzaria')),
-    identityLoader: () async => bundledModelJson(),
+    identityLoader:
+        identityLoader ?? ((family) async => bundledModelJson(family)),
     locator: locator ?? FakeLocator(),
     download: download ?? FakeDownloads().call,
     libraryVersion: () async => libraryVersion,
@@ -376,9 +394,14 @@ const SemanticVectorsSummary installedV30 = SemanticVectorsSummary(
   ],
 );
 
-SemanticVectorsRelease releaseV30({int parts = 1}) => SemanticVectorsRelease(
+SemanticVectorsRelease releaseV30({
+  int parts = 1,
+  SemanticVectorsFamily family = SemanticVectorsFamily.anchor,
+  String identityDigest = '',
+  int? chunkingIdentity,
+}) => SemanticVectorsRelease(
   libraryTag: 'v30-20260930165019',
-  releaseTag: 'vectors-v30-20260930165019',
+  releaseTag: '${family.releaseTagPrefix}v30-20260930165019',
   toLibraryVersion: 30,
   kind: 'base',
   manifestJson: '{"kind":"base"}',
@@ -397,4 +420,7 @@ SemanticVectorsRelease releaseV30({int parts = 1}) => SemanticVectorsRelease(
       ),
   ],
   segmentUncompressedSize: 10,
+  identityDigest: identityDigest,
+  chunkingIdentity: chunkingIdentity,
+  family: family,
 );

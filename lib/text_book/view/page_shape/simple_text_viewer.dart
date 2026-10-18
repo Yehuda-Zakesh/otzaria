@@ -7,7 +7,9 @@ import 'package:otzaria/book_common/utils/commentators_menu.dart';
 import 'package:otzaria/shortcuts/dynamic/dynamic_shortcut.dart';
 import 'package:otzaria/shortcuts/dynamic/dynamic_shortcut_registry.dart';
 import 'package:otzaria/text_display/view/copy_as_menu.dart';
+
 import 'dart:async';
+
 import 'package:flutter/gestures.dart' show kPrimaryMouseButton;
 import 'package:flutter/cupertino.dart'
     show cupertinoTextSelectionHandleControls;
@@ -53,6 +55,7 @@ import 'package:otzaria/utils/ui/context_menu_utils.dart' show ContextMenuUtils;
 import 'package:otzaria/core/messages/text_book_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/personal_notes/personal_notes_system.dart';
+import 'package:otzaria/personal_notes/utils/personal_note_source_selection.dart';
 import 'package:otzaria/personal_notes/storage/personal_notes_changes.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
@@ -68,6 +71,9 @@ import 'package:otzaria/text_book/view/selection/selection_persistence.dart';
 import 'package:otzaria/book_common/selection/selection_hit_test.dart';
 import 'package:otzaria/text_book/view/selection/selected_text_copy.dart';
 import 'package:otzaria/book_common/selection/selected_text_restore.dart';
+import 'package:otzaria/book_protection/models/book_protection.dart';
+import 'package:otzaria/book_protection/repository/book_protection_repository.dart';
+import 'package:otzaria/book_protection/utils/copy_guard.dart';
 import 'package:otzaria/tools/dictionary/repository/dictionary_lookup_repository.dart';
 import 'package:otzaria/plugins/services/plugin_highlight_reveal_service.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
@@ -340,6 +346,8 @@ Future<void> saveCommentaryNoteToRepository({
   required PersonalNoteEditorResult result,
   String? selectedText,
   int? selectionColumn,
+  String? sourceSelectedText,
+  int? sourceSelectionOffset,
   bool punctuationHidden = false,
   int? categoryId,
 }) {
@@ -351,6 +359,8 @@ Future<void> saveCommentaryNoteToRepository({
     contentFormat: result.contentFormat,
     selectedText: selectedText,
     selectionColumn: selectionColumn,
+    sourceSelectedText: sourceSelectedText,
+    sourceSelectionOffset: sourceSelectionOffset,
     punctuationHidden: punctuationHidden,
     categoryId: categoryId,
   );
@@ -488,8 +498,6 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
   FocusNode? _keyboardFocusNode;
   bool _shouldPreserveKeyboardFocus = false;
 
-  // באנר קרדיט מקור המוצג מעל השורה הראשונה (נטען פעם אחת לכל ספר), אם קיים.
-  BookSourceBannerKind? _sourceBannerKind;
   bool _pendingKeyboardFocusRestore = false;
   bool _wasMenuFocused = false;
   String? _savedSelectedText;
@@ -614,6 +622,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     var result = inline_notes.addInlineNotePreviewLinks(
       rawLine,
       lineIndex: lineIndex,
+      dbNotes: state.bookNotes,
     );
     // סמני-מספר מודפסים, למשל (9), שההערה שלהם בספר "הערות על…" המקושר כמפרש.
     if (numberedNoteLinks(
@@ -757,7 +766,11 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     if (state is! TextBookLoaded) return;
 
     if (url.startsWith('otzaria://book-note')) {
-      final note = inline_notes.inlineNoteFromPreviewUrl(state.content, url);
+      final note = inline_notes.inlineNoteFromPreviewUrl(
+        state.content,
+        url,
+        dbNotes: state.bookNotes,
+      );
       if (note == null) return;
       LinkPreviewOverlay.showContent(
         context,
@@ -1031,7 +1044,6 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
           );
         },
       );
-      _loadSourceBanner();
       FocusManager.instance.addListener(_handleGlobalFocusChange);
       // רישום למנגנון הפוקוס הפר-טאבי כדי שמעבר *חזרה* לטאב צורת-הדף ימקד את
       // אזור הקריאה דרך reading_screen (גלילה בחצים עובדת מיד).
@@ -1222,26 +1234,9 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
         oldTab is TextBookTab &&
         newTab is TextBookTab &&
         !sameSourceIdentity(oldTab.book, newTab.book)) {
-      _loadSourceBanner();
       // ה-State עלול להישמר במעבר ספר — מטמון ה"מפרשים הנוספים" ממופה לפי
       // שורה בלבד, ולכן חייב להתאפס כדי לא להחזיר מפרשים של הספר הקודם.
       _siblingController?.clear();
-    }
-  }
-
-  Future<void> _loadSourceBanner() async {
-    final tab = widget.tab;
-    if (tab is! TextBookTab) return;
-    final book = tab.book;
-    final kind = await resolveBookSourceBannerKind(book);
-    // מעבר מהיר בין ספרים עלול לסיים await זה אחרי שכבר עברנו לספר אחר -
-    // יש לוודא שהספר עדיין הנוכחי לפני שדורסים את _sourceBannerKind.
-    final currentTab = widget.tab;
-    if (mounted &&
-        currentTab is TextBookTab &&
-        sameSourceIdentity(book, currentTab.book) &&
-        kind != _sourceBannerKind) {
-      setState(() => _sourceBannerKind = kind);
     }
   }
 
@@ -1546,7 +1541,10 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
         PluginRuntimeDispatcher.instance.dispatchEvent(
           'reader.selection_changed',
           buildPageShapePluginSelectionPayload(
-            selectedText: sourceText,
+            selectedText: limitTextToCopySegments(
+              textBookState.protection,
+              sourceText,
+            ),
             bookTitle: textBookState.book.title,
             sectionIndex:
                 selectedIndex ??
@@ -1845,6 +1843,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
           book: state.book,
           paragraphIndex: index,
           selectedText: capturedText,
+          protection: state.protection,
           onCopy: () => _copyFormattedText(capturedText),
           onAddNote: () => _createNoteForCurrentLine(index, capturedText),
         ),
@@ -2014,6 +2013,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
             source: widget.reportBook?.source ?? BookSource.official,
             index: index,
             selectedText: capturedText,
+            protection: () => _textProtection(state),
           ),
         );
       }
@@ -2087,10 +2087,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     TextBookLoaded state,
     int index,
   ) {
-    final isLoading = _paragraphCommentatorsCache.isLoading(
-      state.book,
-      index,
-    );
+    final isLoading = _paragraphCommentatorsCache.isLoading(state.book, index);
     final showOpenPane = shouldShowOpenCommentatorsPaneEntry(
       hasSelectedCommentators: state.activeCommentators.isNotEmpty,
       showCommentaryAsExpansionTiles: false,
@@ -2114,6 +2111,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
       availableCommentators: paragraphCommentators(
         availableCommentators: state.availableCommentators,
         content: widget.content,
+        bookNotes: widget.isMainText ? state.bookNotes : null,
         paragraphIndex: index,
         linksByLine: state.linksByLine,
         queriedCommentators: isLoading
@@ -2151,9 +2149,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
             paragraphIndex: index,
           )
           .onError((error, stackTrace) {
-            debugPrint(
-              'שגיאה בטעינת מפרשי הפסקה: $error\n$stackTrace',
-            );
+            debugPrint('שגיאה בטעינת מפרשי הפסקה: $error\n$stackTrace');
           }),
     );
   }
@@ -2190,6 +2186,20 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
       _selectionStartColumn,
     );
     final selectedText = source.text;
+    final settingsState = context.read<SettingsBloc>().state;
+    final mappedSelection = selectedText?.trim().isNotEmpty == true
+        ? mapPersonalNoteSourceSelection(
+            bookId: widget.bookTitle ?? state.book.title,
+            lineIndex: index,
+            rawLine: widget.content[index],
+            settings: _selectionRenderSettings(
+              state: state,
+              settingsState: settingsState,
+            ),
+            selectedText: selectedText!.trim(),
+            startHint: source.column,
+          )
+        : null;
     final referenceText = selectedText?.trim().isNotEmpty == true
         ? utils.removeVolwels(selectedText!.trim())
         : widget.content[index];
@@ -2205,6 +2215,8 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
         referenceText: referenceText,
         selectedText: selectedText?.trim(),
         selectionColumn: source.column,
+        sourceSelectedText: mappedSelection?.text,
+        sourceSelectionOffset: mappedSelection?.offset,
         punctuationHidden: state.commentaryRemovePunctuation,
       );
       return;
@@ -2228,6 +2240,8 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
         referenceText: referenceText,
         selectedText: selectedText?.trim(),
         selectionColumn: source.column,
+        sourceSelectedText: mappedSelection?.text,
+        sourceSelectionOffset: mappedSelection?.offset,
         punctuationHidden: state.removePunctuation,
         initialContent: draft?.content ?? '',
         initialFormat: draft?.contentFormat ?? PersonalNoteContentFormat.plain,
@@ -2270,6 +2284,8 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     required String referenceText,
     String? selectedText,
     int? selectionColumn,
+    String? sourceSelectedText,
+    int? sourceSelectionOffset,
     bool punctuationHidden = false,
   }) async {
     final notesKey = _commentaryNotesKey(bookTitle);
@@ -2311,6 +2327,8 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
         result: result,
         selectedText: selectedText,
         selectionColumn: selectionColumn,
+        sourceSelectedText: sourceSelectedText,
+        sourceSelectionOffset: sourceSelectionOffset,
         punctuationHidden: punctuationHidden,
         categoryId: categoryId,
       );
@@ -2402,10 +2420,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     TextBookLoaded state,
     String? selectedText,
   ) => buildCopyAsMenuEntry(
-    base: state.displayProfile(
-      target: _textTarget,
-      channel: TextChannel.copy,
-    ),
+    base: state.displayProfile(target: _textTarget, channel: TextChannel.copy),
     selectedText: selectedText,
     onCopy: (profile) => _copyFormattedText(selectedText, false, profile),
   );
@@ -2453,6 +2468,15 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     }
   }
 
+  /// הגבלת המו"ל של הטקסט שבעמודה: הספר הראשי, או המפרש שבעמודת מפרש.
+  Future<BookProtection> _textProtection(TextBookLoaded state) {
+    if (widget.isMainText) return Future.value(state.protection);
+    final reportBook = widget.reportBook;
+    return reportBook != null
+        ? BookProtectionRepository.instance.forBook(reportBook)
+        : BookProtectionRepository.instance.forTitle(widget.bookTitle ?? '');
+  }
+
   Future<void> _copyFormattedText([
     String? capturedText,
     bool removeNikud = false,
@@ -2470,15 +2494,23 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     }
 
     try {
-      final settingsState = context.read<SettingsBloc>().state;
       final textBookState = context.read<TextBookBloc>().state;
       if (textBookState is! TextBookLoaded) return;
+      final protection = await _textProtection(textBookState);
+      if (!mounted) return;
+      final settingsState = context.read<SettingsBloc>().state;
 
       await copySelectedTextForBook(
         plainText: plainText,
         selectedIndex: _savedSelectedIndex,
         sourceContent: widget.content,
         textBookState: textBookState,
+        protection: protection,
+        segmentCount: selectionSegmentCount(
+          start: _selectionLineStart,
+          end: _selectionLineEnd,
+          text: plainText,
+        ),
         settingsState: settingsState,
         fontFamily: widget.fontFamily ?? settingsState.fontFamily,
         fontSize: widget.fontSize,
@@ -2755,16 +2787,12 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
       segments != null && index < segments.length ? segments[index] : null,
       continuous,
     );
-    final sourceBannerKind = _sourceBannerKind;
-    if (index == 0 && sourceBannerKind != null) {
+    final bannerText = state.protection.bannerText;
+    if (index == 0 && widget.isMainText && state.protection.hasBanner) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          BookSourceBanner(
-            kind: sourceBannerKind,
-            bookTitle: state.book.title,
-            fontSize: widget.fontSize,
-          ),
+          BookSourceBanner(text: bannerText!, fontSize: widget.fontSize),
           line,
         ],
       );
@@ -2842,11 +2870,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
       padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
       child: BlocBuilder<SettingsBloc, SettingsState>(
         builder: (context, settingsState) {
-          final lineContext = _readerLineContext(
-            state,
-            settingsState,
-            noteMap,
-          );
+          final lineContext = _readerLineContext(state, settingsState, noteMap);
           if (isMultiLine) {
             return _buildMultiLineItem(itemLines, state, lineContext, noteMap);
           }
@@ -3076,9 +3100,14 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
         : const <Link>[];
     var data = rawText;
     if (widget.isMainText) {
-      // קישורי inline ראשונים — האופסטים שלהם גולמיים.
+      // קישורי inline ראשונים — האופסטים שלהם גולמיים; אחריהם השמות, לפני
+      // כל הזרקה שמוסיפה תוכן גלוי.
       data = _injectPreviewMarkers(
-        injectInlineLinks(data, inlineLinks),
+        injectDivineNameMarkers(
+          injectInlineLinks(data, inlineLinks),
+          state.divineNames,
+          lineIndex,
+        ),
         lineIndex,
         state,
       );
@@ -3092,6 +3121,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
       notesForLine: notesForLine,
       lineIndex0: lineIndex,
       underlineColor: Theme.of(context).colorScheme.primary,
+      replaceHolyNames: _displayProfile(state).replaceHolyNames,
     );
   }
 

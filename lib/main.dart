@@ -12,13 +12,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show FrameCallback;
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:flutter_single_instance/flutter_single_instance.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:otzaria/plugins/view/safe_mode_controls.dart';
 import 'package:otzaria/plugins/services/startup_crash_counter.dart';
+import 'package:otzaria/plugins/services/webview2_folder_holders.dart';
 import 'package:otzaria/attached_libraries/bloc/attached_libraries_bloc.dart';
 import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/attached_libraries/repository/attached_libraries_repository.dart';
@@ -56,6 +56,7 @@ import 'package:otzaria/tabs/tabs_repository.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
 import 'package:otzaria/workspaces/bloc/workspace_event.dart';
 import 'package:otzaria/workspaces/workspace_repository.dart';
+import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:otzaria/app_bloc_observer.dart';
@@ -88,6 +89,7 @@ import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/core/single_instance_lock.dart';
 import 'package:otzaria/core/otzaria_capabilities.dart';
 import 'package:otzaria/core/data_root_writability_warning.dart';
 import 'package:otzaria/core/cli_command.dart';
@@ -350,6 +352,9 @@ void main(List<String> args) async {
   // SQLite סינכרוני יכול לחסום גם טיימרים: אין לעקוף את החשיפה עם timeout.
   AttachedLibraryRegistry.startupGate = () =>
       _mainWindowRevealedCompleter.future;
+  // אבחון שמריץ Process.start (סינכרוני) — רק אחרי החשיפה, בלי timeout.
+  WebView2FolderHolders.startupGate = () => _mainWindowRevealedCompleter.future
+      .then((_) => Future<void>.delayed(const Duration(seconds: 5)));
 
   PluginDevToolsMode.initFromArgs(args);
   PluginSafeMode.initFromArgs(args);
@@ -466,8 +471,8 @@ void _installGlobalErrorHandlers() {
 }
 
 Future<void> _initializeSentry() async {
-  // ⚠️ רק אחרי החשיפה ובלי timeout: sentry_init (FFI סינכרוני) מחכה ל-crashpad_handler.exe
-  // וחוסם את ה-UI לדקות במחשבים איטיים — בדיוק שם החשיפה מתעכבת (issue #1192).
+  // רק אחרי החשיפה ובלי timeout: sentry_init רץ ב-isolate עזר, אבל טעינת sentry.dll
+  // עדיין סינכרונית ב-UI ואיטית במחשבים מסוננים (issue #1192).
   await _mainWindowRevealedCompleter.future;
   // ה-uncloak רץ כ-task נייטיבי על אותו thread; חסימה לפניו משאירה את
   // החלון בלתי-נראה (נמדד גם אחרי שני endOfFrame) — נותנים לו לרוץ קודם.
@@ -515,15 +520,13 @@ Future<void> _initializeSentry() async {
 }
 
 Future<void> _runAppBootstrap() async {
-  // Check for single instance - skip on Apple platforms (macOS/iOS) due to sandbox restrictions
-  if (!Platform.isMacOS && !Platform.isIOS) {
-    // שם התהליך משמש רק לשם קובץ ה-pid; בלעדיו החבילה מריצה tasklist/ps
-    // חוסם (issue #989). לעותק מותקן הוא שם ה-EXE, כדי שמופע ישן וחדש יזהו זה את זה.
-    FlutterSingleInstance.processName ??= AppPaths.singleInstanceKey();
-    FlutterSingleInstance flutterSingleInstance = FlutterSingleInstance();
-    bool isFirstInstance = await StartupTimeline.instance.phase(
+  // Windows: ה-mutex ב-runner אוכף מופע יחיד. בלינוקס מדלגים בדיבאג כדי לאפשר כמה מופעים.
+  if (Platform.isLinux && !kDebugMode) {
+    final isFirstInstance = await StartupTimeline.instance.phase(
       'singleInstance',
-      flutterSingleInstance.isFirstInstance,
+      () => SingleInstanceLock.acquire(
+        SingleInstanceLock.linuxLockPath(AppPaths.singleInstanceKey()),
+      ),
     );
     if (!isFirstInstance) {
       // אם נשלח ack מוקדם לאתר החנות — ממתינים לסיומו לפני היציאה, אחרת
@@ -925,6 +928,23 @@ Future<void> _initializeRestartableRuntime() async {
   unawaited(_runDeferredAttachedLibraries());
   unawaited(_runDeferredLibraryChangesNotes());
   unawaited(_runDeferredCapabilitiesWrite());
+  unawaited(_runDeferredBookOrderWarmUp());
+}
+
+/// בונה את טבלאות סדר הקטלוג במנוע, כדי שהחיפוש הממוין הראשון לא ישלם עליהן.
+Future<void> _runDeferredBookOrderWarmUp() async {
+  try {
+    await _mainWindowRevealedCompleter.future.timeout(
+      const Duration(seconds: 20),
+    );
+  } on TimeoutException {
+    // ממשיכים בכל זאת — בלי חימום החיפוש הראשון בונה את הטבלאות בעצמו.
+  }
+  try {
+    await (await TantivyDataProvider.instance.engine).warmBookOrder();
+  } catch (error, stackTrace) {
+    _logNonFatalInitializationError('Book order warm-up', error, stackTrace);
+  }
 }
 
 /// כשקונטיינמנט ה-Job Object לא הוקם, תהליכי msedgewebview2.exe שורדים את

@@ -48,8 +48,6 @@ void main() {
       title: 'ספר',
       topics: '/test',
       filePath: 'id:1',
-      catalogueOrder: 0,
-      generationOrder: 0,
       text: 'בראשית ברא אלהים',
       textStorage: TextStorage.libraryDb,
     );

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/utils/http_redirect_download.dart';
 
 /// מידע על ה-release האחרון של קובץ הביוגרפיות.
 class BiographiesRelease {
@@ -27,6 +28,8 @@ class BiographiesDownloader {
       'https://api.github.com/repos/Otzaria/ta-shma-to-otzaria/releases/latest';
 
   static const String _assetSuffix = '/biographies.tsb';
+
+  static const Duration _apiTimeout = Duration(seconds: 15);
 
   final http.Client _client;
   final bool _ownsClient;
@@ -69,10 +72,12 @@ class BiographiesDownloader {
 
   /// שולף את פרטי ה-release האחרון. זורק [Exception] בכשל.
   Future<BiographiesRelease> fetchLatestRelease() async {
-    final response = await _client.get(
-      Uri.parse(latestReleaseApi),
-      headers: {'Accept': 'application/vnd.github+json'},
-    );
+    final response = await _client
+        .get(
+          Uri.parse(latestReleaseApi),
+          headers: {'Accept': 'application/vnd.github+json'},
+        )
+        .timeout(_apiTimeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception('GitHub API החזיר ${response.statusCode}');
     }
@@ -104,13 +109,28 @@ class BiographiesDownloader {
 
   /// מוריד אל קובץ `.part` ומשנה שם אטומית, כדי שקובץ חלקי לא ייראה תקין.
   Future<void> _download(BiographiesRelease release, String dest) async {
-    final response = await _client.get(release.downloadUrl);
+    final response = await sendGetFollowingRedirects(
+      _client,
+      release.downloadUrl,
+    );
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      await response.stream.listen((_) {}).cancel();
       throw Exception('הורדת הביוגרפיות נכשלה (${response.statusCode})');
     }
     final outFile = File('$dest.part');
     await outFile.parent.create(recursive: true);
-    await outFile.writeAsBytes(response.bodyBytes, flush: true);
+    final sink = outFile.openWrite();
+    try {
+      await sink.addStream(response.stream);
+      await sink.flush();
+      await sink.close();
+    } catch (_) {
+      try {
+        await sink.close();
+      } catch (_) {}
+      if (await outFile.exists()) await outFile.delete();
+      rethrow;
+    }
     await outFile.rename(dest);
   }
 

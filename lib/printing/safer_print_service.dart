@@ -1,3 +1,5 @@
+import 'dart:isolate';
+
 import 'package:flutter/widgets.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
@@ -5,6 +7,7 @@ import 'package:otzaria/core/messages/pdf_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/printing/safer_printer_filter.dart';
 import 'package:otzaria/printing/windows_printer_ports.dart';
+import 'package:otzaria/printing/windows_printing_platform.dart';
 import 'package:otzaria/settings/services/safer_mode_guard.dart';
 import 'package:otzaria/widgets/dialogs/dialogs_exports.dart';
 
@@ -23,6 +26,7 @@ Future<bool> printPdfWithSaferMode({
   bool usePrinterSettings = false,
   BuildContext? context,
 }) async {
+  WindowsPrintingPlatform.install();
   final effectiveContext = context ?? navigatorKey.currentContext;
   if (effectiveContext == null ||
       !shouldRequireSaferModePassword(effectiveContext)) {
@@ -37,7 +41,7 @@ Future<bool> printPdfWithSaferMode({
 
   final printers = SaferPrinterFilter.allowed(
     await Printing.listPrinters(),
-    windowsPrinterPorts(),
+    await Isolate.run(windowsPrinterPorts),
   );
   if (!effectiveContext.mounted) return false;
 

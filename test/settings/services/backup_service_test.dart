@@ -19,9 +19,12 @@ import 'package:otzaria/core/user_state/user_state_slot.dart';
 import 'package:otzaria/core/user_state/window_session_store.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/data/data_providers/hive_data_provider.dart';
+import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
+import 'package:otzaria/migration/database/daos/database.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/models/plugin_manifest.dart';
 import 'package:otzaria/plugins/storage/plugin_system_database.dart';
+import 'package:otzaria/search/library_line_source.dart';
 import 'package:otzaria/services/direct_error_report_service.dart';
 import 'package:otzaria/services/sent_reports_counter.dart';
 import 'package:otzaria/personal_notes/models/personal_note.dart';
@@ -29,10 +32,13 @@ import 'package:otzaria/personal_notes/storage/personal_notes_database.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/settings/services/backup_service.dart';
 import 'package:otzaria/settings/services/backup/backup_import_merge.dart';
+import 'package:otzaria/settings/services/backup/backup_store.dart';
 import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/workspaces/workspace_repository.dart';
 import 'package:path/path.dart' as p;
+import 'package:sqlite3/sqlite3.dart' as sqlite3;
 
+import '../../support/fake_line_source_engine.dart';
 import '../../models/direct_error_report_text_correction_test.dart'
     show buildCorrectionReport, trickyLine;
 
@@ -41,8 +47,14 @@ void main() {
 
   late Directory tempDir;
   late Box<dynamic> box;
+  var userBookIndexDrops = 0;
 
   setUp(() async {
+    userBookIndexDrops = 0;
+    BackupService.dropUserBookIndexEntries = () async {
+      userBookIndexDrops++;
+      return true;
+    };
     tempDir = await Directory.systemTemp.createTemp('backup_service_test_');
     Hive.init(tempDir.path);
     box = await Hive.openBox<dynamic>(HiveCache.keyName);
@@ -217,6 +229,186 @@ void main() {
         HiddenLibraryStore.pendingVisibilityIndexSetting,
       ]),
     );
+  });
+
+  test(
+    'user_books.db נכנס לגיבוי כתמונת מצב ומשוחזר ממנו (issue #2189)',
+    () async {
+      final dbPath = await AppPaths.resolveUserBooksDbPath();
+      // חיבור פתוח עם שינויים שעוד ב-WAL — כמו ה-holder בזמן גיבוי אוטומטי.
+      final open = (await _openUserBooksDb())
+        ..execute('PRAGMA journal_mode = WAL')
+        ..execute('PRAGMA wal_autocheckpoint = 0')
+        ..execute(
+          "INSERT INTO line (bookId, lineIndex, content) VALUES (1, 0, 'ספר שקובצו נמחק')",
+        );
+
+      final result = await BackupService.createBackup(
+        includeSettings: true,
+        includeBookmarks: false,
+        includeHistory: false,
+        includeNotes: false,
+        includeWorkspaces: false,
+        includeShamorZachor: false,
+        includePlugins: false,
+      );
+      expect(result.skippedSections, isNot(contains('userBooks')));
+      final backup =
+          jsonDecode(await File(result.path).readAsString())
+              as Map<String, dynamic>;
+      expect(backup['userBooks'], isA<String>());
+
+      open
+        ..execute('DELETE FROM line')
+        ..close();
+
+      final restored = await BackupService.restoreFromBackup(result.path);
+      expect(restored.skippedSections, isNot(contains('userBooks')));
+      expect(restored.userBooksNotReplaced, isFalse);
+      // אותו `uid:` עשוי לציין עכשיו ספר אחר — רשומות האינדקס נמחקות.
+      expect(userBookIndexDrops, 1);
+      expect(File('$dbPath-wal').existsSync(), isFalse);
+      final db = sqlite3.sqlite3.open(dbPath);
+      addTearDown(db.close);
+      expect(db.select('SELECT content FROM line').single.values, [
+        'ספר שקובצו נמחק',
+      ]);
+    },
+  );
+
+  test(
+    'user_books.db נעול: השחזור מדווח שלא הוחלף, ולא כחסר בגיבוי',
+    () async {
+      final dbPath = await AppPaths.resolveUserBooksDbPath();
+      final original = (await _openUserBooksDb())
+        ..execute(
+          "INSERT INTO line (bookId, lineIndex, content) VALUES (1, 0, 'מקורי')",
+        );
+      addTearDown(original.close);
+
+      final result = await BackupService.createBackup(
+        includeSettings: true,
+        includeBookmarks: false,
+        includeHistory: false,
+        includeNotes: false,
+        includeWorkspaces: false,
+        includeShamorZachor: false,
+        includePlugins: false,
+      );
+      final restored = await BackupService.restoreFromBackup(result.path);
+
+      expect(restored.userBooksNotReplaced, isTrue);
+      expect(restored.skippedSections, isNot(contains('userBooks')));
+      expect(userBookIndexDrops, 0);
+      expect(File('$dbPath.restore').existsSync(), isFalse);
+    },
+    // רק ב-Windows חיבור פתוח מונע את החלפת הקובץ.
+    skip: !Platform.isWindows,
+  );
+
+  test('שחזור user_books.db סוגר אותו במנוע החיפוש לפני ההחלפה, ופתיחה '
+      'מחדש מגדירה אותו שוב', () async {
+    final engine = FakeLineSourceEngine();
+    LibraryLineSource.debugReset(engine: engine);
+    addTearDown(LibraryLineSource.debugReset);
+    addTearDown(UserBooksDatabaseHolder.instance.close);
+    final dbPath = await AppPaths.resolveUserBooksDbPath();
+
+    await UserBooksDatabaseHolder.instance.repository;
+    expect(engine.userBooksCalls, [dbPath]);
+    expect(LibraryLineSource.userBooksConfigured, isTrue);
+
+    final result = await BackupService.createBackup(
+      includeSettings: true,
+      includeBookmarks: false,
+      includeHistory: false,
+      includeNotes: false,
+      includeWorkspaces: false,
+      includeShamorZachor: false,
+      includePlugins: false,
+    );
+    final restored = await BackupService.restoreFromBackup(result.path);
+    expect(restored.skippedSections, isNot(contains('userBooks')));
+    expect(engine.userBooksCalls, [dbPath, null]);
+    expect(LibraryLineSource.userBooksConfigured, isFalse);
+
+    await UserBooksDatabaseHolder.instance.repository;
+    expect(engine.userBooksCalls, [dbPath, null, dbPath]);
+  });
+
+  for (final defect in ['truncated', 'corrupt', 'schema']) {
+    for (final stored in [false, true]) {
+      test('גיבוי מסד $defect (${stored ? 'blob' : 'base64'}) '
+          'אינו מחליף מסד פעיל ותקין', () async {
+        final engine = FakeLineSourceEngine();
+        LibraryLineSource.debugReset(engine: engine);
+        addTearDown(LibraryLineSource.debugReset);
+        addTearDown(UserBooksDatabaseHolder.instance.close);
+        final dbPath = await AppPaths.resolveUserBooksDbPath();
+        final original = await _openUserBooksDb();
+        original.execute(
+          "INSERT INTO line (bookId, lineIndex, content) VALUES (1, 0, 'מקורי')",
+        );
+        original.close();
+        final repository = await UserBooksDatabaseHolder.instance.repository;
+        final backup = await BackupService.createBackup(
+          includeSettings: true,
+          includeBookmarks: false,
+          includeHistory: false,
+          includeNotes: false,
+          includeWorkspaces: false,
+          includeShamorZachor: false,
+          includePlugins: false,
+        );
+        final manifest =
+            jsonDecode(await File(backup.path).readAsString())
+                as Map<String, dynamic>;
+        var bytes = base64Decode(manifest['userBooks'] as String);
+        switch (defect) {
+          case 'truncated':
+            bytes = bytes.sublist(0, 128);
+          case 'corrupt':
+            bytes[100] = 0xff;
+          case 'schema':
+            final other = File(p.join(tempDir.path, 'other.db'));
+            sqlite3.sqlite3.open(other.path)
+              ..execute('CREATE TABLE unrelated (value TEXT)')
+              ..close();
+            bytes = await other.readAsBytes();
+        }
+        manifest['userBooks'] = stored
+            ? await BackupStore.forBackupDir(
+                p.dirname(backup.path),
+              ).putBytes(bytes)
+            : base64Encode(bytes);
+        await File(backup.path).writeAsString(jsonEncode(manifest));
+
+        final restored = await BackupService.restoreFromBackup(backup.path);
+
+        expect(restored.userBooksNotReplaced, isTrue);
+        expect(userBookIndexDrops, 0);
+        expect(
+          UserBooksDatabaseHolder.instance.repositoryIfInitialized,
+          same(repository),
+        );
+        expect(engine.userBooksCalls, [dbPath]);
+        expect(File('$dbPath.restore').existsSync(), isFalse);
+        final db = sqlite3.sqlite3.open(dbPath);
+        addTearDown(db.close);
+        expect(db.select('SELECT content FROM line').single.values, ['מקורי']);
+      });
+    }
+  }
+
+  test('חלון משני אינו מגדיר ואינו סוגר את מקור הספרים האישיים', () async {
+    final engine = FakeLineSourceEngine();
+    LibraryLineSource.debugReset(engine: engine);
+    addTearDown(LibraryLineSource.debugReset);
+    WindowRole.isSecondary = true;
+
+    await UserBooksDatabaseHolder.instance.repository;
+    await UserBooksDatabaseHolder.instance.close();
+    expect(engine.userBooksCalls, isEmpty);
   });
 
   test('מפתחות ההסתרה מוצהרים ונכנסים גם במסלול הנסיגה (issue #1448)', () {
@@ -1660,6 +1852,20 @@ void main() {
       expect(status.lastBackupDate, isNotNull);
     });
   });
+}
+
+Future<sqlite3.Database> _openUserBooksDb() async {
+  final path = await AppPaths.resolveUserBooksDbPath();
+  final schema = MyDatabase.withPath(path);
+  await schema.database;
+  schema.close();
+  final db = sqlite3.sqlite3.open(path);
+  db.execute("INSERT INTO category (id, title) VALUES (1, 'קטגוריה')");
+  db.execute("INSERT INTO source (id, name) VALUES (1, 'תיקייה')");
+  db.execute(
+    "INSERT INTO book (id, categoryId, sourceId, title) VALUES (1, 1, 1, 'ספר')",
+  );
+  return db;
 }
 
 /// IOOverrides חלים רק על ה-isolate הנוכחי, ולכן קריאה מתוך Isolate.run אינה נרשמת.

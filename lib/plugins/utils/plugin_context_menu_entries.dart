@@ -41,19 +41,37 @@ List<AppContextMenuEntry> buildPluginContextMenuEntries({
 }) {
   final runtime = dispatcher ?? PluginRuntimeDispatcher.instance;
   final selectedText = _selectedTextOf(selection);
-  return [
-    for (final record in records)
-      if (record.$2.contexts.contains(context) &&
-          record.$2.isVisibleForSelection(selectedText))
-        _buildEntry(
-          pluginId: record.$1,
-          item: record.$2,
-          selection: selection,
-          context: context,
-          dispatcher: runtime,
-          selectionActionDispatcher: selectionActionDispatcher,
-        ),
-  ];
+  final byPlugin = <String, List<PluginContextMenuItem>>{};
+  for (final (pluginId, item) in records) {
+    if (item.contexts.contains(context) &&
+        item.isVisibleForSelection(selectedText)) {
+      byPlugin.putIfAbsent(pluginId, () => []).add(item);
+    }
+  }
+  final entries = <AppContextMenuEntry>[];
+  for (final MapEntry(key: pluginId, value: items) in byPlugin.entries) {
+    // קו חוצץ בין תוספים שונים כברירת מחדל; התוסף מבטל אותו בפריט הראשון שלו.
+    if (entries.isNotEmpty &&
+        !entries.last.isDivider &&
+        items.first.separatorBefore) {
+      entries.add(const AppContextMenuEntry.divider());
+    }
+    for (final item in items) {
+      final entry = _buildEntry(
+        pluginId: pluginId,
+        item: item,
+        selection: selection,
+        context: context,
+        dispatcher: runtime,
+        selectionActionDispatcher: selectionActionDispatcher,
+      );
+      if (entry.isDivider && entries.isNotEmpty && entries.last.isDivider) {
+        continue;
+      }
+      entries.add(entry);
+    }
+  }
+  return entries;
 }
 
 String _selectedTextOf(Map<String, dynamic> selection) =>

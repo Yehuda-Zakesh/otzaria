@@ -10,6 +10,7 @@ import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart'
     show SearchScope, WordMatchMode;
 import 'package:otzaria/search/search_query_builder.dart';
+import 'package:otzaria/search/view/advanced_search_controls.dart';
 import 'package:otzaria/search_feedback/semantic_search_strings.dart';
 import 'package:otzaria/semantic_search/models/semantic_availability.dart';
 import 'package:otzaria/semantic_search/models/semantic_failure.dart';
@@ -91,6 +92,12 @@ void main() {
         'שגיאה בעדכון - לחץ לנסות שוב',
         'עדכון ספרייה',
       ]) {
+        expect(catalog, contains(tooltip), reason: tooltip);
+      }
+    });
+
+    test('הסברי אפשרויות המילה בחיפוש המתקדם', () {
+      for (final tooltip in AdvancedSearchControls.optionTooltips.values) {
         expect(catalog, contains(tooltip), reason: tooltip);
       }
     });

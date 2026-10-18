@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/personal_notes/models/personal_note.dart';
 import 'package:otzaria/personal_notes/utils/note_anchor_utils.dart';
+import 'package:otzaria/utils/text/text_manipulation.dart' as text_utils;
 
 String _colorToHex(Color color) {
   final value = color.toARGB32() & 0xFFFFFF;
@@ -53,6 +54,7 @@ String buildAnnotatedLineHtml({
   required List<PersonalNote> notesForLine,
   required int lineIndex0,
   required Color underlineColor,
+  bool replaceHolyNames = false,
 }) {
   if (rawLine.isEmpty || notesForLine.isEmpty) return rawLine;
   // כבר סומנה; `note?` ולא `note` — כדי לא לתפוס את otzaria://note-marker.
@@ -97,7 +99,10 @@ String buildAnnotatedLineHtml({
         hintSourceLine: sourceLine,
       );
       if (range != null) {
-        addNoteSpan(range.start, range.end);
+        final expanded = replaceHolyNames
+            ? _expandToHolyName(rawLine, range)
+            : range;
+        addNoteSpan(expanded.start, expanded.end);
         continue;
       }
       // לא נמצא הביטוי — נופלים לסימון כל השורה.
@@ -107,6 +112,18 @@ String buildAnnotatedLineHtml({
   }
 
   return wrapHtmlRanges(rawLine, ranges);
+}
+
+NoteAnchorRange _expandToHolyName(String rawLine, NoteAnchorRange range) {
+  var start = range.start;
+  var end = range.end;
+  for (final name in text_utils.findReplaceableHolyNames(rawLine)) {
+    if (name.start < end && name.end > start) {
+      if (name.start < start) start = name.start;
+      if (name.end > end) end = name.end;
+    }
+  }
+  return NoteAnchorRange(start, end);
 }
 
 /// מחזיר את המקטעים של [start, end) שאינם חופפים לאף אחד מ-[spans]

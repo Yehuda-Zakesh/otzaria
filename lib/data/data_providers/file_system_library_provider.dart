@@ -19,7 +19,7 @@ import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 
 /// Library provider that loads books from the file system.
-class FileSystemLibraryProvider implements LibraryProvider {
+class FileSystemLibraryProvider implements LibraryProvider, LinkLinesProvider {
   late String _libraryPath;
   Future<Map<String, String>>? _keyToPath;
   final Map<int, String> _categoryIdToPath =
@@ -734,16 +734,21 @@ class FileSystemLibraryProvider implements LibraryProvider {
   }
 
   @override
-  Future<String> getLinkContent(Link link) async {
+  Future<String> getLinkContent(Link link) async => (await getLinkContentLines(
+    link,
+  )).map((line) => line.content).join('<br>');
+
+  @override
+  Future<List<LinkContentLine>> getLinkContentLines(Link link) async {
     if (!_isInitialized) await initialize();
 
     try {
       if (link.path2.isEmpty) {
-        return 'שגיאה: נתיב ריק';
+        return [(lineIndex: link.index2 - 1, content: 'שגיאה: נתיב ריק')];
       }
 
       if (link.index2 <= 0) {
-        return 'שגיאה: אינדקס לא תקין';
+        return [(lineIndex: link.index2 - 1, content: 'שגיאה: אינדקס לא תקין')];
       }
 
       final title = getTitleFromPath(link.path2);
@@ -759,20 +764,29 @@ class FileSystemLibraryProvider implements LibraryProvider {
       }
 
       if (path == null) {
-        return 'שגיאה: הספר לא נמצא';
+        return [(lineIndex: link.index2 - 1, content: 'שגיאה: הספר לא נמצא')];
       }
 
       final file = File(path);
       if (!await file.exists()) {
-        return 'שגיאה: הקובץ לא נמצא';
+        return [(lineIndex: link.index2 - 1, content: 'שגיאה: הקובץ לא נמצא')];
       }
 
-      return await _getLineFromFile(path, link.index2, title).timeout(
+      return await _getLinesFromFile(
+        path,
+        link.index2,
+        link.index2End,
+        title,
+      ).timeout(
         const Duration(seconds: 3),
-        onTimeout: () => 'שגיאה: פג זמן קריאת הקובץ',
+        onTimeout: () => [
+          (lineIndex: link.index2 - 1, content: 'שגיאה: פג זמן קריאת הקובץ'),
+        ],
       );
     } catch (e) {
-      return 'שגיאה בטעינת תוכן המפרש: $e';
+      return [
+        (lineIndex: link.index2 - 1, content: 'שגיאה בטעינת תוכן המפרש: $e'),
+      ];
     }
   }
 
@@ -781,19 +795,34 @@ class FileSystemLibraryProvider implements LibraryProvider {
   /// [title] הוא כותרת הספר בקטלוג: בפורמט שדורש המרה היא שורה 1 של הפלט,
   /// ולכן היא חלק מהמיקום שהקישור מפנה אליו. הניתוב לפי פורמט הוא גם מה
   /// שמונע קריאת מכולה בינארית כטקסט — שמחזירה ג'יבריש שנראה כתוכן.
-  Future<String> _getLineFromFile(
+  Future<List<LinkContentLine>> _getLinesFromFile(
     String path,
     int lineIndex,
+    int? lastLineIndex,
     String title,
   ) async {
     final text = await readFileBackedBookText(File(path), null, title);
-    if (text == null) return 'שגיאה: לפורמט הקובץ אין תוכן טקסטואלי';
+    if (text == null) {
+      return [
+        (
+          lineIndex: lineIndex - 1,
+          content: 'שגיאה: לפורמט הקובץ אין תוכן טקסטואלי',
+        ),
+      ];
+    }
     final lines = const LineSplitter().convert(text);
 
     if (lineIndex < 1 || lineIndex > lines.length) {
-      return 'שגיאה: אינדקס מחוץ לטווח';
+      return [(lineIndex: lineIndex - 1, content: 'שגיאה: אינדקס מחוץ לטווח')];
     }
 
-    return lines[lineIndex - 1];
+    return [
+      for (
+        var i = lineIndex - 1;
+        i < (lastLineIndex ?? lineIndex).clamp(lineIndex, lines.length);
+        i++
+      )
+        (lineIndex: i, content: lines[i]),
+    ];
   }
 }

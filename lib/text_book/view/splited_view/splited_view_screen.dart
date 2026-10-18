@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:otzaria/plugins/view/plugin_text_reader.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
-import 'package:multi_split_view/multi_split_view.dart';
 import 'package:otzaria/personal_notes/utils/personal_notes_book_key.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/tabs/models/tab.dart';
@@ -55,7 +54,6 @@ class SplitedViewScreen extends StatefulWidget {
 }
 
 class _SplitedViewScreenState extends State<SplitedViewScreen> {
-  late final MultiSplitViewController _controller;
   bool _paneOpen = false;
   // פתיחה אוטומטית של פאנל המפרשים מתבצעת פעם אחת בלבד לכל טעינת מסך.
   bool _didAutoOpenCommentary = false;
@@ -101,7 +99,6 @@ class _SplitedViewScreenState extends State<SplitedViewScreen> {
   @override
   void initState() {
     super.initState();
-    _controller = MultiSplitViewController();
     _searchHighlightNotifier = ValueNotifier<String>(widget.tab.searchText);
     _currentTabIndex = _getInitialTabIndex();
     if (widget.initialTabIndex != null) {
@@ -328,6 +325,7 @@ class _SplitedViewScreenState extends State<SplitedViewScreen> {
       state.content[idx],
       query,
       wholeWord: state.searchWholeWord,
+      dbNotes: state.bookNotes.notesAt(idx),
     )) {
       return;
     }
@@ -378,7 +376,6 @@ class _SplitedViewScreenState extends State<SplitedViewScreen> {
       _onToggleCommentatorsPaneRequest,
     );
     widget.tab.openNotesTabNotifier.removeListener(_onOpenNotesTabRequest);
-    _controller.dispose();
     _searchHighlightNotifier.dispose();
     _savedSelectedText.dispose();
     _selectionSyncController.dispose();

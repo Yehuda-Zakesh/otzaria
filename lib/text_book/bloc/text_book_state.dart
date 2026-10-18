@@ -1,8 +1,11 @@
 import 'package:equatable/equatable.dart';
+import 'package:otzaria/text_book/models/book_notes.dart';
+import 'package:otzaria/book_protection/models/book_protection.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:otzaria/book_common/models/commentator_group.dart';
+import 'package:otzaria/divine_names/models/divine_name_spans.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/text_display/text_display_exports.dart';
 
@@ -34,6 +37,32 @@ String _spacingValuesSignature(Map<String, String> values) {
 
   final keys = values.keys.toList()..sort();
   return keys.map((key) => '$key=${values[key]}').join('|');
+}
+
+/// סט ב-props בהשוואה לפי תוכן ב-O(n): equatable משווה סטים ב-O(n²), וסט
+/// שורות תוצאות החיפוש עשוי להכיל אלפי שורות.
+// TODO: להסיר אחרי מיזוג ושחרור felangel/equatable#223 (setEquals ב-O(n)).
+class _SetProp {
+  const _SetProp(this.values);
+
+  final Set<Object?>? values;
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! _SetProp) return false;
+    final a = values;
+    final b = other.values;
+    if (identical(a, b)) return true;
+    if (a == null || b == null) return false;
+    return a.length == b.length && b.containsAll(a);
+  }
+
+  @override
+  int get hashCode =>
+      values == null ? null.hashCode : Object.hashAllUnordered(values!);
+
+  @override
+  String toString() => '$values';
 }
 
 abstract class TextBookState extends Equatable {
@@ -131,7 +160,7 @@ class TextBookInitial extends TextBookState {
     searchMode,
     searchDistance,
     matchPolicy,
-    initialSearchResultLines,
+    _SetProp(initialSearchResultLines),
     splitedView,
     showPageShapeView,
     pinpointHighlightIndex,
@@ -188,6 +217,9 @@ class TextBookLoaded extends TextBookState {
   final Set<String> selectedLinkTypes;
   final List<TocEntry> tableOfContents;
   final bool isTanach;
+
+  /// הגבלת המו"ל והבאנר של הספר, מהמסד שלו.
+  final BookProtection protection;
 
   /// שכבות תצוגת הטקסט, מהספציפי לכללי: עקיפות זמניות של הכרטיסייה, קובץ
   /// ההגדרות של הספר, והמדיניות הגלובלית כפי שנטענה. ראה [displayProfile].
@@ -264,6 +296,12 @@ class TextBookLoaded extends TextBookState {
   /// זהות הקורא, קבועה לאורך כל ה-states שלו — מפתח לזיכרון הפריסה.
   final Object readerIdentity;
 
+  /// מופעי שמות הקודש שסומנו במסד, נטענים ברקע; ריק במסד ישן.
+  final DivineNameSpans divineNames;
+
+  /// הערות השוליים מהמסד (`line_note`); ריק לספר שגוף ההערות נשאר בשורה.
+  final BookNotes bookNotes;
+
   /// טקסט להדגשה בלבד — לא מפעיל חלונית חיפוש.
   final String highlightText;
 
@@ -288,10 +326,13 @@ class TextBookLoaded extends TextBookState {
     this.visibleLinks = const [],
     this.selectedLinkTypes = const {},
     required this.linksByLine,
+    DivineNameSpans? divineNames,
+    BookNotes? bookNotes,
     required this.tableOfContents,
     bool? removeNikud,
     bool removePunctuation = false,
     this.isTanach = false,
+    this.protection = BookProtection.none,
     bool nikudExemptByTanach = false,
     bool punctuationExemptByTanach = false,
     bool? commentaryRemoveNikudOverride,
@@ -334,6 +375,8 @@ class TextBookLoaded extends TextBookState {
     this.highlightText = '',
     this.permanentHighlightLine,
   }) : readerIdentity = readerIdentity ?? Object(),
+       divineNames = divineNames ?? DivineNameSpans.empty,
+       bookNotes = bookNotes ?? BookNotes.empty,
        displayOverrides =
            displayOverrides ??
            legacyDisplayOverrides(
@@ -497,10 +540,13 @@ class TextBookLoaded extends TextBookState {
     List<Link>? visibleLinks,
     Set<String>? selectedLinkTypes,
     Map<int, List<Link>>? linksByLine,
+    DivineNameSpans? divineNames,
+    BookNotes? bookNotes,
     List<TocEntry>? tableOfContents,
     bool? removeNikud,
     bool? removePunctuation,
     bool? isTanach,
+    BookProtection? protection,
     bool? nikudExemptByTanach,
     bool? punctuationExemptByTanach,
     bool? commentaryRemoveNikudOverride,
@@ -635,8 +681,11 @@ class TextBookLoaded extends TextBookState {
       visibleLinks: visibleLinks ?? this.visibleLinks,
       selectedLinkTypes: selectedLinkTypes ?? this.selectedLinkTypes,
       linksByLine: linksByLine ?? this.linksByLine,
+      divineNames: divineNames ?? this.divineNames,
+      bookNotes: bookNotes ?? this.bookNotes,
       tableOfContents: tableOfContents ?? this.tableOfContents,
       isTanach: isTanach ?? this.isTanach,
+      protection: protection ?? this.protection,
       displayOverrides: overrides,
       bookDisplayLayer: bookDisplayLayer ?? this.bookDisplayLayer,
       displayPolicy: policy,
@@ -731,15 +780,18 @@ class TextBookLoaded extends TextBookState {
     // נבלעת ע"י השוואת ה-state והבחירה לא מתעדכנת.
     activeCommentators,
     commentatorGroups,
+    divineNames,
+    bookNotes,
     availableCommentators.length,
-    rareCommentators,
+    _SetProp(rareCommentators),
     links.length,
     visibleLinks.length,
     // השוואה לפי תוכן — החלפת סוג אחד באחר שומרת על אותו גודל ותיבלע
     // בהשוואת ה-state, והסינון לא יתעדכן.
-    selectedLinkTypes,
+    _SetProp(selectedLinkTypes),
     tableOfContents.length,
     isTanach,
+    protection,
     displayOverrides,
     bookDisplayLayer,
     displayPolicy,
@@ -747,7 +799,7 @@ class TextBookLoaded extends TextBookState {
     continuousReadingMode,
     visibleIndices,
     selectedIndex,
-    selectedIndices,
+    _SetProp(selectedIndices),
     pinLeftPane,
     searchText,
     _searchOptionsSignature(searchOptions),
@@ -757,7 +809,7 @@ class TextBookLoaded extends TextBookState {
     searchDistance,
     matchPolicy,
     searchWholeWord,
-    searchResultLines,
+    _SetProp(searchResultLines),
     currentTitle,
     selectedTextForNote,
     selectedTextSectionIndex,

@@ -1,5 +1,4 @@
 /// ניקוי הטקסט הגולמי שמגיע מהספרייה והפיכתו לרצף מילים עם סמני מבנה.
-/// פורט נאמן של `cleanRawText` בתוסף "תיקון קוראים" (navigation.js).
 library;
 
 import 'package:otzaria/tools/tikkun_korim/models/tikkun_models.dart';
@@ -114,6 +113,38 @@ final RegExp _traditionParashaNote = RegExp(
   r'(?:<sup[^>]*class="footnote-marker"[^>]*>[\s\S]*?</sup>\s*)?'
   r'<i[^>]*class="footnote"[^>]*>\(אין פרשה בספרי ([^)<]*)\)</i>',
 );
+const _variantWord =
+    r'(?:<(?:big|small)>)?[א-ת](?:[א-ת\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7]|</?(?:big|small)>)*';
+const _variantNoteStart =
+    r'<sup[^>]*class="footnote-marker"[^>]*>[^<]*</sup>\s*'
+    r'<i[^>]*class="footnote"[^>]*>\(בספרי ';
+final _leadingVariantNote = RegExp(
+  r'(\s)('
+  '$_variantNoteStart'
+  r'(?:[^<()]|</?(?:big|small)>)+\)</i>)'
+  '($_variantWord)',
+);
+final _traditionWordNote = RegExp(
+  '((?:$_variantWord'
+  r'[־\s]+)?)'
+  '($_variantWord)$_variantNoteStart'
+  r'([^<()]*?(?:תימן|אשכנז)) (?:נהוג לכתוב )?'
+  '($_variantWord)'
+  r'( [^<()]*)?\)</i>',
+);
+final _ashkenazMegillahNote = RegExp(
+  '($_variantWord)'
+  r'<sup[^>]*class="footnote-marker"[^>]*>[^<]*</sup>\s*'
+  r'<i[^>]*class="footnote"[^>]*>\(במגילות אשכנז '
+  '($_variantWord)'
+  r'\)</i>',
+);
+
+/// בוחר את חילופי הנוסח המסומנים במקור כמנהג מגילות אשכנז.
+String applyMegillahNusach(String raw, String nusach) => nusach == 'ashkenaz'
+    ? raw.replaceAllMapped(_ashkenazMegillahNote, (m) => m[2]!)
+    : raw;
+
 final RegExp _bigTag = RegExp(r'<big[^>]*>([\s\S]*?)</big>');
 final RegExp _smallTag = RegExp(r'<small[^>]*>([\s\S]*?)</small>');
 final RegExp _hebrewLetter = RegExp('[א-ת]');
@@ -157,10 +188,8 @@ final String _rabatiEnd = String.fromCharCode(kRabatiEnd);
 String _tightenWord(String s) =>
     s.trim().replaceAll(_whitespaceRun, '').replaceAll(_maqaf, '');
 
-/// המסורת שההערה שוללת בה את הפרשה, לפי שמות העדות שבגוף ההערה.
-/// המודל הוא שתי מסורות בלבד, ולכן "ספרד" ו"אשכנז" הן אותה מסורת,
-/// והערה שמזכירה גם תימן מוכרעת לתימן.
-TikkunTradition? _excludedTraditionOf(String note) {
+/// ספרד ואשכנז משויכות לאותה מסורת; אזכור תימן גובר על שתיהן.
+TikkunTradition? _traditionOf(String note) {
   if (note.contains('תימן')) return TikkunTradition.yemen;
   if (note.contains('ספרד') || note.contains('אשכנז')) {
     return TikkunTradition.ashkenazSephard;
@@ -169,7 +198,7 @@ TikkunTradition? _excludedTraditionOf(String note) {
 }
 
 /// מנקה את טקסט ה-HTML של הספר לרצף מילים עם סמני פרק/פסוק/פרשה.
-String cleanRawText(String raw) {
+String cleanRawText(String raw, {TikkunTradition? tradition}) {
   var text = raw.replaceAllMapped(_chapterHeading, (m) {
     final n = gematriaToNumber(m[1]!.replaceAll(_quoteMarks, ''));
     return n > 0 ? ' CHAPTERMARK${n}MARK ' : ' ';
@@ -189,10 +218,23 @@ String cleanRawText(String raw) {
 
   // חייב לרוץ לפני מחיקת ההערות — הן הנתון היחיד שמבדיל בין המסורות.
   text = text.replaceAllMapped(_traditionParashaNote, (m) {
-    final excluded = _excludedTraditionOf(m[2]!);
+    final excluded = _traditionOf(m[2]!);
     if (excluded == null) return m[0]!;
     return ' {${m[1]}:${excluded.id}} ';
   });
+
+  if (tradition != null) {
+    // יש הערות חילוף לפני המילה; מאחדים את מקומן לפני בחירת החלופה.
+    text = text.replaceAllMapped(
+      _leadingVariantNote,
+      (m) => '${m[1]}${m[3]}${m[2]}',
+    );
+    text = text.replaceAllMapped(_traditionWordNote, (m) {
+      if (_traditionOf(m[3]!) != tradition) return '${m[1]}${m[2]}';
+      final prefix = m[5]?.trim() == 'בתיבה אחת' ? '' : m[1]!;
+      return '$prefix${m[4]}';
+    });
+  }
 
   text = text.replaceAll(_footnoteMarker, ' ');
   text = text.replaceAll(_footnote, ' ');

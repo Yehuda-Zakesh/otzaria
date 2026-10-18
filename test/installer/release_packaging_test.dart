@@ -6,6 +6,47 @@ import 'package:otzaria/update/my_update_widget.dart' show pickWindowsAssetUrl;
 import 'package:path/path.dart' as p;
 
 void main() {
+  test('סכמת האינדקס נקראת ממקור המנוע הנעול ב-pubspec.lock', () async {
+    final temp = Directory.systemTemp.createTempSync('otzaria_engine_schema_');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    File(p.join(temp.path, 'engine', 'rust', 'src', 'api', 'search_engine.rs'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync(
+        'const INDEX_FORMAT: &str = "otzaria-search-index";\n'
+        'pub(crate) const INDEX_SCHEMA_VERSION: u32 = 6;\n',
+      );
+    final lock = File(p.join(temp.path, 'app', 'pubspec.lock'))
+      ..createSync(recursive: true)
+      ..writeAsStringSync('''
+packages:
+  otzaria_search:
+    dependency: transitive
+    description:
+      name: otzaria_search
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.0.0"
+  otzaria_search_engine:
+    dependency: "direct main"
+    description:
+      path: "../engine"
+      relative: true
+    source: path
+    version: "4.0.0"
+  path:
+    dependency: transitive
+    source: hosted
+    version: "1.9.1"
+''');
+
+    final result = await Process.run('bash', [
+      'tool/release/engine_index_schema.sh',
+      lock.path,
+    ]);
+    expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+    expect((result.stdout as String).trim(), 'otzaria-search-index 6');
+  });
+
   test('ארכיון מפוצל נבנה מחדש ומאומת לפי ה-manifest', () async {
     final temp = Directory.systemTemp.createTempSync('otzaria_release_parts_');
     addTearDown(() => temp.deleteSync(recursive: true));
@@ -270,7 +311,6 @@ packages:
           'tool/release/fetch_prebuilt_library_index.sh',
           indexDirectory,
           database.path,
-          talmud.path,
           lock.path,
         ],
         environment: {
@@ -329,16 +369,15 @@ packages:
       isFalse,
     );
 
-    // כרכי תלמוד אחרים: catalogueOrder של כמעט כל הספרייה היה זז מול
-    // מה שהאפליקציה מחשבת אצל המשתמש, בלי ששום בדיקה הייתה תופסת זאת.
-    final wrongTalmud = await fetch(
+    // סדר הקטלוג אינו במזהי המסמכים — האפליקציה דוחפת את המיפוי בעצמה, ולכן
+    // סט כרכי תלמוד אחר אינו פוסל את האינדקס.
+    final otherTalmud = await fetch(
       databaseSha256: await sha256Of(database.path),
       engineVersion: '0.8.4',
-      indexDirectory: p.join(temp.path, 'wrong-talmud', 'index'),
+      indexDirectory: p.join(temp.path, 'other-talmud', 'index'),
       volumesDigest: 'e' * 64,
     );
-    expect(wrongTalmud.exitCode, isNot(0));
-    expect(wrongTalmud.stderr, contains('catalogue order'));
+    expect(otherTalmud.exitCode, 0, reason: '${otherTalmud.stderr}');
   });
 
   test('ה-workflow שומר את ה-SHA שנבחר ותומך בתיקון חירום', () {

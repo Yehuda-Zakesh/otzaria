@@ -54,10 +54,7 @@ class PersonalNotesRepository {
        _service = service ?? PersonalNotesService(),
        _database = database ?? PersonalNotesDatabase.instance;
 
-  Future<List<PersonalNote>> loadNotes(
-    String bookId, {
-    int? categoryId,
-  }) async {
+  Future<List<PersonalNote>> loadNotes(String bookId, {int? categoryId}) async {
     final content = await _loadBookContent(
       bookId,
       categoryId: categoryId,
@@ -78,6 +75,8 @@ class PersonalNotesRepository {
     required PersonalNoteContentFormat contentFormat,
     String? selectedText,
     int? selectionColumn,
+    String? sourceSelectedText,
+    int? sourceSelectionOffset,
     bool punctuationHidden = false,
     int? categoryId,
   }) async {
@@ -91,6 +90,8 @@ class PersonalNotesRepository {
       contentFormat: contentFormat,
       selectedText: selectedText,
       selectionColumn: selectionColumn,
+      sourceSelectedText: sourceSelectedText,
+      sourceSelectionOffset: sourceSelectionOffset,
       punctuationHidden: punctuationHidden,
     );
   }

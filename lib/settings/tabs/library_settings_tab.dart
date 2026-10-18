@@ -13,6 +13,7 @@ import 'package:otzaria/settings/engine/settings_engine_exports.dart';
 import 'package:otzaria/settings/l10n/settings_text.dart';
 import 'package:otzaria/settings/search/settings_search_models.dart';
 import 'package:otzaria/settings/view/settings_screen.dart';
+import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/library/bloc/library_bloc.dart';
 import 'package:otzaria/library/bloc/library_event.dart';
 import 'package:otzaria/library/bloc/library_state.dart';
@@ -25,6 +26,7 @@ import 'package:otzaria/widgets/widgets_exports.dart';
 import 'package:otzaria/indexing/bloc/indexing_bloc.dart';
 import 'package:otzaria/indexing/bloc/indexing_event.dart';
 import 'package:otzaria/indexing/bloc/indexing_state.dart';
+import 'package:otzaria/indexing/models/index_update_mode.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
@@ -60,7 +62,14 @@ class LibrarySettingsTab extends StatefulWidget {
       subtitle: 'אינדקס החיפוש יתעדכן אוטומטית',
       tab: SettingsTab.library,
       cardId: 'library.repository',
-      keywords: ['חיפוש', 'אינדקס', 'אוטומטי', 'מופעל', 'לא מופעל'],
+      keywords: [
+        'חיפוש',
+        'אינדקס',
+        'אוטומטי',
+        'מופעל',
+        'לא מופעל',
+        'ספרים אישיים',
+      ],
     ),
     SettingsSearchEntry(
       id: 'library.search.index_status',
@@ -637,15 +646,31 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
       ).map((library) => library.slug).join(','),
     );
     return [
-      SettingsActionTile.switchTile(
+      SettingsActionTile.segmentedTile<IndexUpdateMode>(
         icon: FluentIcons.arrow_clockwise_24_regular,
         title: context.settingsText('עדכון אינדקס אוטומטי'),
-        subtitle: state.autoUpdateIndex
-            ? context.settingsText('אינדקס החיפוש יתעדכן אוטומטית')
-            : context.settingsText('אינדקס החיפוש לא יתעדכן אוטומטית'),
-        value: state.autoUpdateIndex,
-        onChanged: (value) {
-          context.read<SettingsBloc>().add(UpdateAutoUpdateIndex(value));
+        options: [
+          SegmentOption(
+            value: IndexUpdateMode.all,
+            label: context.settingsText('כל הספרים'),
+            subtitle: context.settingsText('אינדקס החיפוש יתעדכן אוטומטית'),
+          ),
+          SegmentOption(
+            value: IndexUpdateMode.libraryOnly,
+            label: context.settingsText('בלי ספרים אישיים'),
+            subtitle: context.settingsText(
+              'אינדקס החיפוש יתעדכן אוטומטית, בלי ספרים אישיים',
+            ),
+          ),
+          SegmentOption(
+            value: IndexUpdateMode.off,
+            label: context.settingsText('כבוי'),
+            subtitle: context.settingsText('אינדקס החיפוש לא יתעדכן אוטומטית'),
+          ),
+        ],
+        currentValue: state.indexUpdateMode,
+        onChanged: (mode) {
+          context.read<SettingsBloc>().add(UpdateIndexUpdateMode(mode));
         },
       ),
       BlocBuilder<IndexingBloc, IndexingState>(
@@ -677,6 +702,11 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
           } else if (isActive && indexingState.isFinalizing) {
             subtitleText = context.settingsText(
               'מסיים ומאחד את קבצי האינדקס',
+            );
+          } else if (isActive && indexingState.isScanning) {
+            subtitleText = context.settingsText(
+              'בודק אילו ספרים דורשים עדכון: {processed}/{total}',
+              args: {'processed': processed, 'total': total},
             );
           } else if (isActive) {
             subtitleText = context.settingsText(
@@ -740,7 +770,9 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
                     if (!await _indexingRepository.clearIndex()) return;
                     if (!mounted) return;
                     setState(() => _requiresManualReindex = false);
-                    indexingBloc.add(StartIndexing(library));
+                    indexingBloc.add(
+                      StartIndexing(await DataRepository.instance.library),
+                    );
                   },
                 )
               else if (indexingState is IndexingComplete)
@@ -764,11 +796,11 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
               else
                 ActionButton.recommended(
                   text: context.settingsText('עדכן'),
-                  onPressed: () {
-                    final library = context.read<LibraryBloc>().state.library;
-                    if (library != null) {
-                      context.read<IndexingBloc>().add(StartIndexing(library));
-                    }
+                  onPressed: () async {
+                    final indexingBloc = context.read<IndexingBloc>();
+                    // העץ המלא: העץ של LibraryBloc מסונן מהסתרות.
+                    final library = await DataRepository.instance.library;
+                    indexingBloc.add(StartIndexing(library));
                   },
                 ),
             ],

@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/theme/app_seed_colors.dart';
+import 'package:otzaria/theme/app_surfaces.dart';
+import 'package:otzaria/theme/app_colors.dart';
 import 'package:otzaria/theme/app_theme_data.dart';
 
 /// ניגודיות WCAG בין שני צבעים (יחס בהירות).
@@ -131,6 +133,57 @@ void main() {
             'primaryContainer ${cs.primaryContainer} עם onSurface '
             '${cs.onSurface} חייב להישאר בלתי-קריא כדי למנוע שימוש בטעות',
       );
+    });
+
+    test('קישורי ספר מובחנים מהטקסט בערכות נייטרליות (#2589)', () {
+      for (final seed in [AppSeedColors.white, AppSeedColors.grey]) {
+        for (final brightness in Brightness.values) {
+          final cs = AppThemeData.createColorScheme(seed, brightness);
+          final name = '${AppSeedColors.nameOf(seed)} $brightness';
+          final link = AppSurfaces.readerLink(cs);
+          expect(
+            _contrastRatio(link, cs.onSurface),
+            greaterThanOrEqualTo(2.0),
+            reason: '$name: link $link מול onSurface ${cs.onSurface}',
+          );
+          for (final background in [
+            cs.surface,
+            cs.surfaceContainerHighest,
+            if (brightness == Brightness.dark) AppColors.darkScaffold,
+          ]) {
+            expect(
+              _contrastRatio(link, background),
+              greaterThanOrEqualTo(4.5),
+              reason: '$name: link $link מול $background',
+            );
+          }
+        }
+      }
+    });
+
+    test('צבעי הממשק נשמרים בכל ערכות הבסיס (#2589)', () {
+      for (final option in AppSeedColors.options) {
+        final neutral = HSLColor.fromColor(option.color).saturation < 0.1;
+        for (final brightness in Brightness.values) {
+          final cs = AppThemeData.createColorScheme(option.color, brightness);
+          final base = ColorScheme.fromSeed(
+            seedColor: option.color,
+            brightness: brightness,
+            dynamicSchemeVariant: neutral
+                ? DynamicSchemeVariant.monochrome
+                : DynamicSchemeVariant.tonalSpot,
+          );
+          if (!neutral) {
+            expect(AppSurfaces.readerLink(cs), base.primary);
+          }
+          expect(
+            cs.primary,
+            base.primary,
+            reason: '${option.name} $brightness',
+          );
+          expect(cs.onPrimary, base.onPrimary, reason: option.name);
+        }
+      }
     });
 
     test('secondaryContainer עם onSurface/onSurfaceVariant תמיד קריא', () {

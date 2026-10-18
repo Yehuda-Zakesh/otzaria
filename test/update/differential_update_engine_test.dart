@@ -521,6 +521,91 @@ void main() {
     }, skip: !hasZstd ? 'zstd is not on PATH' : null);
   });
 
+  group('קריאת החבילה מהדיסק', () {
+    final payload = _Fixture._randomBytes(3 << 20, 7);
+
+    File packageWith(Map<String, List<int>> files) {
+      final archive = Archive();
+      files.forEach(
+        (name, bytes) => archive.addFile(ArchiveFile.bytes(name, bytes)),
+      );
+      final file = File(p.join(temp.path, 'stream.zip'));
+      file.writeAsBytesSync(ZipEncoder().encodeBytes(archive));
+      return file;
+    }
+
+    final manifestBytes = utf8.encode(jsonEncode(_fullManifest()));
+
+    UpdatePackageEntry entryFor(String sha) => UpdatePackageEntry(
+      path: 'otzaria.exe',
+      method: 'full',
+      compression: 'zstd',
+      entryName: 'files/otzaria.exe.zst',
+      entrySize: payload.length,
+      entrySha256: sha,
+      newSize: 1,
+      newSha256: '0' * 64,
+    );
+
+    test('payload תקין נכתב לקובץ זהה-בית', () async {
+      final package = await UpdatePackage.open(
+        packageWith({
+          kUpdatePackageManifestEntryName: manifestBytes,
+          'files/otzaria.exe.zst': payload,
+        }),
+      );
+      expect(package.manifest.kind, UpdatePackageKind.full);
+      final out = File(p.join(temp.path, 'payload.bin'));
+      await package.writePayloadTo(
+        entryFor(sha256.convert(payload).toString()),
+        out,
+      );
+      expect(out.readAsBytesSync(), payload);
+    });
+
+    test('payload שאינו תואם את ה-hash — packageCorrupt', () async {
+      final package = await UpdatePackage.open(
+        packageWith({
+          kUpdatePackageManifestEntryName: manifestBytes,
+          'files/otzaria.exe.zst': payload,
+        }),
+      );
+      await expectLater(
+        package.writePayloadTo(
+          entryFor('f' * 64),
+          File(p.join(temp.path, 'payload.bin')),
+        ),
+        _throwsAbort(UpdateAbortReason.packageCorrupt),
+      );
+    });
+
+    test('payload חסר בחבילה — packageCorrupt', () async {
+      final package = await UpdatePackage.open(
+        packageWith({kUpdatePackageManifestEntryName: manifestBytes}),
+      );
+      await expectLater(
+        package.writePayloadTo(
+          entryFor(sha256.convert(payload).toString()),
+          File(p.join(temp.path, 'payload.bin')),
+        ),
+        _throwsAbort(UpdateAbortReason.packageCorrupt),
+      );
+    });
+
+    test('קובץ שאינו ZIP או בלי מניפסט — packageInvalid', () async {
+      final notZip = File(p.join(temp.path, 'not.zip'))
+        ..writeAsBytesSync(payload);
+      await expectLater(
+        UpdatePackage.open(notZip),
+        _throwsAbort(UpdateAbortReason.packageInvalid),
+      );
+      await expectLater(
+        UpdatePackage.open(packageWith({'files/otzaria.exe.zst': payload})),
+        _throwsAbort(UpdateAbortReason.packageInvalid),
+      );
+    });
+  });
+
   group('הגנת נתוני המשתמש', () {
     test('נתיב של נתוני משתמש נדחה כקובץ מנוהל', () {
       for (final path in const [
@@ -593,3 +678,25 @@ List<int> _corruptPayloads(List<int> zipBytes) {
   }
   return ZipEncoder().encodeBytes(rebuilt);
 }
+
+Map<String, Object?> _fullManifest() => {
+  'schemaVersion': 1,
+  'variant': 'full',
+  'platform': 'windows',
+  'architecture': 'x64',
+  'fromReleaseTag': 'a',
+  'fromReleaseVersion': 'a',
+  'toReleaseTag': 'b',
+  'toReleaseVersion': 'b',
+  'payloadSize': 0,
+  'entries': const [],
+  'removals': const [],
+};
+
+Matcher _throwsAbort(UpdateAbortReason reason) => throwsA(
+  isA<DifferentialUpdateUnavailable>().having(
+    (e) => e.reason,
+    'reason',
+    reason,
+  ),
+);

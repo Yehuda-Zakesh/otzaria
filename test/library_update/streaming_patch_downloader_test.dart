@@ -175,7 +175,7 @@ void main() {
   });
 
   test(
-    'sha256 מחולץ שגוי → PatchDownloadException ושום קובץ לא נשאר',
+    'sha256 מחולץ שגוי → PatchDownloadException ונשאר רק קובץ נעילה ריק',
     () async {
       await expectLater(
         build().downloadAndExtract(
@@ -185,7 +185,17 @@ void main() {
         ),
         throwsA(isA<PatchDownloadException>()),
       );
-      expect(tmp.listSync(), isEmpty);
+      // הנעילה נשארת על אותו inode; כל נתוני ההורדה חייבים להימחק.
+      final leftovers = tmp.listSync();
+      expect(leftovers.map((file) => p.basename(file.path)), [
+        'patch-v1-v2.db.zst.lock',
+      ]);
+      final lock = leftovers.single;
+      expect(
+        FileSystemEntity.typeSync(lock.path, followLinks: false),
+        FileSystemEntityType.file,
+      );
+      expect(File(lock.path).lengthSync(), 0);
     },
   );
 

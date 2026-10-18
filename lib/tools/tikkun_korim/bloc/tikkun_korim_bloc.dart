@@ -230,7 +230,11 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
       emit(state.copyWith(pages: const [], clearHeader: true));
       return;
     }
-    final processed = await repository.processedBook(book.name, _widths);
+    final processed = await repository.processedBook(
+      book.name,
+      _widths,
+      nusach: state.settings.nusach,
+    );
     if (requestId != _requestId || emit.isDone) return;
     final page = TikkunPage(
       startLineIdx: 0,
@@ -637,6 +641,8 @@ class TikkunKorimBloc extends Bloc<TikkunKorimEvent, TikkunKorimState> {
     final needsReload =
         previous.stamFontFamily != event.settings.stamFontFamily ||
         previous.decalogueTaam != event.settings.decalogueTaam ||
+        (state.nav.section.isTanachBook &&
+            previous.nusach != event.settings.nusach) ||
         ((state.nav.section == TikkunSection.haftarot ||
                 state.nav.section == TikkunSection.torahReadings) &&
             (previous.nusach != event.settings.nusach ||

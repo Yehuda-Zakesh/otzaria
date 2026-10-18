@@ -6,6 +6,7 @@ import 'package:otzaria/search/search_query_builder.dart';
 import 'package:otzaria/search/search_repository.dart';
 import 'package:otzaria/search/utils/smart_lexical_in_book_search.dart';
 import 'package:otzaria/search/utils/in_book_search_routing.dart';
+import 'package:otzaria/search/utils/user_regex_query.dart';
 import 'package:otzaria/search/view/search_dialog.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
@@ -21,20 +22,29 @@ class InBookSearchSettings {
     this.spacingValues = const {},
     this.searchMode = SearchMode.exact,
     this.distance = 0,
-    this.matchPolicy = SearchMatchPolicy.standard,
+    SearchMatchPolicy matchPolicy = SearchMatchPolicy.standard,
     this.optionsForEveryWord,
-  });
+    this.query,
+  }) : requestedMatchPolicy = matchPolicy;
 
   /// The settings a new in-book search starts with: the defaults saved with
   /// "קבע כברירת מחדל", whose word options apply to every word typed.
   factory InBookSearchSettings.savedDefaults() {
     if (!Settings.isInitialized) return const InBookSearchSettings();
     final mode = SearchDefaults.loadModeDefault();
+    final policy = SearchDefaults.loadMatchPolicyDefault();
     return InBookSearchSettings(
       searchMode: mode,
       distance: mode == SearchMode.fuzzy
           ? kMaxFuzzyDistance
           : SearchDefaults.loadDistanceDefault(),
+      matchPolicy: SearchConfiguration(
+        searchMode: mode,
+        proximityScope: policy.proximityScope,
+        wordMatchMode: policy.wordMatchMode,
+        wordMatchCount: policy.wordMatchCount,
+        anyOrder: SearchDefaults.loadAnyOrderDefault(),
+      ).matchPolicy,
       optionsForEveryWord: SearchQueryBuilder.normalizeGlobalOptionsForMode(
         mode,
         mode == SearchMode.exact
@@ -68,7 +78,19 @@ class InBookSearchSettings {
   final Map<String, String> spacingValues;
   final SearchMode searchMode;
   final int distance;
-  final SearchMatchPolicy matchPolicy;
+
+  /// המדיניות שהמשתמש בחר; [matchPolicy] היא מה שחל בפועל על [query].
+  final SearchMatchPolicy requestedMatchPolicy;
+
+  /// השאילתה שאליה הותאמו ההגדרות ב-[forQuery], או null לפני כן.
+  final String? query;
+
+  SearchMatchPolicy get matchPolicy {
+    final query = this.query;
+    return query == null
+        ? requestedMatchPolicy
+        : requestedMatchPolicy.forQuery(query);
+  }
 
   /// Word options that apply to every word of whatever query is typed, or
   /// null when [searchOptions] were chosen for a specific query.
@@ -78,7 +100,17 @@ class InBookSearchSettings {
   /// [query].
   InBookSearchSettings forQuery(String query) {
     final options = optionsForEveryWord;
-    if (options == null) return this;
+    if (options == null) {
+      return InBookSearchSettings(
+        searchOptions: searchOptions,
+        alternativeWords: alternativeWords,
+        spacingValues: spacingValues,
+        searchMode: searchMode,
+        distance: distance,
+        matchPolicy: requestedMatchPolicy,
+        query: query,
+      );
+    }
     return InBookSearchSettings(
       searchOptions: SearchQueryBuilder.expandGlobalOptionsToWords(
         query,
@@ -86,8 +118,9 @@ class InBookSearchSettings {
       ),
       searchMode: searchMode,
       distance: distance,
-      matchPolicy: matchPolicy,
+      matchPolicy: requestedMatchPolicy,
       optionsForEveryWord: options,
+      query: query,
     );
   }
 
@@ -115,10 +148,11 @@ class InBookSearchSettings {
       );
 }
 
-/// The query an in-book search runs for [raw]: trimmed and without nikud, or
-/// null when there is nothing to search for.
+/// The query an in-book search runs for [raw]: trimmed and without nikud (a
+/// valid `/…/` as typed), or null when there is nothing to search for.
 String? searchableInBookQuery(String raw) {
   var query = raw.trim();
+  if (UserRegexQuery.isValid(query)) return query;
   if (utils.hasNikud(query)) {
     query = utils.removeVolwels(query);
   }
@@ -149,7 +183,7 @@ Future<List<SearchResult>> searchBookWithEngine(
     }
   }
   final parameters = settings.activeParameters;
-  final policy = settings.matchPolicy;
+  final policy = settings.requestedMatchPolicy.forQuery(query);
   return repository.searchTexts(
     SearchEngineRequest(
       query: query,
@@ -165,6 +199,7 @@ Future<List<SearchResult>> searchBookWithEngine(
       negativeScope: policy.proximityScope,
       wordMatchMode: policy.wordMatchMode,
       wordMatchCount: policy.wordMatchCount,
+      anyOrder: policy.anyOrder,
       order: ResultsOrder.catalogue,
     ),
   );

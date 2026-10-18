@@ -103,7 +103,7 @@ if (response.success) {
 | קוד | קטגוריה | משמעות |
 |---|---|---|
 | `permission_denied` / `error.permission_denied` | `permission` | ההרשאה לא הוצהרה במניפסט או לא אושרה |
-| `error.forbidden` | `permission` | ההרשאה קיימת אך היעד עצמו חסום — נתיב מחוץ לתיקייה מאושרת, תיקייה מוגנת, או URL שאינו ב-allowlist |
+| `error.forbidden` | `permission` | ההרשאה קיימת אך היעד עצמו חסום — נתיב מחוץ לתיקייה מאושרת, תיקייה מוגנת, URL שאינו ב-allowlist, או ספר שהמו"ל הגביל את מסירת הטקסט שלו |
 | `error.invalid_params` | `validation` | פרמטרים חסרים או שגויים |
 | `error.selection_empty` | `validation` | הבחירה שהתבקשה ריקה — אין טקסט לחפש בו התאמות |
 | `error.not_found` | `not_found` | הפריט המבוקש אינו קיים |
@@ -156,6 +156,7 @@ if (response.success) {
 | `library.resolveRef` | 0.9.97 |
 | `library.getBookMetadata` | 0.9.89 |
 | `library.getBookDetails` | 0.9.98 |
+| `library.getBookProtections` | 0.9.99 |
 | `library.resolveBooks` | 0.9.97 |
 | `library.resolveCategoryPaths` | 0.9.97 |
 | `library.listRecentBooks` | 0.9.89 |
@@ -735,7 +736,9 @@ const { data } = await Otzaria.call('library.getBookDetails', {
 //   publicationDates: ['שס"ו'], publicationPlaces: ['וונציה'],
 //   topics: ['הלכה'], shortDescription: '...', fullDescription: '...',
 //   textSource: { key: 'Sefaria', name: 'ספריא', url: 'https://www.sefaria.org/texts' },
-//   reference: '...', lineCount: 4210, libraryPath: 'הלכה/שולחן ערוך'
+//   reference: '...', lineCount: 4210, libraryPath: 'הלכה/שולחן ערוך',
+//   protection: { level: 0, textAvailable: true, editableExport: true,   // מ-0.9.99
+//                 pdfExport: true, copyLimit: null, printLimit: null }
 // }
 ```
 
@@ -746,6 +749,42 @@ const { data } = await Otzaria.call('library.getBookDetails', {
   עם `name` זהה ל-`key` וללא `url`.
 - `libraryPath` הוא הנתיב היחסי בספרייה בלבד. לספר אישי הוא `null` — נתיב
   הקובץ שלו אינו נחשף לתוספים.
+- `protection` (מגרסה 0.9.99) — הגבלת המו"ל של הספר. ראו
+  [`library.getBookProtections`](#librarygetbookprotections).
+
+### `library.getBookProtections`
+**הרשאה:** `library.books.read` · **מגרסה:** 0.9.99
+
+הגבלת המו"ל (טבלת `book_protection` במסד) של כמה ספרים בקריאה אחת — הספר עצמו
+ומפרשיו. מאפשר לתוסף לדעת **מראש** מה מותר, במקום לגלות זאת מ-`error.forbidden`
+באמצע עבודה, ולהציג את ההגבלה למשתמש כמו הממשק: לא להציע פעולה שאסורה.
+
+```javascript
+const { data } = await Otzaria.call('library.getBookProtections', {
+  items: [
+    { bookUid: 'id:183' },                              // זהות ספר, כמו getBookMetadata
+    { title: 'שער הציון', categoryId: 12 },            // מפרש, כפי שחוזר מ-getLinks
+  ]  // עד 500
+});
+// [
+//   { level: 1, textAvailable: false, editableExport: false, pdfExport: true,
+//     copyLimit: 40, printLimit: null },
+//   null   // ספר שלא נמצא
+// ]
+```
+
+| שדה | משמעות |
+|---|---|
+| `level` | 0 — ללא הגבלה; 1–2 — רמת ההגבלה (רמה לא מוכרת מעל 2 נמסרת כ-2) |
+| `textAvailable` | האם הטקסט נמסר לתוספים (`getBookContent`, `getLinkContent`, חיפוש) |
+| `editableExport` | האם מותר לייצא לפורמט קל לעריכה — Word, טקסט, EPUB, FB2 |
+| `pdfExport` | האם מותרת שמירה כ-PDF |
+| `copyLimit` / `printLimit` | מספר השורות המרבי בהעתקה / בהדפסה; `null` — ללא הגבלה |
+
+**תוסף שמייצא טקסט לקובץ צריך לבדוק את הספר ואת כל המפרשים שהוא כולל**, ולא
+להציע ייצוא כש-`editableExport` הוא `false` — כמו שהממשק מסתיר את "ייצוא הספר".
+ספר אישי אינו מוגבל.
+
 
 ### `library.resolveBooks`
 **הרשאה:** `library.books.read`
@@ -1237,7 +1276,7 @@ const { data } = await Otzaria.call('library.getLinkTargetsSummary', {
 
 תוכן הצד המקושר — עד **25 פריטים** בקריאה אחת (יותר מכך:
 `error.invalid_params`). ה-`items` מוחזרים באותו סדר של הקלט; פריט שלא ניתן
-לטעון מוחזר כ-`{ error: "not_found" }`.
+לטעון מוחזר כ-`{ error: "not_found" }`, ופריט מספר שהמו"ל הגביל — כ-`{ error: "forbidden" }`.
 
 העבירו את `targetTitle`, `targetLine`, `targetLineEnd`, `targetIsUserBook`
 ו-`targetCategoryId` בדיוק כפי שהתקבלו מ-`getLinks` — הם מזהים את הספר הנכון
@@ -1377,6 +1416,7 @@ const { data } = await Otzaria.call('search.fullText', {
 - `textStatus` — מצב הטקסט (ראו `search.query` להלן)
 - `continuesToNextLine` — הביטוי נמשך לשורה הבאה (ראו `search.query` להלן)
 - `index` — אינדקס השורה/עמוד בספר
+- `error` — `"forbidden"` בתוצאה מספר שהמו"ל הגביל; `text` ריק בה
 
 > **הערה:** `search.fullText` אינו מחזיר `id` כי מנוע החיפוש (Tantivy) אינו שומר את מזהה הספר מה-DB. כדי לקבל את `id` — יש לקרוא ל-`library.getBookMetadata({ bookId, type })` עם התוצאה. `search.query` (להלן) כן מחזיר זהות מלאה.
 
@@ -1420,6 +1460,7 @@ for await (const chunk of chunks) {
 | `proximityScope` | `'wordDistance'` | `'wordDistance'` מרווח מילים \| `'sameParagraph'` באותה פסקה \| `'sameSection'` תחת אותה כותרת |
 | `wordMatchMode` | `'all'` | `'all'` \| `'anyWord'` \| `'mostWords'` \| `'atLeast'` |
 | `wordMatchCount` | `2` | מספר המילים הנדרש; ניתן לשלוח רק עם `mode: 'advanced'` ו-`wordMatchMode: 'atLeast'` |
+| `anyOrder` (מגרסה 0.9.99) | `false` | `true` = אותו מרווח כמו בחיפוש לפי הסדר (`distance`), אבל המילים יכולות להופיע בכל סדר; חל גם על `negativeQuery` ואינו משפיע על שאילתה של מילה אחת. נדחה במצב `'fuzzy'`, עם `proximityScope` שאינו `'wordDistance'`, עם `wordMatchMode` שאינו `'all'` ועם `customSpacing` |
 | `grouping` | `'none'` | `'none'` \| `'sameSection'` (איחוד לפי סעיף) \| `'identicalText'` (איחוד טקסט זהה) |
 | `options` | `{}` | אפשרויות מילה שחלות על **כל** מילות השאילתה |
 | `wordOptions` | `{}` | אפשרויות פר-מילה במפתח `"{מילה}_{אינדקס}"`; גובר על `options` |
@@ -1485,6 +1526,9 @@ for await (const chunk of chunks) {
 
 בגרסאות קודמות השדה חסר; יש להתייחס להיעדרו כ-`'ok'`.
 
+**`error`** — `"forbidden"` בתוצאה מספר שהמו"ל הגביל את מסירת הטקסט שלו;
+`text` ריק בה, ושאר השדות (זהות, `index`) נשמרים.
+
 **`continuesToNextLine`** — `true` כשהביטוי מתחיל בסוף השורה `index` ונמשך
 בתחילת השורה הבאה (`index + 1`). `text` מחבר אז את סוף השורה ואת תחילת הבאה
 במעבר שורה (`<br>`), והמילים מודגשות בשתיהן. התוצאה נספרת פעם אחת, לשורה `index`.
@@ -1536,7 +1580,8 @@ const { data } = await Otzaria.call('search.getOptions', {});
 > בשקט: `negativeQuery`, `alternativeWords`, `customSpacing`, `proximityScope`,
 > `wordMatchMode` וכל פרמטרי ה-`negative*` דורשים `mode: 'advanced'`; המצב
 > `'fuzzy'` אינו מקבל אפשרויות מילה כלל; המצב `'exact'` מקבל רק את
-> `wordOptions.exact` שלמעלה.
+> `wordOptions.exact` שלמעלה. `anyOrder: true` נדחה בכל מקום שבו הוא היה
+> נבלע (מקורב, טווח פסקה/כותרת, התאמה חלקית, מרווח ידני).
 
 ### `search.setFieldText`
 **הרשאה:** `search.field_actions` · **מגרסה:** 0.9.99
@@ -1694,6 +1739,10 @@ window.addEventListener('reader.inBookSearch.requested', async (event) => {
 `distance` הוא מספר המילים שמותר שיופיעו *בין* מילות השאילתה (0 = צמודות),
 ומנוע שמודד מרחק ביחידה אחרת חייב לתרגם אותו. מארח ותיק אינו שולח את השדות.
 
+מגרסה 0.9.99 האירוע נושא `anyOrder: true` כשהמשתמש ביטל "שמור על סדר המילים
+המקורי" והבחירה חלה (גם במצב `exact`): אותו מרווח כמו בחיפוש לפי הסדר,
+אבל המילים יכולות להופיע בכל סדר. כשהשדה חסר — לפי הסדר.
+
 שם ספק שייך לתוסף הראשון שרשם אותו; ניסיון של תוסף אחר לרשום אותו נדחה
 עם `error.conflict`.
 
@@ -1810,6 +1859,7 @@ await Otzaria.call('reader.openSearchTab', {
 | `proximityScope` | `'wordDistance'` | `'wordDistance'` \| `'sameParagraph'` \| `'sameSection'` |
 | `wordMatchMode` | `'all'` | `'all'` \| `'anyWord'` \| `'mostWords'` \| `'atLeast'` |
 | `wordMatchCount` | `2` | חוקי רק עם `mode: 'advanced'` ו-`wordMatchMode: 'atLeast'` |
+| `anyOrder` (מגרסה 0.9.99) | `false` | אותו מרווח, אבל המילים בכל סדר; אותם כללים כמו ב-`search.query` |
 | `options` | `{}` | אפשרויות מילה שחלות על כל מילות השאילתה (למשל `'קידומות דקדוקיות'`) |
 | `wordOptions` | `{}` | אפשרויות פר-מילה במפתח `"{מילה}_{אינדקס}"`; גובר על `options` |
 
@@ -2006,6 +2056,9 @@ const { data } = await Otzaria.call('reader.getSelection');
 //   sourceRange: { ... }
 // }
 ```
+
+בספר שהמו"ל הגביל, `text` כולל לכל היותר את 40 השורות הראשונות של הבחירה,
+והעוגן המורחב אינו מוחזר כשהבחירה קוצרה.
 
 יחידת המיקום הקנונית היא grapheme cluster לפי חלוקת Unicode של ה־Host. `codePoint` ו־`utf16` נמסרים לצורכי שילוב בלבד; אין להשתמש ב־`String.length` של JavaScript כעוגן קנוני.
 
@@ -5215,6 +5268,22 @@ API — מפונה. הפינוי שקוף באותו אופן ככיבוי אח�
 
 עד 50 מחרוזות, כל אחת עד 100 תווים. אין תמיכה ב-regex (בכוונה). ה-`showWhen` עובד גם ברישום דינמי דרך `reader.addContextMenuItem`.
 
+### separatorBefore — קו חוצץ בין תוספים
+
+מ-`0.9.99`. כשכמה תוספים מוסיפים פריטים לאותו תפריט הקשר, התוכנה מציירת
+כברירת מחדל קו חוצץ בין קבוצת הפריטים של כל תוסף. תוסף שמעדיף שהפריטים שלו
+ימשיכו ברצף עם מה שמעליהם מצהיר על הפריט העליון הראשון שלו:
+
+```json
+{ "id": "my-item", "title": "הפעולה שלי", "separatorBefore": false }
+```
+
+- ערך בוליאני בלבד; ברירת המחדל היא `true`.
+- נקרא רק מהפריט העליון הראשון של התוסף בתפריט; בפריט ילד הרישום נדחה
+  עם `error.invalid_params`.
+- עובד גם ברישום דינמי דרך `reader.addContextMenuItem`, וב-`reader.updateContextMenuItem`.
+- פריט `separator` שהתוסף הוסיף בעצמו בתחילת הקבוצה אינו מכפיל את הקו.
+
 ### action — פעולת host על פריט תפריט הקשר
 
 מ-`minAppVersion: 0.9.97`. פריט `contextMenuItems` מסוג `item` (גם ילד של
@@ -5927,6 +5996,8 @@ Otzaria.on('reader.selection_changed', (data) => {
 //   source: "library"
 // }
 ```
+
+בספר שהמו"ל הגביל, `text` כולל לכל היותר את 40 השורות הראשונות של הבחירה.
 
 ---
 

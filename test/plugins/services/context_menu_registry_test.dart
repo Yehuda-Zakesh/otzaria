@@ -478,5 +478,55 @@ void main() {
         throwsInvalidParams(),
       );
     });
+
+    group('separatorBefore', () {
+      Matcher throwsInvalidParams() => throwsA(
+        isA<PluginContextMenuException>().having(
+          (error) => error.code,
+          'code',
+          'error.invalid_params',
+        ),
+      );
+
+      test('defaults to true and survives toJson only when false', () {
+        registry.registerPayload('a', {'id': 'one', 'title': 'One'});
+        registry.registerPayload('b', {
+          'id': 'two',
+          'title': 'Two',
+          'separatorBefore': false,
+        });
+
+        final items = {for (final r in registry.getAll()) r.$1: r.$2};
+        expect(items['a']!.separatorBefore, isTrue);
+        expect(items['a']!.toJson().containsKey('separatorBefore'), isFalse);
+        expect(items['b']!.separatorBefore, isFalse);
+        expect(items['b']!.toJson()['separatorBefore'], isFalse);
+      });
+
+      test('a non-boolean value is rejected', () {
+        expect(
+          () => registry.registerPayload('a', {
+            'id': 'bad',
+            'title': 'Bad',
+            'separatorBefore': 'no',
+          }),
+          throwsInvalidParams(),
+        );
+      });
+
+      test('a child item cannot carry it', () {
+        expect(
+          () => registry.registerPayload('a', {
+            'id': 'menu',
+            'type': 'submenu',
+            'title': 'Menu',
+            'children': [
+              {'id': 'child', 'title': 'Child', 'separatorBefore': false},
+            ],
+          }),
+          throwsInvalidParams(),
+        );
+      });
+    });
   });
 }

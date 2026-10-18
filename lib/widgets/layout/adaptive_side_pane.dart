@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:otzaria/theme/theme_exports.dart';
 import 'package:otzaria/widgets/feedback/edge_scrollbar_behavior.dart';
 import 'package:otzaria/widgets/layout/floating_panel.dart';
@@ -92,6 +93,7 @@ class AdaptiveSidePane extends StatefulWidget {
 class _AdaptiveSidePaneState extends State<AdaptiveSidePane> {
   bool? _lastHadRoomForSideBySide;
   bool? _lastReportedLayoutMode;
+  bool _overlaysContent = false;
 
   // ── Drag state ──────────────────────────────────────────────────────────────
   // רוחב פנימי בזמן גרירה — מנוהל דרך ValueNotifier כדי לא לגרום ל-parent rebuild
@@ -109,11 +111,17 @@ class _AdaptiveSidePaneState extends State<AdaptiveSidePane> {
   // מחדש — אחרת נעיצה/ביטול נעיצה מאפסים את מיקום הקריאה.
   final GlobalKey _mainContentKey = GlobalKey();
   final GlobalKey _paneContentKey = GlobalKey();
+  final FocusNode _paneFocusNode = FocusNode(
+    canRequestFocus: false,
+    skipTraversal: true,
+  );
 
   /// תוכן החלונית עם מפתח קבוע — נעיצה מעבירה אותו בין הפריסות בלי לבנות מחדש
   /// (גלילה, ענפים פתוחים ושדה חיפוש פתוח נשמרים).
-  Widget get _paneContent =>
-      KeyedSubtree(key: _paneContentKey, child: widget.paneContent);
+  Widget get _paneContent => KeyedSubtree(
+    key: _paneContentKey,
+    child: Focus(focusNode: _paneFocusNode, child: widget.paneContent),
+  );
 
   static const double _kWideTopGap = 14;
   static const double _kWideBottomGap = 10;
@@ -154,6 +162,7 @@ class _AdaptiveSidePaneState extends State<AdaptiveSidePane> {
   @override
   void dispose() {
     _livePaneWidth.dispose();
+    _paneFocusNode.dispose();
     super.dispose();
   }
 
@@ -301,8 +310,31 @@ class _AdaptiveSidePaneState extends State<AdaptiveSidePane> {
     return SafeArea(child: paneContent);
   }
 
+  // Esc מגיע לכאן רק אם אף צאצא ממוקד (שדה, בחירה) לא טיפל בו קודם.
+  // החלונית הסגורה נשארת בעץ, ופוקוס שנשאר בה היה בולע הקלדה בשדה נסתר.
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.escape ||
+        !widget.isOpen ||
+        !_overlaysContent) {
+      return KeyEventResult.ignored;
+    }
+    if (_paneFocusNode.hasFocus) FocusManager.instance.primaryFocus?.unfocus();
+    widget.onClose();
+    return KeyEventResult.handled;
+  }
+
   @override
   Widget build(BuildContext context) {
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: _handleKey,
+      child: _buildLayout(context),
+    );
+  }
+
+  Widget _buildLayout(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final paneOnRight = _isPaneOnRight(context);
@@ -327,6 +359,7 @@ class _AdaptiveSidePaneState extends State<AdaptiveSidePane> {
         }
 
         final usesPushLayout = hasRoomForSideBySide && !widget.floatOverContent;
+        _overlaysContent = !usesPushLayout;
         if (widget.onLayoutModeChanged != null &&
             _lastReportedLayoutMode != usesPushLayout) {
           _lastReportedLayoutMode = usesPushLayout;

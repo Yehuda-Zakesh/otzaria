@@ -340,6 +340,9 @@ class _LibraryBrowserState extends State<LibraryBrowser>
   Rect? _lastTourBookCardRect;
   final Set<String> _expandedCategories = {};
   final _settingsPanelOpen = ValueNotifier<bool>(false);
+
+  /// סריקת תיקיות אישיות שהתחילה מ"טעינה מחדש" ועוד לא הסתיימה.
+  final _reloadScanPending = ValueNotifier<bool>(false);
   double? _previewPaneWidthOverride;
   late final ValueNotifier<double> _topBarTotalHeight;
 
@@ -431,6 +434,7 @@ class _LibraryBrowserState extends State<LibraryBrowser>
     _secondaryRowVisible.dispose();
     _topBarTotalHeight.dispose();
     _settingsPanelOpen.dispose();
+    _reloadScanPending.dispose();
     super.dispose();
   }
 
@@ -486,6 +490,10 @@ class _LibraryBrowserState extends State<LibraryBrowser>
               SelectCategoryForPreview(state.currentCategory ?? state.library!),
             );
           },
+        ),
+        BlocListener<CustomFoldersBloc, CustomFoldersState>(
+          listenWhen: (p, c) => p.isSyncing && !c.isSyncing,
+          listener: (_, _) => _reloadScanPending.value = false,
         ),
         BlocListener<SettingsBloc, SettingsState>(
           listenWhen: (p, c) =>
@@ -612,7 +620,13 @@ class _LibraryBrowserState extends State<LibraryBrowser>
                       );
                     },
                   ),
-                  if (state.isLoading) _buildLoadingOverlay(context),
+                  // גם בזמן סריקת התיקיות שקודמת לרענון מהכפתור.
+                  ValueListenableBuilder<bool>(
+                    valueListenable: _reloadScanPending,
+                    builder: (context, pending, _) => state.isLoading || pending
+                        ? _buildLoadingOverlay(context)
+                        : const SizedBox.shrink(),
+                  ),
                 ],
               );
             },
@@ -1188,6 +1202,7 @@ class _LibraryBrowserState extends State<LibraryBrowser>
   }
 
   void _refreshWithPersonalFolders() {
+    _reloadScanPending.value = true;
     context.read<CustomFoldersBloc>().add(
       const RescanCustomFolders(showNoChangesMessage: false),
     );

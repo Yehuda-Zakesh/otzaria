@@ -95,5 +95,19 @@ void main() {
       expect(saadia.name, 'רבינו סעדיה אלפיומי גאון');
       expect(saadia.biographyShort, 'מגאוני בבל.');
     });
+
+    test('טקסט ביוגרפיה באנגלית בלבד אינו מוצג (#2556)', () {
+      final bio = Biography.fromEntry({
+        'id': 4,
+        'name': 'בית הלל',
+        'doc': {
+          'summary': {'en': 'Beit Hillel was a school of thought.'},
+          'biographyShort': {'en': 'Traditionally seen in rivalry.'},
+        },
+      });
+      expect(bio.name, 'בית הלל');
+      expect(bio.summary, isNull);
+      expect(bio.biographyShort, isNull);
+    });
   });
 }

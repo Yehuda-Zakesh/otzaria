@@ -163,6 +163,18 @@ abstract final class NavPanelSearch {
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey;
+    // Esc ראשון מנקה את השדה; הבא בתור סוגר חלונית צפה (AdaptiveSidePane).
+    if (key == LogicalKeyboardKey.escape) {
+      final onClear = delegate.onClear;
+      if (event is! KeyDownEvent ||
+          onClear == null ||
+          delegate.controller.text.isEmpty) {
+        return KeyEventResult.ignored;
+      }
+      delegate.controller.clear();
+      onClear();
+      return KeyEventResult.handled;
+    }
     if (key != LogicalKeyboardKey.arrowDown &&
         key != LogicalKeyboardKey.arrowUp) {
       return KeyEventResult.ignored;

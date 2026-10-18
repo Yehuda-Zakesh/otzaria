@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/personal_notes/models/personal_note.dart';
 import 'package:otzaria/text_book/utils/inline_notes_utils.dart' as notes;
 import 'package:otzaria/text_book/utils/section_search_utils.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
@@ -786,6 +787,51 @@ Future<void> main() async {
     });
   });
 
+  group('noteAnchorFractionInLine (issue #2532)', () {
+    PersonalNote note({String? anchorText, int? anchorStart}) => PersonalNote(
+      id: 'n',
+      bookId: 'ספר',
+      lineNumber: 1,
+      anchorText: anchorText,
+      anchorStart: anchorStart,
+      lastKnownLineNumber: 1,
+      status: PersonalNoteStatus.located,
+      content: 'תוכן',
+      contentPlain: 'תוכן',
+      contentFormat: PersonalNoteContentFormat.plain,
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+
+    test('המיקום נמדד בטקסט הנקי ולא באורך ה-HTML הגולמי', () {
+      final line =
+          '<span style="color: red; font-weight: bold">${'א' * 10}</span> '
+          'יעד ${List.filled(20, 'סוף').join(' ')}';
+      final fraction = noteAnchorFractionInLine(
+        line,
+        note(anchorText: 'יעד', anchorStart: line.indexOf('יעד')),
+      );
+      final clean = cleanLineForSearch(line);
+      expect(fraction, closeTo(clean.indexOf('יעד') / clean.length, 0.03));
+      expect(fraction, lessThan(line.indexOf('יעד') / line.length - 0.2));
+    });
+
+    test('בוחר את המופע שעליו נכתבה ההערה כשהביטוי חוזר', () {
+      final line = 'יעד ${List.filled(30, 'מילה').join(' ')} יעד סוף';
+      final fraction = noteAnchorFractionInLine(
+        line,
+        note(anchorText: 'יעד', anchorStart: line.lastIndexOf('יעד')),
+      );
+      expect(fraction, greaterThan(0.9));
+    });
+
+    test('הערת שורה שלמה או עוגן שלא נמצא — שבר 0', () {
+      const line = 'שמע ישראל ה אלהינו ה אחד';
+      expect(noteAnchorFractionInLine(line, note()), 0);
+      expect(noteAnchorFractionInLine(line, note(anchorText: 'משה')), 0);
+    });
+  });
+
   group('queryMatchesInlineNoteOnly', () {
     const noteLine =
         'שלום עולם '
@@ -809,6 +855,34 @@ Future<void> main() async {
           noteLine,
           'שלום',
           pattern: literalPattern('שלום'),
+        ),
+        isFalse,
+      );
+    });
+
+    test('ספר מהמסד: גוף ההערה בטבלה — המונח נמצא בה בלבד', () {
+      const stored = 'שלום עולם <sup class="footnote-marker">1</sup>';
+      expect(
+        queryMatchesInlineNoteOnly(
+          stored,
+          'דין',
+          dbNotes: const [
+            (
+              noteIndex: 0,
+              charPos: -1,
+              marker: '1',
+              body: 'כאן מופיע דין מיוחד',
+            ),
+          ],
+          pattern: literalPattern('דין'),
+        ),
+        isTrue,
+      );
+      expect(
+        queryMatchesInlineNoteOnly(
+          stored,
+          'דין',
+          pattern: literalPattern('דין'),
         ),
         isFalse,
       );

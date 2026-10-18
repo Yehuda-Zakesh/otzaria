@@ -222,7 +222,27 @@ class ContextMenuRegistry extends PluginItemRegistry<PluginContextMenuItem> {
       showWhenContainsAny: _parseShowWhen(json['showWhen']),
       when: parseWhen(json['when'], nested: depth > 0),
       action: _parseAction(json),
+      separatorBefore: _parseSeparatorBefore(json['separatorBefore'], depth),
     );
+  }
+
+  /// `separatorBefore: false` — ביטול הקו החוצץ האוטומטי שלפני קבוצת הפריטים
+  /// של התוסף. רלוונטי רק לפריט עליון; בפריט ילד הוא היה נבלע בשקט.
+  bool _parseSeparatorBefore(Object? value, int depth) {
+    if (value == null) return true;
+    if (value is! bool) {
+      throw const PluginContextMenuException(
+        'error.invalid_params',
+        'separatorBefore must be a boolean',
+      );
+    }
+    if (depth > 0) {
+      throw const PluginContextMenuException(
+        'error.invalid_params',
+        'separatorBefore is only allowed on top-level items',
+      );
+    }
+    return value;
   }
 
   /// פעולת host דקלרטיבית על הפריט — ולידציה מבנית בלבד; הצהרת ההרשאה

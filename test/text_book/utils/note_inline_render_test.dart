@@ -8,6 +8,9 @@ import 'package:otzaria/text_book/utils/inline_section_markers.dart';
 import 'package:otzaria/book_common/utils/link_anchor_markers.dart';
 import 'package:otzaria/text_book/utils/note_inline_render.dart';
 import 'package:otzaria/text_book/utils/numbered_note_markers.dart';
+import 'package:otzaria/widgets/smart_text/render_settings.dart';
+import 'package:otzaria/widgets/smart_text/text_renderer_service.dart';
+import 'package:otzaria/utils/text/text_manipulation.dart' show HolyNameStyle;
 
 PersonalNote _note({
   String? anchorText,
@@ -111,6 +114,62 @@ void main() {
     // המילים שלפני הביטוי לא נמצאות בתוך תגית ה-<a>.
     final aStart = html.indexOf('<a ');
     expect(html.substring(0, aStart).contains('וַיֹּאמֶר'), isTrue);
+  });
+
+  test('בחירה חלקית בשם קודש אינה מפצלת את השם לפני החלפת הסגנון', () {
+    const raw = 'יהוה';
+    final html = buildAnnotatedLineHtml(
+      rawLine: raw,
+      sourceLine: raw,
+      notesForLine: [
+        _note(anchorText: 'הוה', anchorStart: 1, anchorEnd: 4),
+      ],
+      lineIndex0: 0,
+      underlineColor: color,
+      replaceHolyNames: true,
+    );
+
+    final rendered = TextRendererService.processText(
+      html,
+      const RenderSettings(replaceHolyNames: true),
+    );
+    expect(rendered, contains('>יקוק</a>'));
+
+    final hehStyle = TextRendererService.processText(
+      html,
+      const RenderSettings(
+        replaceHolyNames: true,
+        holyNameStyle: HolyNameStyle.hehApostrophe,
+      ),
+    );
+    expect(hehStyle, contains(">ה'</a>"));
+  });
+
+  test('הרחבת שם הקודש שומרת את הבחירה המלאה ואת כל השמות שנחצו', () {
+    for (final (raw, anchor, start, end, expected) in [
+      ('ברוך יהוה לעולם', 'ברוך יהוה לעולם', 0, 15, 'ברוך יקוק לעולם'),
+      ('יהוה ויהוה', 'הוה ויהוה', 1, 9, 'יקוק ויקוק'),
+      ('אמר:יהוה', 'הוה', 5, 8, 'יקוק'),
+    ]) {
+      final html = buildAnnotatedLineHtml(
+        rawLine: raw,
+        sourceLine: raw,
+        notesForLine: [
+          _note(anchorText: anchor, anchorStart: start, anchorEnd: end),
+        ],
+        lineIndex0: 0,
+        underlineColor: color,
+        replaceHolyNames: true,
+      );
+      final rendered = TextRendererService.processText(
+        html,
+        const RenderSettings(replaceHolyNames: true),
+      );
+      expect(rendered, contains('>$expected</a>'));
+      if (raw.startsWith('אמר:')) {
+        expect(rendered.startsWith('אמר:'), isTrue);
+      }
+    }
   });
 
   test('הערת-שורה-שלמה עוטפת את כל השורה', () {

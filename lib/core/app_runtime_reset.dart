@@ -6,6 +6,7 @@ import 'package:otzaria/library/hidden/hidden_library_store.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/data/cache/acronyms_cache.dart';
 import 'package:otzaria/data/cache/generation_cache.dart';
+import 'package:otzaria/indexing/utils/book_facet_metadata_cache.dart';
 import 'package:otzaria/data/cache/books_cache.dart';
 import 'package:otzaria/data/data_providers/cache_database_holder.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
@@ -13,6 +14,8 @@ import 'package:otzaria/data/data_providers/library_provider_manager.dart';
 import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
 import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
+import 'package:otzaria/divine_names/repository/divine_names_repository.dart';
+import 'package:otzaria/text_book/repository/book_notes_repository.dart';
 import 'package:otzaria/find_ref/bloc/find_ref_bloc.dart';
 import 'package:otzaria/find_ref/repository/find_ref_repository.dart';
 import 'package:otzaria/find_ref/repository/reference_books_cache.dart';
@@ -53,12 +56,15 @@ Future<void> resetRuntimeStateForAppRestart() async {
   BooksCache.instance.clear();
   AcronymsCache.instance.clear();
   GenerationCache.instance.clear();
+  BookFacetMetadataCache.instance.clear();
   // ה-FindRefRepository מחזיק caches פנימיים (מפרשים, AltToc שטוח) שלא
   // ניזונים מהקאשים שלמעלה. בלי איפוס יזום הם ישרדו עד restart מלא.
   FindRefRepository.clearAllCaches();
   FindRefBloc.clearAllSearches();
   CommentaryService.clearEraCache();
   TargetLineLinksService.instance.clearCache();
+  DivineNamesRepository.instance.clear();
+  BookNotesRepository.instance.clear();
 }
 
 /// תאימות לשם הישן במסלול איפוס הגדרות.

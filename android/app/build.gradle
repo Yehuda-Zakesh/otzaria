@@ -89,6 +89,8 @@ android {
 
     packagingOptions {
         jniLibs {
+            // שני פלאגיני Rust אורזים את אותו runtime של C++; נדרש עותק יחיד לכל ABI.
+            pickFirsts += ['**/libc++_shared.so']
             // אריזה לא-דחוסה שברה טעינת ספריות נייטיביות במכשירים מסוימים
             useLegacyPackaging = true
         }

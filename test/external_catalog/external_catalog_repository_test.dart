@@ -246,6 +246,83 @@ void main() {
       expect(dbDownloadCount, 1);
     });
 
+    group('DB דחוס', () {
+      late List<int> remoteDbBytes;
+
+      setUp(() async {
+        final remoteDbPath = path.join(tempDir.path, 'remote_zst.db');
+        await _createCatalogDatabase(remoteDbPath, version: 5);
+        remoteDbBytes = await File(remoteDbPath).readAsBytes();
+      });
+
+      http.Client client() => MockClient((request) async {
+        final url = request.url.toString();
+        if (url == ExternalCatalogRepository.releaseApiUrl) {
+          return http.Response(
+            jsonEncode({
+              'tag_name': 'db-v5',
+              'assets': [
+                {
+                  'name': DatabaseConstants.externalCatalogArchiveFileName,
+                  'browser_download_url': 'https://example.com/catalog.db.zst',
+                },
+                {
+                  'name': DatabaseConstants.externalCatalogVersionFileName,
+                  'browser_download_url': 'https://example.com/version.txt',
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        if (url == 'https://example.com/version.txt') {
+          return http.Response('5\n', 200);
+        }
+        if (url == 'https://example.com/catalog.db.zst') {
+          return http.Response.bytes(remoteDbBytes, 200);
+        }
+        return http.Response('Not found', 404);
+      });
+
+      test('נפרס מקובץ בדיסק אל ה-DB, והארכיון נמחק', () async {
+        String? extractedFrom;
+        repository = ExternalCatalogRepository(
+          httpClient: client(),
+          extractZst: (archivePath, outputPath) async {
+            extractedFrom = archivePath;
+            expect(await File(archivePath).readAsBytes(), remoteDbBytes);
+            await File(archivePath).copy(outputPath);
+          },
+        );
+
+        await repository.downloadLatestDatabase();
+
+        expect(await repository.getCurrentDatabaseVersion(), 5);
+        expect(extractedFrom, isNotNull);
+        expect(File(extractedFrom!).existsSync(), isFalse);
+        expect(
+          File('${repository.databasePath}.download').existsSync(),
+          isFalse,
+        );
+      });
+
+      test('כשל בפריסה משאיר את ה-DB הקיים', () async {
+        await _createCatalogDatabase(repository.databasePath, version: 3);
+        repository = ExternalCatalogRepository(
+          httpClient: client(),
+          extractZst: (_, _) async => throw const FormatException('corrupt'),
+        );
+
+        await expectLater(repository.downloadLatestDatabase(), throwsException);
+
+        expect(await repository.getCurrentDatabaseVersion(), 3);
+        expect(
+          File('${repository.databasePath}.download.zst').existsSync(),
+          isFalse,
+        );
+      });
+    });
+
     test(
       'updateDatabaseIfNeeded זורק שגיאה ידידותית כשה-DB נעול ב-Windows',
       () async {

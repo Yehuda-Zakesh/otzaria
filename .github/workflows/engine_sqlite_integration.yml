@@ -58,7 +58,7 @@ jobs:
           # ב-macOS ה-cache כמעט לא נמצא בין ריצות, ושמירתו איטית מהתקנה.
           cache: false
 
-      # קומיט מנוע שעוד אין לו בינאריים מוכנים נבנה מהמקור דרך cargokit.
+      # קומיט מנוע שעוד אין לו בינאריים מוכנים נבנה מהמקור ב-build hook שלו.
       - name: Install Rust for native source fallback
         uses: dtolnay/rust-toolchain@stable
 
@@ -96,7 +96,7 @@ jobs:
           flutter-version: 3.47.2
           cache: true
 
-      # האמולטור x86_64, וה-ABI מוגבל אליו בשלב שלפני הבדיקה.
+      # האמולטור x86_64.
       - name: Install Rust for native source fallback
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -112,10 +112,6 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # flutter test בונה דיבאג לכל ה-ABI-ים; ב-x86 שני פלאגינים אורזים libc++_shared.so.
-      - name: Build only the emulator ABI
-        run: echo 'target-platform=android-x64' >> android/gradle.properties
-
       - name: Run engine SQLite integration test
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -124,7 +120,9 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
-          script: flutter test integration_test/external_line_text_test.dart -d emulator-5554 --timeout 10m
+          script: >-
+            flutter test integration_test/external_line_text_test.dart -d emulator-5554 --timeout 10m
+            --dart-define=OTZARIA_TEST_ZSTD_DICT="$(base64 < test/fixtures/line_content_codec/dict.zdict | tr -d '\r\n')"
 
   # אין בנייה ל-iOS בשום workflow, ולא אומת שהאפליקציה נבנית לסימולטור. לכן
   # רק בהרצה ידנית; להעביר ל-pull_request אחרי ריצה ירוקה ראשונה.
@@ -171,3 +169,4 @@ jobs:
         run: >-
           flutter test integration_test/external_line_text_test.dart
           -d ${{ steps.simulator.outputs.udid }} --timeout 10m
+          --dart-define=OTZARIA_TEST_ZSTD_DICT="$(base64 < test/fixtures/line_content_codec/dict.zdict | tr -d '\r\n')"

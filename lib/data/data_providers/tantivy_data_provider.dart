@@ -4,12 +4,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart' as p;
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
-import 'package:otzaria/data/data_providers/catalogue_order_revision.dart';
+import 'package:otzaria/indexing/utils/pending_reindex_store.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
+import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
 import 'package:otzaria/search/library_line_source.dart';
 import 'package:otzaria/search/search_engine_gateway.dart';
 import 'package:otzaria/search/magic_dictionary_downloader.dart';
+import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/core/app_paths.dart';
 
 /// A singleton class that manages search functionality using Tantivy search engine.
@@ -30,7 +32,10 @@ class TantivyDataProvider {
   };
 
   /// Instance of the search engine pointing to the index directory
-  Future<SearchEngine> get engine => _engineInit.ensure(_initAll);
+  Future<SearchEngine> get engine {
+    AttachedLibraryRegistry.instance.noteEngineUse();
+    return _engineInit.ensure(_initAll);
+  }
 
   set engine(Future<SearchEngine> value) => _engineInit.current = value;
 
@@ -46,12 +51,6 @@ class TantivyDataProvider {
   /// (otzaria_index_meta.json או meta.json של Tantivy) דרך מנוע החיפוש.
   IndexCompatibility? _indexCompatibility;
   IndexCompatibility? get indexCompatibility => _indexCompatibility;
-
-  /// נקבע באתחול: האינדקס מכיל ספרים שנצרב בהם סדר קטלוגי מגרסה ישנה.
-  bool _catalogueOrderStale = false;
-
-  /// תיקיית האינדקס שחתימת הסדר הקטלוגי עליה נכשלה באתחול, אם נכשלה.
-  String? _pendingCatalogueOrderStampPath;
 
   /// Indicates whether the indexing process is currently running
   ValueNotifier<bool> isIndexing = ValueNotifier(false);
@@ -101,11 +100,7 @@ class TantivyDataProvider {
     } else {
       engine = await _initEngine();
     }
-    final indexedFilePathsLoaded = await _loadIndexedFilePaths(engine);
-    _syncCatalogueOrderRevision(
-      indexPath,
-      indexStateIsKnown: indexedFilePathsLoaded && !isTempFallback,
-    );
+    await _loadIndexedFilePaths(engine);
 
     // indexedFilePaths כעת משקפת את מצב האינדקס בפועל. צרכנים שמסיקים
     // "אין אינדקס" מתוך הקבוצה צריכים לחכות לסימן הזה כדי לא להציג שגוי בהפעלה.
@@ -118,6 +113,12 @@ class TantivyDataProvider {
   Future<void> _prepareLibraryLineSource() async {
     await LibraryLineSource.ensureHostSqlite();
     await LibraryLineSource.configure(DatabaseConstants.getDatabasePath());
+    // המסד נפתח לפני שהמנוע נטען — ההגדרה בפתיחתו לא הגיעה אליו.
+    final userBooksDbPath = UserBooksDatabaseHolder.instance.openDbPath;
+    if (userBooksDbPath != null) {
+      await UserBooksDatabaseHolder.configureSearchLineSource(userBooksDbPath);
+    }
+    await AttachedLibraryRegistry.instance.enableEngineSources();
   }
 
   /// קורא את תוצאת בדיקת התאימות מהאינדקס עצמו. כשל בבדיקה אינו עוצר את
@@ -135,61 +136,6 @@ class TantivyDataProvider {
       debugPrint('⚠️ בדיקת תאימות האינדקס נכשלה: $e');
       return null;
     }
-  }
-
-  /// מכריע אם הסדר הקטלוגי שבאינדקס מיושן. אינדקס ריק (התקנה נקייה או
-  /// אינדקס שאופס) מסומן מיד בגרסה הנוכחית, כדי שלא ידרוש בנייה מחדש.
-  ///
-  /// [indexStateIsKnown] false כשלא הצלחנו לקרוא את מצב האינדקס או שהמנוע
-  /// רץ על אינדקס זמני. חתימה במצב כזה הייתה מברכת אינדקס ישן ומלא כתקין,
-  /// והבאג היה נשאר אצל המשתמש בלי שום סימן — לכן לא כותבים ולא מסמנים.
-  void _syncCatalogueOrderRevision(
-    String indexPath, {
-    required bool indexStateIsKnown,
-  }) {
-    final hasIndexedBooks = indexedFilePaths.isNotEmpty;
-    if (_pendingCatalogueOrderStampPath != indexPath) {
-      _pendingCatalogueOrderStampPath = null;
-    }
-
-    if (CatalogueOrderRevision.shouldStamp(
-      indexStateIsKnown: indexStateIsKnown,
-      hasIndexedBooks: hasIndexedBooks,
-    )) {
-      _catalogueOrderStale = false;
-      // כשל כתיבה כאן שקט אך יקר: האינדקס המלא שייבנה מיד יימצא בלי חותם,
-      // כלומר "ישן", והמשתמש יידרש לבנות הכול מחדש.
-      _pendingCatalogueOrderStampPath = CatalogueOrderRevision.write(indexPath)
-          ? null
-          : indexPath;
-      return;
-    }
-
-    // אינדוקס באותה הפעלה כבר מילא את האינדקס בסדר הנוכחי — ניסיון חוזר
-    // לחתום מונע הכרזת "ישן" על אינדקס תקין בפתיחה מחדש שבאמצע ההפעלה.
-    if (indexStateIsKnown) {
-      ensureCatalogueOrderStamp();
-    }
-
-    _catalogueOrderStale = CatalogueOrderRevision.isStale(
-      storedRevision: CatalogueOrderRevision.read(indexPath),
-      hasIndexedBooks: hasIndexedBooks,
-      indexStateIsKnown: indexStateIsKnown,
-    );
-
-    if (_catalogueOrderStale) {
-      debugPrint('⚠️ האינדקס נבנה בסדר קטלוגי ישן — נדרשת בנייה מחדש');
-    }
-  }
-
-  /// כותב מחדש חותם סדר קטלוגי שכתיבתו נכשלה באתחול, כשהאינדקס שעל הדיסק
-  /// אכן נבנה בסדר הנוכחי. מחזיר האם החותם קיים כעת (כולל "לא נדרש דבר").
-  bool ensureCatalogueOrderStamp() {
-    final pendingPath = _pendingCatalogueOrderStampPath;
-    if (pendingPath == null) return true;
-    if (!CatalogueOrderRevision.write(pendingPath)) return false;
-    _pendingCatalogueOrderStampPath = null;
-    return true;
   }
 
   /// טוען מהאינדקס עצמו את רשימת הספרים שיש להם מסמכים חיים.
@@ -447,11 +393,10 @@ class TantivyDataProvider {
     return engine;
   }
 
-  /// האם האינדקס הקיים דורש איפוס ובנייה מחדש — בגלל אי-תאימות סכמה
-  /// שנקראה מהאינדקס עצמו, או בגלל שנצרב בו סדר קטלוגי מגרסה ישנה.
+  /// האם האינדקס הקיים דורש איפוס ובנייה מחדש — לפי בדיקת התאימות שנקראה
+  /// מהאינדקס עצמו.
   bool get requiresManualReindex =>
-      isRebuildRequiredStatus(_indexCompatibility?.status) ||
-      _catalogueOrderStale;
+      isRebuildRequiredStatus(_indexCompatibility?.status);
 
   /// האם סטטוס תאימות נתון מחייב בנייה מחדש של האינדקס.
   @visibleForTesting
@@ -545,6 +490,20 @@ class TantivyDataProvider {
     debugPrint('✅ Index reset completed');
   }
 
+  /// מבטל במנוע את קריאות החיפוש של [requestId]. מנוע שלא נפתח לא התחיל אותן.
+  void cancelLexicalSearch(int requestId) {
+    final current = _engineInit.current;
+    if (current == null) return;
+    unawaited(
+      current.then(
+        (engine) =>
+            RustSearchEngineOperations(engine).cancelLexicalSearch(requestId),
+        onError: (Object error) =>
+            debugPrint('cancelLexicalSearch skipped: $error'),
+      ),
+    );
+  }
+
   Future<Map<String, int>> countByBook(
     String query,
     List<String> facets, {
@@ -565,6 +524,8 @@ class TantivyDataProvider {
     bool matchTaamim = false,
     WordMatchMode wordMatchMode = WordMatchMode.all,
     int? wordMatchCount,
+    bool anyOrder = false,
+    int? cancelRequestId,
   }) async {
     final results = await _searchGateway.countByBook(
       RustSearchEngineOperations(await engine),
@@ -587,6 +548,8 @@ class TantivyDataProvider {
         matchTaamim: matchTaamim,
         wordMatchMode: wordMatchMode,
         wordMatchCount: wordMatchCount,
+        anyOrder: anyOrder,
+        cancelRequestId: cancelRequestId,
       ),
     );
 
@@ -601,6 +564,7 @@ class TantivyDataProvider {
   Future<void> clear() async {
     isIndexing.value = false;
     indexedFilePaths.clear();
+    PendingReindexStore.clearMemory();
 
     // שחרור משאבים לפני מחיקה פיזית של הקבצים (חשוב במיוחד ב-Windows
     // שבו קבצים פתוחים אינם ניתנים למחיקה).

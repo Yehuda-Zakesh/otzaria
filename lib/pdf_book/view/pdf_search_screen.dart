@@ -14,6 +14,7 @@ import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
+import 'package:otzaria/indexing/models/index_update_mode.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/pdf_book/bloc/pdf_book_bloc.dart';
 import 'package:otzaria/pdf_book/bloc/pdf_book_event.dart';
@@ -24,6 +25,8 @@ import 'package:otzaria/search/view/whole_word_search_action.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/search/search_repository.dart';
 import 'package:otzaria/search/utils/literal_search_pattern.dart';
+import 'package:otzaria/search/utils/user_regex_query.dart';
+import 'package:otzaria/pdf_book/utils/pdf_user_regex_pattern.dart';
 import 'package:otzaria/search/utils/snippet_builder.dart';
 import 'package:otzaria/search/view/in_book_advanced_search_dialog.dart';
 import 'package:otzaria/search/view/search_dialog.dart';
@@ -142,11 +145,14 @@ class PdfBookSearchView extends StatefulWidget {
     required String? indexedFilePath,
     required bool indexInitialized,
     required Set<String> indexedFilePaths,
+    bool excludedByIndexMode = false,
   }) {
     if (indexedFilePath == null || indexedFilePath.isEmpty) return null;
     if (!indexInitialized) return null;
     if (indexedFilePaths.contains(indexedFilePath)) return null;
-    return PdfMessages.bookNotInSearchIndex;
+    return excludedByIndexMode
+        ? PdfMessages.personalBookNotInSearchIndex
+        : PdfMessages.bookNotInSearchIndex;
   }
 
   /// אותיות עבריות ואנגליות — שכבת טקסט עם ספרות ופיסוק בלבד אינה שמישה.
@@ -313,8 +319,10 @@ class PdfBookSearchViewState extends State<PdfBookSearchView> {
 
   bool _wholeWord = InBookSearchPreferences.loadWholeWord();
 
+  /// `/…/` also scans the pages: the engine's matcher runs on each text layer.
   bool get _isSimpleSearch =>
       _settings.isSimpleSearch ||
+      UserRegexQuery.isValid(widget.searchController.text) ||
       (_isBundledTalmudPdf &&
           _matchPolicy.querySemantics == SearchQuerySemantics.smart);
 
@@ -569,7 +577,7 @@ class PdfBookSearchViewState extends State<PdfBookSearchView> {
   /// שומרת כל שורה בסדר ויזואלי, ושם הסדר התקין מחזיר תמיד אפס.
   void _startReversedOrderSearch() {
     final query = searchableInBookQuery(widget.searchController.text);
-    if (query == null) return;
+    if (query == null || UserRegexQuery.isValid(query)) return;
     final reversed = PdfBookSearchView.buildSimpleSearchPattern(
       query,
       wholeWord: _wholeWord,
@@ -822,15 +830,18 @@ class PdfBookSearchViewState extends State<PdfBookSearchView> {
     if (_isSimpleSearch) {
       _pdfHighlightDebounce?.cancel();
       _pendingSimpleSearchScrollFor = query;
+      final userRegex = PdfUserRegexPattern.tryParse(query);
       // תבנית סובלנית-ניקוד מהמנוע, כדי שגם PDF ששכבת הטקסט שלו מנוקדת יודגש.
-      final literal = PdfBookSearchView.buildSimpleSearchPattern(
-        query,
-        wholeWord: _wholeWord,
-      );
+      final literal = userRegex != null
+          ? null
+          : PdfBookSearchView.buildSimpleSearchPattern(
+              query,
+              wholeWord: _wholeWord,
+            );
       _lastPdfHighlightSource = literal?.source ?? query;
       // שדה החיפוש כבר ממתין להפסקת ההקלדה; השהיית pdfrx הייתה מוסיפה עוד 500ms.
       widget.textSearcher.startTextSearch(
-        literal?.regExp ?? query,
+        userRegex ?? literal?.regExp ?? query,
         goToFirstMatch: false,
         searchImmediately: true,
       );
@@ -873,6 +884,9 @@ class PdfBookSearchViewState extends State<PdfBookSearchView> {
             indexedFilePath: _indexedFilePath,
             indexInitialized: TantivyDataProvider.instance.isInitialized.value,
             indexedFilePaths: TantivyDataProvider.instance.indexedFilePaths,
+            excludedByIndexMode:
+                widget.source.isUser &&
+                !IndexUpdateMode.readStored().indexesPersonalBooks,
           );
         }
       });
@@ -1051,7 +1065,7 @@ class PdfBookSearchViewState extends State<PdfBookSearchView> {
           query: widget.searchController.text,
           searchMode: _searchMode,
           distance: _searchDistance,
-          matchPolicy: _matchPolicy,
+          matchPolicy: _settings.requestedMatchPolicy,
           searchOptions: _searchOptions,
           alternativeWords: _alternativeWords,
           spacingValues: _spacingValues,

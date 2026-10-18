@@ -89,7 +89,7 @@ void main() {
       expect(item.actions, isEmpty);
     });
 
-    test('שלב הסריקה: הודעת בדיקה, התקדמות, ובלי לחצני השהיה/חיסכון', () {
+    test('שלב הבדיקה: הודעת בדיקה, התקדמות ולחצן השהיה בלבד', () {
       final item = indexingWorkStatusItem(
         const IndexingInProgress(
           booksProcessed: 40,
@@ -103,7 +103,23 @@ void main() {
       expect(item.message, 'בודק אילו ספרים דורשים עדכון באינדקס');
       expect(item.detail, 'התקדמות: 40/80');
       expect(item.progress, 0.5);
-      expect(item.actions, isEmpty);
+      expect(item.actions.map((a) => a.label), ['השהה']);
+    });
+
+    test('שלב הבדיקה מושהה: הודעת השהיה ולחצן "המשך"', () {
+      final item = indexingWorkStatusItem(
+        const IndexingInProgress(
+          booksProcessed: 40,
+          totalBooks: 80,
+          isScanning: true,
+          isPaused: true,
+        ),
+        onTogglePause: () {},
+        onToggleEconomy: () {},
+      );
+
+      expect(item.message, 'בדיקת הספרים מושהית');
+      expect(item.actions.first.label, 'המשך');
     });
 
     test('סה"כ אפס: אין progress דטרמיניסטי', () {

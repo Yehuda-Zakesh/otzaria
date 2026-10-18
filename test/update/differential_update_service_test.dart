@@ -8,7 +8,7 @@ import 'package:otzaria/update/differential/update_package.dart';
 import 'package:otzaria/update/differential/zstd_runner.dart';
 import 'package:otzaria/update/my_update_widget.dart';
 import 'package:path/path.dart' as p;
-import 'package:updat/updat.dart';
+import 'package:otzaria/update/updat_compat.dart';
 
 import '../../tool/release/generate_app_file_manifest.dart';
 import '../../tool/release/generate_update_package.dart' as builder;

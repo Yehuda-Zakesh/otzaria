@@ -4,11 +4,15 @@ library;
 
 import 'dart:math' as math;
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/tools/tikkun_korim/settings/tikkun_stam_fonts.dart';
 import 'package:otzaria/tools/tikkun_korim/engine/tokenizer.dart';
 import 'package:otzaria/tools/tikkun_korim/export/tikkun_pdf_exporter.dart';
 import 'package:otzaria/tools/tikkun_korim/export/tikkun_vector_ops.dart';
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_settings.dart';
+import 'package:otzaria/tools/tikkun_korim/models/tikkun_models.dart';
+import 'package:otzaria/tools/tikkun_korim/models/tikkun_vav_ketia.dart';
 
 import '../support/tikkun_fakes.dart';
 
@@ -31,6 +35,51 @@ Iterable<TikkunTextOp> _withText(TikkunVectorPage page, String text) =>
     page.texts.where((op) => op.text == text);
 
 void main() {
+  setUpAll(() async {
+    for (final entry in kTikkunBundledFontAssets.entries) {
+      await (FontLoader(
+        entry.key,
+      )..addFont(rootBundle.load(entry.value))).load();
+    }
+  });
+  for (final tradition in TikkunTradition.values) {
+    for (final form in TikkunVavKetia.values) {
+      testWidgets(
+        'ייצוא ${tradition.id}/${form.id} מצייר את הצורה בשני הטורים',
+        (tester) async {
+          final word = LayoutWord(
+            stam: 'שלום',
+            nikud: 'שָׁלוֹם',
+            vavKetiaTradition: tradition,
+          );
+          final exporter = _exporter(settings: TikkunSettings(vavKetia: form));
+          late List<TikkunVectorPage> pages;
+          await tester.runAsync(() async {
+            pages = await exporter.layoutPages([
+              [
+                TikkunLine(words: [word], layout: LineLayout.partial),
+              ],
+            ]);
+          });
+          final texts = pages.single.texts
+              .where((t) => !t.artifact)
+              .map((t) => t.text)
+              .toList();
+          final code = form.codeFor(tradition);
+          if (code == null) {
+            expect(texts, containsAll(['שלום', 'שָׁלוֹם']));
+          } else {
+            expect(
+              texts.where((t) => t.contains(String.fromCharCode(code))),
+              hasLength(2),
+            );
+          }
+          expect(word.stam, 'שלום');
+          expect(word.nikud, 'שָׁלוֹם');
+        },
+      );
+    }
+  }
   testWidgets('כל מילה נאספת פעם אחת לכל טור, והכותרת בגופן מפורש', (
     tester,
   ) async {

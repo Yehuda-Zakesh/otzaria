@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:otzaria/indexing/utils/pending_reindex_store.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/empty_library/services/library_package/library_package.dart';
@@ -313,6 +314,7 @@ class LibraryPackageImporter {
     try {
       await Directory(p.dirname(indexTarget)).create(recursive: true);
       await Directory(indexDir).rename(indexTarget);
+      PendingReindexStore.clearMemory();
     } catch (_) {
       if (hadPrevious) await Directory(previous).rename(indexTarget);
       rethrow;

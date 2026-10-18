@@ -153,8 +153,8 @@ const List<String> _rambamHalfLineHeads = [
   '\u05d5\u05db\u05e4\u05e8',
 ];
 
-/// ראש התא — אות רבתי/זעירא היא מילה נפרדת באסימונים, ולכן היא מצטרפת
-/// למילה שאחריה כדי להשוות לתיבה השלמה שהרמב"ם מונה.
+/// אות רבתי/זעירא שעומדת לבדה מצטרפת למילה שאחריה לצורך ההשוואה.
+/// מילה שלמה שמכילה אות כזו נשארת כמות שהיא.
 String _cellHead(List<LayoutWord> words) {
   if (words.isEmpty) return '';
   final first = words.first.stam;
@@ -163,7 +163,7 @@ String _cellHead(List<LayoutWord> words) {
   );
   final stripPua = RegExp('[\u{E000}-\u{E0FF}]');
   final head = first.replaceAll(stripPua, '');
-  if (!hasPua || words.length < 2) return head;
+  if (!hasPua || head.length != 1 || words.length < 2) return head;
   return head + words[1].stam.replaceAll(stripPua, '');
 }
 

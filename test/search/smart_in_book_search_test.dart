@@ -138,7 +138,7 @@ Future<void> main() async {
       expect(engine.setMagicDictionaryPath(path: databasePath), isTrue);
       for (var i = 0; i < lines.length; i++) {
         await engine.addDocument(
-          id: BigInt.from(i + 1),
+          ordinal: i,
           title: 'בראשית',
           reference: 'שורה $i',
           topics: '/smart/book',
@@ -206,12 +206,12 @@ Future<void> main() async {
       });
     }
 
-    test('הקטלוג ממוין לפי id גם כשמספרי השורות בסדר אחר', () async {
+    test('הקטלוג ממוין לפי מקום השורה גם כשמספרי השורות בסדר אחר', () async {
       await engine.addDocumentsBatch(
         docs: [
           for (final entry in {901: 3, 899: 7, 900: 1}.entries)
             DocumentInput(
-              id: BigInt.from(entry.key),
+              ordinal: entry.key - 899,
               title: 'סדר',
               reference: 'שורה',
               topics: '/order',
@@ -230,7 +230,7 @@ Future<void> main() async {
         limit: 2,
         settings: settings,
       );
-      expect(results.map((r) => r.id.toInt()), [899, 900]);
+      expect(results.map(_ordinal), [0, 1]);
       expect(results.map((r) => r.segment.toInt()), [7, 1]);
     });
 
@@ -239,7 +239,7 @@ Future<void> main() async {
         docs: [
           for (final path in ['a', 'b'])
             DocumentInput(
-              id: BigInt.from(999),
+              ordinal: 998,
               title: 'תאומים',
               reference: path,
               topics: '/twins',
@@ -266,8 +266,6 @@ Future<void> main() async {
         title: 'חוצה',
         topics: '/cross',
         filePath: 'cross',
-        catalogueOrder: 20,
-        generationOrder: 20,
         textStorage: TextStorage.inIndex,
         text: 'אלהים סוף ברא\nאלהים סוף\nברא אלהים סוף ברא\nאלהים סוף',
       );
@@ -307,7 +305,7 @@ Future<void> main() async {
         docs: [
           for (var i = 0; i < 5105; i++)
             DocumentInput(
-              id: BigInt.from(10000 + i),
+              ordinal: i,
               title: 'גדול',
               reference: 'שורה $i',
               topics: '/large',
@@ -327,11 +325,11 @@ Future<void> main() async {
         settings: settings,
       );
       expect(results, hasLength(5000));
-      expect(results.first.id.toInt(), 10050);
-      expect(results.last.id.toInt(), 15049);
+      expect(_ordinal(results.first), 50);
+      expect(_ordinal(results.last), 5049);
       expect(
-        results.map((r) => r.id.toInt()),
-        orderedEquals(List.generate(5000, (i) => 10050 + i)),
+        results.map(_ordinal),
+        orderedEquals(List.generate(5000, (i) => 50 + i)),
       );
     });
 
@@ -360,3 +358,7 @@ Future<void> main() async {
     });
   }, skip: ready ? false : searchEngineSkipReason);
 }
+
+/// מקום השורה בספר לפי מזהה המסמך (המנוע מקצה את חציו העליון לספר).
+int _ordinal(SearchResult result) =>
+    (result.id & BigInt.from(0xFFFFFFFF)).toInt() - 1;

@@ -305,10 +305,14 @@ class CustomFoldersBloc extends Bloc<CustomFoldersEvent, CustomFoldersState> {
       ),
     );
     try {
-      final result = await _syncCustomFolders(
-        currentFolders,
-        onlyFolderPath: event.onlyFolderPath,
-      );
+      // בלי תיקיות אין מה לסרוק, והסנכרון פותח שני מסדים ומעכב את הרענון.
+      final skipSync = currentFolders.isEmpty;
+      final result = skipSync
+          ? const FileSyncResult()
+          : await _syncCustomFolders(
+              currentFolders,
+              onlyFolderPath: event.onlyFolderPath,
+            );
       final hasChanges = result.addedBooks > 0 || result.updatedBooks > 0;
       final message = hasChanges
           ? 'הסריקה הושלמה: ${result.addedBooks} ספרים נוספו, '
@@ -324,7 +328,8 @@ class CustomFoldersBloc extends Bloc<CustomFoldersEvent, CustomFoldersState> {
             IndexingRepository.userBookKey(id),
         },
         // כשל חלקי לא מסומן כהשלמה — סנכרון הרקע יקבל הזדמנות לנסות שוב.
-        coversAllFolders: event.onlyFolderPath == null && result.errors.isEmpty,
+        coversAllFolders:
+            !skipSync && event.onlyFolderPath == null && result.errors.isEmpty,
         requestIds: event.requestId == null ? const {} : {event.requestId!},
       );
       emit(

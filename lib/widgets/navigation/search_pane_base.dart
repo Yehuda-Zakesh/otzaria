@@ -123,9 +123,16 @@ class _SearchPaneBaseState extends State<SearchPaneBase> {
     final slot = NavPanelSearchSlot.indexOf(context);
     final host = NavPanelSearchScope.hostOf(context);
     final isActiveSlot = slot == null || host == null || host.activeTab == slot;
+    void onClear() {
+      widget.onSearchTextChanged?.call('');
+      widget.resetSearchCallback();
+      widget.focusNode.requestFocus();
+    }
+
     final delegate = NavPanelSearchDelegate(
       controller: widget.searchController,
       hintText: widget.hintText ?? '',
+      onClear: onClear,
       onArrowDown: widget.onArrowDown,
       onArrowUp: widget.onArrowUp,
     );
@@ -147,11 +154,7 @@ class _SearchPaneBaseState extends State<SearchPaneBase> {
             widget.onSubmitted?.call();
             widget.focusNode.requestFocus();
           },
-          onClear: () {
-            widget.onSearchTextChanged?.call('');
-            widget.resetSearchCallback();
-            widget.focusNode.requestFocus();
-          },
+          onClear: onClear,
           isCompact: _isCompact,
           onExpand: () => setState(() => _isCompact = false),
           leading: const Icon(OtzariaIcons.search_24_regular),

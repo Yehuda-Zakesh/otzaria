@@ -506,9 +506,11 @@ class ReferenceBooksCache {
       final end = (i + maxConcurrent < paths.length)
           ? i + maxConcurrent
           : paths.length;
-      await Future.wait([
-        for (var j = i; j < end; j++) getPdfOutlineEntries(paths[j]),
-      ]);
+      await Pdfrx.runAsBackgroundWork(
+        () => Future.wait([
+          for (var j = i; j < end; j++) getPdfOutlineEntries(paths[j]),
+        ]),
+      );
     }
     debugPrint(
       '[ReferenceBooksCache] PDF outline pre-warm complete '

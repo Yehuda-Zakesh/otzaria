@@ -1,7 +1,5 @@
 /// המסלולים המלאים של המנוע: התורה כולה, ספר תנ"ך בודד, הפטרה וקריאת מועד.
-/// פורט של `loadAndProcessAll`, `loadAndDisplayTanachBook`,
-/// `loadAndDisplayHaftarah` ו-`loadAndDisplayTorahReading` (navigation.js)
-/// בלי ה-IO וה-DOM — קלט טקסט גולמי, פלט שורות מעומדות.
+/// קלט טקסט גולמי, פלט שורות מעומדות, ללא IO.
 library;
 
 import 'dart:math' as math;
@@ -16,10 +14,11 @@ import 'package:otzaria/tools/tikkun_korim/engine/special_sections_marker.dart';
 import 'package:otzaria/tools/tikkun_korim/engine/stam_width_model.dart';
 import 'package:otzaria/tools/tikkun_korim/engine/tokenizer.dart';
 import 'package:otzaria/tools/tikkun_korim/engine/verse_range_slicer.dart';
+import 'package:otzaria/tools/tikkun_korim/engine/vav_ketia_marker.dart';
 import 'package:otzaria/tools/tikkun_korim/models/tikkun_models.dart';
 import 'package:otzaria/tools/tikkun_korim/repository/tikkun_contracts.dart';
 
-/// אסימוני ספר בודד: ניקוי, פירוק, בחירת הפרשיות לפי [tradition] וסימון
+/// אסימוני ספר בודד: ניקוי, בחירת נוסח ופרשיות לפי [tradition] וסימון
 /// הקטעים המיוחדים שלו.
 List<TikkunToken> tokenizeBook(
   String rawText,
@@ -28,7 +27,14 @@ List<TikkunToken> tokenizeBook(
   TikkunDecalogueTaam decalogueTaam = TikkunDecalogueTaam.merged,
 }) => markSpecialSections(
   applyDecalogueTaam(
-    filterByTradition(tokenizeText(cleanRawText(rawText)), tradition),
+    filterByTradition(
+      markVavKetiaWords(
+        tokenizeText(cleanRawText(rawText, tradition: tradition)),
+        hebrewBookName,
+        tradition,
+      ),
+      tradition,
+    ),
     hebrewBookName,
     decalogueTaam,
   ),

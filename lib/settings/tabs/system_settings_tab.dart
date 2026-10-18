@@ -1087,7 +1087,8 @@ class _SystemSettingsTabState extends State<SystemSettingsTab> {
           skipped.isNotEmpty ||
           missingFolders.isNotEmpty ||
           result.hasLegacyPartialSettings ||
-          result.notesWithoutAnchor > 0;
+          result.notesWithoutAnchor > 0 ||
+          result.userBooksNotReplaced;
       final content = [
         if (skipped.isEmpty)
           context.settingsText('הנתונים שוחזרו בהצלחה.')
@@ -1095,6 +1096,11 @@ class _SystemSettingsTabState extends State<SystemSettingsTab> {
           context.settingsText(
             'שחזור חלקי — חסרים בקובץ הגיבוי: {items}.',
             args: {'items': skipped.join(", ")},
+          ),
+        if (result.userBooksNotReplaced)
+          context.settingsText(
+            'הספרים האישיים לא שוחזרו: לא ניתן היה להחליף את הקובץ שלהם '
+            '(ייתכן שהוא בשימוש). יש לשחזר שוב אחרי הפעלה מחדש של התוכנה.',
           ),
         if (result.hasLegacyPartialSettings)
           context.settingsText(

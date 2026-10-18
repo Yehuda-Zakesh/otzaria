@@ -80,3 +80,8 @@ abstract class LibraryProvider {
   /// Returns the text content at the link's target location
   Future<String> getLinkContent(Link link);
 }
+
+/// ספק שמחזיר טווח בשאילתה אחת, בלי לאבד את גבולות שורות המקור.
+abstract interface class LinkLinesProvider {
+  Future<List<LinkContentLine>> getLinkContentLines(Link link);
+}

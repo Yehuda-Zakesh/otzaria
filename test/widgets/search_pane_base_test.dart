@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/widgets/layout/adaptive_side_pane.dart';
 import 'package:otzaria/widgets/navigation/nav_panel_search.dart';
 import 'package:otzaria/widgets/navigation/search_pane_base.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
@@ -223,4 +225,50 @@ void main() {
       expect(find.text('אין תוצאות'), findsOneWidget);
     },
   );
+
+  testWidgets('בחלונית מרחפת Esc ראשון מנקה את השדה והשני סוגר אותה', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    final focusNode = FocusNode();
+    var resets = 0;
+    var closed = 0;
+
+    addTearDown(() {
+      controller.dispose();
+      focusNode.dispose();
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AdaptiveSidePane(
+            isOpen: true,
+            floatOverContent: true,
+            onClose: () => closed++,
+            mainContent: const SizedBox.expand(),
+            paneContent: SearchPaneBase(
+              searchController: controller,
+              focusNode: focusNode,
+              resultsWidget: const SizedBox.shrink(),
+              isNoResults: false,
+              resetSearchCallback: () => resets++,
+            ),
+          ),
+        ),
+      ),
+    );
+    focusNode.requestFocus();
+    await tester.pump();
+    await tester.enterText(find.byType(RtlTextField), 'בראשית');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    expect(controller.text, isEmpty);
+    expect(resets, 1);
+    expect(closed, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    expect(closed, 1);
+    expect(focusNode.hasFocus, isFalse, reason: 'הקלדה לא תיכנס לשדה נסתר');
+  });
 }

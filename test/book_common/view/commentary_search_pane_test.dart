@@ -81,6 +81,49 @@ Future<void> main() async {
     expect(find.textContaining('מתוך'), findsNothing);
   });
 
+  testWidgets('Enter goes to the first result of a new search (#2606)', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: 'שלום');
+    final focusNode = FocusNode();
+    final total = ValueNotifier(3);
+    final current = ValueNotifier(-1);
+    final snippets = ValueNotifier<List<CommentarySearchSnippet>>(const []);
+    addTearDown(() {
+      controller.dispose();
+      focusNode.dispose();
+      total.dispose();
+      current.dispose();
+      snippets.dispose();
+    });
+    var next = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CommentarySearchPane(
+            controller: controller,
+            focusNode: focusNode,
+            hintText: 'חיפוש במפרשים...',
+            totalResults: total,
+            currentResult: current,
+            snippets: snippets,
+            onPrevious: () {},
+            onNext: () => next++,
+            onSnippetTap: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('נמצאו 3 תוצאות'), findsOneWidget);
+    await tester.showKeyboard(find.byType(EditableText));
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump();
+    expect(next, 1);
+    expect(focusNode.hasFocus, isTrue);
+  });
+
   testWidgets(
     'refreshes snippets without rebuilding the focused search field',
     (

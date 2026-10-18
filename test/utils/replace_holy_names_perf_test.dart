@@ -21,9 +21,12 @@ String _oracle(String s, HolyNameStyle style) {
       }
       break;
     }
-    return style == HolyNameStyle.hehApostrophe
-        ? "ה'"
-        : 'י${match[1]}ק${match[2]}ו${match[3]}ק${match[4]}';
+    return switch (style) {
+      HolyNameStyle.kufKuf =>
+        'י${match[1]}ק${match[2]}ו${match[3]}ק${match[4]}',
+      HolyNameStyle.hehApostrophe => "ה'",
+      HolyNameStyle.doubleYod => 'י${match[1]}י${match[3]}${match[4]}',
+    };
   });
 }
 

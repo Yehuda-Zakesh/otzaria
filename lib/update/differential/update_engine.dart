@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:isolate';
 
-import 'package:crypto/crypto.dart';
+import 'package:otzaria/utils/file/native_sha256.dart';
 import 'package:path/path.dart' as p;
 
 import 'managed_paths.dart';
@@ -178,10 +178,13 @@ Future<List<SwapFile>> _changedFiles(
   return files;
 }
 
-/// מחשב את sha256 של קובץ בזרימה, בלי להחזיק אותו בזיכרון.
-Future<String> sha256OfFile(File file) async {
-  final digest = await sha256.bind(file.openRead()).first;
-  return digest.toString();
+/// מחשב את sha256 של קובץ בזרימה, בלי להחזיק אותו בזיכרון. חוסם את ה-isolate
+/// הקורא — מה-isolate הראשי יש לקרוא ל-[_sha256OffMain].
+Future<String> sha256OfFile(File file) => sha256OfFileFast(file.path);
+
+Future<String> _sha256OffMain(File file) {
+  final path = file.path;
+  return Isolate.run(() => sha256OfFileFast(path));
 }
 
 /// בונה מחבילה את קבוצת הקבצים החדשה בתיקיית עבודה נפרדת — לעולם לא
@@ -267,7 +270,9 @@ class DifferentialUpdateEngine {
     final steps = <UpdateStep>[];
     for (final entry in manifest.entries) {
       final local = File(p.join(installRoot.path, entry.path));
-      final localHash = await local.exists() ? await sha256OfFile(local) : null;
+      final localHash = await local.exists()
+          ? await _sha256OffMain(local)
+          : null;
 
       if (localHash == entry.newSha256) {
         steps.add(UpdateStep(entry, UpdateFileAction.alreadyUpToDate));
@@ -494,7 +499,7 @@ class DifferentialUpdateEngine {
     required File payloadFile,
     required Directory staging,
   }) async {
-    await payloadFile.writeAsBytes(package.payloadOf(entry), flush: true);
+    await package.writePayloadTo(entry, payloadFile);
     final target = File(p.join(staging.path, entry.path));
     await target.parent.create(recursive: true);
 
@@ -603,7 +608,8 @@ class DifferentialUpdateEngine {
         '$path: the staged file is missing',
       );
     }
-    if (await staged.length() != size || await sha256OfFile(staged) != sha256) {
+    if (await staged.length() != size ||
+        await _sha256OffMain(staged) != sha256) {
       throw DifferentialUpdateUnavailable(
         UpdateAbortReason.stagingVerificationFailed,
         '$path: the staged file does not match the manifest',

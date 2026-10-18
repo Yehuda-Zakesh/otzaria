@@ -23,7 +23,6 @@ import 'package:otzaria/pdf_book/view/pdf_outlines_screen.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
-import 'package:otzaria/widgets/misc/app_cursors.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 final _outFile = File(
@@ -61,7 +60,6 @@ void main() {
         origDebugPrint(message, wrapWidth: wrapWidth);
       };
 
-      AppCursors.skipForTesting = true;
       app.main(const <String>[]);
       await _waitUntil(
         tester,

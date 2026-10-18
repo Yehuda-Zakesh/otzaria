@@ -27,7 +27,12 @@ import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart'
     show SearchScope, WordMatchMode;
+import 'package:otzaria/search/in_book_search_preferences.dart';
+import 'package:otzaria/plugins/services/plugin_text_reader_registry.dart';
 import 'package:path/path.dart' as p;
+
+import '../../support/search_engine_test_init.dart';
+import '../../plugins/services/plugin_text_reader_registry_test.dart' as reader;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -348,6 +353,55 @@ void main() {
         await _closeBlocAndAllowDeferredDispose(bloc);
       },
     );
+
+    // #2587: סעיף בשו"ע אינו בתוכן העניינים, ולכן כותרת הטאב זהה לכותרת היעד.
+    group('טאב פתוח באותה כותרת עם יעד בשורה אחרת', () {
+      Future<(TabsBloc, TextBookTab)> openAndRetarget({
+        required bool navigateToPositionIfReused,
+      }) async {
+        final bloc = _newBloc(_FakeTabsRepository());
+        final existingTab = _createTextTab('ספר א', index: 0, categoryId: 1)
+          ..currentTitle.value = 'סימן א';
+
+        bloc.add(AddTab(existingTab));
+        await bloc.stream.firstWhere((s) => s.tabs.length == 1);
+
+        bloc.add(
+          OpenOrFocusTab(
+            _createTextTab('ספר א', index: 12, categoryId: 1),
+            targetTitle: 'סימן א',
+            navigateToPositionIfReused: navigateToPositionIfReused,
+          ),
+        );
+        await pumpEventQueue();
+        return (bloc, existingTab);
+      }
+
+      test('עם navigateToPositionIfReused הטאב הקיים מנווט ליעד', () async {
+        final (bloc, existingTab) = await openAndRetarget(
+          navigateToPositionIfReused: true,
+        );
+
+        expect(bloc.state.tabs, hasLength(1));
+        expect(bloc.state.currentTabIndex, 0);
+        expect(existingTab.index, 12);
+        expect(existingTab.lines.hasPendingTarget, isTrue);
+
+        await _closeBlocAndAllowDeferredDispose(bloc);
+      });
+
+      test('בלי הדגל הטאב הקיים רק ממוקד ונשאר במקומו', () async {
+        final (bloc, existingTab) = await openAndRetarget(
+          navigateToPositionIfReused: false,
+        );
+
+        expect(bloc.state.tabs, hasLength(1));
+        expect(existingTab.index, 0);
+        expect(existingTab.lines.hasPendingTarget, isFalse);
+
+        await _closeBlocAndAllowDeferredDispose(bloc);
+      });
+    });
 
     test('ממקד טאב PDF קיים לפי כותרת גם אם העמוד שונה', () async {
       final bloc = _newBloc(_FakeTabsRepository());
@@ -1863,6 +1917,185 @@ void main() {
       },
     );
 
+    for (final loadedBeforeOpen in [true, false]) {
+      for (final inCombinedTab in [false, true]) {
+        for (final withPlugin in [false, true]) {
+          test(
+            'קישור עם מיקום והדגשה שומר יעד בתוך שורה ארוכה '
+            '(loaded=$loadedBeforeOpen, combined=$inCombinedTab, plugin=$withPlugin)',
+            () async {
+              if (!await tryInitSearchEngine()) {
+                markTestSkipped(searchEngineSkipReason);
+                return;
+              }
+              final registry = PluginTextReaderRegistry.instance;
+              if (withPlugin) {
+                await registry.select(reader.plugin(), true);
+                addTearDown(() => registry.select(reader.plugin(), false));
+              }
+              final tabsBloc = _newBloc(_FakeTabsRepository());
+              final longLine =
+                  '${List.filled(80, 'מילה').join(' ')} יעד ההדגשה סוף';
+              final contentReady = Completer<String>();
+              final existingBloc = TextBookBloc(
+                repository: _PinpointFakeTextBookRepository(
+                  pendingContent: contentReady.future,
+                ),
+                initialState: TextBookInitial.named(
+                  TextBook(id: 42, title: 'בראשית'),
+                  0,
+                  false,
+                  const [],
+                ),
+              );
+              existingBloc.add(
+                const LoadContent(
+                  fontSize: 20,
+                  showSplitView: false,
+                  removeNikud: false,
+                  loadCommentators: false,
+                ),
+              );
+              void completeContent() => contentReady.complete(
+                ['שורה', 'שורה', longLine].join('\n'),
+              );
+              if (loadedBeforeOpen) {
+                completeContent();
+                await existingBloc.stream.firstWhere(
+                  (s) => s is TextBookLoaded,
+                );
+              }
+              final existingTab = TextBookTab(
+                book: TextBook(id: 42, title: 'בראשית'),
+                index: 0,
+                blocOverride: existingBloc,
+              );
+              tabsBloc.add(
+                AddTab(
+                  inCombinedTab
+                      ? CombinedTab(
+                          rightTab: _createTextTab('שמות', categoryId: 2),
+                          leftTab: existingTab,
+                        )
+                      : existingTab,
+                ),
+              );
+              await tabsBloc.stream.firstWhere((s) => s.tabs.length == 1);
+
+              final navigationStarted = Completer<void>();
+              void onPosition() {
+                if (existingTab.lines.position.value?.topLine == 2 &&
+                    !navigationStarted.isCompleted) {
+                  navigationStarted.complete();
+                }
+              }
+
+              existingTab.lines.position.addListener(onPosition);
+              final navigationReady = Completer<void>();
+              var navigationCount = 0;
+              if (withPlugin) {
+                existingTab.lines.externalNavigator = (_) {
+                  navigationCount++;
+                  return navigationCount == 1
+                      ? navigationReady.future
+                      : Future<void>.value();
+                };
+              }
+              tabsBloc.add(
+                OpenOrFocusTab(
+                  TextBookTab(
+                    book: TextBook(id: 42, title: 'בראשית'),
+                    index: 2,
+                    highlightText: 'יעד ההדגשה',
+                    permanentHighlightLine: 2,
+                  ),
+                  navigateToPositionIfReused: true,
+                ),
+              );
+              await navigationStarted.future.timeout(
+                const Duration(seconds: 2),
+              );
+              existingTab.lines.position.removeListener(onPosition);
+              if (withPlugin) {
+                expect(navigationCount, 1);
+                expect(
+                  existingTab.lines.position.value?.intraLineFraction,
+                  0,
+                );
+                navigationReady.complete();
+              }
+              if (!loadedBeforeOpen) {
+                await pumpEventQueue();
+                expect(existingTab.lines.position.value?.topLine, 2);
+                completeContent();
+              }
+              await existingBloc.stream
+                  .firstWhere(
+                    (s) => s is TextBookLoaded && s.highlightText.isNotEmpty,
+                  )
+                  .timeout(const Duration(seconds: 2));
+
+              expect(tabsBloc.state.tabs, hasLength(1));
+              expect(existingTab.lines.position.value?.topLine, 2);
+              expect(
+                existingTab.lines.position.value?.intraLineFraction,
+                greaterThan(0.9),
+              );
+              await _closeBlocAndAllowDeferredDispose(tabsBloc);
+            },
+          );
+        }
+      }
+    }
+
+    test('בלי מילים שלמות: הדגשה מאמצע מילה בטאב קיים גוללת אליה', () async {
+      if (!await tryInitSearchEngine()) {
+        markTestSkipped(searchEngineSkipReason);
+        return;
+      }
+      await InBookSearchPreferences.saveWholeWord(false);
+      addTearDown(() => InBookSearchPreferences.saveWholeWord(true));
+      final tabsBloc = _newBloc(_FakeTabsRepository());
+      final longLine = '${List.filled(80, 'מילה').join(' ')} בירושלים סוף';
+      final existingBloc = _createLoadedTextBookBloc(
+        book: TextBook(id: 42, title: 'בראשית'),
+        initialIndex: 2,
+        content: ['שורה', 'שורה', longLine].join('\n'),
+      );
+      final loaded =
+          await existingBloc.stream.firstWhere((s) => s is TextBookLoaded)
+              as TextBookLoaded;
+      expect(loaded.searchWholeWord, isFalse);
+      final existingTab = TextBookTab(
+        book: TextBook(id: 42, title: 'בראשית'),
+        index: 2,
+        blocOverride: existingBloc,
+      );
+      tabsBloc.add(AddTab(existingTab));
+      await tabsBloc.stream.firstWhere((s) => s.tabs.length == 1);
+
+      tabsBloc.add(
+        OpenOrFocusTab(
+          TextBookTab(
+            book: TextBook(id: 42, title: 'בראשית'),
+            index: 2,
+            highlightText: 'רושלים',
+            permanentHighlightLine: 2,
+          ),
+        ),
+      );
+      await existingBloc.stream
+          .firstWhere((s) => s is TextBookLoaded && s.highlightText.isNotEmpty)
+          .timeout(const Duration(seconds: 2));
+
+      expect(
+        existingTab.lines.position.value?.intraLineFraction,
+        greaterThan(0.9),
+      );
+
+      await _closeBlocAndAllowDeferredDispose(tabsBloc);
+    });
+
     test(
       'מחיל ApplyMarkHighlight כש‑bloc הקיים עדיין ב‑Initial וטוען רק אחרי כן',
       () async {
@@ -1924,11 +2157,6 @@ void main() {
       },
     );
 
-    // הגנה על האיחוד של שני מסלולי ה-highlight ב-_propagatePinpointHighlightToExistingTab.
-    // הטסטים מעלינו מכסים רק את highlightText/permanentHighlightLine. כאן
-    // בודקים שגם pinpointHighlight (המסלול שהיה נפרד לפני האיחוד) ממשיך לעבוד.
-    // הערה: בזרימה אמיתית tab.index == pinpointHighlightSectionIndex (ראה
-    // book_open_coordinator.dart) ולכן הטאבים תואמים ב-_findMatchingTopLevelTabIndex.
     test(
       'pinpointHighlight על טאב קיים — מוחל באמצעות pinpointHighlightSectionIndex',
       () async {
@@ -2433,9 +2661,10 @@ class _TrackedPdfBookTab extends PdfBookTab {
 TextBookBloc _createLoadedTextBookBloc({
   required TextBook book,
   int initialIndex = 0,
+  String? content,
 }) {
   final bloc = TextBookBloc(
-    repository: _PinpointFakeTextBookRepository(),
+    repository: _PinpointFakeTextBookRepository(content: content),
     initialState: TextBookInitial.named(book, initialIndex, false, const []),
   );
   bloc.add(
@@ -2450,12 +2679,17 @@ TextBookBloc _createLoadedTextBookBloc({
 }
 
 class _PinpointFakeTextBookRepository extends TextBookRepository {
-  _PinpointFakeTextBookRepository()
+  _PinpointFakeTextBookRepository({this.content, this.pendingContent})
     : super(fileSystem: FileSystemData.instance);
+
+  final String? content;
+  final Future<String>? pendingContent;
 
   @override
   Future<String> getBookContent(TextBook book) async {
-    return List.generate(20, (index) => 'שורה $index').join('\n');
+    return pendingContent ??
+        content ??
+        List.generate(20, (index) => 'שורה $index').join('\n');
   }
 
   @override

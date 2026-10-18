@@ -20,6 +20,7 @@ import 'package:otzaria/navigation/bloc/navigation_state.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
 import 'package:otzaria/settings/engine/settings_state.dart';
+import 'package:otzaria/settings/services/custom_folders/bloc/custom_folders_bloc.dart';
 import 'package:otzaria/theme/app_theme_data.dart';
 import 'package:otzaria/tools/calendar/bloc/calendar_cubit.dart';
 import 'package:otzaria/widgets/lists/filter_chips_widget.dart';
@@ -118,6 +119,9 @@ Future<StreamController<LibraryState>> _pump(
           BlocProvider<NavigationBloc>.value(value: navigationBloc),
           BlocProvider<LibraryUpdateBloc>.value(value: libraryUpdateBloc),
           BlocProvider<CalendarCubit>.value(value: calendarCubit),
+          BlocProvider<CustomFoldersBloc>(
+            create: (_) => CustomFoldersBloc(addLibraryEvent: (_) {}),
+          ),
         ],
         child: const LibraryBrowser(),
       ),

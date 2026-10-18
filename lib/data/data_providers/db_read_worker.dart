@@ -13,6 +13,7 @@ import 'package:otzaria/migration/database/query_loader.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
 import 'package:otzaria/migration/models/book.dart' as db_models;
 import 'package:otzaria/models/book_source.dart';
+import 'package:otzaria/models/links.dart';
 import 'package:otzaria/utils/file/document_format.dart';
 
 /// חיבור RO פתוח ויכולותיו, כפי שה-worker מעביר לטעינות הטווח.
@@ -51,15 +52,36 @@ Future<String> linkContentFromDbLines(
   int bookId,
   int index2,
   int? index2End,
-) async {
-  final line = await repository.getLineByIndex(bookId, index2 - 1);
-  if (line == null) return 'שגיאה: אינדקס מחוץ לטווח';
+) async => (await linkSourceLinesFromDb(
+  repository,
+  bookId,
+  index2,
+  index2End,
+)).map((line) => line.content).join('<br>');
 
+/// שורות היעד בשאילתת טווח אחת, גם כשכל אחת מכילה מעברי שורה פנימיים.
+Future<List<LinkContentLine>> linkSourceLinesFromDb(
+  SeforimRepository repository,
+  int bookId,
+  int index2,
+  int? index2End,
+) async {
   final end0 = (index2End ?? index2) - 1;
-  if (end0 <= index2 - 1) return line.content;
-  final rangeLines = await repository.getLines(bookId, index2 - 1, end0);
-  if (rangeLines.isEmpty) return line.content;
-  return rangeLines.map((l) => l.content).join('<br>');
+  if (end0 <= index2 - 1) {
+    final line = await repository.getLineByIndex(bookId, index2 - 1);
+    return [
+      (
+        lineIndex: index2 - 1,
+        content: line?.content ?? 'שגיאה: אינדקס מחוץ לטווח',
+      ),
+    ];
+  }
+  final lines = await repository.getLines(bookId, index2 - 1, end0);
+  return lines.isEmpty || lines.first.lineIndex != index2 - 1
+      ? [(lineIndex: index2 - 1, content: 'שגיאה: אינדקס מחוץ לטווח')]
+      : lines
+            .map((line) => (lineIndex: line.lineIndex, content: line.content))
+            .toList(growable: false);
 }
 
 Future<Map<String, Object?>> _officialLinkContent(
@@ -74,14 +96,15 @@ Future<Map<String, Object?>> _officialLinkContent(
       (format?.isTextual ?? false)) {
     return const {'fallback': true};
   }
-  return {
-    'content': await linkContentFromDbLines(
-      repository,
-      book.id,
-      args['index2'] as int,
-      args['index2End'] as int?,
-    ),
-  };
+  final lines = await linkSourceLinesFromDb(
+    repository,
+    book.id,
+    args['index2'] as int,
+    args['index2End'] as int?,
+  );
+  return args['includeLines'] == true
+      ? {'lines': lines}
+      : {'content': lines.map((line) => line.content).join('<br>')};
 }
 
 /// שורה של ספר שכבר נפתר ב-seforim.db, כפי ש-[DbReadWorker.lines] מחזיר.

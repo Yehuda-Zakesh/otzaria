@@ -4,6 +4,7 @@ library;
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:otzaria/settings/widgets/settings_card.dart';
+import 'package:otzaria/settings/widgets/tikkun_vav_ketia_setting.dart';
 import 'package:otzaria/tools/tikkun_korim/models/tikkun_models.dart';
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_settings.dart';
 import 'package:otzaria/widgets/misc/app_popup_menu.dart';
@@ -147,6 +148,10 @@ class TikkunSettingsPanel extends StatelessWidget {
         SettingsCard(
           title: 'תוכן ומנהגים',
           children: [
+            TikkunVavKetiaSetting(
+              value: settings.vavKetia,
+              onChanged: (value) => _emit(settings.copyWith(vavKetia: value)),
+            ),
             SettingsActionTile.segmentedTile<String>(
               icon: FluentIcons.book_open_24_regular,
               title: 'פתיחה בהפעלה',

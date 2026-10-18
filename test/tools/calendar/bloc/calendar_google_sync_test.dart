@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:googleapis_auth/googleapis_auth.dart' as auth;
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/tools/calendar/bloc/calendar_cubit.dart';
+import 'package:otzaria/tools/calendar/repository/google_calendar_repository.dart';
 import 'package:otzaria/tools/calendar/services/google_calendar_service.dart';
 import 'package:otzaria/tools/calendar/services/notification_service.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
@@ -242,5 +244,71 @@ void main() {
     expect(cubit.state.googleCalendarConnected, isTrue);
     expect(cubit.state.googleCalendarSyncError, isNull);
     expect(cubit.state.events, isEmpty);
+  });
+
+  test('a late insert response preserves its id for the next edit', () {
+    fakeAsync((async) {
+      final firstResponse = Completer<http.Response>();
+      final methods = <String>[];
+      final repository = GoogleCalendarRepository(
+        _Google(
+          handler: (request) async {
+            methods.add(request.method);
+            if (methods.length == 1) return firstResponse.future;
+            return _json({'id': 'google-event'});
+          },
+        ),
+      );
+      final event = CustomEvent(
+        id: 'local-event',
+        title: 'פגישה',
+        description: '',
+        createdAt: DateTime(2026, 10, 18),
+        baseGregorianDate: DateTime(2026, 10, 18),
+        baseJewishYear: 5787,
+        baseJewishMonth: 7,
+        baseJewishDay: 7,
+        recurrenceType: RecurrenceType.none,
+      );
+      String? googleId;
+      var completed = false;
+      repository.upsertEvent(event, 'Asia/Jerusalem').then((id) {
+        googleId = id;
+        completed = true;
+      });
+      async.flushMicrotasks();
+      expect(methods, ['POST']);
+      async.elapse(const Duration(seconds: 21));
+      final completedBeforeResponse = completed;
+      firstResponse.complete(_json({'id': 'google-event'}));
+      async.flushMicrotasks();
+
+      expect(completedBeforeResponse, isFalse);
+      expect(completed, isTrue);
+      expect(googleId, 'google-event');
+      repository.upsertEvent(
+        event.copyWith(title: 'פגישה מעודכנת', googleEventId: googleId),
+        'Asia/Jerusalem',
+      );
+      async.flushMicrotasks();
+      expect(methods, ['POST', 'PUT']);
+    });
+  });
+
+  test('a stalled calendar list still times out', () {
+    fakeAsync((async) {
+      final response = Completer<http.Response>();
+      final repository = GoogleCalendarRepository(
+        _Google(handler: (_) => response.future),
+      );
+      List<GoogleCalendarInfo>? calendars;
+      repository.listCalendars().then((result) => calendars = result);
+      async.flushMicrotasks();
+      expect(calendars, isNull);
+      async.elapse(const Duration(seconds: 21));
+      expect(calendars, isEmpty);
+      response.complete(_json({'items': []}));
+      async.flushMicrotasks();
+    });
   });
 }

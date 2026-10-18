@@ -14,9 +14,12 @@ import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/search/search_defaults.dart';
+import 'package:otzaria/search/search_engine_gateway.dart'
+    show LexicalSearchRequestIds, isSearchCancelledError;
 import 'package:otzaria/search/search_repository.dart';
 import 'package:otzaria/search/search_query_builder.dart';
 import 'package:otzaria/search/utils/facet_helper.dart';
+import 'package:otzaria/search/utils/user_regex_query.dart';
 import 'package:flutter/foundation.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 
@@ -32,6 +35,7 @@ typedef _FacetRecountInputs = ({
   SearchScope proximityScope,
   WordMatchMode wordMatchMode,
   int wordMatchCount,
+  bool anyOrder,
 });
 
 typedef IndexedBookResolution = ({Book? book, bool isStale});
@@ -39,6 +43,9 @@ typedef IndexedBookResolution = ({Book? book, bool isStale});
 class SearchBloc extends Bloc<SearchEvent, SearchState> {
   final SearchRepository _repository;
   int _searchRequestId = 0;
+
+  /// מזהה הביטול במנוע של החיפוש הנוכחי; חיפוש חדש או סגירה מבטלים אותו.
+  int? _engineRequestId;
 
   /// חתימת החיפוש שעבורו חושבו ספירות ה-facets שב-state כרגע.
   /// מאפשרת לדלג על ספירת כל-האינדקס (countByBook) כשלחיצה על קטגוריה
@@ -105,6 +112,8 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
     on<UpdateProximityScopeWithoutSearch>(_onUpdateProximityScopeWithoutSearch);
     on<UpdateWordMatchMode>(_onUpdateWordMatchMode);
     on<UpdateWordMatchModeWithoutSearch>(_onUpdateWordMatchModeWithoutSearch);
+    on<UpdateWordOrder>(_onUpdateWordOrder);
+    on<UpdateWordOrderWithoutSearch>(_onUpdateWordOrderWithoutSearch);
     on<ToggleSearchMode>(_onToggleSearchMode);
     on<SetSearchMode>(_onSetSearchMode);
     on<SetSearchModeWithoutSearch>(_onSetSearchModeWithoutSearch);
@@ -138,6 +147,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
     Emitter<SearchState> emit,
   ) async {
     final requestId = ++_searchRequestId;
+    _cancelEngineSearch();
     final query = event.query;
     final negativeQuery = event.negativeQuery ?? state.negativeQuery;
     // גם חיפוש שנעצר כאן מייצג את כוונת המשתמש העדכנית — שמירתו מונעת
@@ -173,6 +183,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
       return;
     }
 
+    final engineRequestId = _engineRequestId = LexicalSearchRequestIds.next();
     final requestedFacets = List<String>.from(state.currentFacets);
     final shouldPreserveFacetCounts =
         state.searchQuery == query && state.facetCounts.isNotEmpty;
@@ -214,25 +225,32 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
       state.searchScopeFacets.toSet(),
     );
 
+    // ספירת-ספרים נפרדת נדרשת רק כשהחיפוש רץ על תת-בחירה מהעץ (אחרת
+    // ה-stream המשולב מספק את הספירות), וגם אז רק אם החתימה השתנתה.
+    void refreshFacetCounts() => unawaited(
+      _refreshFacetCountsForAllBooks(
+        event,
+        requestId,
+        engineRequestId,
+        recountSignature,
+        recountInputs,
+      ),
+    );
+    final recountFacets = !scopeEqualsSearch && !shouldSkipFacetRecount;
+    // רג'קס חוצה-רווחים קורא שורות: ספירת הטווח המלא רצה אחרי הזרם, ולא
+    // כסריקה שנייה במקביל לו.
+    final recountAfterStream =
+        recountFacets &&
+        UserRegexQuery.plan(query)?.kind == UserRegexKind.crossSpace;
+
     try {
-      // ספירת-ספרים נפרדת נדרשת רק כשהחיפוש רץ על תת-בחירה מהעץ (אחרת
-      // ה-stream המשולב מספק את הספירות), וגם אז רק אם החתימה השתנתה.
-      if (!scopeEqualsSearch && !shouldSkipFacetRecount) {
-        unawaited(
-          _refreshFacetCountsForAllBooks(
-            event,
-            requestId,
-            recountSignature,
-            recountInputs,
-          ),
-        );
-      }
+      if (recountFacets && !recountAfterStream) refreshFacetCounts();
 
       // stream משולב: האירוע הראשון נושא ספירה כוללת + ספירה לפי ספר
       // מאותו מעבר אינדקס, ואחריו chunks של תוצאות.
       final stream = _repository.searchTextsStreamWithCounts(
         SearchEngineRequest(
-          query: SearchQueryBuilder.sanitizeQuery(query),
+          query: SearchQueryBuilder.engineQuery(query),
           facets: requestedFacets,
           limit: state.numResults,
           distance: state.distance,
@@ -251,6 +269,11 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
           grouping: state.configuration.resultGrouping.engineGrouping,
           wordMatchMode: state.wordMatchMode,
           wordMatchCount: state.wordMatchCount,
+          anyOrder: state.configuration.appliesAnyOrder(
+            customSpacing: event.customSpacing ?? const {},
+            query: state.searchQuery,
+          ),
+          cancelRequestId: engineRequestId,
         ),
         chunkSize: 50, // 50 תוצאות בכל chunk
       );
@@ -311,6 +334,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
       if (requestId != _searchRequestId) {
         return;
       }
+      if (recountAfterStream) refreshFacetCounts();
 
       // יישוב הספירה: כשהעמוד הראשון ביקש את כל התוצאות (total <= limit)
       // אך המנוע החזיר פחות ממה שספר (מסמך שנספר אבל נכשל בשליפה מה-store,
@@ -336,6 +360,10 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
       );
     } catch (e, stackTrace) {
       if (requestId != _searchRequestId) return;
+      if (isSearchCancelledError(e)) {
+        emit(state.copyWith(isLoading: false));
+        return;
+      }
       // שגיאת החיפוש מוצגת בהודעה וב-state כדי שלא תיראה כ"0 תוצאות".
       debugPrint('❌ Search failed: $e\n$stackTrace');
       // בלי רישום ליומן, כשל חיפוש (כמו אחרי יציאה משינה, issue #1012)
@@ -359,6 +387,24 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
         ),
       );
     }
+  }
+
+  void _cancelEngineSearch() {
+    final id = _engineRequestId;
+    if (id == null) return;
+    _engineRequestId = null;
+    unawaited(
+      _repository.cancelLexicalSearch(id).catchError((Object error) {
+        debugPrint('Search cancel failed: $error');
+      }),
+    );
+  }
+
+  @override
+  Future<void> close() {
+    _searchRequestId++;
+    _cancelEngineSearch();
+    return super.close();
   }
 
   /// אותו אירוע חייב לשמש גם לחתימת הספירות וגם לשליחה — אחרת החתימות
@@ -389,6 +435,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
       proximityScope: state.proximityScope,
       wordMatchMode: state.wordMatchMode,
       wordMatchCount: state.wordMatchCount,
+      anyOrder: state.anyOrder,
     );
   }
 
@@ -409,6 +456,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
       inputs.proximityScope.name,
       inputs.wordMatchMode.name,
       inputs.wordMatchCount,
+      inputs.anyOrder,
       jsonEncode(event.customSpacing ?? const <String, String>{}),
       jsonEncode(
         (event.alternativeWords ?? const <int, List<String>>{}).map(
@@ -431,6 +479,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
   Future<void> _refreshFacetCountsForAllBooks(
     UpdateSearchQuery event,
     int requestId,
+    int engineRequestId,
     String signature,
     _FacetRecountInputs inputs,
   ) async {
@@ -448,7 +497,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
     final Map<String, int> bookCounts;
     try {
       bookCounts = await TantivyDataProvider.instance.countByBook(
-        SearchQueryBuilder.sanitizeQuery(query),
+        SearchQueryBuilder.engineQuery(query),
         inputs.scopeFacets,
         fuzzy: inputs.fuzzy,
         distance: inputs.distance,
@@ -459,12 +508,23 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
         searchMode: inputs.searchMode,
         wordMatchMode: inputs.wordMatchMode,
         wordMatchCount: inputs.wordMatchCount,
+        anyOrder:
+            SearchConfiguration(
+              searchMode: inputs.searchMode,
+              proximityScope: inputs.proximityScope,
+              wordMatchMode: inputs.wordMatchMode,
+              anyOrder: inputs.anyOrder,
+            ).appliesAnyOrder(
+              customSpacing: event.customSpacing ?? const {},
+              query: query,
+            ),
         customSpacing: event.customSpacing,
         alternativeWords: event.alternativeWords,
         searchOptions: event.searchOptions,
         negativeCustomSpacing: event.negativeCustomSpacing,
         negativeAlternativeWords: event.negativeAlternativeWords,
         negativeSearchOptions: event.negativeSearchOptions,
+        cancelRequestId: engineRequestId,
       );
     } catch (e, stackTrace) {
       // עדכון ה-facets רץ ב-fire-and-forget (unawaited). המנוע דוחה שאילתה
@@ -588,6 +648,28 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
     }
 
     emit(state.copyWith(configuration: newConfig));
+    return true;
+  }
+
+  void _onUpdateWordOrder(UpdateWordOrder event, Emitter<SearchState> emit) {
+    if (!_updateWordOrderConfiguration(event.anyOrder, emit)) return;
+    _reSearch();
+  }
+
+  void _onUpdateWordOrderWithoutSearch(
+    UpdateWordOrderWithoutSearch event,
+    Emitter<SearchState> emit,
+  ) {
+    _updateWordOrderConfiguration(event.anyOrder, emit);
+  }
+
+  bool _updateWordOrderConfiguration(bool anyOrder, Emitter<SearchState> emit) {
+    if (anyOrder == state.anyOrder) return false;
+    emit(
+      state.copyWith(
+        configuration: state.configuration.copyWith(anyOrder: anyOrder),
+      ),
+    );
     return true;
   }
 
@@ -950,6 +1032,8 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
     ResetSearch event,
     Emitter<SearchState> emit,
   ) {
+    _searchRequestId++;
+    _cancelEngineSearch();
     _facetCountsSignature = null;
     _lastUserSearch = null;
     emit(const SearchState());
@@ -1065,7 +1149,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
       // מבקשים את כל התוצאות עד עכשיו + עוד numResults תוצאות
       final nextResults = await _repository.searchTexts(
         SearchEngineRequest(
-          query: SearchQueryBuilder.sanitizeQuery(state.searchQuery),
+          query: SearchQueryBuilder.engineQuery(state.searchQuery),
           facets: state.currentFacets,
           limit: state.numResults,
           offset: state.results.length,
@@ -1085,6 +1169,11 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
           grouping: state.configuration.resultGrouping.engineGrouping,
           wordMatchMode: state.wordMatchMode,
           wordMatchCount: state.wordMatchCount,
+          anyOrder: state.configuration.appliesAnyOrder(
+            customSpacing: event.customSpacing ?? const {},
+            query: state.searchQuery,
+          ),
+          cancelRequestId: _engineRequestId,
         ),
       );
       // חיפוש חדש החליף את התוצאות ומנהל את isLoading בעצמו.
@@ -1110,6 +1199,10 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
       );
     } catch (e, stackTrace) {
       if (requestId != _searchRequestId) return;
+      if (isSearchCancelledError(e)) {
+        emit(state.copyWith(isLoading: false));
+        return;
+      }
       debugPrint('❌ Load more results failed: $e\n$stackTrace');
       UiSnack.showError(LibraryMessages.loadMoreResultsError);
       emit(state.copyWith(isLoading: false));

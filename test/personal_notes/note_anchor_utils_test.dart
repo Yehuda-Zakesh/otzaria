@@ -23,6 +23,30 @@ void main() {
       expect(raw[p.rawIndex[dNorm]], 'ד');
     });
 
+    test('מפענח ישויות HTML תוך שמירת האינדקס בשורה הגולמית', () {
+      const raw = 'אמר &quot;אב&quot; אחרי';
+      final projection = projectLine(raw);
+      final range = locateAnchor(rawLine: raw, anchorText: 'אב');
+
+      expect(projection.normalized, 'אמר אב אחרי');
+      expect(range, isNotNull);
+      expect(raw.substring(range!.start, range.end), 'אב');
+    });
+
+    test('מקור plaintext לא מפוענח מחדש כ-HTML בבחירת מופע חוזר', () {
+      const raw = 'יהוה &lt;אב&gt; יהוה יהוה יהוה יהוה יהוה';
+      const sourceText = 'יהוה <אב> יהוה יהוה יהוה יהוה יהוה';
+      final anchor = computeAnchorForSelection(
+        rawLine: raw,
+        selectedText: 'יהוה',
+        sourceSelectionOffset: sourceText.lastIndexOf('יהוה'),
+        sourceSelectionText: sourceText,
+        selectionColumnHint: 23,
+      );
+
+      expect(anchor?.start, raw.lastIndexOf('יהוה'));
+    });
+
     test('מקף עברי (־) הופך לרווח, עקבי עם normalizeAnchorText', () {
       const raw = 'כל־ישראל';
       final p = projectLine(raw);

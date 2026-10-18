@@ -9,7 +9,7 @@ import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:path/path.dart' as path;
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
-import 'package:zstandard/zstandard.dart';
+import 'package:otzaria/utils/file/zstd_stream_extractor.dart';
 
 /// מנהל את מסד הקטלוגים החיצוניים (אוצר החכמה והיברובוקס).
 class ExternalCatalogRepository {
@@ -29,17 +29,19 @@ class ExternalCatalogRepository {
   static final ExternalCatalogRepository instance = ExternalCatalogRepository();
 
   final http.Client _httpClient;
-  final Zstandard _zstandard;
+  final Future<void> Function(String archivePath, String outputPath)
+  _extractZst;
   final Duration apiTimeout;
   final Duration downloadTimeout;
 
   ExternalCatalogRepository({
     http.Client? httpClient,
-    Zstandard? zstandard,
+    @visibleForTesting
+    Future<void> Function(String archivePath, String outputPath)? extractZst,
     this.apiTimeout = defaultApiTimeout,
     this.downloadTimeout = defaultDownloadTimeout,
   }) : _httpClient = httpClient ?? http.Client(),
-       _zstandard = zstandard ?? Zstandard() {
+       _extractZst = extractZst ?? ZstdStreamExtractor.extractToFile {
     HttpClientRegistry.register(_httpClient.close);
   }
 
@@ -224,21 +226,27 @@ class ExternalCatalogRepository {
       await dbDir.create(recursive: true);
     }
 
-    final downloadedBytes = await _downloadAssetBytes(asset.downloadUrl);
-    final dbBytes = asset.isCompressed
-        ? await _zstandard.decompress(downloadedBytes)
-        : downloadedBytes;
-    if (dbBytes == null) {
-      throw Exception('חילוץ DB הקטלוגים נכשל');
-    }
-
     final dbFile = File(databasePath);
     final tempFile = File('$databasePath.download');
+    final archiveFile = File('$databasePath.download.zst');
     final backupFile = File('$databasePath.bak');
     if (await tempFile.exists()) {
       await tempFile.delete();
     }
-    await tempFile.writeAsBytes(dbBytes, flush: true);
+    final downloadedBytes = await _downloadAssetBytes(asset.downloadUrl);
+    if (asset.isCompressed) {
+      // פריסה בזרימה מהדיסק ב-isolate: ה-DB הפרוס אינו נטען לזיכרון.
+      await archiveFile.writeAsBytes(downloadedBytes, flush: true);
+      try {
+        await _extractZst(archiveFile.path, tempFile.path);
+      } catch (e) {
+        throw Exception('חילוץ DB הקטלוגים נכשל: $e');
+      } finally {
+        if (await archiveFile.exists()) await archiveFile.delete();
+      }
+    } else {
+      await tempFile.writeAsBytes(downloadedBytes, flush: true);
+    }
 
     // מעבירים את הקובץ הקיים לגיבוי לפני ההחלפה (במקום למחוק אותו), כדי שאם
     // ההחלפה תיכשל באמצע — נוכל לשחזר ולא להשאיר את המשתמש ללא קטלוג כלל.

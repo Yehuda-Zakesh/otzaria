@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/settings/panels/tikkun_korim_settings_panel.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_settings.dart';
+import 'package:otzaria/tools/tikkun_korim/models/tikkun_vav_ketia.dart';
 
 import '../../helpers/memory_settings_cache.dart';
 
@@ -27,6 +28,15 @@ Future<void> _pump(WidgetTester tester) async {
 void main() {
   setUp(() async {
     await Settings.init(cacheProvider: MemorySettingsCache());
+  });
+
+  testWidgets('בחירת צורת וי״ו נשמרת עבור כלי תיקון קוראים', (tester) async {
+    await _pump(tester);
+    await tester.tap(find.text('לפי המסורת'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('כעין יו״ד'));
+    await tester.pumpAndSettle();
+    expect(const TikkunSettingsStore().load().vavKetia, TikkunVavKetia.yod);
   });
 
   testWidgets('הכרטיס מציג את פריטי "תוכן ומנהגים" של הכלי', (tester) async {

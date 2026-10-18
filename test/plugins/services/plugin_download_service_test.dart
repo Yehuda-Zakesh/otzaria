@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -205,6 +206,42 @@ void main() {
         throwsA(isA<Exception>()),
       );
       expect(requested, hasLength(1));
+    });
+
+    test('throws TimeoutException when the server never answers', () async {
+      final service = PluginDownloadService(
+        client: MockClient((_) => Completer<http.Response>().future),
+        stallTimeout: const Duration(milliseconds: 50),
+      );
+
+      await expectLater(
+        service.downloadPluginArchive(
+          Uri.parse('https://example.com/plugin.otzplugin'),
+        ),
+        throwsA(isA<TimeoutException>()),
+      );
+    });
+
+    test('throws TimeoutException when the body stops flowing', () async {
+      final service = PluginDownloadService(
+        client: MockClient.streaming((_, _) async {
+          Stream<List<int>> stalled() async* {
+            yield [1];
+            await Future<void>.delayed(const Duration(seconds: 1));
+            yield [2];
+          }
+
+          return http.StreamedResponse(stalled(), 200);
+        }),
+        stallTimeout: const Duration(milliseconds: 50),
+      );
+
+      await expectLater(
+        service.downloadPluginArchive(
+          Uri.parse('https://example.com/plugin.otzplugin'),
+        ),
+        throwsA(isA<TimeoutException>()),
+      );
     });
   });
 }

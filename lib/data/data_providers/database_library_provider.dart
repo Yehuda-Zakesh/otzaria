@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+import 'package:otzaria/text_book/repository/book_notes_repository.dart';
+import 'package:otzaria/divine_names/repository/divine_names_repository.dart';
 import 'package:flutter/foundation.dart'
     show ValueNotifier, debugPrint, visibleForTesting;
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -18,6 +20,8 @@ import 'package:otzaria/data/data_providers/db_read_worker.dart';
 import 'package:otzaria/data/data_providers/library_provider.dart';
 import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
 import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
+import 'package:otzaria/divine_names/models/divine_name_spans.dart';
+import 'package:otzaria/text_book/models/book_notes.dart';
 import 'package:otzaria/migration/database/daos/book_dao.dart';
 import 'package:otzaria/migration/database/daos/category_dao.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
@@ -1307,6 +1311,124 @@ Map<int, String> _loadDibburHamatchilInIsolate({
   }
 }
 
+/// מופעי שמות הקודש של ספר (`line_divine_name`) לפי `lineIndex`, בשאילתה
+/// אחת. מסד ישן, בלי הטבלה, נותן [DivineNameSpans.empty].
+DivineNameSpans _loadDivineNamesInIsolate({
+  required ReadOnlyDbTarget target,
+  required String bookTitle,
+  int? categoryId,
+}) {
+  sqlite3.Database? db;
+  try {
+    db = openReadOnlyTarget(target);
+    final capabilities = DbCapabilities.probe(db);
+    if (!capabilities.hasDivineNames) return DivineNameSpans.empty;
+
+    final bookId = _selectBookId(
+      db,
+      capabilities,
+      bookTitle,
+      categoryId: categoryId,
+    );
+    if (bookId == null) return DivineNameSpans.empty;
+
+    final builder = DivineNameSpansBuilder();
+    final rows = db.select(
+      'SELECT l.lineIndex AS lineIndex, d.charStart AS charStart, '
+      'd.charEnd AS charEnd, d.kind AS kind '
+      'FROM line l JOIN line_divine_name d ON d.lineId = l.id '
+      'WHERE l.bookId = ? ORDER BY l.lineIndex, d.charStart',
+      [bookId],
+    );
+    for (final row in rows) {
+      final lineIndex = row['lineIndex'];
+      final start = row['charStart'];
+      final end = row['charEnd'];
+      final kind = row['kind'];
+      if (lineIndex is int && start is int && end is int && kind is int) {
+        builder.add(lineIndex, start, end, kind);
+      }
+    }
+    return builder.build();
+  } finally {
+    db?.close();
+  }
+}
+
+/// הערות השוליים של ספר (`line_note`) לפי `lineIndex`, בשאילתה אחת. מסד בלי
+/// הטבלה (סכמה 6, מצורף, אישי) נותן [BookNotes.empty].
+BookNotes _loadBookNotesInIsolate({
+  required ReadOnlyDbTarget target,
+  required String bookTitle,
+  int? categoryId,
+}) {
+  sqlite3.Database? db;
+  try {
+    db = openReadOnlyTarget(target);
+    final capabilities = DbCapabilities.probe(db);
+    if (!capabilities.hasBookNotes) return BookNotes.empty;
+
+    final bookId = _selectBookId(
+      db,
+      capabilities,
+      bookTitle,
+      categoryId: categoryId,
+    );
+    if (bookId == null) return BookNotes.empty;
+
+    final builder = BookNotesBuilder();
+    final rows = db.select(
+      'SELECT l.lineIndex AS lineIndex, n.noteIndex AS noteIndex, '
+      'n.charPos AS charPos, n.marker AS marker, n.body AS body '
+      'FROM line l JOIN line_note n ON n.lineId = l.id '
+      'WHERE l.bookId = ? ORDER BY l.lineIndex, n.noteIndex',
+      [bookId],
+    );
+    for (final row in rows) {
+      final lineIndex = row['lineIndex'];
+      final noteIndex = row['noteIndex'];
+      final charPos = row['charPos'];
+      final marker = row['marker'];
+      final body = row['body'];
+      if (lineIndex is int && noteIndex is int && body is String) {
+        builder.add(
+          lineIndex,
+          noteIndex,
+          marker is String ? marker : null,
+          body,
+          charPos: charPos is int ? charPos : -1,
+        );
+      }
+    }
+    if (capabilities.hasBookNoteDivineNames) {
+      final names = db.select(
+        'SELECT l.lineIndex AS lineIndex, d.noteIndex AS noteIndex, '
+        'd.charStart AS charStart, d.charEnd AS charEnd, d.kind AS kind '
+        'FROM line l JOIN line_note_divine_name d ON d.lineId = l.id '
+        'WHERE l.bookId = ? ORDER BY l.lineIndex, d.noteIndex, d.charStart',
+        [bookId],
+      );
+      for (final row in names) {
+        final lineIndex = row['lineIndex'];
+        final noteIndex = row['noteIndex'];
+        final start = row['charStart'];
+        final end = row['charEnd'];
+        final kind = row['kind'];
+        if (lineIndex is int &&
+            noteIndex is int &&
+            start is int &&
+            end is int &&
+            kind is int) {
+          builder.addDivineName(lineIndex, noteIndex, start, end, kind);
+        }
+      }
+    }
+    return builder.build();
+  } finally {
+    db?.close();
+  }
+}
+
 /// Top-level wrapper עבור טעינת קישורי ספר ב-isolate.
 /// ראה ההסבר ב-[_runBookLoadInIsolate].
 Future<List<Map<String, Object?>>> _runBookLinksInIsolate({
@@ -1689,7 +1811,7 @@ class ScanResult {
 }
 
 /// Library provider that loads books from the SQLite database.
-class DatabaseLibraryProvider implements LibraryProvider {
+class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
   final SqliteDataProvider _sqliteProvider = SqliteDataProvider.instance;
   final Set<BookCompositeKey> _cachedKeys = {};
   final Map<int, String> _categoryIdToPath = {};
@@ -1979,6 +2101,34 @@ class DatabaseLibraryProvider implements LibraryProvider {
     int? categoryId,
   }) {
     return _loadAlternativeStructuresRowsInIsolate(
+      target: (path: dbPath, untrusted: untrusted, immutable: false),
+      bookTitle: bookTitle,
+      categoryId: categoryId,
+    );
+  }
+
+  @visibleForTesting
+  static BookNotes loadBookNotesForTesting({
+    required String dbPath,
+    bool untrusted = false,
+    required String bookTitle,
+    int? categoryId,
+  }) {
+    return _loadBookNotesInIsolate(
+      target: (path: dbPath, untrusted: untrusted, immutable: false),
+      bookTitle: bookTitle,
+      categoryId: categoryId,
+    );
+  }
+
+  @visibleForTesting
+  static DivineNameSpans loadDivineNamesForTesting({
+    required String dbPath,
+    bool untrusted = false,
+    required String bookTitle,
+    int? categoryId,
+  }) {
+    return _loadDivineNamesInIsolate(
       target: (path: dbPath, untrusted: untrusted, immutable: false),
       bookTitle: bookTitle,
       categoryId: categoryId,
@@ -3013,6 +3163,9 @@ class DatabaseLibraryProvider implements LibraryProvider {
 
   /// Clears the cached titles (call when database changes)
   void clearCache() {
+    Link.clearContentCache();
+    BookNotesRepository.instance.clear();
+    DivineNamesRepository.instance.clear();
     _cachedKeys.clear();
     _categoryIdToPath.clear();
     _categoriesById.clear();
@@ -4524,9 +4677,18 @@ class DatabaseLibraryProvider implements LibraryProvider {
   }
 
   @override
-  Future<String> getLinkContent(Link link) async {
-    if (link.path2.isEmpty) return 'שגיאה: נתיב ריק';
-    if (link.index2 <= 0) return 'שגיאה: אינדקס לא תקין';
+  Future<String> getLinkContent(Link link) async => (await getLinkContentLines(
+    link,
+  )).map((line) => line.content).join('<br>');
+
+  @override
+  Future<List<LinkContentLine>> getLinkContentLines(Link link) async {
+    if (link.path2.isEmpty) {
+      return [(lineIndex: link.index2 - 1, content: 'שגיאה: נתיב ריק')];
+    }
+    if (link.index2 <= 0) {
+      return [(lineIndex: link.index2 - 1, content: 'שגיאה: אינדקס לא תקין')];
+    }
 
     final normalizedTitle = _bookTitleFromLinkPath(link.path2);
     // כותרת ללא תיקייה עשויה להסתיים בסיומת אמיתית; נסה אותה לפני שם הקובץ.
@@ -4537,7 +4699,9 @@ class DatabaseLibraryProvider implements LibraryProvider {
     ];
 
     final repository = _sqliteProvider.repository;
-    if (repository == null) return 'שגיאה: מאגר לא מאותחל';
+    if (repository == null) {
+      return [(lineIndex: link.index2 - 1, content: 'שגיאה: מאגר לא מאותחל')];
+    }
 
     for (final title in targetTitles) {
       final fromWorker = await _officialLinkContentOnWorker(link, title);
@@ -4561,7 +4725,14 @@ class DatabaseLibraryProvider implements LibraryProvider {
           if (resolvedBook != null) break findBook;
         }
       }
-      if (resolvedBook == null) return 'שגיאה: הספר לא נמצא במסד הנתונים';
+      if (resolvedBook == null) {
+        return [
+          (
+            lineIndex: link.index2 - 1,
+            content: 'שגיאה: הספר לא נמצא במסד הנתונים',
+          ),
+        ];
+      }
 
       // ספר file-backed (תיקייה שנוספה בלי "הוסף למסד הנתונים") — אין שורות
       // ב-DB, התוכן נקרא מהקובץ עצמו לפי אותו פיצול שורות של הסורק.
@@ -4574,7 +4745,11 @@ class DatabaseLibraryProvider implements LibraryProvider {
           dbBook.filePath != null &&
           (dbBookFormat?.isTextual ?? false)) {
         final file = File(dbBook.filePath!);
-        if (!await file.exists()) return 'שגיאה: הקובץ לא נמצא';
+        if (!await file.exists()) {
+          return [
+            (lineIndex: link.index2 - 1, content: 'שגיאה: הקובץ לא נמצא'),
+          ];
+        }
         // הווריאנט המלא כבר במטמון הקורא; וריאנט נפרד מכפיל את הטקסט
         // ב-cache.db ומחליף את תמונת המפרש בתג תמונה ריק.
         final text =
@@ -4582,18 +4757,26 @@ class DatabaseLibraryProvider implements LibraryProvider {
             '';
         final lines = text.split('\n');
         final start = link.index2 - 1;
-        if (start >= lines.length) return 'שגיאה: אינדקס מחוץ לטווח';
+        if (start >= lines.length) {
+          return [
+            (lineIndex: link.index2 - 1, content: 'שגיאה: אינדקס מחוץ לטווח'),
+          ];
+        }
         final end0 = ((link.index2End ?? link.index2) - 1).clamp(
           start,
           lines.length - 1,
         );
         return lines
             .sublist(start, end0 + 1)
-            .map((l) => l.trimRight())
-            .join('<br>');
+            .indexed
+            .map(
+              (entry) =>
+                  (lineIndex: start + entry.$1, content: entry.$2.trimRight()),
+            )
+            .toList(growable: false);
       }
 
-      return await linkContentFromDbLines(
+      return await linkSourceLinesFromDb(
         resolvedBook.repository,
         resolvedBook.book.id,
         link.index2,
@@ -4601,13 +4784,13 @@ class DatabaseLibraryProvider implements LibraryProvider {
       );
     } catch (e) {
       debugPrint('⚠️ Error in getLinkContent: $e');
-      return 'שגיאה בטעינת תוכן המפרש';
+      return [(lineIndex: link.index2 - 1, content: 'שגיאה בטעינת תוכן המפרש')];
     }
   }
 
   /// תוכן קישור לספר ב-seforim.db, מה-[DbReadWorker] במקום על ה-UI isolate.
   /// null — הספר אינו שם או שהוא ספר קבצים: המסלול הישיר ממשיך.
-  Future<String?> _officialLinkContentOnWorker(
+  Future<List<LinkContentLine>?> _officialLinkContentOnWorker(
     Link link,
     String targetTitle,
   ) async {
@@ -4621,14 +4804,15 @@ class DatabaseLibraryProvider implements LibraryProvider {
                 'categoryId': link.targetCategoryId,
                 'index2': link.index2,
                 'index2End': link.index2End,
+                'includeLines': true,
               })
               as Map;
-      return result['content'] as String?;
+      return (result['lines'] as List?)?.cast<LinkContentLine>();
     } on DbReadWorkerSuspended {
-      return 'שגיאה: מאגר לא מאותחל';
+      return [(lineIndex: link.index2 - 1, content: 'שגיאה: מאגר לא מאותחל')];
     } catch (e) {
       debugPrint('⚠️ getLinkContent worker and fallback failed: $e');
-      return 'שגיאה בטעינת תוכן המפרש';
+      return [(lineIndex: link.index2 - 1, content: 'שגיאה בטעינת תוכן המפרש')];
     }
   }
 
@@ -4787,6 +4971,46 @@ class DatabaseLibraryProvider implements LibraryProvider {
       'getDibburHamatchilByLineIndex "$bookTitle"',
       (target) => _runBookLoadInIsolate(
         _loadDibburHamatchilInIsolate,
+        target: target,
+        bookTitle: bookTitle,
+        categoryId: categoryId,
+      ),
+    );
+  }
+
+  /// מופעי שמות הקודש של ספר (`line_divine_name`), לפי `lineIndex`. במסד
+  /// ישן, או לספר בלי מופעים, מוחזר [DivineNameSpans.empty].
+  Future<DivineNameSpans> getDivineNameSpans(
+    String bookTitle, {
+    int? categoryId,
+    BookSource source = BookSource.official,
+  }) async {
+    return _readTarget(
+      source,
+      DivineNameSpans.empty,
+      'getDivineNameSpans "$bookTitle"',
+      (target) => _runBookLoadInIsolate(
+        _loadDivineNamesInIsolate,
+        target: target,
+        bookTitle: bookTitle,
+        categoryId: categoryId,
+      ),
+    );
+  }
+
+  /// הערות השוליים של ספר (`line_note`), לפי `lineIndex`. במסד בלי הטבלה,
+  /// או לספר בלי הערות, מוחזר [BookNotes.empty].
+  Future<BookNotes> getBookNotes(
+    String bookTitle, {
+    int? categoryId,
+    BookSource source = BookSource.official,
+  }) async {
+    return _readTarget(
+      source,
+      BookNotes.empty,
+      'getBookNotes "$bookTitle"',
+      (target) => _runBookLoadInIsolate(
+        _loadBookNotesInIsolate,
         target: target,
         bookTitle: bookTitle,
         categoryId: categoryId,

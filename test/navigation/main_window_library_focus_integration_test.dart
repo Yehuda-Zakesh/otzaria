@@ -34,6 +34,7 @@ import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/settings/engine/settings_state.dart';
+import 'package:otzaria/settings/services/custom_folders/bloc/custom_folders_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/bloc/tabs_state.dart';
@@ -173,6 +174,9 @@ void main() {
                   BlocProvider<WorkspaceBloc>.value(value: workspace),
                   BlocProvider<PluginSystemBloc>.value(value: pluginSystem),
                   BlocProvider<LibraryUpdateBloc>.value(value: libraryUpdate),
+                  BlocProvider<CustomFoldersBloc>(
+                    create: (_) => CustomFoldersBloc(addLibraryEvent: (_) {}),
+                  ),
                 ],
                 child: RepositoryProvider<SettingsRepository>(
                   create: (_) => SettingsRepository(),

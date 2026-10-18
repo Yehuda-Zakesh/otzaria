@@ -4,48 +4,16 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/painting.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:opentype_shaper/opentype_shaper.dart';
 import 'package:otzaria/tools/tikkun_korim/export/tikkun_pdf_exporter.dart';
 import 'package:otzaria/tools/tikkun_korim/export/tikkun_pdf_writer.dart';
 import 'package:otzaria/tools/tikkun_korim/export/tikkun_vector_ops.dart';
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_settings.dart';
+import 'package:otzaria/tools/tikkun_korim/models/tikkun_vav_ketia.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
-
-String? _findNativeLibrary() {
-  final name = Platform.isWindows
-      ? 'opentype_shaper.dll'
-      : Platform.isMacOS
-      ? 'libopentype_shaper.dylib'
-      : 'libopentype_shaper.so';
-  final configFile = File('.dart_tool/package_config.json');
-  if (!configFile.existsSync()) return null;
-
-  final packages =
-      jsonDecode(configFile.readAsStringSync())['packages'] as List;
-  final shaper = packages.cast<Map<String, dynamic>>().firstWhere(
-    (package) => package['name'] == 'opentype_shaper',
-    orElse: () => const {},
-  );
-  final rootUri = shaper['rootUri'] as String?;
-  if (rootUri == null) return null;
-  final packageRoot = Uri.parse(rootUri);
-  final resolvedRoot = packageRoot.hasScheme
-      ? packageRoot
-      : configFile.parent.uri.resolveUri(packageRoot);
-  final packageDirectory = Directory.fromUri(resolvedRoot);
-
-  for (final profile in const ['release', 'debug']) {
-    final candidate = File.fromUri(
-      packageDirectory.uri.resolve('rust/target/$profile/$name'),
-    );
-    if (candidate.existsSync()) return candidate.absolute.path;
-  }
-  return null;
-}
 
 /// גופן חופשי שמוטמע בתוכנה — גופני גוטמן קנייניים ואינם בשימוש כאן.
 const String _fontPath = 'fonts/tikkun_korim/Ashkenazi-Stam.ttf';
@@ -100,11 +68,48 @@ List<String> _inflatedStreams(Uint8List bytes) {
 }
 
 void main() {
-  final libraryPath = _findNativeLibrary();
-  final skip = libraryPath == null ? 'the native shaper is not built' : null;
-
-  setUp(() => ShaperLibrary.path = libraryPath);
-
+  TestWidgetsFlutterBinding.ensureInitialized();
+  for (final cff in [false, true]) {
+    for (final form in TikkunVavKetia.values.where(
+      (f) => f.codePoint != null,
+    )) {
+      test(
+        'PDF ${cff ? 'CFF' : 'TTF'}/${form.id} מעתיק וי״ו עברית ולא קוד פרטי',
+        () async {
+          final bytes = cff
+              ? (await rootBundle.load(
+                  'packages/otzaria_ashurit/OtzariaAshuritNikud-Regular.otf',
+                )).buffer.asUint8List()
+              : await File(_fontPath).readAsBytes();
+          final writer = TikkunVectorPdfWriter(
+            pageFormat: PdfPageFormat.a4,
+            loadFont: (_, {required bool bold}) async => bytes,
+            fallbackFamilies: const [],
+          );
+          final shown = 'שלום'.replaceFirst(
+            'ו',
+            String.fromCharCode(form.codePoint!),
+          );
+          final pdf = await writer.write([
+            TikkunVectorPage(
+              texts: [_text(shown)],
+              rects: const [],
+              width: 400,
+              height: 200,
+            ),
+          ], unifyScale: false);
+          final cmap = _inflatedStreams(
+            pdf,
+          ).where((s) => s.contains('beginbfchar')).join();
+          expect(cmap, contains('<05D5>'));
+          expect(
+            cmap,
+            isNot(contains(form.codePoint!.toRadixString(16).toUpperCase())),
+          );
+        },
+      );
+    }
+  }
   test('המסמך מטמיע גופן Type0 ומכיל דף לכל עמוד שנאסף', () async {
     final writer = TikkunVectorPdfWriter(
       pageFormat: PdfPageFormat.a4,
@@ -130,7 +135,7 @@ void main() {
     expect(text, contains('/ToUnicode'));
     // אין תמונות — הטקסט וקטורי.
     expect(text, isNot(contains('/Subtype/Image')));
-  }, skip: skip);
+  });
 
   test('גליף רווח נכתב בין מילים שכנות בשורה, ולא בין שורות', () async {
     Future<(int, String)> render(List<TikkunTextOp> texts) async {
@@ -176,7 +181,7 @@ void main() {
     expect(touchingCount, apartCount);
     expect(sameLineCmap, contains('<0020>'));
     expect(apartCmap, isNot(contains('<0020>')));
-  }, skip: skip);
+  });
 
   test('קנה המידה: עמוד גבוה מהדף מוקטן, ובאיחוד כל העמודים מקבלים אותו', () {
     final writer = TikkunVectorPdfWriter(
@@ -243,5 +248,5 @@ void main() {
       ),
       throwsA(isA<TikkunExportCancelled>()),
     );
-  }, skip: skip);
+  });
 }

@@ -1,7 +1,12 @@
+import 'dart:math' show min;
+
 import 'package:flutter/material.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/book_protection/models/book_protection.dart';
+import 'package:otzaria/book_protection/repository/book_protection_repository.dart';
+import 'package:otzaria/book_protection/utils/copy_guard.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 import 'package:otzaria/core/messages/common_messages.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
@@ -9,6 +14,7 @@ import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/personal_notes/personal_notes_system.dart';
+import 'package:otzaria/personal_notes/utils/personal_note_source_selection.dart';
 import 'package:otzaria/services/target_line_links_service.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
@@ -31,6 +37,7 @@ import 'package:otzaria/text_book/view/selection/selected_text_copy.dart';
 import 'package:otzaria/text_book/utils/reader_menu_entries.dart';
 import 'package:otzaria/utils/text/global_search_helper.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
+import 'package:otzaria/widgets/smart_text/render_settings.dart';
 
 /// תווית פריט תפריט ההקשר לפתיחה ברקע — משותפת לתוצאות חיפוש ולמפרשים.
 const kOpenInNewTabLabel = 'פתח בכרטיסייה חדשה';
@@ -144,6 +151,7 @@ class ContextMenuUtils {
             context: context,
             link: link,
             savedSelectedText: savedSelectedText,
+            displayProfile: profile,
           ),
         ),
         if (targetBookId != null)
@@ -155,6 +163,7 @@ class ContextMenuUtils {
               source: link.targetSource,
               index: link.index2 - 1,
               selectedText: savedSelectedText,
+              protection: () => BookProtectionRepository.instance.forLink(link),
             ),
           ),
       ]),
@@ -240,10 +249,7 @@ class ContextMenuUtils {
     BuildContext context,
     Offset tapPosition,
   ) {
-    final url = inlineLinkUrlAt(
-      tapPosition,
-      viewId: View.of(context).viewId,
-    );
+    final url = inlineLinkUrlAt(tapPosition, viewId: View.of(context).viewId);
     if (url == null || !HtmlLinkHandler.opensAnotherBook(url)) return const [];
     return [
       AppContextMenuEntry(
@@ -258,6 +264,7 @@ class ContextMenuUtils {
   static Future<void> _createCommentaryNote({
     required BuildContext context,
     required Link link,
+    required TextDisplayProfile displayProfile,
     String? savedSelectedText,
   }) async {
     final bookTitle = utils.getTitleFromPath(link.path2);
@@ -293,6 +300,16 @@ class ContextMenuUtils {
     );
     if (result == null || result.contentPlain.trim().isEmpty) return;
 
+    final sourceSelection = selectedText?.isNotEmpty == true
+        ? mapPersonalNoteSourceSelection(
+            bookId: notesKey,
+            lineIndex: link.index2 - 1,
+            rawLine: rawContent,
+            settings: RenderSettings.fromProfile(displayProfile),
+            selectedText: selectedText!,
+          )
+        : null;
+
     try {
       await PersonalNotesRepository().addNote(
         bookId: notesKey,
@@ -301,6 +318,8 @@ class ContextMenuUtils {
         contentPlain: result.contentPlain,
         contentFormat: result.contentFormat,
         selectedText: selectedText,
+        sourceSelectedText: sourceSelection?.text,
+        sourceSelectionOffset: sourceSelection?.offset,
         categoryId: link.targetCategoryId,
       );
       if (context.mounted) UiSnack.showSuccess(TextBookMessages.noteSaved);
@@ -388,6 +407,12 @@ class ContextMenuUtils {
   }) async {
     try {
       final settingsState = context.read<SettingsBloc>().state;
+      if (!ensureCopyAllowed(
+        await BookProtectionRepository.instance.forLink(link),
+        linkSegmentCount(link),
+      )) {
+        return;
+      }
 
       final content = await link.content;
       if (content.trim().isEmpty) {
@@ -465,6 +490,8 @@ class ContextMenuUtils {
   /// העתקת טקסט מעוצב (HTML) ללוח
   /// [removeNikud] — "העתק בלי ניקוד" (issue #851): מסיר ניקוד וטעמים
   /// מהעותק בלבד, בלי לגעת בתצוגה.
+  /// [protection]/[segmentCount] — לבחירה החוצה כמה מפרשים ([link] null);
+  /// אחרת נגזרים מ-[link].
   static Future<void> copyFormattedText({
     required BuildContext context,
     required String? savedSelectedText,
@@ -473,6 +500,8 @@ class ContextMenuUtils {
     bool removeNikud = false,
     TextDisplayProfile? copyProfile,
     bool plainTextOnly = false,
+    BookProtection? protection,
+    int? segmentCount,
   }) async {
     final plainText = savedSelectedText;
 
@@ -480,6 +509,23 @@ class ContextMenuUtils {
       UiSnack.show(CommonMessages.noTextSelected);
       return;
     }
+
+    final resolvedProtection =
+        protection ??
+        (link == null
+            ? BookProtection.none
+            : await BookProtectionRepository.instance.forLink(link));
+    if (!ensureCopyAllowed(
+      resolvedProtection,
+      segmentCount ??
+          (link == null
+              ? countTextSegments(plainText)
+              // בחירה חלקית בתוך קישור-טווח אינה מכסה את כל שורותיו.
+              : min(linkSegmentCount(link), countTextSegments(plainText))),
+    )) {
+      return;
+    }
+    if (!context.mounted) return;
 
     try {
       final settingsState = context.read<SettingsBloc>().state;
@@ -500,6 +546,8 @@ class ContextMenuUtils {
         copyProfile: copyProfile,
         copyTarget: TextTarget.commentary,
         plainTextOnly: plainTextOnly,
+        protection: resolvedProtection,
+        segmentCount: 1,
       );
     } catch (e) {
       debugPrint('Error copying text: $e');

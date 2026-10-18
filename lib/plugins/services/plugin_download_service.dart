@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,8 +11,13 @@ import 'package:path/path.dart' as p;
 class PluginDownloadService {
   final http.Client _client;
 
-  PluginDownloadService({http.Client? client})
-    : _client = client ?? http.Client() {
+  /// משך מרבי ללא בייטים (גם בהמתנה לכותרות) לפני [TimeoutException].
+  final Duration _stallTimeout;
+
+  PluginDownloadService({
+    http.Client? client,
+    this._stallTimeout = const Duration(seconds: 60),
+  }) : _client = client ?? http.Client() {
     HttpClientRegistry.register(_client.close);
   }
 
@@ -33,7 +39,9 @@ class PluginDownloadService {
     var response = await _sendFollowingRedirects(resolvedUri, storeOnly);
 
     if (response.statusCode >= 400 && resolvedUri != downloadUri) {
-      final body = await response.stream.bytesToString();
+      final body = await utf8.decodeStream(
+        response.stream.timeout(_stallTimeout),
+      );
       // לחנות אין גרסה תואמת — פרטי התאימות כבר בגוף התשובה, ואין טעם
       // להוריד ארכיון שממילא ייפסל.
       final incompatible = PluginStoreIncompatibleException.tryParse(body);
@@ -62,7 +70,7 @@ class PluginDownloadService {
     final sink = targetFile.openWrite();
 
     try {
-      await sink.addStream(response.stream);
+      await sink.addStream(response.stream.timeout(_stallTimeout));
       await sink.flush();
       await sink.close();
     } catch (_) {
@@ -111,14 +119,14 @@ class PluginDownloadService {
         throw Exception('הורדת תוסף מותרת רק מכתובת של חנות התוספים');
       }
       final request = http.Request('GET', current)..followRedirects = false;
-      final response = await _client.send(request);
+      final response = await _client.send(request).timeout(_stallTimeout);
       final location = response.headers['location'];
       final isRedirect =
           response.statusCode >= 300 &&
           response.statusCode < 400 &&
           location != null;
       if (!isRedirect) return response;
-      await response.stream.drain<void>();
+      await response.stream.timeout(_stallTimeout).drain<void>();
       current = current.resolve(location);
     }
     throw Exception('יותר מדי הפניות בהורדת התוסף');

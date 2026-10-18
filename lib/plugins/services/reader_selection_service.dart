@@ -5,7 +5,9 @@ import 'package:crypto/crypto.dart';
 import 'package:otzaria/plugins/models/plugin_reader_selection.dart';
 import 'package:otzaria/plugins/models/text_source_map.dart';
 import 'package:otzaria/plugins/services/text_source_map_service.dart';
+import 'package:otzaria/utils/text/text_manipulation.dart' as text_utils;
 import 'package:otzaria/widgets/smart_text/render_settings.dart';
+import 'package:otzaria/widgets/smart_text/text_renderer_service.dart';
 
 class ReaderSelectionService {
   static const int contextLength = 30;
@@ -165,6 +167,241 @@ class ReaderSelectionService {
       rawText: rawText,
       settings: settings,
     );
+    return _buildFromMap(
+      map: map,
+      bookId: bookId,
+      bookTitle: bookTitle,
+      sectionIndex: sectionIndex,
+      currentRef: currentRef,
+      tabId: tabId,
+      createdAt: createdAt,
+      bookDbId: bookDbId,
+      bookType: bookType,
+      bookSource: bookSource,
+      renderedStartUtf16: renderedStartUtf16,
+      renderedEndUtf16: renderedEndUtf16,
+    );
+  }
+
+  /// ממפה בחירה מהתצוגה לטווח המקביל במקור בעזרת מפת פסקה אחת.
+  PluginReaderSelection? buildFromRenderedSelection({
+    required String bookId,
+    required String bookTitle,
+    required int sectionIndex,
+    required String rawText,
+    required RenderSettings settings,
+    required String selectedText,
+    int? startHint,
+    String? currentRef,
+    int? bookDbId,
+    String? bookType,
+    String? bookSource,
+  }) {
+    final map = _sourceMapService.build(
+      bookId: bookId,
+      sectionIndex: sectionIndex,
+      rawText: rawText,
+      settings: settings,
+    );
+    final range = _locateWhitespaceNormalizedRange(
+      renderedText: map.renderedText,
+      selectedText: selectedText,
+      startHint: startHint,
+    );
+    if (range == null) return null;
+    var preciseSourceRange = null as ({int start, int end})?;
+    if (settings.replaceHolyNames) {
+      final replacementMapping = _sourceRangeForHolyNameReplacement(
+        map: map,
+        rawText: rawText,
+        settings: settings,
+        renderedRange: range,
+      );
+      if (replacementMapping == null ||
+          (replacementMapping.hasVisibleReplacements &&
+              replacementMapping.range == null)) {
+        return null;
+      }
+      preciseSourceRange = replacementMapping.range;
+    }
+    return _buildFromMap(
+      map: map,
+      bookId: bookId,
+      bookTitle: bookTitle,
+      sectionIndex: sectionIndex,
+      currentRef: currentRef,
+      bookDbId: bookDbId,
+      bookType: bookType,
+      bookSource: bookSource,
+      renderedStartUtf16: range.start,
+      renderedEndUtf16: range.end,
+      sourceStartGrapheme: preciseSourceRange?.start,
+      sourceEndGrapheme: preciseSourceRange?.end,
+    );
+  }
+
+  ({
+    bool hasVisibleReplacements,
+    ({int start, int end})? range,
+  })?
+  _sourceRangeForHolyNameReplacement({
+    required PluginTextSourceMap map,
+    required String rawText,
+    required RenderSettings settings,
+    required ({int start, int end}) renderedRange,
+  }) {
+    final intermediateSettings = settings.copyWith(replaceHolyNames: false);
+    final intermediateHtml = TextRendererService.processText(
+      rawText,
+      intermediateSettings,
+    );
+    final intermediateMap = _sourceMapService.buildFromProcessedHtml(
+      bookId: map.bookId,
+      sectionIndex: map.sectionIndex,
+      rawText: rawText,
+      processedHtml: intermediateHtml,
+    );
+    final replacements = text_utils.findReplaceableHolyNames(
+      intermediateHtml,
+    );
+    final replacedHtml = text_utils.replaceHolyNames(
+      intermediateHtml,
+      style: settings.holyNameStyle,
+    );
+    if (TextRendererService.stripHtml(replacedHtml) != map.renderedText) {
+      return null;
+    }
+
+    final intermediateText = intermediateMap.renderedText;
+    final sourceBoundaries = _GraphemeBoundaries(intermediateText);
+    final replacementRanges =
+        <
+          ({int sourceStart, int sourceEnd, int renderedStart, int renderedEnd})
+        >[];
+    var htmlOffset = 0;
+    var htmlScanOffset = 0;
+    var insideHtmlTag = false;
+    var visibleOffset = 0;
+    var delta = 0;
+    final projectedText = StringBuffer();
+    for (final match in replacements) {
+      while (htmlScanOffset < match.start) {
+        final code = intermediateHtml.codeUnitAt(htmlScanOffset++);
+        if (code == 0x3C) insideHtmlTag = true;
+        if (code == 0x3E) insideHtmlTag = false;
+      }
+      final isInsideTag = insideHtmlTag;
+      htmlScanOffset = match.end;
+      if (isInsideTag) continue;
+
+      final precedingText = TextRendererService.stripHtml(
+        intermediateHtml.substring(htmlOffset, match.start),
+      );
+      projectedText.write(precedingText);
+      visibleOffset += precedingText.length;
+      final visibleMatch = TextRendererService.stripHtml(match[0]!);
+      projectedText.write(visibleMatch);
+      final sourceStart = sourceBoundaries.graphemeAtUtf16(visibleOffset);
+      final sourceEnd = sourceBoundaries.graphemeAtUtf16(
+        visibleOffset + visibleMatch.length,
+      );
+      if (sourceStart == null || sourceEnd == null) return null;
+      final replacement = text_utils.replaceHolyNames(
+        visibleMatch,
+        style: settings.holyNameStyle,
+      );
+      final replacementLength = replacement.characters.length;
+      final outputStart = sourceStart - delta;
+      replacementRanges.add((
+        sourceStart: sourceStart,
+        sourceEnd: sourceEnd,
+        renderedStart: outputStart,
+        renderedEnd: outputStart + replacementLength,
+      ));
+      delta += (sourceEnd - sourceStart) - replacementLength;
+      visibleOffset += visibleMatch.length;
+      htmlOffset = match.end;
+    }
+    final trailingText = TextRendererService.stripHtml(
+      intermediateHtml.substring(htmlOffset),
+    );
+    projectedText.write(trailingText);
+    visibleOffset += trailingText.length;
+    if (visibleOffset != intermediateText.length ||
+        projectedText.toString() != intermediateText) {
+      return null;
+    }
+    if (replacementRanges.isEmpty) {
+      return (hasVisibleReplacements: false, range: null);
+    }
+
+    final renderedBoundaries = _GraphemeBoundaries(map.renderedText);
+    final renderedStart = renderedBoundaries.graphemeAtUtf16(
+      renderedRange.start,
+    );
+    final renderedEnd = renderedBoundaries.graphemeAtUtf16(renderedRange.end);
+    if (renderedStart == null || renderedEnd == null) return null;
+
+    int toIntermediate(int boundary, {required bool endBoundary}) {
+      var deltaBefore = 0;
+      for (final replacement in replacementRanges) {
+        if (boundary < replacement.renderedStart) {
+          return boundary + deltaBefore;
+        }
+        if (boundary <= replacement.renderedEnd) {
+          if (boundary == replacement.renderedStart) {
+            return replacement.sourceStart;
+          }
+          if (boundary == replacement.renderedEnd) {
+            return replacement.sourceEnd;
+          }
+          if (replacement.renderedEnd - replacement.renderedStart ==
+              replacement.sourceEnd - replacement.sourceStart) {
+            return replacement.sourceStart +
+                (boundary - replacement.renderedStart);
+          }
+          return endBoundary ? replacement.sourceEnd : replacement.sourceStart;
+        }
+        deltaBefore +=
+            (replacement.sourceEnd - replacement.sourceStart) -
+            (replacement.renderedEnd - replacement.renderedStart);
+      }
+      return boundary + deltaBefore;
+    }
+
+    final intermediateStart = toIntermediate(renderedStart, endBoundary: false);
+    final intermediateEnd = toIntermediate(renderedEnd, endBoundary: true);
+    return (
+      hasVisibleReplacements: true,
+      range: (
+        start: _sourceMapService.renderedBoundaryToSource(
+          intermediateMap,
+          intermediateStart,
+        ),
+        end: _sourceMapService.renderedBoundaryToSource(
+          intermediateMap,
+          intermediateEnd,
+        ),
+      ),
+    );
+  }
+
+  PluginReaderSelection? _buildFromMap({
+    required PluginTextSourceMap map,
+    required String bookId,
+    required String bookTitle,
+    required int sectionIndex,
+    required int renderedStartUtf16,
+    required int renderedEndUtf16,
+    String? currentRef,
+    String? tabId,
+    DateTime? createdAt,
+    int? bookDbId,
+    String? bookType,
+    String? bookSource,
+    int? sourceStartGrapheme,
+    int? sourceEndGrapheme,
+  }) {
     final rendered = _GraphemeBoundaries(map.renderedText);
     final renderedStart = rendered.graphemeAtUtf16(renderedStartUtf16);
     final renderedEnd = rendered.graphemeAtUtf16(renderedEndUtf16);
@@ -174,14 +411,12 @@ class ReaderSelectionService {
       return null;
     }
 
-    final sourceStart = _sourceMapService.renderedBoundaryToSource(
-      map,
-      renderedStart,
-    );
-    final sourceEnd = _sourceMapService.renderedBoundaryToSource(
-      map,
-      renderedEnd,
-    );
+    final sourceStart =
+        sourceStartGrapheme ??
+        _sourceMapService.renderedBoundaryToSource(map, renderedStart);
+    final sourceEnd =
+        sourceEndGrapheme ??
+        _sourceMapService.renderedBoundaryToSource(map, renderedEnd);
     if (sourceStart >= sourceEnd) return null;
 
     final source = _GraphemeBoundaries(map.sourceText);
@@ -227,6 +462,55 @@ class ReaderSelectionService {
       direction: _direction(renderedText),
       createdAt: timestamp,
     );
+  }
+
+  ({int start, int end})? _locateWhitespaceNormalizedRange({
+    required String renderedText,
+    required String selectedText,
+    int? startHint,
+  }) {
+    final normalized = StringBuffer();
+    final offsets = <int>[];
+    var pendingWhitespace = false;
+    var whitespaceStart = 0;
+    for (var i = 0; i < renderedText.length; i++) {
+      final character = renderedText[i];
+      if (character.trim().isEmpty) {
+        if (normalized.isNotEmpty) {
+          if (!pendingWhitespace) whitespaceStart = i;
+          pendingWhitespace = true;
+        }
+        continue;
+      }
+      if (pendingWhitespace) {
+        offsets.add(whitespaceStart);
+        normalized.write(' ');
+        pendingWhitespace = false;
+      }
+      offsets.add(i);
+      normalized.write(character);
+    }
+    final needle = selectedText.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (needle.isEmpty || needle.length > offsets.length) return null;
+    final text = normalized.toString();
+    final starts = <int>[];
+    var from = 0;
+    while (from <= text.length - needle.length) {
+      final found = text.indexOf(needle, from);
+      if (found < 0) break;
+      starts.add(found);
+      from = found + 1;
+    }
+    if (starts.isEmpty) return null;
+    final start = startHint == null
+        ? starts.first
+        : (starts..sort(
+                (a, b) => (offsets[a] - startHint).abs().compareTo(
+                  (offsets[b] - startHint).abs(),
+                ),
+              ))
+              .first;
+    return (start: offsets[start], end: offsets[start + needle.length - 1] + 1);
   }
 
   PluginTextRangeAnchor? buildRangeAnchor({
@@ -374,10 +658,18 @@ class _GraphemeBoundaries {
   PluginTextOffset offsetAt(int index) => offsets[index];
 
   int? graphemeAtUtf16(int utf16) {
-    for (var index = 0; index < offsets.length; index++) {
-      if (offsets[index].utf16 == utf16) return index;
+    var low = 0;
+    var high = offsets.length;
+    while (low < high) {
+      final mid = (low + high) >> 1;
+      final offset = offsets[mid].utf16;
+      if (offset < utf16) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
     }
-    return null;
+    return low < offsets.length && offsets[low].utf16 == utf16 ? low : null;
   }
 
   String slice(int start, int end) => values.sublist(start, end).join();

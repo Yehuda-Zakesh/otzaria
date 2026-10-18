@@ -30,6 +30,7 @@ import 'package:flutter/rendering.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:otzaria/book_common/utils/link_anchor_variants.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart';
+import 'package:otzaria/theme/app_surfaces.dart';
 import 'package:otzaria/widgets/smart_text/selection_fill_text.dart';
 import 'package:otzaria/widgets/smart_text/simple_inline_html.dart';
 
@@ -356,7 +357,7 @@ class RaisedMarkerOverlay extends SingleChildRenderObjectWidget {
   /// רינדור חדש שמציג טקסט ספר צריך לקרוא לזה — לא לבנות עטיפה משלו.
   ///
   /// [linkColor] ו-[activeBackground] — צבעי אותיות המפרשים; כשאינם מסופקים
-  /// נגזרים מערכת הנושא (primary / primaryContainer), כמו ב-SmartTextWidget.
+  /// נגזרים מצבע קישורי הספר ו-primaryContainer, כמו ב-SmartTextWidget.
   static Widget wrap({
     required BuildContext context,
     required List<RaisedMarker> markers,
@@ -378,7 +379,7 @@ class RaisedMarkerOverlay extends SingleChildRenderObjectWidget {
     return RaisedMarkerOverlay(
       markers: markers,
       baseStyle: style,
-      linkColor: linkColor ?? colorScheme.primary,
+      linkColor: linkColor ?? AppSurfaces.readerLink(colorScheme),
       activeBackground: activeBackground ?? colorScheme.primaryContainer,
       activeForeground: activeForeground ?? colorScheme.onPrimaryContainer,
       child: child,

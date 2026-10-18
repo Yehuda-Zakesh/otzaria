@@ -42,6 +42,51 @@ Widget _buildList({
   );
 }
 
+Widget _buildAnimatedList({
+  required double width,
+  required ItemScrollController controller,
+  required ItemPositionsListener listener,
+  bool smoothWheel = false,
+  int? preferredIndex = 60,
+  Key? listKey,
+}) => MaterialApp(
+  home: Center(
+    child: AnimatedContainer(
+      width: width,
+      height: 400,
+      duration: const Duration(milliseconds: 300),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final anchored = ScrollPositionReanchor(
+            preferredIndex: preferredIndex,
+            scrollController: controller,
+            positionsListener: listener,
+            child: ScrollablePositionedList.builder(
+              key: listKey,
+              initialScrollIndex: 50,
+              itemCount: 200,
+              itemScrollController: controller,
+              itemPositionsListener: listener,
+              itemBuilder: (context, index) => SizedBox(
+                height: 30 * (600 / constraints.maxWidth),
+                child: Text('פסקה $index'),
+              ),
+            ),
+          );
+          return smoothWheel ? SmoothWheelScroll(child: anchored) : anchored;
+        },
+      ),
+    ),
+  ),
+);
+
+double? _edgeOf(ItemPositionsListener listener, int index) => listener
+    .itemPositions
+    .value
+    .where((position) => position.index == index)
+    .firstOrNull
+    ?.itemLeadingEdge;
+
 int _topIndex(ItemPositionsListener listener) =>
     reanchorTargetPosition(listener.itemPositions.value)!.index;
 
@@ -372,6 +417,85 @@ void main() {
       );
     });
 
+    testWidgets(
+      'אנימציית צמצום אינה מקפיצה את הפסקה בין פריימים (issue #2658)',
+      (
+        tester,
+      ) async {
+        final controller = ItemScrollController();
+        final listener = ItemPositionsListener.create();
+        Widget list(double width, int? selected) => MaterialApp(
+          home: Directionality(
+            textDirection: TextDirection.rtl,
+            child: Center(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                width: width,
+                height: 400,
+                child: LayoutBuilder(
+                  builder: (context, constraints) => ScrollPositionReanchor(
+                    enabled: true,
+                    preferredIndex: selected,
+                    scrollController: controller,
+                    positionsListener: listener,
+                    child: ScrollablePositionedList.builder(
+                      itemScrollController: controller,
+                      itemPositionsListener: listener,
+                      itemCount: 200,
+                      itemBuilder: (context, index) => SizedBox(
+                        height: 30 * (600 / constraints.maxWidth),
+                        child: Text('$index'),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.pumpWidget(list(600, null));
+        await tester.pumpAndSettle();
+        await tester.drag(
+          find.byType(ScrollablePositionedList),
+          const Offset(0, -1500),
+        );
+        await tester.pumpAndSettle();
+        await tester.pump(ScrollPositionReanchor.idleDelay);
+        await tester.pumpAndSettle();
+
+        final selected = _topIndex(listener) + 10;
+        await tester.pumpWidget(list(600, selected));
+        await tester.pumpAndSettle();
+        final edgeBefore = listener.itemPositions.value
+            .firstWhere((p) => p.index == selected)
+            .itemLeadingEdge;
+
+        await tester.pumpWidget(list(300, selected));
+        final edges = <double?>[];
+        for (var frame = 0; frame < 20; frame++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          edges.add(
+            listener.itemPositions.value
+                .where((p) => p.index == selected)
+                .firstOrNull
+                ?.itemLeadingEdge,
+          );
+        }
+        await tester.pumpAndSettle();
+
+        // העיגון רץ אחרי הפריים, ולכן הפריים הראשון עוד מוצג בלעדיו.
+        for (final edge in edges.skip(1)) {
+          expect(edge, isNotNull, reason: 'הפסקה הנבחרת יצאה מהמסך');
+          expect(
+            edge!,
+            moreOrLessEquals(edgeBefore, epsilon: 0.01),
+            reason: 'גובה הפסקה בפריימים: $edges',
+          );
+        }
+      },
+    );
+
     testWidgets('צמצום מיד אחרי גלילה ארוכה, לפני שהגלילה נחה, אינו מפיל', (
       tester,
     ) async {
@@ -492,6 +616,146 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(_topIndex(listener), 8);
+    });
+  });
+
+  group('גלילה במהלך אנימציית רוחב (issue #2658)', () {
+    late ItemScrollController controller;
+    late ItemPositionsListener listener;
+
+    setUp(() {
+      controller = ItemScrollController();
+      listener = ItemPositionsListener.create();
+    });
+
+    Future<void> start(WidgetTester tester, {bool smoothWheel = false}) async {
+      Widget host(double width) => _buildAnimatedList(
+        width: width,
+        controller: controller,
+        listener: listener,
+        smoothWheel: smoothWheel,
+      );
+      await tester.pumpWidget(host(600));
+      await tester.pumpAndSettle();
+      expect(_edgeOf(listener, 60), 0.75);
+      await tester.pumpWidget(host(300));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+
+    Future<void> finish(WidgetTester tester) async {
+      for (var frame = 0; frame < 25; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await tester.pumpAndSettle();
+      await _idle(tester);
+      expect(tester.takeException(), isNull);
+    }
+
+    for (final smoothWheel in [false, true]) {
+      testWidgets('נקישת גלגלת אינה נבלעת, החלקה: $smoothWheel', (
+        tester,
+      ) async {
+        await start(tester, smoothWheel: smoothWheel);
+        _wheel(
+          tester,
+          tester.getCenter(find.byType(ScrollablePositionedList)),
+          dy: 80,
+        );
+        await finish(tester);
+        expect(_edgeOf(listener, 60), isNotNull);
+        expect(_edgeOf(listener, 60)!, lessThan(0.74));
+      });
+    }
+
+    testWidgets('גלגלת אחרי תזמון העיגון מבטלת את הקפיצה המתוזמנת', (
+      tester,
+    ) async {
+      await start(tester);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _wheel(
+          tester,
+          tester.getCenter(find.byType(ScrollablePositionedList)),
+          dy: 80,
+        );
+      });
+      await tester.pump(const Duration(milliseconds: 16));
+      await finish(tester);
+      expect(_edgeOf(listener, 60), isNotNull);
+      expect(_edgeOf(listener, 60)!, lessThan(0.74));
+    });
+
+    testWidgets('החלפת רשימה בזמן גלילה אינה משאירה פעילות ישנה', (
+      tester,
+    ) async {
+      await start(tester, smoothWheel: true);
+      _wheel(
+        tester,
+        tester.getCenter(find.byType(ScrollablePositionedList)),
+        dy: 80,
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+      final nextListener = ItemPositionsListener.create();
+      await tester.pumpWidget(
+        _buildAnimatedList(
+          width: 300,
+          controller: ItemScrollController(),
+          listener: nextListener,
+          listKey: const ValueKey('replacement'),
+          smoothWheel: true,
+        ),
+      );
+      await finish(tester);
+      expect(_edgeOf(nextListener, 60), isNotNull);
+      expect(_edgeOf(nextListener, 60)!, inInclusiveRange(0, 1));
+    });
+
+    testWidgets('גרירה קצרה משנה את מקום הקריאה', (tester) async {
+      await start(tester);
+      await tester.drag(
+        find.byType(ScrollablePositionedList),
+        const Offset(0, -80),
+      );
+      await finish(tester);
+      expect(_edgeOf(listener, 60), isNotNull);
+      expect(_edgeOf(listener, 60)!, lessThan(0.74));
+    });
+
+    testWidgets('ניווט מונפש משלים את הגלילה', (tester) async {
+      await start(tester);
+      await tester.pump(const Duration(milliseconds: 16));
+      unawaited(
+        controller.scrollTo(
+          index: 60,
+          alignment: 0.25,
+          duration: const Duration(milliseconds: 600),
+        ),
+      );
+      await finish(tester);
+      expect(_edgeOf(listener, 60), moreOrLessEquals(0.25, epsilon: 0.01));
+    });
+
+    testWidgets('פירוק התצוגה בזמן ההקפאה אינו משאיר callback פעיל', (
+      tester,
+    ) async {
+      await start(tester);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('ניווט לפסקה אחרת ממשיך לעגן את הבחירה החדשה', (tester) async {
+      await start(tester);
+      controller.jumpTo(index: 65, alignment: 0.25);
+      await tester.pumpWidget(
+        _buildAnimatedList(
+          width: 300,
+          controller: controller,
+          listener: listener,
+          preferredIndex: 65,
+        ),
+      );
+      await finish(tester);
+      expect(_edgeOf(listener, 65), moreOrLessEquals(0.25, epsilon: 0.01));
     });
   });
 
@@ -958,6 +1222,52 @@ void main() {
       await _idle(tester);
 
       expect(find.byKey(inner), findsOneWidget, reason: 'הכרטיס יצא מהמסך');
+      expect(_scrollableIn(tester, inner), same(stateBefore));
+      expect(innerController.offset, offset);
+    });
+
+    testWidgets('קפיצת רוחב שבוטלה אינה מוחקת חוב של כרטיס מקונן', (
+      tester,
+    ) async {
+      final innerController = ScrollController();
+      addTearDown(innerController.dispose);
+      const inner = Key('inner');
+      Widget host(double width) => _buildNestedHost(
+        width: width,
+        controller: controller,
+        listener: listener,
+        nestedIndex: 4,
+        nested: SizedBox(
+          height: 250,
+          child: ListView.builder(
+            key: inner,
+            controller: innerController,
+            itemCount: 60,
+            itemBuilder: (context, i) =>
+                SizedBox(height: 40, child: Text('פנימי $i')),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(host(600));
+      await tester.pumpAndSettle();
+      await tester.dragFrom(const Offset(400, 390), const Offset(0, -450));
+      await tester.pump();
+      await tester.drag(find.byKey(inner), const Offset(0, -200));
+      await tester.pump();
+      await _idle(tester);
+      final stateBefore = _scrollableIn(tester, inner);
+      final offset = innerController.offset;
+      expect(offset, greaterThan(100));
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _wheel(tester, const Offset(400, 20), dy: 50);
+      });
+      await tester.pumpWidget(host(300));
+      await tester.pumpAndSettle();
+      await _idle(tester);
+
+      expect(find.byKey(inner), findsOneWidget);
       expect(_scrollableIn(tester, inner), same(stateBefore));
       expect(innerController.offset, offset);
     });

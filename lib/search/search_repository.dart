@@ -1,3 +1,4 @@
+import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/search/search_engine_gateway.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
@@ -32,9 +33,9 @@ class SearchRepository {
     final provider = _engineProvider;
     if (provider != null) return provider();
 
-    return RustSearchEngineOperations(
-      await TantivyDataProvider.instance.engine,
-    );
+    final engine = await TantivyDataProvider.instance.engine;
+    await AttachedLibraryRegistry.instance.engineSourcesSettled;
+    return RustSearchEngineOperations(engine);
   }
 
   Future<SemanticSearchEngineOperations> _semanticEngine() async {
@@ -130,6 +131,17 @@ class SearchRepository {
   Future<SearchPageResult> searchTextsAndCount(
     SearchEngineRequest request,
   ) async => _gateway.searchAndCount(await _engine(), request);
+
+  /// עוצר במנוע את קריאות החיפוש שנשאו את [requestId] (זרם, ספירות, `/…/`).
+  /// לא נוגע במנוע שעוד לא נפתח.
+  Future<void> cancelLexicalSearch(int requestId) async {
+    final provider = _engineProvider;
+    if (provider == null) {
+      TantivyDataProvider.instance.cancelLexicalSearch(requestId);
+      return;
+    }
+    (await provider()).cancelLexicalSearch(requestId);
+  }
 
   /// חיפוש בזרם של chunks. האירוע הראשון נושא גם את הספירה הכוללת
   /// ואת הספירה לפי ספר — מחושבות באותו מעבר אינדקס של החיפוש עצמו, במקום

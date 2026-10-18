@@ -9,7 +9,10 @@ permissions:
 
 jobs:
   label:
+    # בלי הסימון אין מה לעשות - מדלגים בלי לתפוס רנר מהתור.
+    if: contains(github.event.issue.body, '-labels:')
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     steps:
       - uses: actions/github-script@v9.0.0
         with:

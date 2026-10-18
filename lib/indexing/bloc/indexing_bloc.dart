@@ -15,9 +15,7 @@ import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/indexing/services/indexing_failure_reporter.dart';
 import 'package:otzaria/indexing/services/indexing_wakelock.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
-import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/library/hidden/hidden_library_store.dart';
-import 'package:otzaria/models/books.dart';
 
 class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
   final IndexingRepository _repository;
@@ -29,6 +27,10 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
   bool _isPaused = false;
   bool _isEconomy = false;
   bool _isFinalizing = false;
+
+  // ביטול מנקז את ריצות האינדוקס שכבר בתור: הן נשלחו לפני שהמשתמש עצר.
+  final _enqueuedAtCancelCount = Expando<int>();
+  int _cancelCount = 0;
 
   IndexingBloc(
     this._repository, {
@@ -64,6 +66,12 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
     );
   }
 
+  @override
+  void add(IndexingEvent event) {
+    if (event is RunIndexing) _enqueuedAtCancelCount[event] = _cancelCount;
+    super.add(event);
+  }
+
   /// כל מצבי ההתקדמות נפלטים דרך כאן כדי שדגלי ההשהיה והמצב החסכוני
   /// יישמרו על פני כל עדכון התקדמות.
   IndexingInProgress _inProgress({
@@ -85,6 +93,21 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
     IndexingWorkEvent event,
     Emitter<IndexingState> emit,
   ) async {
+    if (event is RunIndexing &&
+        (_enqueuedAtCancelCount[event] ?? _cancelCount) != _cancelCount) {
+      // הריצה הבאה תחליף ותבדוק את מה שזו הייתה מטפלת בו; ספרים שנשלחו
+      // לבדיקה מוחלפים — החלפה מיותרת עדיפה על תוכן ישן.
+      try {
+        await _repository.rememberChangedBooks(
+          [...event.changedBooks, ...event.check.books],
+          checkLibrary: event.check.wholeLibrary,
+        );
+      } catch (e) {
+        debugPrint('⚠️ שמירת ספרים שהשתנו מריצה שבוטלה נכשלה: $e');
+      }
+      return;
+    }
+
     // רק בקשה שהמשתמש יזם מדווחת. אירועי התחזוקה האוטומטיים (ניקוי יתומים,
     // ספרים חדשים/שהשתנו) נשלחים בכל חלון בכל טעינת ספרייה, וההודעה עליהם
     // קפצה בכל פתיחת חלון משני.
@@ -102,23 +125,13 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
       _repository.resumeIndexing();
     }
 
-    if (event is StartIndexing) {
-      await _onStartIndexing(event, emit);
+    if (event is RunIndexing) {
+      await _onRunIndexing(event, emit);
       return;
     }
 
-    if (event is IndexSpecificBooks) {
-      await _onBooksWork(event.books, event.library, emit, reindex: false);
-      return;
-    }
-
-    if (event is ReindexChangedBooks) {
-      await _onBooksWork(event.books, event.library, emit, reindex: true);
-      return;
-    }
-
-    if (event is ReconcileIndex) {
-      await _onReconcileIndex(event, emit);
+    if (event is SyncBookOrder) {
+      await _repository.syncBookOrder(event.library);
       return;
     }
 
@@ -132,7 +145,7 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
           if (_repository.eligibleBookCount(event.library) == 0) {
             emit(const IndexingComplete());
           } else {
-            await _onStartIndexing(StartIndexing(event.library), emit);
+            await _onRunIndexing(RunIndexing(event.library), emit);
           }
         }
         success =
@@ -173,11 +186,9 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
           throw StateError('מחיקת ספרים מוסתרים מהאינדקס נכשלה');
         }
         if (event.newlyVisible.isNotEmpty) {
-          await _onBooksWork(
-            event.newlyVisible,
-            event.library,
+          await _onRunIndexing(
+            RunIndexing(event.library, books: event.newlyVisible),
             emit,
-            reindex: false,
           );
           success =
               state is IndexingComplete && (state as IndexingComplete).isClean;
@@ -214,57 +225,44 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
     }
   }
 
-  /// Handles the ReconcileIndex event — סריקת התאמה בין האינדקס לספרייה,
-  /// ואינדוקס מחדש של הספרים שנמצאו שונים.
-  Future<void> _onReconcileIndex(
-    ReconcileIndex event,
+  /// ריצת אינדוקס אחת. המצב InProgress נפלט רק כשיש עבודה: בשלב הבדיקה
+  /// עם isScanning, ובלולאה עם מספר הספרים לעבודה — לא כל הספרייה.
+  Future<void> _onRunIndexing(
+    RunIndexing event,
     Emitter<IndexingState> emit,
   ) async {
     final workId = ++_nextWorkId;
     final runClock = Stopwatch()..start();
     _activeWorkId = workId;
 
-    final totalCandidates = _repository.eligibleBookCount(
-      event.library,
-      books: event.books,
-      includePdfBooks: false,
-    );
-    if (totalCandidates == 0) {
-      _activeWorkId = null;
-      return;
-    }
-
-    emit(
-      _inProgress(
-        booksProcessed: 0,
-        totalBooks: totalCandidates,
-        isScanning: true,
-      ),
-    );
-
     await _runIndexing(
       emit,
       workId,
       runClock,
-      () => _repository.reconcileIndexWithLibrary(
+      () => _repository.runIndexing(
         event.library,
-        onlyBooks: event.books,
-        // שלב הסריקה מדווח דרך emit ישיר (ולא UpdateIndexingProgress) כדי
-        // ש-processed==total בסוף הסריקה לא ייתפס כ"אינדוקס הושלם" לפני
-        // שלב האינדוקס-מחדש.
+        books: event.books,
+        changedBooks: event.changedBooks,
+        check: event.check,
+        // שלב הבדיקה נפלט ישירות (ולא UpdateIndexingProgress) כדי ש-
+        // processed==total בסופו לא ייתפס כהתקדמות של שלב האינדוקס.
         onScanProgress: (processed, total) {
           if (_activeWorkId != workId) return;
           emit(
             _inProgress(
               booksProcessed: processed,
               totalBooks: total,
-              isCreatingIndex: state.isCreatingIndex,
               isScanning: true,
             ),
           );
         },
+        onWorkListReady: (total) {
+          if (_activeWorkId != workId) return;
+          emit(_inProgress(booksProcessed: 0, totalBooks: total));
+        },
         onActualIndexingStarted: () => add(ActualIndexingStarted(workId)),
         onProgress: _progressOf(workId),
+        onFinalizing: () => add(IndexingFinalizing(workId)),
       ),
     );
   }
@@ -277,37 +275,6 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
           total: total,
         ),
       );
-
-  /// Handles the StartIndexing event
-  Future<void> _onStartIndexing(
-    StartIndexing event,
-    Emitter<IndexingState> emit,
-  ) async {
-    final workId = ++_nextWorkId;
-    final runClock = Stopwatch()..start();
-    _activeWorkId = workId;
-
-    // Set initial state
-    // מחשב מראש את totalBooks כדי לשדר אותו מיד
-    final totalBooks = _repository.eligibleBookCount(event.library);
-    if (totalBooks == 0) {
-      emit(IndexingInitial());
-      return;
-    }
-    emit(_inProgress(booksProcessed: 0, totalBooks: totalBooks));
-
-    await _runIndexing(
-      emit,
-      workId,
-      runClock,
-      () => _repository.indexAllBooks(
-        event.library,
-        onActualIndexingStarted: () => add(ActualIndexingStarted(workId)),
-        onFinalizing: () => add(IndexingFinalizing(workId)),
-        onProgress: _progressOf(workId),
-      ),
-    );
-  }
 
   void _onActualIndexingStarted(
     ActualIndexingStarted event,
@@ -342,48 +309,6 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
         totalBooks: currentState.totalBooks,
         isCreatingIndex: currentState.isCreatingIndex,
       ),
-    );
-  }
-
-  /// מטפל באינדוקס של רשימת ספרים — חדשים (IndexSpecificBooks) או
-  /// כאלה שתוכנם השתנה (ReindexChangedBooks, עם [reindex] פעיל).
-  Future<void> _onBooksWork(
-    List<Book> books,
-    Library library,
-    Emitter<IndexingState> emit, {
-    required bool reindex,
-  }) async {
-    final workId = ++_nextWorkId;
-    final runClock = Stopwatch()..start();
-    _activeWorkId = workId;
-
-    if (books.isEmpty) {
-      _activeWorkId = null;
-      return;
-    }
-
-    final totalBooks = _repository.eligibleBookCount(library, books: books);
-    emit(_inProgress(booksProcessed: 0, totalBooks: totalBooks));
-
-    onActualIndexingStarted() => add(ActualIndexingStarted(workId));
-    final onProgress = _progressOf(workId);
-    await _runIndexing(
-      emit,
-      workId,
-      runClock,
-      () => reindex
-          ? _repository.reindexChangedBooks(
-              books,
-              library,
-              onActualIndexingStarted: onActualIndexingStarted,
-              onProgress: onProgress,
-            )
-          : _repository.indexBooks(
-              books,
-              library,
-              onActualIndexingStarted: onActualIndexingStarted,
-              onProgress: onProgress,
-            ),
     );
   }
 
@@ -456,6 +381,7 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
   ) {
     _activeWorkId = null;
     _isPaused = false;
+    _cancelCount++;
     _repository.cancelIndexing();
     emit(IndexingStopped());
   }

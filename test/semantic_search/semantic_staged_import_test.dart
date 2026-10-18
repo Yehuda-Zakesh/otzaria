@@ -12,6 +12,7 @@ import 'package:otzaria/semantic_search/models/semantic_import_layout.dart';
 import 'package:otzaria/semantic_search/models/semantic_model_identity.dart';
 import 'package:otzaria/semantic_search/models/semantic_model_release.dart';
 import 'package:otzaria/semantic_search/models/semantic_paths.dart';
+import 'package:otzaria/semantic_search/models/semantic_vectors_family.dart';
 import 'package:otzaria/semantic_search/models/semantic_vectors_release.dart';
 import 'package:otzaria/semantic_search/repository/semantic_release_locator.dart';
 import 'package:otzaria/semantic_search/repository/semantic_staged_import.dart';
@@ -47,23 +48,47 @@ final Map<SemanticQuantization, SemanticModelRelease?> _smallModel = {
   SemanticQuantization.fp32: null,
 };
 
+int _chunkingOf(SemanticVectorsFamily family) =>
+    SemanticModelIdentity.parse(bundledModelJson(family)).chunkingIdentity;
+
+final List<SemanticVectorsCandidate> _anchorOnly = [
+  (
+    family: SemanticVectorsFamily.anchor,
+    chunkingIdentity: _chunkingOf(SemanticVectorsFamily.anchor),
+  ),
+];
+
+final List<SemanticVectorsCandidate> _windowsFirst = [
+  (
+    family: SemanticVectorsFamily.windows,
+    chunkingIdentity: _chunkingOf(SemanticVectorsFamily.windows),
+  ),
+  ..._anchorOnly,
+];
+
 /// מניפסט וקטורים בצורה שמתפרסמת ב-SeforimLibrary.
-String _manifest({String segment = 'segment', int version = 30}) =>
-    const JsonEncoder.withIndent('  ').convert({
-      'format': 'otzaria-vectors-release',
-      'kind': 'base',
-      'fromLibraryVersion': 0,
-      'toLibraryVersion': version,
-      'libraryReleaseTag': 'v$version-20260930165019',
-      'segment': {'sha256': 'cd' * 32, 'size': 99},
-      'files': [
-        {
-          'file': _segmentName,
-          'sha256': _sha(utf8.encode(segment)),
-          'size': utf8.encode(segment).length,
-        },
-      ],
-    });
+String _manifest({
+  String segment = 'segment',
+  int version = 30,
+  SemanticVectorsFamily family = SemanticVectorsFamily.anchor,
+}) => const JsonEncoder.withIndent('  ').convert({
+  'format': 'otzaria-vectors-release',
+  'kind': 'base',
+  'identity': {
+    'model': {'chunking_identity': _chunkingOf(family)},
+  },
+  'fromLibraryVersion': 0,
+  'toLibraryVersion': version,
+  'libraryReleaseTag': 'v$version-20260930165019',
+  'segment': {'sha256': 'cd' * 32, 'size': 99},
+  'files': [
+    {
+      'file': _segmentName,
+      'sha256': _sha(utf8.encode(segment)),
+      'size': utf8.encode(segment).length,
+    },
+  ],
+});
 
 class _UnreachableLocator extends SemanticVectorsReleaseLocator {
   int lookups = 0;
@@ -72,6 +97,7 @@ class _UnreachableLocator extends SemanticVectorsReleaseLocator {
   Future<SemanticVectorsRelease?> findForLibraryVersion(
     int libraryVersion, {
     String? libraryTag,
+    required List<SemanticVectorsCandidate> candidates,
   }) async {
     lookups++;
     throw const SocketException('no network');
@@ -387,6 +413,7 @@ void main() {
     final release = SemanticStagedImport.parseStagedManifest(
       utf8.encode(_manifest()),
       30,
+      _anchorOnly,
     )!;
     final backend = FakeBackend();
     final downloads = FakeDownloads();
@@ -589,6 +616,7 @@ void main() {
       SemanticStagedImport.parseStagedManifest(
         utf8.encode(_manifest(version: 29)),
         30,
+        _anchorOnly,
       ),
       isNull,
     );
@@ -600,9 +628,143 @@ void main() {
           '"size":1,"sha256":"aa"}],"segment":{"size":1}}',
         ),
         30,
+        _anchorOnly,
       ),
       throwsFormatException,
     );
+  });
+
+  test('מניפסט מוכן נושא את משפחת ה-chunking שלו, ושל משפחה זרה אינו משמש', () {
+    final bytes = utf8.encode(
+      _manifest(family: SemanticVectorsFamily.windows),
+    );
+    final release = SemanticStagedImport.parseStagedManifest(
+      bytes,
+      30,
+      _windowsFirst,
+    )!;
+    expect(release.family, SemanticVectorsFamily.windows);
+    expect(release.releaseTag, 'vectors-windows-$_tag');
+    expect(
+      release.files.single.downloadUrl,
+      semanticVectorsAssetUrl(
+        _tag,
+        _segmentName,
+        releaseTagPrefix: 'vectors-windows-',
+      ),
+    );
+    expect(
+      SemanticStagedImport.parseStagedManifest(bytes, 30, _anchorOnly),
+      isNull,
+    );
+  });
+
+  test('מנוע עם חלונות: נתונים מוכנים של הסט הישן גוברים על הרשת', () async {
+    final manifest = stageAll();
+    final backend = FakeBackend()..supportsLongLineWindows = true;
+    final downloads = FakeDownloads();
+    final locator = FakeLocator(
+      releaseV30(
+        family: SemanticVectorsFamily.windows,
+        chunkingIdentity: _chunkingOf(SemanticVectorsFamily.windows),
+      ),
+    );
+    final repository = buildRepository(
+      root: root,
+      backend: backend,
+      locator: locator,
+      download: downloads.call,
+      modelReleases: _smallModel,
+    );
+
+    await repository.enableAndDownload();
+
+    expect(locator.lookups, isEmpty);
+    expect(downloads.urls, isEmpty);
+    final install = backend.installRequests.single;
+    expect(install.manifestJson, manifest);
+    expect(install.modelIdentityJson, bundledModelJson());
+  });
+
+  for (final payload in <String?>[null, 'short']) {
+    test('מניפסט ישן ללא קובץ תואם מאפשר גילוי חלונות ($payload)', () async {
+      write(
+        staged(kSemanticImportVectorsFolderName, _manifestName),
+        _manifest(),
+      );
+      if (payload != null) {
+        write(staged(kSemanticImportVectorsFolderName, _segmentName), payload);
+      }
+      // Model files alone must not give the old vector family priority.
+      write(staged(kSemanticModelFolderName, 'model.onnx'), 'model');
+      final importer = SemanticStagedImport(() async => paths());
+      final windows = SemanticStagedImport.parseStagedManifest(
+        utf8.encode(_manifest(family: SemanticVectorsFamily.windows)),
+        30,
+        _windowsFirst,
+      )!;
+      var onlineCalled = false;
+
+      final release = await importer.locate(
+        30,
+        offline: false,
+        candidates: _windowsFirst,
+        online: () async {
+          onlineCalled = true;
+          return windows;
+        },
+      );
+
+      expect(onlineCalled, isTrue);
+      expect(release, windows);
+    });
+  }
+
+  test('מניפסט מוכן עם מבנה segment שגוי נדחה וממשיכים לרשת', () async {
+    final manifest = jsonDecode(_manifest()) as Map<String, dynamic>;
+    manifest['segment'] = 'invalid shape';
+    write(
+      staged(kSemanticImportVectorsFolderName, _manifestName),
+      jsonEncode(manifest),
+    );
+    final importer = SemanticStagedImport(() async => paths());
+    var onlineCalled = false;
+
+    expect(
+      await importer.locate(
+        30,
+        offline: false,
+        candidates: _windowsFirst,
+        online: () async {
+          onlineCalled = true;
+          return null;
+        },
+      ),
+      isNull,
+    );
+    expect(onlineCalled, isTrue);
+  });
+
+  test('מנוע בלי חלונות: הרשת נבדקת קודם, כמו תמיד', () async {
+    stageAll();
+    final locator = FakeLocator(
+      SemanticStagedImport.parseStagedManifest(
+        utf8.encode(_manifest()),
+        30,
+        _anchorOnly,
+      ),
+    );
+    final repository = buildRepository(
+      root: root,
+      backend: FakeBackend(),
+      locator: locator,
+      download: FakeDownloads().call,
+      modelReleases: _smallModel,
+    );
+
+    await repository.enableAndDownload();
+
+    expect(locator.lookups, [30]);
   });
 
   test('בלי רשת ובלי נתונים מוכנים — הכשל המקורי נשאר', () async {
