@@ -1,7 +1,7 @@
 /// מנהג הקריאות (א"י/חו"ל) נגזר מהעיר שבלוח השנה כל עוד לא נבחר במפורש.
 library;
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_settings.dart';

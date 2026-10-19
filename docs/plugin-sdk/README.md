@@ -353,6 +353,16 @@ Otzaria.on('plugin.suspended', stop);   // עצירת timers / polling / WebSock
 | `reader.openBookAtRef` | `reader.open` | `{ bookId, ref, index?, highlight? }` | `boolean` |
 | `reader.printRange` | `reader.open` | `{ bookUid \| id \| bookId, startIndex, endIndex?, commentators? }` | `{ printed }` |
 | `reader.getCurrentState` | `reader.open` | — | `ReaderState` |
+| `reader.beginCorrectionSession` | `reader.local_edit` | `{ tabId }` | `CorrectionSessionSnapshot & { recovery }` |
+| `reader.getCorrectionSession` | `reader.local_edit` | `{ sessionId }` | `CorrectionSessionSnapshot` |
+| `reader.restoreCorrectionDraft` | `reader.local_edit` | `{ sessionId, bookUid, libraryVersion, expectedRevision, changes }` | `CorrectionSessionSnapshot` |
+| `reader.resetCorrection` | `reader.local_edit` | `{ sessionId, sectionIndex, expectedRevision }` | `CorrectionSessionSnapshot` |
+| `reader.endCorrectionSession` | `reader.local_edit` | `{ sessionId, expectedRevision }` | `CorrectionSessionSnapshot` |
+| `reader.acknowledgeCorrectionDraft` | `reader.local_edit` | `{ draftId, version }` | `{ draftId, version, acknowledged, duplicate }` |
+| `reader.listCorrectionDrafts` | `reader.local_edit` | `{}` | `{ drafts: CorrectionDraftSummary[] }` |
+| `reader.getCorrectionDraft` | `reader.local_edit` | `{ draftId }` | `CorrectionDraft` |
+
+אוצריא שומרת כל סשן תיקון בטיוטה עמידה עד שהתוסף מאשר אותה ב־`acknowledgeCorrectionDraft`; ראו [חוזה השמירה וההתאוששות](API_REFERENCE.md#חוזה-שמירה-והתאוששות-של-טיוטות-תיקון).
 
 ### navigation.*
 
@@ -586,6 +596,7 @@ const { data: keys } = await Otzaria.call('storage.list');
 | `library.books.provide` | הוספת ספרים מהתוסף לאיתור הספרים במסך הספרייה (`contributes.startup.libraryBooks`); לחיצה על ספר כזה נמסרת לתוסף |
 | `search.fulltext.read` | חיפוש טקסט מלא |
 | `reader.open` | פתיחת ספרים + קריאת מצב הקורא |
+| `reader.local_edit` | שכבת תיקונים זמנית בקורא הטקסט הרשמי, ללא כתיבה למקור; מ־0.9.99 |
 | `navigation.write` | ניווט בין מסכים |
 | `plugin.open_other` | פתיחת דף של תוסף אחר המותקן אצל המשתמש (`plugin.openOther`), כולל הפעלת הקוד שלו |
 | `notes.read` | קריאת הערות אישיות |

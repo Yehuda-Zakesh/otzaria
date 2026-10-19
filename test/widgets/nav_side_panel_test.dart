@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/theme/app_surfaces.dart';
 import 'package:otzaria/widgets/layout/adaptive_side_pane.dart';
 import 'package:otzaria/widgets/layout/floating_panel.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/widgets/navigation/nav_side_panel.dart';
 import '../helpers/memory_settings_cache.dart';
 

@@ -1,4 +1,4 @@
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 
 /// A wrapper around the static Settings class to make it more testable.
 /// This allows us to mock the Settings class in tests.

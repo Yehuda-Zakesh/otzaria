@@ -1,7 +1,7 @@
 // לתחזוקת הסיור המודרך ראו: docs/guided_tour_developer_guide.md
 
 import 'package:flutter/widgets.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
 import 'package:otzaria/shortcuts/shortcut_helper.dart';
 import 'package:otzaria/shortcuts/shortcut_validator.dart';

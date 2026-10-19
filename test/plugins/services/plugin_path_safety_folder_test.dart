@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/plugins/services/plugin_path_safety.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';

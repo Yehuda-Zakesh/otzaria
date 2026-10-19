@@ -1,4 +1,4 @@
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 
 /// מתג "כלול ספרים אישיים" של האיתור. מקור יחיד לדיאלוג, לקישורים ולסיור —
 /// ברירת מחדל נפרדת במסלול אחד מסננת ספרים אישיים בשקט כשהמתג מוצג דלוק.

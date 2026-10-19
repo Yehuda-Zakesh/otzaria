@@ -1,5 +1,25 @@
 /// ריכוז הודעות המערכת (UiSnack) של מערכת התוספים.
 abstract class PluginMessages {
+  static String correctionEditRejected(String message) =>
+      'התיקון לא הוחל: $message';
+  static String correctionRecovered({
+    required int applied,
+    required int conflicts,
+  }) => [
+    if (applied > 0) 'שוחזרו $applied תיקונים מטיוטה קודמת.',
+    if (conflicts > 0)
+      '$conflicts תיקונים לא הוחלו כי המקור השתנה; הם נשמרו בטיוטה.',
+  ].join(' ');
+  static const String correctionDraftSaveFailed =
+      'שמירת טיוטת התיקון נכשלה. השינויים עדיין מוצגים, והשמירה תנוסה שוב.';
+  static const String correctionDraftRetry = 'נסה שוב';
+  static const String correctionDraftSaved = 'טיוטת התיקון נשמרה.';
+  static const String correctionOwnershipLost =
+      'סשן התיקון הסתיים כי הספר נפתח לעריכה בחלון אחר. תיקונים שלא נשמרו נשמרים בטיוטה כהתנגשויות.';
+  static const String correctionQuitUnverified =
+      'לא ניתן לוודא שכל תיקוני התוספים נשמרו. היציאה בוטלה.';
+  static const String correctionQuitFlushFailed =
+      'שמירת תיקוני התוספים נכשלה בחלון אחד לפחות. היציאה בוטלה.';
   static const String nativeTextReader = 'קורא רגיל';
   static const String textReaderSettings = 'הגדרות קורא התוסף';
   static const String externalBookNotFound = 'הספר לא נמצא בקטלוג החיצוני';

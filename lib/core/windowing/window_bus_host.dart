@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -27,6 +28,8 @@ import 'package:otzaria/navigation/bloc/navigation_event.dart';
 import 'package:otzaria/navigation/bloc/navigation_state.dart';
 import 'package:otzaria/navigation/view/main_window_screen.dart';
 import 'package:otzaria/plugins/view/webview_environment_holder.dart';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
+import 'package:otzaria/plugins/storage/plugin_system_database.dart';
 import 'package:otzaria/plugins/utils/plugin_safe_mode.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_event.dart';
@@ -236,6 +239,102 @@ class _WindowBusHostState extends State<WindowBusHost> {
         );
       case MultiWindowService.requestCloseWindow:
         return _closeSelfPolitely();
+      case MultiWindowService.requestPrepareCorrectionQuit:
+        final corrections = PluginCorrectionSessionService.instance;
+        final requestId = request['requestId'];
+        if (requestId is! String ||
+            !corrections.beginProcessQuitPreparation(requestId)) {
+          return {'locked': false};
+        }
+        final unsaved = await corrections.unsavedStates();
+        return {
+          'locked': true,
+          'slot': WindowBus.instance.slot,
+          'unsaved': [
+            for (final state in unsaved)
+              {
+                'tabId': state.tabId,
+                'ownerName': state.ownerName,
+                'bookId': state.bookId,
+              },
+          ],
+        };
+      case MultiWindowService.requestPrepareCorrectionStorageMove:
+        final corrections = PluginCorrectionSessionService.instance;
+        final requestId = request['requestId'];
+        if (requestId is! String ||
+            !corrections.beginProcessQuitPreparation(requestId)) {
+          return false;
+        }
+        try {
+          final ready = await corrections.prepareForStorageMove(requestId);
+          if (!ready) {
+            corrections.cancelProcessQuitPreparation(requestId);
+          }
+          return ready;
+        } catch (_) {
+          corrections.cancelProcessQuitPreparation(requestId);
+          return false;
+        }
+      case MultiWindowService.requestFinishCorrectionStorageMove:
+        final corrections = PluginCorrectionSessionService.instance;
+        final requestId = request['requestId'];
+        if (requestId is! String) return false;
+        try {
+          final finished = await corrections.finishStorageMovePreparation(
+            requestId,
+          );
+          if (finished) {
+            await PluginSystemDatabase.instance.lockForStorageMove(requestId);
+          }
+          return finished;
+        } catch (_) {
+          return false;
+        }
+      case MultiWindowService.requestFinishCorrectionQuit:
+        final corrections = PluginCorrectionSessionService.instance;
+        final requestId = request['requestId'];
+        if (requestId is! String ||
+            !corrections.isProcessQuitPreparedFor(requestId)) {
+          return false;
+        }
+        final accepted = (request['accepted'] as List? ?? const [])
+            .whereType<String>()
+            .toSet();
+        final remaining = await corrections.unsavedStates();
+        final remainingIds = {
+          for (final state in remaining)
+            jsonEncode([
+              WindowBus.instance.slot,
+              state.tabId,
+              state.ownerName,
+              state.bookId,
+            ]),
+        };
+        if (!remainingIds.every(accepted.contains)) return false;
+        return true;
+      case MultiWindowService.requestEndCorrectionSessions:
+        final requestId = request['requestId'];
+        final corrections = PluginCorrectionSessionService.instance;
+        if (requestId is! String ||
+            !corrections.isProcessQuitPreparedFor(requestId)) {
+          return false;
+        }
+        await corrections.shutdown(timeout: const Duration(seconds: 5));
+        return true;
+      case MultiWindowService.requestFlushCorrectionSessions:
+        return PluginCorrectionSessionService.instance.flushAll(
+          timeout: const Duration(seconds: 3),
+        );
+      case MultiWindowService.requestCancelCorrectionQuit:
+        final requestId = request['requestId'];
+        if (requestId is String) {
+          PluginSystemDatabase.instance.releaseStorageMove(requestId);
+          PluginCorrectionSessionService.instance.cancelProcessQuitPreparation(
+            requestId,
+          );
+        }
+        return true;
       default:
         return null;
     }

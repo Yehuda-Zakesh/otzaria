@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/plugins/database/plugin_database_service.dart';
 import 'package:otzaria/plugins/declarative/compiler/declarative_value_checks.dart';
 import 'package:otzaria/plugins/declarative/models/declarative_program.dart';

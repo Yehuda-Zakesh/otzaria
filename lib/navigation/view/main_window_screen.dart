@@ -38,7 +38,7 @@ import 'package:otzaria/navigation/bloc/navigation_event.dart';
 import 'package:otzaria/navigation/bloc/navigation_state.dart';
 import 'package:otzaria/navigation/startup_indexing_decision.dart';
 import 'package:otzaria/navigation/view/startup_work_gate.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/find_ref/bloc/find_ref_bloc.dart';
 import 'package:otzaria/find_ref/view/find_ref_dialog.dart';
 import 'package:otzaria/find_ref/bloc/find_ref_event.dart';

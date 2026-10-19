@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:hive_ce/hive.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/windowing/settings_sync.dart';
@@ -191,10 +191,6 @@ class HiveCache extends CacheProvider {
   }
 
   /// מחיקת כל ההגדרות, בהמתנה לסיומה.
-  ///
-  /// `Settings.clearCache` של החבילה הוא `void` ואינו ממתין ל-Future של
-  /// המחיקה: איפוס דרכו מתחיל בנייה מחדש בזמן שהמחיקה עוד רצה, וברירות
-  /// המחדל שנכתבות מיד אחריו נמחקות איתה.
   static Future<void> clearAllPreferences() async {
     if (!Hive.isBoxOpen(keyName)) return;
     await Hive.box<dynamic>(keyName).clear();

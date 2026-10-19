@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart' show debugPrint;
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 
 /// העדפת "מילים שלמות בלבד" של החיפוש בתוך ספר (טקסט ו-PDF).
 ///

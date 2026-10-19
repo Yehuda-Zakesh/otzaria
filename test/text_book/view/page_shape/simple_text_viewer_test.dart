@@ -6,8 +6,9 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_quill/flutter_quill.dart' as quill;
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/book_protection/repository/book_protection_repository.dart';
 import 'package:otzaria/data/data_providers/library_provider.dart';
 import 'package:otzaria/data/data_providers/library_provider_manager.dart';
 import 'package:otzaria/library/models/library.dart';
@@ -1500,7 +1501,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(
-        isCommentaryFocusNode(FocusManager.instance.primaryFocus),
+        isOtherSelectionFocusNode(FocusManager.instance.primaryFocus),
         isFalse,
       );
 
@@ -1514,7 +1515,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(
-        isCommentaryFocusNode(FocusManager.instance.primaryFocus),
+        isOtherSelectionFocusNode(FocusManager.instance.primaryFocus),
         isTrue,
         reason: 'הטקסט הראשי אסור לו לחטוף בחזרה את הפוקוס מהמפרש שנלחץ',
       );
@@ -1530,7 +1531,7 @@ void main() {
         'PageShapeContentFocus',
       );
       expect(
-        isCommentaryFocusNode(FocusManager.instance.primaryFocus),
+        isOtherSelectionFocusNode(FocusManager.instance.primaryFocus),
         isFalse,
       );
       // ממתינים לטיימר זיהוי הלחיצה הכפולה.
@@ -2273,6 +2274,106 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
     await tester.pump();
     expect(copied, ['רבי יוחנן הלכה']);
+  });
+
+  testWidgets('Ctrl+C בחלונית צפה מעתיק את מה שסומן בה (issue #2764)', (
+    tester,
+  ) async {
+    // ספר בלי הגבלת מו"ל — בלי לפתוח את מסד הספרייה.
+    BookProtectionRepository.instance.debugRepositoryFor = (_) async => null;
+    addTearDown(BookProtectionRepository.instance.debugReset);
+    final link = Link(
+      heRef: 'שער הציון, א',
+      index1: 1,
+      path2: 'שער הציון',
+      index2: 1,
+      connectionType: 'commentary',
+      anchorStart: 0,
+      anchorLabel: 'א',
+    );
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(LinkPreviewOverlay.dismiss);
+    await tester.pumpWidget(
+      MultiBlocProvider(
+        providers: [
+          BlocProvider<TextBookBloc>.value(
+            value: _TestTextBookBloc(
+              _loadedState().copyWith(
+                content: const ['abcdef'],
+                linksByLine: {
+                  1: [link],
+                },
+              ),
+            ),
+          ),
+          BlocProvider<PersonalNotesBloc>.value(
+            value: _TestPersonalNotesBloc(const PersonalNotesState.initial()),
+          ),
+          BlocProvider<SettingsBloc>.value(
+            value: _TestSettingsBloc(SettingsState.initial()),
+          ),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                Expanded(
+                  child: SimpleTextViewer(
+                    content: const ['abcdef'],
+                    fontSize: 18,
+                    openBookCallback: (_) {},
+                    isMainText: true,
+                  ),
+                ),
+                const SelectionArea(child: Text('פאנל צד')),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // אזור בחירה באותו מסך (פאנל צד) — הטקסט הראשי ממשיך להחזיר אליו את
+    // הפוקוס, כדי שהחיצים ימשיכו לגלול אותו.
+    await tester.tap(find.text('פאנל צד'), kind: PointerDeviceKind.mouse);
+    await tester.pumpAndSettle();
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'PageShapeContentFocus',
+    );
+    tester
+        .widgetList<SmartTextWidget>(find.byType(SmartTextWidget))
+        .firstWhere((widget) => widget.onAnchorHover != null)
+        .onAnchorHover!('otzaria://anchor?ref=0_0', const Offset(300, 100));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+
+    final word = _wordBox(tester, 'שער הציון');
+    final gesture = await tester.startGesture(
+      Offset(word.right - 1, word.center.dy),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+    await gesture.moveTo(Offset(word.left + 1, word.center.dy));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+
+    expect(copied, ['שער הציון']);
   });
 
   testWidgets('גלילה של יותר ממסך וחזרה שומרת את הבחירה (issue #2014)', (

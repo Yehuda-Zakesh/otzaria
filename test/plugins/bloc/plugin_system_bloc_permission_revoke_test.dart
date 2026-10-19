@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/data/sqlite/sqlite3_api.dart';
+import 'package:otzaria/plugins/repository/plugin_correction_draft_repository.dart';
 import 'package:otzaria/plugins/services/plugin_new_tab_page_registry.dart';
 import 'package:otzaria/plugins/models/plugin_valid_permissions.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
@@ -13,6 +15,7 @@ import 'package:otzaria/plugins/services/context_menu_registry.dart';
 import 'package:otzaria/plugins/services/plugin_external_search_service.dart';
 import 'package:otzaria/plugins/services/plugin_highlight_registry.dart';
 import 'package:otzaria/plugins/services/plugin_in_book_search_service.dart';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/plugins/services/plugin_lazy_activation_service.dart';
 import 'package:otzaria/plugins/services/plugin_shortcut_registry.dart';
 import 'package:otzaria/plugins/services/plugin_toolbar_registry.dart';
@@ -36,6 +39,9 @@ class _FakeRepo implements PluginRegistryRepository {
 
   @override
   Future<List<InstalledPlugin>> getDevelopmentPlugins() async => [];
+
+  @override
+  Future<void> detachDevelopmentPlugin(String id) async {}
 
   @override
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
@@ -118,9 +124,19 @@ void main() {
   );
   const menuItem = PluginContextMenuItem(id: 'item', label: 'Item');
 
-  tearDown(() {
+  late Database correctionDb;
+
+  setUp(() {
+    correctionDb = sqlite3.openInMemory();
+    PluginCorrectionSessionService.instance.draftRepository =
+        PluginCorrectionDraftRepository.direct(correctionDb);
+  });
+
+  tearDown(() async {
     PluginNewTabPageRegistry.instance.remove('p1');
     PluginNewTabPageRegistry.instance.remove('p2');
+    PluginCorrectionSessionService.instance.removeOwner('p1');
+    PluginCorrectionSessionService.instance.removeOwner('p2');
     PluginToolbarRegistry.instance.removeAll('p1');
     ContextMenuRegistry.instance.removeAll('p1');
     PluginShortcutRegistry.instance.removeAll('p1');
@@ -129,6 +145,8 @@ void main() {
     PluginExternalSearchService.instance.removePlugin('p1');
     PluginInBookSearchService.instance.removePlugin('p1');
     PluginLazyActivationService.instance.backgroundDeactivator = null;
+    await _idle();
+    correctionDb.close();
   });
 
   Future<void> revoke(String permission) async {
@@ -201,6 +219,81 @@ void main() {
     );
   });
 
+  group('סשני תיקון מקומיים', () {
+    final events = <(String, Map<String, dynamic>)>[];
+
+    Future<void> beginFor(String owner, String tab) =>
+        PluginCorrectionSessionService.instance.begin(
+          owner: owner,
+          tabId: tab,
+          bookId: 'ספר',
+          bookUid: 'id:1',
+          libraryVersion: '1',
+          loadSource: (_) async => 'מקור',
+          onEvent: (topic, payload) => events.add((topic, payload)),
+        );
+
+    setUp(events.clear);
+
+    test(
+      'שלילת reader.local_edit מסיימת את הסשן עם plugin_unavailable',
+      () async {
+        await beginFor('p1', 'tab-1');
+
+        await revoke('reader.local_edit');
+        await _idle();
+
+        expect(
+          PluginCorrectionSessionService.instance.hasSessionForTab('tab-1'),
+          isFalse,
+        );
+        expect(events.single.$1, 'reader.correctionSessionEnded');
+        expect(events.single.$2['reason'], 'plugin_unavailable');
+      },
+    );
+
+    test('ניתוק תוסף פיתוח מסיים את הסשן שלו', () async {
+      await beginFor('p1', 'tab-1');
+      final bloc = PluginSystemBloc(repository: _FakeRepo());
+      addTearDown(bloc.close);
+
+      bloc.add(const DetachDevelopmentPluginRequested('p1'));
+      await Future<void>.delayed(Duration.zero);
+      await _idle();
+
+      expect(
+        PluginCorrectionSessionService.instance.hasSessionForTab('tab-1'),
+        isFalse,
+      );
+      expect(events.single.$2['reason'], 'plugin_unavailable');
+    });
+
+    test('שלילת הרשאה אחרת משאירה את הסשן', () async {
+      await beginFor('p1', 'tab-1');
+
+      await revoke('reader.open');
+      await _idle();
+
+      expect(
+        PluginCorrectionSessionService.instance.hasSessionForTab('tab-1'),
+        isTrue,
+      );
+      expect(events, isEmpty);
+    });
+
+    test('שלילת הרשאה של תוסף אחד אינה מסיימת סשן של תוסף אחר', () async {
+      await beginFor('p2', 'tab-2');
+
+      await revoke('reader.local_edit');
+      await _idle();
+
+      expect(
+        PluginCorrectionSessionService.instance.hasSessionForTab('tab-2'),
+        isTrue,
+      );
+    });
+  });
+
   test('revoking an unrelated permission keeps the registrations', () async {
     PluginToolbarRegistry.instance.register('p1', toolbarItem);
     ContextMenuRegistry.instance.register('p1', menuItem);
@@ -270,5 +363,12 @@ void main() {
         expect(deactivations, ['p1']);
       },
     );
+  }
+}
+
+/// סיום סשן תיקון (שמירה, שחרור lease ואירוע) רץ אחרי ההסרה עצמה.
+Future<void> _idle() async {
+  for (var i = 0; i < 20; i++) {
+    await Future<void>.delayed(Duration.zero);
   }
 }

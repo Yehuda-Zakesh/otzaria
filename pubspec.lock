@@ -728,14 +728,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.13.0"
-  flutter_settings_screens:
-    dependency: "direct main"
-    description:
-      name: flutter_settings_screens
-      sha256: b9e5ff87537fceeb67012560db6ef4bb0ff7d7a031e8184e1689538756ca99a0
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.3.4"
   flutter_spinbox:
     dependency: "direct main"
     description:
@@ -1589,8 +1581,8 @@ packages:
     dependency: "direct main"
     description:
       path: "packages/scrollable_positioned_list"
-      ref: master
-      resolved-ref: ebe2f4ef9f27cd5bbb095d01e524c5cd714f7aa5
+      ref: 19113e3925833d68d076ffd2c0c4f85b89a50c82
+      resolved-ref: 19113e3925833d68d076ffd2c0c4f85b89a50c82
       url: "https://github.com/Otzaria/flutter.widgets"
     source: git
     version: "0.3.8+1"
@@ -1629,7 +1621,7 @@ packages:
     source: git
     version: "9.30.1"
   shared_preferences:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: shared_preferences
       sha256: "1e85e0dccf5b4a016077fea7dfbb4a7cb39c759ac1596fcf60c06deadb7da91f"

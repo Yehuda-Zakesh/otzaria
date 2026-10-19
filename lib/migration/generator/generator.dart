@@ -6,6 +6,8 @@ import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
 import 'package:pdfrx/pdfrx.dart';
 
+import 'package:otzaria/models/books.dart' show flattenToc;
+
 import '../models/book.dart';
 import '../models/category.dart';
 import '../models/line.dart';
@@ -18,7 +20,7 @@ import 'package:otzaria/utils/file/document_converter.dart';
 import 'package:otzaria/utils/file/document_format.dart';
 import 'package:otzaria/utils/file/text_encoding.dart';
 import 'package:otzaria/utils/file/toc_parser.dart'
-    show isTocExcludedHeadingLine;
+    show TocParser, isTocExcludedHeadingLine;
 
 /// DatabaseGenerator is responsible for generating the Otzaria database from source files.
 /// It processes directories, books, and links to create a structured database.
@@ -248,20 +250,24 @@ class DatabaseGenerator {
       // וחייב לשמור אותו כדי שאפשר יהיה להמיר בזמן קריאה.
       final storesLinesInDb = format?.canStoreLinesInDb ?? false;
       final targetFilePath = storesLinesInDb && insertContent ? null : bookPath;
+      // PDFium גלובלי לתהליך: אין לפתוח PDF ב-isolate של הסנכרון.
+      // ה-outline שלו נקרא בהוספת התיקייה.
+      final processContent = insertContent || (format?.isTextual ?? false);
 
       // Check for duplicates in the same category with the same file type (for performance measurement)
       final existingBook = await repository
           .checkBookExistsInCategoryWithFileType(title, categoryId, fileType);
       if (existingBook != null) {
-        if ((format?.isProductionSupported ?? false) && insertContent) {
-          await repository.clearBookContent(existingBook.id);
-          // כשל כאן משאיר את הספר בלי תוכן, אך גם בלי לעדכן את חותמת הקובץ
-          // (`updateBookStorage` שלמטה) — ולכן הסריקה הבאה תנסה שוב במקום
-          // לדלג עליו כ"לא השתנה".
-          try {
-            await processBookContent(bookPath, existingBook.id);
-          } catch (_) {
+        if ((format?.isProductionSupported ?? false) && processContent) {
+          if (insertContent) {
             await repository.clearBookContent(existingBook.id);
+          }
+          try {
+            await processBookContent(bookPath, existingBook.id, insertContent);
+          } catch (_) {
+            if (insertContent) {
+              await repository.clearBookContent(existingBook.id);
+            }
             rethrow;
           }
           // Keep file stats and storage location in sync. If insertContent is true and it's a txt file, filePath becomes null.
@@ -355,9 +361,9 @@ class DatabaseGenerator {
       final insertedBookId = await repository.insertBook(book);
 
       // Process content of the book
-      if (insertContent) {
+      if (processContent) {
         try {
-          await processBookContent(bookPath, insertedBookId);
+          await processBookContent(bookPath, insertedBookId, insertContent);
         } catch (_) {
           // כל כשל משאיר את הספר ניתן לניסיון חוזר בסריקה הבאה.
           await repository.deleteBookCompletely(insertedBookId);
@@ -399,7 +405,12 @@ class DatabaseGenerator {
   ///
   /// [bookPath] The path to the book file
   /// [bookId] The ID of the book in the database
-  Future<void> processBookContent(String bookPath, int bookId) async {
+  /// [storeLines] בספר חיצוני נשמר רק תוכן העניינים.
+  Future<void> processBookContent(
+    String bookPath,
+    int bookId, [
+    bool storeLines = true,
+  ]) async {
     final format = documentFormatFromExtension(bookPath);
     if (format == null) {
       throw UnsupportedDocumentFormatException(path: bookPath);
@@ -412,31 +423,42 @@ class DatabaseGenerator {
       return;
     }
 
-    if (format.requiresConversion) {
-      // הקריאה בתוך ה-isolate — נמנעת העתקת buffer גדול בין isolates.
-      // בלי תמונות: כאן נדרש רק מבנה השורות ותוכן העניינים.
-      final content = await Isolate.run(
-        () => convertDocumentFileSync(
-          bookPath,
-          format: format,
-          embedImages: false,
-        ),
-      );
-      final lines = content.split('\n');
+    // המרה בתוך ה-isolate — נמנעת העתקת buffer גדול בין isolates. בלי
+    // תמונות: כאן נדרש רק מבנה השורות ותוכן העניינים. אחרת — מטמון ה-RAM.
+    final lines = format.requiresConversion
+        ? (await Isolate.run(
+            () => convertDocumentFileSync(
+              bookPath,
+              format: format,
+              embedImages: false,
+            ),
+          )).split('\n')
+        : _bookContentCache[_toLibraryRelativeKey(bookPath)] ??
+              await readBookLines(bookPath);
 
-      await processLinesWithTocEntries(bookId, lines);
-      await repository.updateBookTotalLines(bookId, lines.length);
+    if (!storeLines) {
+      final roots = TocParser.parseEntriesFromContent(lines.join('\n'));
+      final headings = flattenToc(roots);
+      final ids = {
+        for (var i = 0; i < headings.length; i++) headings[i]: i + 1,
+      };
+      await repository.replaceExternalBookToc(bookId, [
+        for (final entry in headings)
+          TocEntry(
+            id: ids[entry]!,
+            bookId: bookId,
+            parentId: ids[entry.parent],
+            text: entry.text,
+            level: entry.level,
+            lineIndex: entry.index,
+            hasChildren: entry.children.isNotEmpty,
+            isLastChild: (entry.parent?.children ?? roots).last == entry,
+          ),
+      ]);
       return;
     }
 
-    // Prefer preloaded content from RAM if available
-    final key = _toLibraryRelativeKey(bookPath);
-    final lines = _bookContentCache[key] ?? await readBookLines(bookPath);
-
-    // Process each line one by one, handling TOC entries as we go
     await processLinesWithTocEntries(bookId, lines);
-
-    // Update the total number of lines
     await repository.updateBookTotalLines(bookId, lines.length);
   }
 

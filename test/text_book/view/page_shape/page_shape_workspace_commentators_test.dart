@@ -2,7 +2,7 @@
 // ספר הציג את אותם מפרשים בכל שולחנות העבודה. כאן נבדק תחום השמירה
 // פר-שולחן-עבודה: הוא גובר על הגדרת הספר, ורק בשולחן שבו נשמר.
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_settings_manager.dart';
 

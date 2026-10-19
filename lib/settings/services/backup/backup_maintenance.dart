@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/core/app_paths.dart';

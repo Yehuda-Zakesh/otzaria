@@ -3,7 +3,7 @@ import 'package:otzaria/tabs/utils/touch_tab_swipe_recognizer.dart';
 import 'package:otzaria/tabs/utils/tab_content_vertical_drag_recognizer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';

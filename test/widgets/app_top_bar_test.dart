@@ -5,7 +5,7 @@ import 'package:otzaria/models/books.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
 import 'package:otzaria/tabs/view/pane_drag_handle.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/widgets/navigation/app_top_bar.dart';
 
 import '../helpers/memory_settings_cache.dart';

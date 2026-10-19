@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/theme/theme_exports.dart';
 import 'package:otzaria/widgets/layout/adaptive_side_pane.dart';
 import 'package:otzaria/widgets/misc/animated_pin_button.dart';

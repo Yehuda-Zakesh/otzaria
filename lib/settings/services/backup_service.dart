@@ -4,7 +4,7 @@ import 'dart:isolate';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:hive_ce/hive.dart';
 import 'package:path/path.dart' as p;
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:logging/logging.dart';
 import 'package:otzaria/bookmarks/models/bookmark_group.dart';
 import 'package:otzaria/app_report/services/app_report_service.dart';
@@ -46,6 +46,17 @@ import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/settings/services/backup/backup_import_merge.dart';
 import 'package:otzaria/settings/services/backup/backup_maintenance.dart';
 import 'package:otzaria/settings/services/backup/backup_store.dart';
+
+/// תוצאת [BackupService.restoreFromBackup].
+typedef BackupRestoreResult = ({
+  List<String> skippedSections,
+  List<String> missingCustomFolders,
+  bool hasLegacyPartialSettings,
+  int notesWithoutAnchor,
+  int restoredPlugins,
+  bool userBooksNotReplaced,
+  BackupImportCounts? added,
+});
 
 /// Status of the most recent backup and whether a new one is recommended.
 class BackupStatus {
@@ -847,18 +858,7 @@ class BackupService {
   /// [mode] — `replace` (ברירת מחדל) מחליף את הנתונים הקיימים; `merge` מייבא
   /// מגיבוי של מכשיר אחר בלי למחוק דבר: ההגדרות והטאבים הפתוחים אינם נוגעים,
   /// והפריטים מתווספים לקיימים (ראה [BackupImportMerge]).
-  static Future<
-    ({
-      List<String> skippedSections,
-      List<String> missingCustomFolders,
-      bool hasLegacyPartialSettings,
-      int notesWithoutAnchor,
-      int restoredPlugins,
-      bool userBooksNotReplaced,
-      BackupImportCounts? added,
-    })
-  >
-  restoreFromBackup(
+  static Future<BackupRestoreResult> restoreFromBackup(
     String backupPath, {
     BackupImportMode mode = BackupImportMode.replace,
   }) async {
@@ -1696,6 +1696,26 @@ class BackupService {
     final includePlugins =
         Settings.getValue<bool>('key-backup-plugins') ?? true;
 
+    // "שחזור מהגיבוי האחרון" בוחר בחדש ביותר, ולכן גיבוי של נתונים שנמחקו
+    // מבחוץ לא יסתיר גיבוי שיש בו נתונים (issue #2610).
+    final emptySections = await _emptyUserSections(
+      bookmarks: includeBookmarks,
+      history: includeHistory,
+      notes: includeNotes,
+      plugins: includePlugins,
+    );
+    if (emptySections.isNotEmpty && await _latestBackupHasAny(emptySections)) {
+      _logger.warning(
+        'Auto-backup skipped: no personal data, unlike the '
+        'latest backup',
+      );
+      await Settings.setValue(
+        'key-last-auto-backup',
+        DateTime.now().toIso8601String(),
+      );
+      return;
+    }
+
     final result = await createBackup(
       includeSettings: includeSettings,
       includeBookmarks: includeBookmarks,
@@ -1729,6 +1749,81 @@ class BackupService {
       await BackupMaintenance.runMaintenance();
     } catch (e) {
       _logger.warning('Backup maintenance failed: $e');
+    }
+  }
+
+  /// הסעיפים האישיים הנכללים, כשכולם ריקים; אחרת רשימה ריקה.
+  /// התקנת תוסף והרשאותיו לבדן אינן נתוני משתמש.
+  static Future<List<String>> _emptyUserSections({
+    required bool bookmarks,
+    required bool history,
+    required bool notes,
+    required bool plugins,
+  }) async {
+    if (bookmarks && (await _backupBookmarks()).isNotEmpty) return const [];
+    if (history && (await _backupHistory()).isNotEmpty) return const [];
+    if (notes &&
+        (await PersonalNotesDatabase.instance.listBooksWithNotes())
+            .isNotEmpty) {
+      return const [];
+    }
+    if (plugins) {
+      final db = PluginSystemDatabase.instance;
+      for (final plugin in await db.getAllInstalledPlugins()) {
+        if (plugin.isDevelopment) continue;
+        if (await db.hasPluginUserData(plugin.pluginId)) {
+          return const [];
+        }
+        final data = Directory(
+          await AppPaths.getPluginDataPath(plugin.pluginId),
+        );
+        if (await data.exists() &&
+            await data
+                .list(recursive: true, followLinks: false)
+                .any((entity) => entity is File)) {
+          return const [];
+        }
+      }
+    }
+    return [
+      if (bookmarks) 'bookmarks',
+      if (history) 'history',
+      if (notes) 'notes',
+      if (plugins) 'plugins',
+    ];
+  }
+
+  static bool _pluginHasUserData(Object? plugin) =>
+      plugin is Map &&
+      ['kvStore', 'publishedRecords', 'data'].any((key) {
+        final value = plugin[key];
+        return value is List && value.isNotEmpty ||
+            value is Map && value.isNotEmpty;
+      });
+
+  /// האם בגיבוי החדש ביותר יש נתונים אישיים, לרבות תוכן תוספים.
+  static Future<bool> latestBackupHasUserData() =>
+      _latestBackupHasAny(const ['bookmarks', 'history', 'notes', 'plugins']);
+
+  /// האם באחד מ-[sections] של הגיבוי החדש ביותר יש פריטים. קובץ פגום — לא.
+  static Future<bool> _latestBackupHasAny(List<String> sections) async {
+    final backups = await getAvailableBackups();
+    if (backups.isEmpty) return false;
+    final path = backups.first.path;
+    try {
+      return await Isolate.run(() {
+        final data = json.decode(File(path).readAsStringSync());
+        return data is Map &&
+            sections.any((s) {
+              final value = data[s];
+              return value is List &&
+                  (s == 'plugins'
+                      ? value.any(_pluginHasUserData)
+                      : value.isNotEmpty);
+            });
+      });
+    } catch (_) {
+      return false;
     }
   }
 

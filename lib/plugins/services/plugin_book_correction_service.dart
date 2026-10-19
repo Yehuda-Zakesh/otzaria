@@ -59,6 +59,7 @@ class PluginBookCorrectionService {
     final details = args['details'] ?? '';
     final allowQueue = args['allowQueue'] ?? true;
     final forceFreeText = args['forceFreeText'] ?? false;
+    final requireTextCorrection = args['requireTextCorrection'] ?? false;
     final start = args['sourceStart'];
     final end = args['sourceEnd'];
     if (id is! String ||
@@ -73,6 +74,7 @@ class PluginBookCorrectionService {
         details is! String ||
         allowQueue is! bool ||
         forceFreeText is! bool ||
+        requireTextCorrection is! bool ||
         original == proposed ||
         original.length > TextCorrection.maxTextLength ||
         proposed.length > TextCorrection.maxTextLength ||
@@ -82,6 +84,11 @@ class PluginBookCorrectionService {
         ((start == null) != (end == null)) ||
         (start != null && (start is! int || end is! int || last != first))) {
       throw Exception('error.invalid_params: נתוני התיקון אינם תקינים.');
+    }
+    if (requireTextCorrection && forceFreeText) {
+      throw Exception(
+        'error.invalid_params: לא ניתן לדרוש תיקון מובנה יחד עם forceFreeText.',
+      );
     }
     if (utf8.encode(jsonEncode(args)).length >
         DirectErrorReport.maxApiBodyBytes) {
@@ -169,6 +176,11 @@ class PluginBookCorrectionService {
         }
       }
     }
+    if (requireTextCorrection && correction == null) {
+      throw Exception(
+        'error.text_correction_unavailable: לא ניתן למפות את השינוי במדויק למקור הספר; הוא היה נשלח רק כדיווח טקסט חופשי.',
+      );
+    }
     final fallback =
         '--- הצעת תיקון ---\nמקור: $original\nמוצע: ${proposed.isEmpty ? '(מחיקה)' : proposed}';
     final note = [
@@ -237,6 +249,7 @@ class PluginBookCorrectionService {
       'nativeReportId': report.id,
       'message': result.message,
       'duplicate': result.isDuplicate,
+      'reportKind': correction == null ? 'free_text' : 'text_correction',
       'correctionSupported': result.isSent
           ? correction != null && !result.correctionNotSupported
           : null,

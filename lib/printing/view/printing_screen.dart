@@ -8,7 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show mapEquals, visibleForTesting;
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/text_book/utils/inline_notes_utils.dart';
 import 'package:otzaria/text_book/repository/book_notes_repository.dart';
 import 'package:otzaria/text_book/models/book_notes.dart';

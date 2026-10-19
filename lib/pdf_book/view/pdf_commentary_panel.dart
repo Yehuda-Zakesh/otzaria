@@ -124,7 +124,7 @@ List<Link> pdfScopedCommentaryLinks({
       scoped.add(link);
     }
   }
-  return scoped;
+  return dedupeLinksByTarget(scoped);
 }
 
 /// מפתח הזהות של פריט מפרש. חייב להיות תלוי-קישור בלבד: מפתח שכולל את העמוד
@@ -1151,6 +1151,19 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
       curve: 10.0,
       accelerationFactor: 5,
       itemScrollController: _itemScrollController,
+      onKeyEvent: (_, event) => ContextMenuUtils.reportCommentaryErrorShortcut(
+        context,
+        event,
+        link:
+            _lastSelectedLink ??
+            selectedItemLinks(
+              _itemKeys,
+              _orderedLinks,
+              _getLinkKey,
+            ).singleOrNull,
+        selectedText: _currentSelectedText,
+        fontSize: widget.fontSize,
+      ),
       child: _wrapWithSelection(child),
     );
   }

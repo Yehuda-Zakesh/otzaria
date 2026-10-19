@@ -2238,6 +2238,16 @@ class CommentaryListBaseState extends State<CommentaryListBase>
                             curve: 10.0,
                             accelerationFactor: 5,
                             itemScrollController: _itemScrollController,
+                            onKeyEvent: (_, event) =>
+                                ContextMenuUtils.reportCommentaryErrorShortcut(
+                                  context,
+                                  event,
+                                  link:
+                                      _lastSelectedLink.value ??
+                                      _singleSelectedLink(),
+                                  selectedText: _savedSelectedText.value,
+                                  fontSize: widget.fontSize,
+                                ),
                             child: RtlSelectionShortcuts(
                               child: SelectionArea(
                                 key: _selectionAreaKey,

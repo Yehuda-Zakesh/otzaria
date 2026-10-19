@@ -134,6 +134,23 @@ void main() {
     addTearDown(peer.dispose);
   });
 
+  test('חלון שנרשם אחרי הכנת היציאה משנה את קבוצת המשתתפים', () {
+    WindowBus.instance.register();
+    final first = _FakePeer(2, (_) => true);
+    expect(first.register(), isTrue);
+    addTearDown(first.dispose);
+    final preparedPeers = WindowBus.instance.otherRegisteredSlots();
+
+    final joined = _FakePeer(3, (_) => true);
+    expect(joined.register(), isTrue);
+    addTearDown(joined.dispose);
+
+    expect(
+      MultiWindowService.correctionQuitPeersUnchanged(preparedPeers),
+      isFalse,
+    );
+  });
+
   test('request מחזיר את תשובת החלון השני', () async {
     final peer = _FakePeer(3, (request) => {'echo': request['value']});
     expect(peer.register(), isTrue);

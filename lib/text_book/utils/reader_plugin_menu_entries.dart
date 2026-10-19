@@ -7,6 +7,10 @@ import 'package:otzaria/plugins/utils/plugin_context_menu_entries.dart';
 import 'package:otzaria/plugins/models/plugin_book_identity.dart';
 import 'package:otzaria/plugins/services/context_menu_registry.dart';
 import 'package:otzaria/plugins/services/reader_selection_service.dart';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
+import 'package:otzaria/tabs/models/combined_tab.dart';
+import 'package:otzaria/tabs/models/tab.dart';
+import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/widgets/misc/app_popup_menu.dart';
 import 'package:otzaria/widgets/smart_text/render_settings.dart';
@@ -110,11 +114,26 @@ Map<String, dynamic> buildReaderSelectionPayload({
   );
 }
 
+String? readerBookTabId(OpenedTab? tab, TextBookLoaded state) {
+  if (tab == null) return null;
+  if (tab is TextBookTab) {
+    return PluginCorrectionSessionService.tabIdFor(tab);
+  }
+  for (final pane in leafPanes(tab).whereType<TextBookTab>()) {
+    if (identical(pane.bloc.state, state)) {
+      return PluginCorrectionSessionService.tabIdFor(pane);
+    }
+  }
+  return null;
+}
+
 Map<String, dynamic> buildReaderBookPayload({
   required TextBookLoaded state,
   required int paragraphIndex,
+  String? tabId,
 }) => {
   ...PluginBookIdentity.toJsonWithUid(state.book),
+  'tabId': ?tabId,
   'bookTitle': state.book.title,
   'currentBook': state.book.title,
   'currentBookId': state.book.title,
@@ -187,6 +206,7 @@ List<AppContextMenuEntry> buildReaderPluginMenuEntries({
   String selectionContext = 'reader-selection',
   List<(String, PluginContextMenuItem)>? pluginItems,
   TextRange? lineRange,
+  String? tabId,
 }) {
   final items = pluginItems ?? ContextMenuRegistry.instance.getAll();
   if (items.isEmpty || paragraphIndex < 0 || paragraphIndex >= lines.length) {
@@ -199,9 +219,12 @@ List<AppContextMenuEntry> buildReaderPluginMenuEntries({
       selection: buildReaderBookPayload(
         state: state,
         paragraphIndex: paragraphIndex,
+        tabId: tabId,
       ),
       context: 'reader-book',
-      selectionActionDispatcher: pluginSelectionActionDispatcherOf(menuContext),
+      selectionActionDispatcher: pluginSelectionActionDispatcherOf(
+        menuContext,
+      ),
     );
     final highlightEntries = buildClickedHighlightPluginEntries(
       root: root,

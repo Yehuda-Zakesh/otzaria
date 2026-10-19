@@ -6,16 +6,24 @@ import 'dart:ui' as ui show IsolateNameServer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/plugins/services/plugin_unsaved_changes_registry.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_state.dart';
+import 'package:otzaria/data/sqlite/sqlite3_api.dart';
+import 'package:otzaria/models/books.dart';
+import 'package:otzaria/plugins/repository/plugin_correction_draft_repository.dart';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
+import 'package:otzaria/plugins/storage/plugin_correction_draft_store.dart';
+import 'package:otzaria/tabs/models/tab.dart';
+import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/tabs/utils/confirm_close_tabs.dart';
 
+import '../test_helpers/controllable_correction_draft_repository.dart';
 import '../test_helpers/memory_cache_provider.dart';
 import 'package:otzaria/core/pre_close_registry.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
@@ -64,6 +72,9 @@ void main() {
     database.close();
     runner.uninstall();
     MultiWindowService.debugSupportedOverride = null;
+    MultiWindowService.correctionQuitRequestTimeout = const Duration(
+      seconds: 6,
+    );
     WindowRole.isSecondary = false;
     WindowBus.instance.onRequest = null;
     WindowBus.instance.unregister();
@@ -126,6 +137,32 @@ void main() {
 
     expect(launches, 0);
     expect(runner.closeSelfCalls, 0);
+  });
+
+  testWidgets('כיבוי macOS נכשל בבטחה כשחלון מוסתר לא עונה', (tester) async {
+    MultiWindowService.correctionQuitRequestTimeout = const Duration(
+      milliseconds: 10,
+    );
+    WindowBus.instance.register();
+    final peer = _FakeOwner(2, reply: false)..register();
+    addTearDown(peer.dispose);
+    final tab = ToolTab(toolId: 'p', title: 'תוסף', instanceId: 'i');
+    await tester.pumpWidget(
+      BlocProvider<TabsBloc>.value(
+        value: _GuardTabs(tab),
+        child: MaterialApp(
+          navigatorKey: navigatorKey,
+          home: const SizedBox(),
+        ),
+      ),
+    );
+
+    await tester.runAsync(
+      () => AppWindowListener().handleWindowClose(quit: true),
+    );
+
+    expect(runner.closeSelfCalls, 0);
+    expect(PluginCorrectionSessionService.instance.processQuitPending, isFalse);
   });
 
   test('כשל בהכנת העדכון אינו נועל את ניסיון הסגירה הבא', () async {
@@ -312,6 +349,154 @@ void main() {
     }
   }
 
+  group('סשן תיקון בלשונית קורא', () {
+    final service = PluginCorrectionSessionService.instance;
+    final ended = <String>[];
+    late Database draftDb;
+    late ControllableCorrectionDraftRepository drafts;
+    late TextBookTab tab;
+    late String tabId;
+
+    setUp(() {
+      PluginCorrectionSessionService.flushTimeout = const Duration(
+        milliseconds: 100,
+      );
+      draftDb = sqlite3.openInMemory();
+      drafts = ControllableCorrectionDraftRepository(
+        PluginCorrectionDraftRepository.direct(draftDb),
+      );
+      service.draftRepository = drafts;
+      tab = TextBookTab(book: TextBook(title: 'ספר'), index: 0);
+      tabId = PluginCorrectionSessionService.tabIdFor(tab);
+      ended.clear();
+    });
+
+    tearDown(() async {
+      drafts.failWrites = false;
+      await service.purgeOwner('p');
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      draftDb.close();
+      PluginCorrectionSessionService.flushTimeout = const Duration(seconds: 3);
+    });
+
+    Future<void> openWindow(WidgetTester tester, {bool failing = false}) async {
+      await tester.runAsync(
+        () => service.begin(
+          owner: 'p',
+          tabId: tabId,
+          bookId: 'ספר',
+          bookUid: 'id:1',
+          libraryVersion: 'v1',
+          loadSource: (_) async => 'מקור',
+          onEvent: (topic, payload) {
+            if (topic == 'reader.correctionSessionEnded') {
+              ended.add(payload['reason'] as String);
+            }
+          },
+        ),
+      );
+      drafts.failWrites = failing;
+      service.editParagraph(tabId, 0, 'מקור', 'תיקון');
+      WindowBus.instance.register();
+      await tester.pumpWidget(
+        BlocProvider<TabsBloc>.value(
+          value: _GuardTabs(tab),
+          child: MaterialApp(
+            navigatorKey: navigatorKey,
+            home: const SizedBox(),
+          ),
+        ),
+      );
+      addTearDown(() => tester.pumpWidget(const SizedBox()));
+    }
+
+    /// מריץ את הסגירה האמיתית עד הדיאלוג (אם יש); ההמשך נשמר ב-[closing].
+    late Future<void> closing;
+    Future<void> startClose(
+      WidgetTester tester,
+      AppWindowListener listener,
+    ) async {
+      closing = listener.handleWindowClose();
+      // פעולות המאגר והטיימרים רצים בשעון המדומה; pumpAndSettle לבדו אינו מקדם אותו.
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await tester.pumpAndSettle();
+    }
+
+    Future<Map<String, Object?>?> stored(WidgetTester tester) => tester
+        .runAsync(() => drafts.get('p', correctionDraftId('p', 'id:1')))
+        .then((draft) => draft);
+
+    testWidgets('טיוטה שנשמרה: בלי אזהרה, הסשן מסתיים ב-window_closed', (
+      tester,
+    ) async {
+      await openWindow(tester);
+      await startClose(tester, AppWindowListener());
+      expect(find.text(unsavedChangesDialogTitle), findsNothing);
+      await tester.runAsync(() async {
+        await closing;
+        for (var i = 0; i < 20; i++) {
+          await Future<void>.delayed(Duration.zero);
+        }
+      });
+      expect(runner.closeSelfCalls, 1);
+      expect(service.hasSessionForTab(tabId), isFalse);
+      expect(ended, ['window_closed']);
+      expect(
+        ((await stored(tester))!['changes'] as List).single['proposedText'],
+        'תיקון',
+      );
+    });
+
+    testWidgets(
+      'כתיבה שנכשלת: ביטול משאיר חלון, סשן ושינוי; אישור סוגר והמצב נשמר '
+      'אחרי התאוששות',
+      (tester) async {
+        await openWindow(tester, failing: true);
+        final listener = AppWindowListener();
+
+        await startClose(tester, listener);
+        expect(find.text(unsavedChangesDialogTitle), findsOneWidget);
+        await tester.tap(find.text('ביטול'));
+        await tester.pumpAndSettle();
+        await tester.runAsync(() => closing);
+        expect(runner.closeSelfCalls, 0);
+        expect(service.hasSessionForTab(tabId), isTrue);
+        expect(service.displayText(tabId, 0, 'מקור'), 'תיקון');
+
+        await startClose(tester, listener);
+        await tester.tap(find.text(unsavedChangesCloseAnyway));
+        await tester.pumpAndSettle();
+        await tester.runAsync(() => closing);
+        expect(runner.closeSelfCalls, 1);
+        expect(service.hasSessionForTab(tabId), isFalse);
+        expect(
+          await tester.runAsync(() => service.unsavedStates()),
+          hasLength(1),
+          reason: 'המצב נשאר באזהרת היציאה עד שיישמר',
+        );
+
+        drafts.failWrites = false;
+        await tester.runAsync(() async {
+          service.retryDraftWrites();
+          for (var i = 0; i < 20; i++) {
+            await Future<void>.delayed(Duration.zero);
+          }
+        });
+        expect(
+          ((await stored(tester))!['changes'] as List).single['proposedText'],
+          'תיקון',
+        );
+        expect(ended, ['window_closed']);
+        // שחרור ה-lease שאחרי ההתאוששות רץ בשעון המדומה.
+        await tester.pump(const Duration(milliseconds: 50));
+      },
+    );
+  });
+
   test('macOS, החלון האחרון: מוסתר, הסשן נשמר, והתהליך אינו מסתיים', () async {
     AppWindowListener.debugKeepsProcessAfterLastWindowOverride = true;
     addTearDown(
@@ -377,9 +562,10 @@ class _FakeRunner {
 
 /// החלון הראשון של התהליך — תופס משבצת ואת כינוי המארח, ועונה לכל בקשה.
 class _FakeOwner {
-  _FakeOwner(this.slot);
+  _FakeOwner(this.slot, {this.reply = true});
 
   final int slot;
+  final bool reply;
   late final ReceivePort _port;
 
   void register() {
@@ -394,7 +580,7 @@ class _FakeOwner {
     );
     _port.listen((message) {
       final map = message as Map;
-      (map['reply'] as SendPort).send({'ok': true, 'result': null});
+      if (reply) (map['reply'] as SendPort).send({'ok': true, 'result': null});
     });
   }
 
@@ -407,7 +593,7 @@ class _FakeOwner {
 
 class _GuardTabs extends Fake implements TabsBloc {
   _GuardTabs(this.tab);
-  final ToolTab tab;
+  final OpenedTab tab;
 
   @override
   Stream<TabsState> get stream => const Stream.empty();

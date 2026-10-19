@@ -1180,7 +1180,7 @@ const Map<String, Map<String, String>> kSettingsCatalogs = {
     'פסקה נפרדת לפני': 'Separate paragraph, before',
     'פעולה': 'What To Do',
     'פעולה זו אינה הפיכה!': 'This cannot be undone!',
-    'פעולה זו אינה הפיכה! נתוני התוסף יימחקו.': 'This cannot be undone — the plugin\'s data will be deleted.',
+    'פעולה זו אינה הפיכה! נתוני התוסף יימחקו, וגם טיוטות תיקון שלא נשלחו.': 'This cannot be undone — the plugin\'s data will be deleted, including unsent correction drafts.',
     'פעולה זו אינה ניתנת לביטול!': 'This action cannot be undone!',
     'פעולה זו תחליף את הנתונים הקיימים בנתונים מקובץ הגיבוי העדכני ביותר שנמצא בתיקיית הגיבוי.': 'This replaces your current data with the newest backup file in the backup folder.',
     'פעולה זו תחליף את הנתונים הקיימים בנתונים מקובץ הגיבוי שנבחר.': 'This replaces your current data with the data from the selected backup file.',

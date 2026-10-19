@@ -19,6 +19,10 @@ class UserStateDatabase {
   Database? _database;
   String? _pathOverride;
 
+  /// הפתיחה האחרונה יצרה את הקובץ — אין בו עדיין גרסת סכמה.
+  bool get createdOnOpen => _createdOnOpen;
+  bool _createdOnOpen = false;
+
   /// פותח את המסד בנתיב הזה במקום בתיקיית המסדים; לבדיקות בלבד.
   @visibleForTesting
   static UserStateDatabase openAt(String path) =>
@@ -88,6 +92,7 @@ class UserStateDatabase {
 
   void _migrateSchema(Database db) {
     final current = firstIntValue(db.select('PRAGMA user_version')) ?? 0;
+    _createdOnOpen = current == 0;
     if (current >= _schemaVersion) return;
     db.execute('PRAGMA user_version = $_schemaVersion');
   }

@@ -63,9 +63,10 @@ import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:otzaria/app_bloc_observer.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/data/data_providers/cache_database_holder.dart';
 import 'package:otzaria/data/data_providers/hive_data_provider.dart';
+import 'package:otzaria/data/data_providers/shared_preferences_cache.dart';
 import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
@@ -95,6 +96,7 @@ import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/single_instance_lock.dart';
 import 'package:otzaria/core/otzaria_capabilities.dart';
 import 'package:otzaria/core/data_root_writability_warning.dart';
+import 'package:otzaria/core/personal_data_missing_warning.dart';
 import 'package:otzaria/core/cli_command.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/sqlite_memory_release.dart';
@@ -1090,8 +1092,8 @@ Future<void> _runDeferredAutoBackup() async {
   }
 }
 
-/// אזהרה על שורש נתונים חסום-לכתיבה. ממתינה לחשיפת החלון — דיאלוג לפניה
-/// אינו מוצג כי עדיין אין Navigator.
+/// אזהרות על שורש הנתונים: חסום לכתיבה, או מסדים אישיים שנמחקו. ממתינה
+/// לחשיפת החלון — דיאלוג לפניה אינו מוצג כי עדיין אין Navigator.
 Future<void> _runDeferredDataRootWritabilityWarning() async {
   try {
     await _mainWindowRevealedCompleter.future.timeout(
@@ -1101,6 +1103,11 @@ Future<void> _runDeferredDataRootWritabilityWarning() async {
     // ממשיכים בכל זאת — אם ה-Navigator עדיין חסר, ההצגה תדולג בשקט.
   }
   await DataRootWritabilityWarning.showIfNeeded();
+  try {
+    await PersonalDataMissingWarning.showIfNeeded();
+  } catch (error, stackTrace) {
+    _logNonFatalInitializationError('Personal data warning', error, stackTrace);
+  }
 }
 
 /// זיהוי קריסה של ההפעלה הקודמת ופתיחת נעילת ההפעלה הנוכחית. הנעילה נכתבת
@@ -1956,6 +1963,7 @@ Future<void> initHive() async {
   // המסד נפתח כאן ולא בעצלות: `TabsRepository.loadTabs` קורא אותו
   // סינכרונית מבנאי של bloc.
   await UserStateDatabase.instance.database;
+  if (!WindowRole.isSecondary) await PersonalDataMissingWarning.detect();
   // סידור הסשנים חייב לרוץ פעם אחת לפני TabsBloc ו-NavigationBloc,
   // כי שניהם טוענים כרטיסיות וסדר הטעינה ביניהם תלוי בתזמון.
   if (_restoresAllWindows) {

@@ -1379,7 +1379,9 @@ TextStyle _oldStyleForElement(dom.Element e, TextStyle style, bool hide) {
       linkAnchorVariantFromClasses(e.classes),
       style.copyWith(fontSize: scaled(kLinkAnchorMarkerScale)),
     );
-    if (hide) style = style.copyWith(color: transparent);
+    if (hide) {
+      style = style.copyWith(color: transparent, decorationColor: transparent);
+    }
   }
   if (name == 'i' ||
       name == 'em' ||

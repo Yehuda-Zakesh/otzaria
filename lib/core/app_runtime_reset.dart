@@ -23,12 +23,18 @@ import 'package:otzaria/migration/sync/background_sync_initializer.dart';
 import 'package:otzaria/personal_notes/storage/personal_notes_database.dart';
 import 'package:otzaria/plugins/storage/plugin_system_database.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/services/commentary_service.dart';
 import 'package:otzaria/services/target_line_links_service.dart';
 
 /// מאפס מצב runtime מקומי כדי שהאפליקציה תוכל להיבנות מחדש בלי סגירת תהליך.
-Future<void> resetRuntimeStateForAppRestart() async {
+Future<void> resetRuntimeStateForAppRestart({
+  String? correctionStorageMoveRequestId,
+}) async {
   MultiWindowService.clearVisibilityRequestsForRestart();
+  await PluginCorrectionSessionService.instance.prepareForRuntimeReset(
+    requestId: correctionStorageMoveRequestId,
+  );
   await const HiddenLibraryStore().resetRuntimeStateForAppRestart();
   await PluginRuntimeDispatcher.instance.prepareForAppRestart();
   await SqliteDataProvider.instance.dispose();

@@ -13,6 +13,10 @@ import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
+import 'package:otzaria/migration/models/toc_entry.dart';
+import 'package:otzaria/migration/models/category.dart';
+import 'package:otzaria/models/books.dart' as reader;
+import 'package:otzaria/utils/file/toc_parser.dart';
 import 'package:otzaria/migration/sync/file_sync_service.dart';
 import 'package:otzaria/settings/services/custom_folders/custom_folder.dart';
 import 'package:otzaria/utils/file/document_converter.dart';
@@ -232,6 +236,304 @@ void main() {
     expect(text, contains('הגרסה השנייה'));
     expect(text, isNot(contains('הגרסה הראשונה')));
   });
+
+  test(
+    'ספר שנוסף או נערך ונקלט ברענון — כותרותיו נמצאות באיתור (issue #2684)',
+    () async {
+      final file = File(path.join(booksDir.path, 'ספר אישי.txt'))
+        ..writeAsStringSync('<h1>ספר אישי</h1>\n<h2>פרק א</h2>\nתוכן');
+      Future<List<Map<String, dynamic>>> find(String heading) async =>
+          repository.getTocEntriesForReference(
+            (await repository.getAllBooksLean()).single.id,
+            'ספר אישי',
+            queryTokens: heading.split(' '),
+          );
+
+      expect((await sync()).errors, isEmpty);
+      expect(await find('פרק א'), isNotEmpty);
+
+      file.writeAsStringSync('${file.readAsStringSync()}\n<h2>פרק ב</h2>\nעוד');
+      file.setLastModifiedSync(DateTime.now().add(const Duration(minutes: 5)));
+      expect((await sync()).errors, isEmpty);
+      expect(await find('פרק ב'), isNotEmpty);
+      expect(await find('פרק א'), hasLength(1)); // הוחלף, לא שוכפל
+    },
+  );
+
+  Future<int> importExternalText(File file, String content) async {
+    final categoryId = await repository.insertCategory(
+      const Category(title: 'ספרים אישיים'),
+    );
+    final folderCategoryId = await repository.insertCategory(
+      Category(title: 'ספרים', parentId: categoryId, level: 1),
+    );
+    final sourceId = await repository.insertSource(
+      CustomFolderSource.nameForFolder(booksDir.path),
+      -1,
+    );
+    final headings = reader.flattenToc(
+      TocParser.parseEntriesFromContent(content),
+    );
+    final ids = {for (var i = 0; i < headings.length; i++) headings[i]: i + 1};
+    final stat = file.statSync();
+    return repository.insertExternalContentBook(
+      categoryId: folderCategoryId,
+      title: 'ספר אישי',
+      filePath: file.path,
+      fileType: 'txt',
+      fileSize: stat.size,
+      lastModified: stat.modified.millisecondsSinceEpoch,
+      isPersonal: true,
+      sourceId: sourceId,
+      tocEntries: [
+        for (final entry in headings)
+          TocEntry(
+            id: ids[entry]!,
+            bookId: 0,
+            parentId: ids[entry.parent],
+            text: entry.text,
+            level: entry.level,
+            lineIndex: entry.index,
+          ),
+      ],
+    );
+  }
+
+  test('רענון משמר את כל הכותרות שנקלטו בהוספת תיקייה', () async {
+    const content =
+        '<h1>ספר אישי</h1>\n  <h2>פרק עם רווח</h2>\nתוכן\n'
+        '## פרק מרקדאון\n### תת פרק\n<h2 data-toc="none">עיצוב</h2>';
+    final file = File(path.join(booksDir.path, 'ספר אישי.txt'))
+      ..writeAsStringSync(content);
+    final id = await importExternalText(file, content);
+    final before = await repository.getBookToc(id);
+    expect(before.map((e) => e.text), [
+      'ספר אישי',
+      'פרק עם רווח',
+      'פרק מרקדאון',
+      'תת פרק',
+    ]);
+    file.writeAsStringSync('$content\nעוד תוכן');
+    file.setLastModifiedSync(DateTime.now().add(const Duration(minutes: 5)));
+
+    expect((await sync()).errors, isEmpty);
+    final after = await repository.getBookToc(id);
+    expect(
+      after.map((e) => (e.text, e.level, e.lineIndex)),
+      before.map((e) => (e.text, e.level, e.lineIndex)),
+    );
+    final parents = {for (final e in after) e.id: e.text};
+    expect(after.map((e) => parents[e.parentId]), [
+      null,
+      'ספר אישי',
+      'ספר אישי',
+      'פרק מרקדאון',
+    ]);
+    expect((await repository.getAllBooksLean()).single.totalLines, 0);
+    expect(await repository.getLineContents(id), isEmpty);
+    expect(after.map((e) => (e.hasChildren, e.isLastChild)), [
+      (true, true),
+      (false, false),
+      (true, true),
+      (false, true),
+    ]);
+  });
+
+  test(
+    'כשל קריאה זמני מדווח ומשמר ספר חיצוני ותוכן עניינים לניסיון חוזר',
+    () async {
+      const content = '<h1>ספר אישי</h1>\n<h2>פרק א</h2>\nתוכן';
+      final file = File(path.join(booksDir.path, 'ספר אישי.txt'))
+        ..writeAsStringSync(content);
+      final id = await importExternalText(file, content);
+      final before = (await repository.getAllBooksLean()).single;
+      final tocBefore = await repository.getBookToc(id);
+      file.setLastModifiedSync(DateTime.now().add(const Duration(minutes: 5)));
+      try {
+        expect((await Process.run('chmod', ['000', file.path])).exitCode, 0);
+        await expectLater(
+          file.readAsBytes(),
+          throwsA(isA<FileSystemException>()),
+        );
+        final result = await sync();
+        expect(result.errors, hasLength(1));
+        final after = (await repository.getAllBooksLean()).single;
+        expect(after.id, id);
+        expect(after.lastModified, before.lastModified);
+        expect(
+          (await repository.getBookToc(id)).map((e) => (e.id, e.text)),
+          tocBefore.map((e) => (e.id, e.text)),
+        );
+      } finally {
+        await Process.run('chmod', ['600', file.path]);
+      }
+      file.writeAsStringSync('$content\n<h2>פרק ב</h2>');
+      expect((await sync()).errors, isEmpty);
+      expect((await repository.getAllBooksLean()).single.id, id);
+      expect((await repository.getBookToc(id)).map((e) => e.text), [
+        'ספר אישי',
+        'פרק א',
+        'פרק ב',
+      ]);
+    },
+    skip: Platform.isWindows,
+  );
+
+  for (final initiallyStored in [false, true]) {
+    test(
+      'כשל כתיבת TOC שומר את כל נתוני הספר (שורות במסד: $initiallyStored)',
+      () async {
+        final file = File(path.join(booksDir.path, 'ספר אישי.txt'))
+          ..writeAsStringSync('<h1>ספר אישי</h1>\n<h2>פרק א</h2>\nתוכן');
+        folders = [
+          CustomFolder(
+            path: booksDir.path,
+            addToDatabase: initiallyStored,
+            addedAt: DateTime(2026),
+          ),
+        ];
+        expect((await sync()).errors, isEmpty);
+        final book = (await repository.getAllBooksLean()).single;
+        final db = await database.database;
+        List<Map<String, dynamic>> rows(String table) => db
+            .select('SELECT * FROM $table ORDER BY 1, 2')
+            .map((row) => Map<String, dynamic>.from(row))
+            .toList();
+        final before = {
+          for (final table in [
+            'book',
+            'line',
+            'tocEntry',
+            'tocText',
+            'line_toc',
+            'line_ref',
+          ])
+            table: rows(table),
+        };
+        final tocBefore = await repository.getTocEntriesForReference(
+          book.id,
+          book.title,
+        );
+        db.execute('''
+        CREATE TRIGGER fail_external_toc BEFORE INSERT ON tocEntry
+        WHEN NEW.bookId = ${book.id}
+        BEGIN SELECT RAISE(FAIL, 'injected TOC write failure'); END
+      ''');
+        file.writeAsStringSync('<h1>ספר אישי</h1>\n<h2>פרק ב</h2>\nתוכן חדש');
+        file.setLastModifiedSync(
+          DateTime.now().add(const Duration(minutes: 5)),
+        );
+        folders = [
+          CustomFolder(
+            path: booksDir.path,
+            addToDatabase: false,
+            addedAt: DateTime(2026),
+          ),
+        ];
+        final failed = await sync();
+        expect(failed.errors, hasLength(1));
+        for (final table in before.keys) {
+          expect(rows(table), before[table], reason: table);
+        }
+        expect(
+          await repository.getTocEntriesForReference(book.id, book.title),
+          tocBefore,
+        );
+        db.execute('DROP TRIGGER fail_external_toc');
+        expect((await sync()).errors, isEmpty);
+        final after = (await repository.getAllBooksLean()).single;
+        expect(after.id, book.id);
+        expect(after.filePath, file.path);
+        expect(after.totalLines, 0);
+        expect((await repository.getBookToc(book.id)).map((e) => e.text), [
+          'ספר אישי',
+          'פרק ב',
+        ]);
+        expect(
+          await repository.getTocEntriesForReference(
+            book.id,
+            book.title,
+            queryTokens: ['פרק', 'ב'],
+          ),
+          isNotEmpty,
+        );
+        expect(
+          await repository.getTocEntriesForReference(
+            book.id,
+            book.title,
+            queryTokens: ['פרק', 'א'],
+          ),
+          isEmpty,
+        );
+        for (final table in ['line', 'line_toc', 'line_ref']) {
+          expect(rows(table), isEmpty, reason: table);
+        }
+      },
+    );
+  }
+
+  test('מעבר בין קריאה מהקובץ לשמירה במסד משמר זהות ותוכן עניינים', () async {
+    final file = File(path.join(booksDir.path, 'ספר אישי.txt'))
+      ..writeAsStringSync('<h1>ספר אישי</h1>\n<h2>פרק א</h2>\nתוכן');
+    expect((await sync()).errors, isEmpty);
+    final id = (await repository.getAllBooksLean()).single.id;
+    for (final storeLines in [true, false, true]) {
+      folders = [
+        CustomFolder(
+          path: booksDir.path,
+          addToDatabase: storeLines,
+          addedAt: DateTime(2026),
+        ),
+      ];
+      final result = await sync();
+      expect(result.errors, isEmpty);
+      expect(result.updatedBooks, 1);
+      final book = (await repository.getAllBooksLean()).single;
+      expect(book.id, id);
+      expect(book.filePath, storeLines ? isNull : file.path);
+      expect(book.totalLines, storeLines ? 3 : 0);
+      expect(
+        await repository.getLineContents(id),
+        storeLines ? hasLength(3) : isEmpty,
+      );
+      expect((await repository.getBookToc(id)).map((e) => e.text), [
+        'ספר אישי',
+        'פרק א',
+      ]);
+      if (!storeLines) {
+        expect(
+          (await database.database).select('SELECT * FROM line_toc'),
+          isEmpty,
+        );
+        expect(
+          (await database.database).select('SELECT * FROM line_ref'),
+          isEmpty,
+        );
+      }
+    }
+  });
+
+  test(
+    'רענון אינו פותח PDF — תוכן העניינים שלו נשמר כשהקובץ השתנה (issue #2684)',
+    () async {
+      // ה-outline של PDF נקרא ב-isolate הראשי בהוספת התיקייה; הסנכרון רץ
+      // ב-isolate נפרד, ושם PDFium (גלובלי לתהליך) אסור לאתחול.
+      final pdf = File(path.join(booksDir.path, 'סרוק.pdf'))
+        ..writeAsStringSync('%PDF-1.4\n%%EOF');
+      expect((await sync()).errors, isEmpty);
+      final bookId = (await repository.getAllBooksLean()).single.id;
+      await repository.insertTocEntry(
+        TocEntry(bookId: bookId, text: 'שער', level: 1, lineIndex: 1),
+      );
+
+      pdf.setLastModifiedSync(DateTime.now().add(const Duration(minutes: 5)));
+      expect((await sync()).updatedBooks, 1);
+      expect(
+        (await repository.getBookToc(bookId)).map((e) => e.text),
+        ['שער'],
+      );
+    },
+  );
 
   test('סריקה חוזרת בלי שינוי אינה מוסיפה או מעדכנת (§91)', () async {
     writeDocx('מסמך.docx', 'תוכן');

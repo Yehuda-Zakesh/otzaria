@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/links.dart';
@@ -23,6 +23,7 @@ import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/page_shape/page_shape_screen.dart';
 import 'package:otzaria/text_book/view/page_shape/simple_text_viewer.dart';
+import 'package:otzaria/widgets/layout/resizable_drag_handle.dart';
 
 import '../../../test_helpers/memory_cache_provider.dart';
 
@@ -52,12 +53,13 @@ void main() {
     WidgetTester tester, {
     required double sidePanesWidth,
     double textMaxWidth = 0,
+    double width = windowWidth,
   }) async {
     await Settings.setValue<bool>(
       'page_shape_apply_text_max_width',
       textMaxWidth != 0,
     );
-    tester.view.physicalSize = const Size(windowWidth, 736);
+    tester.view.physicalSize = Size(width, 736);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
@@ -137,6 +139,119 @@ void main() {
     await pumpScreen(tester, sidePanesWidth: 0, textMaxWidth: 600);
     expectColumnsFit(tester);
   });
+
+  testWidgets(
+    'בחלון צר הטקסט הראשי שומר על חלקו גם מול רוחבים ישנים בפיקסלים',
+    (
+      tester,
+    ) async {
+      // נגרר בחלון רחב בגרסה קודמת (issue #2782).
+      await Settings.setValue<double>('page_shape_left_width', 500);
+      await Settings.setValue<double>('page_shape_right_width', 500);
+      await pumpScreen(tester, sidePanesWidth: 0, width: 820);
+      expectColumnsFit(tester);
+      final mainWidth = tester.getSize(find.byType(SimpleTextViewer)).width;
+      expect(mainWidth, greaterThanOrEqualTo(0.3 * (820 - 64)));
+    },
+  );
+
+  testWidgets('היחס בין הטורים לטקסט הראשי נשמר כשהחלון מוקטן', (
+    tester,
+  ) async {
+    // פיקסלים מגרסה קודמת: רבע מחלון של 1600.
+    await Settings.setValue<double>('page_shape_left_width', 400);
+    await Settings.setValue<double>('page_shape_right_width', 400);
+    await pumpScreen(tester, sidePanesWidth: 0, width: 1600);
+    final wideRatio =
+        tester.getSize(find.byType(SimpleTextViewer)).width / 1600;
+
+    tester.view.physicalSize = const Size(800, 736);
+    await tester.pumpAndSettle();
+    expectColumnsFit(tester);
+    final narrowRatio =
+        tester.getSize(find.byType(SimpleTextViewer)).width / 800;
+    expect(narrowRatio, closeTo(wideRatio, 0.05));
+  });
+
+  testWidgets('גרירת טור כששני הטורים מוקטנים יחד מזיזה רק אותו', (
+    tester,
+  ) async {
+    await Settings.setValue<double>('page_shape_left_width', 0.4);
+    await Settings.setValue<double>('page_shape_right_width', 0.4);
+    await pumpScreen(tester, sidePanesWidth: 0, width: 1064);
+    final before = tester.getSize(find.byType(SimpleTextViewer)).width;
+
+    final handle = find.byType(ResizableDragHandle).first;
+    // הידית רחבה מהעמודה בת 8 הפיקסלים שמכילה אותה; לוחצים בתוך העמודה.
+    final handleRect = tester.getRect(handle);
+    final gesture = await tester.startGesture(
+      Offset(handleRect.left + 4, handleRect.center.dy),
+    );
+    for (var i = 0; i < 6; i++) {
+      await gesture.moveBy(const Offset(10, 0));
+      await tester.pump();
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    final after = tester.getSize(find.byType(SimpleTextViewer)).width;
+    expect(after - before, greaterThan(25));
+  });
+  for (final hiddenColumn in ['left', 'right']) {
+    testWidgets('גרירה משמרת יחס טור $hiddenColumn מוסתר גם בהצגה מחדש', (
+      tester,
+    ) async {
+      final visibleColumn = hiddenColumn == 'left' ? 'right' : 'left';
+      await Settings.setValue<double>('page_shape_${hiddenColumn}_width', 0.17);
+      await Settings.setValue<double>(
+        'page_shape_${visibleColumn}_width',
+        0.25,
+      );
+      await Settings.setValue<bool>(
+        'page_shape_global_visibility_$hiddenColumn',
+        false,
+      );
+      await pumpScreen(tester, sidePanesWidth: 700, width: 1000);
+      expect(find.text('בחר מפרש'), findsOneWidget);
+
+      final handle = find.byType(ResizableDragHandle).first;
+      final rect = tester.getRect(handle);
+      final gesture = await tester.startGesture(
+        Offset(rect.left + 4, rect.center.dy),
+      );
+      for (var i = 0; i < 6; i++) {
+        await gesture.moveBy(Offset(hiddenColumn == 'right' ? -10 : 10, 0));
+        await tester.pump();
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(
+        Settings.getValue<double>('page_shape_${hiddenColumn}_width'),
+        0.17,
+      );
+      expect(
+        Settings.getValue<double>('page_shape_${visibleColumn}_width'),
+        isNot(0.25),
+      );
+
+      await Settings.setValue<bool>(
+        'page_shape_global_visibility_$hiddenColumn',
+        true,
+      );
+      tester.view.physicalSize = const Size(1700, 736);
+      await tester.pumpAndSettle();
+      expectColumnsFit(tester);
+      final pane = find
+          .ancestor(
+            of: find.text('בחר מפרש').at(hiddenColumn == 'left' ? 0 : 1),
+            matching: find.byWidgetPredicate(
+              (widget) => widget is SizedBox && widget.child is Container,
+            ),
+          )
+          .first;
+      expect(tester.getSize(pane).width, closeTo(0.17 * (1000 - 64), 0.001));
+    });
+  }
 }
 
 TextBookLoaded _loadedState(TextBook book) => TextBookLoaded(

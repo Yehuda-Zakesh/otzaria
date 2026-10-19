@@ -24,6 +24,7 @@ import 'package:otzaria/text_book/view/page_shape/utils/page_shape_commentary_se
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_plugin_api.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/commentary_sync_helper.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_workspace_scope.dart';
+import 'package:otzaria/text_book/view/page_shape/utils/page_shape_pane_sizes.dart';
 import 'package:otzaria/text_book/view/page_shape/page_shape_settings_panel.dart';
 import 'package:otzaria/text_book/view/commentary_list_base.dart';
 import 'package:otzaria/text_book/widgets/text_book_state_builder.dart';
@@ -43,10 +44,12 @@ import 'package:otzaria/widgets/layout/resizable_drag_handle.dart';
 import 'package:otzaria/widgets/layout/adaptive_side_pane.dart';
 import 'package:otzaria/widgets/layout/context_overlay_panel.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:collection/collection.dart';
+
 import 'dart:async';
 import 'dart:isolate';
+
 import 'package:otzaria/core/messages/text_book_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/data/book_locator.dart';
@@ -67,8 +70,10 @@ import 'package:otzaria/widgets/controls/action_buttons.dart';
 import 'package:otzaria/text_book/view/selection/selection_sync_controller.dart';
 import 'package:otzaria/widgets/navigation/panel_tab_header.dart';
 
-/// קבועים לחישוב רוחב חלוניות המפרשים
+/// ברירות מחדל לגודל הטורים, כחלק מהדף
 const double _kCommentaryPaneWidthFactor = 0.17;
+const double _kBottomPaneHeightFactor = 0.27;
+const double _kBottomLeftPaneWidthFactor = 0.5;
 
 /// רוחב הכותרת האנכית + רווחים + מפריד (20 לכותרת + 4 לרווח + 8 למפריד)
 const double _kCommentaryLabelAndSpacingWidth = 32.0;
@@ -132,7 +137,7 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
       ValueNotifier<int>(0);
   final GlobalKey _mainTextViewerKey = GlobalKey();
 
-  // גדלים לחלוניות - יחושבו לפי גודל המסך
+  // סרגל הצד בפיקסלים; הטורים כחלק יחסי מהדף כדי לשמור על היחס בשינוי גודל.
   double? _leftSidebarWidth;
   double? _leftWidth;
   double? _rightWidth;
@@ -163,28 +168,18 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
 
-    // ערכים שמורים הם פיקסלים מוחלטים מסשן קודם — יש לחתוך לגבולות
-    // החלון הנוכחי כדי שלא יגלשו כשהחלון קטן ממה שהיה בסשן הקודם.
+    // סרגל הצד נשמר בפיקסלים — יש לחתוך לגבולות החלון הנוכחי.
     _leftSidebarWidth =
         (Settings.getValue<double>('page_shape_left_sidebar_width') ??
                 screenWidth * 0.22)
             .clamp(0.0, screenWidth * 0.35);
-    _leftWidth =
-        (Settings.getValue<double>('page_shape_left_width') ??
-                screenWidth * 0.17)
-            .clamp(0.0, screenWidth * 0.4);
-    _rightWidth =
-        (Settings.getValue<double>('page_shape_right_width') ??
-                screenWidth * 0.17)
-            .clamp(0.0, screenWidth * 0.4);
-    _bottomHeight =
-        (Settings.getValue<double>('page_shape_bottom_height') ??
-                screenHeight * 0.27)
-            .clamp(0.0, screenHeight * 0.5);
-    _bottomLeftWidth =
-        (Settings.getValue<double>('page_shape_bottom_left_width') ??
-                screenWidth * 0.5)
-            .clamp(0.0, screenWidth * 0.9);
+    _leftWidth = _loadFraction('page_shape_left_width', screenWidth);
+    _rightWidth = _loadFraction('page_shape_right_width', screenWidth);
+    _bottomHeight = _loadFraction('page_shape_bottom_height', screenHeight);
+    _bottomLeftWidth = _loadFraction(
+      'page_shape_bottom_left_width',
+      screenWidth,
+    );
 
     setState(() {});
 
@@ -206,29 +201,67 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
 
     final screenWidth = MediaQuery.of(context).size.width;
     final screenHeight = MediaQuery.of(context).size.height;
+    final left = _storedFraction(settings.pageShapeLeftWidth, screenWidth);
+    final right = _storedFraction(settings.pageShapeRightWidth, screenWidth);
+    final bottom = _storedFraction(
+      settings.pageShapeBottomHeight,
+      screenHeight,
+    );
+    final bottomLeft = _storedFraction(
+      settings.pageShapeBottomLeftWidth,
+      screenWidth,
+    );
     setState(() {
-      if (settings.pageShapeLeftWidth != null) {
-        _leftWidth = settings.pageShapeLeftWidth!.clamp(0.0, screenWidth * 0.4);
-      }
-      if (settings.pageShapeRightWidth != null) {
-        _rightWidth = settings.pageShapeRightWidth!.clamp(
-          0.0,
-          screenWidth * 0.4,
-        );
-      }
-      if (settings.pageShapeBottomHeight != null) {
-        _bottomHeight = settings.pageShapeBottomHeight!.clamp(
-          0.0,
-          screenHeight * 0.5,
-        );
-      }
-      if (settings.pageShapeBottomLeftWidth != null) {
-        _bottomLeftWidth = settings.pageShapeBottomLeftWidth!.clamp(
-          0.0,
-          screenWidth * 0.9,
-        );
-      }
+      _leftWidth = left ?? _leftWidth;
+      _rightWidth = right ?? _rightWidth;
+      _bottomHeight = bottom ?? _bottomHeight;
+      _bottomLeftWidth = bottomLeft ?? _bottomLeftWidth;
     });
+
+    final hasLegacy = [
+      settings.pageShapeLeftWidth,
+      settings.pageShapeRightWidth,
+      settings.pageShapeBottomHeight,
+      settings.pageShapeBottomLeftWidth,
+    ].any((value) => value != null && value > 1);
+    if (hasLegacy) {
+      // ממירים מתוך הערך העדכני, כדי לא לדרוס שמירה מגרירה שקדמה לנו.
+      await TextBookPerBookSettings.mutate(book, (existing) {
+        final current = existing ?? TextBookPerBookSettings();
+        return current.copyWith(
+          pageShapeLeftWidth: _storedFraction(
+            current.pageShapeLeftWidth,
+            screenWidth,
+          ),
+          pageShapeRightWidth: _storedFraction(
+            current.pageShapeRightWidth,
+            screenWidth,
+          ),
+          pageShapeBottomHeight: _storedFraction(
+            current.pageShapeBottomHeight,
+            screenHeight,
+          ),
+          pageShapeBottomLeftWidth: _storedFraction(
+            current.pageShapeBottomLeftWidth,
+            screenWidth,
+          ),
+        );
+      });
+    }
+  }
+
+  static double? _storedFraction(double? stored, double legacyExtent) =>
+      stored == null ? null : pageShapeStoredFraction(stored, legacyExtent);
+
+  /// פיקסלים מגרסה קודמת מומרים פעם אחת ונשמרים כיחס, אחרת כל שינוי
+  /// גודל חלון היה ממיר אותם מחדש ביחס לגודל אחר.
+  static double? _loadFraction(String key, double legacyExtent) {
+    final stored = Settings.getValue<double>(key);
+    final fraction = _storedFraction(stored, legacyExtent);
+    if (fraction != null && fraction != stored) {
+      Settings.setValue<double>(key, fraction);
+    }
+    return fraction;
   }
 
   void _reanchorMainText() => widget.tab?.lines.keepViewAcrossRelayout();
@@ -1139,32 +1172,95 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
                                 final pageWidth = constrainPage
                                     ? pageMaxWidth
                                     : pageConstraints.maxWidth;
-                                // הרוחבים השמורים נמדדו מול החלון; חלוניות צד מצרות את הדף.
-                                final freeWidth =
-                                    pageWidth -
-                                    2 * _kCommentaryLabelAndSpacingWidth;
-                                final sideMax = math.max(80.0, freeWidth * 0.4);
-                                final screenWidth = MediaQuery.of(
-                                  context,
-                                ).size.width;
-                                final leftWidth = math.min(
-                                  _leftWidth ??
-                                      screenWidth * _kCommentaryPaneWidthFactor,
-                                  sideMax,
+                                final freeWidth = math.max(
+                                  1.0,
+                                  pageWidth -
+                                      2 * _kCommentaryLabelAndSpacingWidth,
                                 );
-                                final rightWidth = math.min(
-                                  _rightWidth ??
-                                      screenWidth * _kCommentaryPaneWidthFactor,
-                                  sideMax,
+                                final pageHeight = math.max(
+                                  1.0,
+                                  pageConstraints.maxHeight,
                                 );
+                                final sideMax = math.max(
+                                  kPageShapeSideMinWidth,
+                                  freeWidth * kPageShapeSideMaxFraction,
+                                );
+                                final hasLeftPane = _isCommentatorVisible(
+                                  'left',
+                                  _leftCommentator,
+                                );
+                                final hasRightPane = _shouldShowRightPane(
+                                  state,
+                                );
+                                final sideWidths = resolvePageShapeSideWidths(
+                                  freeWidth: freeWidth,
+                                  leftFraction:
+                                      _leftWidth ?? _kCommentaryPaneWidthFactor,
+                                  rightFraction:
+                                      _rightWidth ??
+                                      _kCommentaryPaneWidthFactor,
+                                  hasLeft: hasLeftPane,
+                                  hasRight: hasRightPane,
+                                );
+                                final leftWidth = sideWidths.left;
+                                final rightWidth = sideWidths.right;
+                                // גרירה מקבעת טור שני גלוי לרוחבו המוצג וחוסמת את
+                                // הנגרר, כדי שההקטנה המשותפת לא תזיז את הידית.
+                                final sidesMax =
+                                    freeWidth * (1 - kPageShapeMainMinFraction);
+                                void dragSide({
+                                  required bool isLeft,
+                                  required double width,
+                                }) {
+                                  final other = isLeft ? rightWidth : leftWidth;
+                                  final hasOther = isLeft
+                                      ? hasRightPane
+                                      : hasLeftPane;
+                                  final max = math.min(
+                                    sideMax,
+                                    sidesMax - (hasOther ? other : 0),
+                                  );
+                                  final fraction = pageShapeFraction(
+                                    width.clamp(
+                                      kPageShapeSideMinWidth,
+                                      math.max(kPageShapeSideMinWidth, max),
+                                    ),
+                                    freeWidth,
+                                  );
+                                  final otherFraction = pageShapeFraction(
+                                    other,
+                                    freeWidth,
+                                  );
+                                  setState(() {
+                                    _leftWidth = isLeft
+                                        ? fraction
+                                        : hasOther
+                                        ? otherFraction
+                                        : _leftWidth;
+                                    _rightWidth = isLeft
+                                        ? hasOther
+                                              ? otherFraction
+                                              : _rightWidth
+                                        : fraction;
+                                  });
+                                }
+
                                 final bottomLeftMax = math.max(
                                   100.0,
                                   freeWidth * 0.8,
                                 );
                                 final bottomLeftWidth = math.min(
-                                  _bottomLeftWidth ?? screenWidth * 0.5,
+                                  (_bottomLeftWidth ??
+                                          _kBottomLeftPaneWidthFactor) *
+                                      freeWidth,
                                   bottomLeftMax,
                                 );
+                                final bottomHeight =
+                                    math.min(
+                                      _bottomHeight ?? _kBottomPaneHeightFactor,
+                                      0.5,
+                                    ) *
+                                    pageHeight;
                                 final page = Row(
                                   children: [
                                     Expanded(
@@ -1240,17 +1336,15 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
                                                           child: ResizableDragHandle(
                                                             isVertical: true,
                                                             showDivider: false,
-                                                            onDragDelta: (delta) {
-                                                              setState(() {
-                                                                _leftWidth =
-                                                                    (leftWidth -
-                                                                            delta)
-                                                                        .clamp(
-                                                                          80.0,
-                                                                          sideMax,
-                                                                        );
-                                                              });
-                                                            },
+                                                            onDragDelta:
+                                                                (
+                                                                  delta,
+                                                                ) => dragSide(
+                                                                  isLeft: true,
+                                                                  width:
+                                                                      leftWidth -
+                                                                      delta,
+                                                                ),
                                                             onDragEnd:
                                                                 _saveSizes,
                                                           ),
@@ -1320,17 +1414,15 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
                                                           child: ResizableDragHandle(
                                                             isVertical: true,
                                                             showDivider: false,
-                                                            onDragDelta: (delta) {
-                                                              setState(() {
-                                                                _rightWidth =
-                                                                    (rightWidth +
-                                                                            delta)
-                                                                        .clamp(
-                                                                          80.0,
-                                                                          sideMax,
-                                                                        );
-                                                              });
-                                                            },
+                                                            onDragDelta:
+                                                                (
+                                                                  delta,
+                                                                ) => dragSide(
+                                                                  isLeft: false,
+                                                                  width:
+                                                                      rightWidth +
+                                                                      delta,
+                                                                ),
                                                             onDragEnd:
                                                                 _saveSizes,
                                                           ),
@@ -1403,26 +1495,27 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
                                               onPanUpdate: (details) {
                                                 setState(() {
                                                   _bottomHeight =
-                                                      ((_bottomHeight ?? 0) -
-                                                              details.delta.dy)
-                                                          .clamp(
-                                                            80.0,
-                                                            MediaQuery.of(
-                                                                  context,
-                                                                ).size.height *
-                                                                0.5,
-                                                          );
+                                                      pageShapeFraction(
+                                                        (bottomHeight -
+                                                                details
+                                                                    .delta
+                                                                    .dy)
+                                                            .clamp(
+                                                              80.0,
+                                                              math.max(
+                                                                80.0,
+                                                                pageHeight *
+                                                                    0.5,
+                                                              ),
+                                                            ),
+                                                        pageHeight,
+                                                      );
                                                 });
                                               },
                                               onPanEnd: _saveSizes,
                                             ),
                                             SizedBox(
-                                              height:
-                                                  _bottomHeight ??
-                                                  MediaQuery.of(
-                                                        context,
-                                                      ).size.height *
-                                                      0.27,
+                                              height: bottomHeight,
                                               child: Column(
                                                 children: [
                                                   Expanded(
@@ -1492,17 +1585,17 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
                                                                               (
                                                                                 delta,
                                                                               ) {
-                                                                                setState(
-                                                                                  () {
-                                                                                    _bottomLeftWidth =
-                                                                                        (bottomLeftWidth -
-                                                                                                delta)
-                                                                                            .clamp(
-                                                                                              100.0,
-                                                                                              bottomLeftMax,
-                                                                                            );
-                                                                                  },
-                                                                                );
+                                                                                setState(() {
+                                                                                  _bottomLeftWidth = pageShapeFraction(
+                                                                                    (bottomLeftWidth -
+                                                                                            delta)
+                                                                                        .clamp(
+                                                                                          100.0,
+                                                                                          bottomLeftMax,
+                                                                                        ),
+                                                                                    freeWidth,
+                                                                                  );
+                                                                                });
                                                                               },
                                                                           onDragEnd:
                                                                               _saveSizes,

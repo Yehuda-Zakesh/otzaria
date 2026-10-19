@@ -2,7 +2,7 @@
 // רגילה. ההעדפה נשמרת פר-ספר בהחלפת התצוגה, אבל רק מסלול הפתיחה מהספרייה
 // (BookOpenCoordinator) ותוצאות החיפוש זכרו לקרוא אותה — ההיסטוריה והסימניות
 // בנו את הטאב דרך OpenedTab.fromBook בלי לציין מצב, והטאב נפל ל-false.
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/tabs/models/tab.dart';

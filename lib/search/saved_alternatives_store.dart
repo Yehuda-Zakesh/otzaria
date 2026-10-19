@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/search/search_query_builder.dart';
 
 /// מאגר גלובלי של מילים חילופיות שמורות, ממופה מילה -> רשימת חלופות.

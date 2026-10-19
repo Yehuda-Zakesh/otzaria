@@ -1,4 +1,4 @@
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/book_common/utils/commentator_name_matching.dart';
 import 'package:otzaria/book_common/utils/category_settings_utils.dart'
     as category_utils;

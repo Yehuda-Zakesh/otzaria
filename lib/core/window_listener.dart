@@ -8,6 +8,8 @@ import 'package:otzaria/app_report/services/app_crash_session.dart';
 import 'package:otzaria/app_report/services/app_hang_report.dart';
 import 'package:otzaria/core/http_client_registry.dart';
 import 'package:otzaria/core/pre_close_registry.dart';
+import 'package:otzaria/core/ui_snack.dart';
+import 'package:otzaria/core/messages/plugin_messages.dart';
 import 'package:otzaria/core/window_persistence.dart';
 import 'package:otzaria/core/windowing/app_window_controller.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
@@ -23,6 +25,7 @@ import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
 import 'package:otzaria/indexing/utils/indexing_crash_canary.dart';
 import 'package:otzaria/personal_notes/storage/personal_notes_database.dart';
 import 'package:otzaria/plugins/storage/plugin_system_database.dart';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/plugins/services/plugin_crash_guard.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 import 'package:otzaria/plugins/view/webview_environment_holder.dart';
@@ -90,7 +93,29 @@ class AppWindowListener extends WindowListener {
       if (!_sessionEndFlushStarted) {
         _sessionEndFlushStarted = true;
         AppCrashSession.markCleanExitSync();
-        final flushFailure = await _closeWindowScoped();
+        Object? flushFailure;
+        try {
+          final correctionFlushes = await Future.wait([
+            PluginCorrectionSessionService.instance.flushAll(
+              timeout: const Duration(seconds: 3),
+            ),
+            for (final slot in WindowBus.instance.otherRegisteredSlots())
+              WindowBus.instance.request(
+                slot,
+                {'type': MultiWindowService.requestFlushCorrectionSessions},
+                timeout: const Duration(seconds: 3),
+              ),
+          ]);
+          if (correctionFlushes.any((result) => result != true)) {
+            flushFailure = StateError(
+              'One or more correction drafts could not be flushed.',
+            );
+          }
+        } catch (error) {
+          flushFailure = error;
+        }
+        final closeFailure = await _closeWindowScoped();
+        flushFailure ??= closeFailure;
         if (flushFailure != null) {
           // אותו טיפול כמו במסלול הסגירה הרגיל: הכשל הוא האות היחיד
           // לכך שכתיבות תלויות לא נשמרו.
@@ -293,9 +318,10 @@ class AppWindowListener extends WindowListener {
       return;
     }
     _isClosing = true;
+    var correctionQuitFinished = false;
     try {
       if (canClose != null && !canClose()) return;
-      if (!await confirmAppCloseWithUnsavedChanges()) return;
+      if (!await confirmAppCloseWithUnsavedChanges(allWindows: quit)) return;
       if (!await confirmCloseWhilePrinting()) return;
       if (canClose != null && !canClose()) return;
 
@@ -312,6 +338,16 @@ class AppWindowListener extends WindowListener {
       final endsProcess = isLast && (quit || !_keepsProcessAfterLastWindow);
 
       if (endsProcess) {
+        if (!quit &&
+            !await confirmAppCloseWithUnsavedChanges(allWindows: true)) {
+          return;
+        }
+        if (!await finishPreparedProcessCorrectionQuit()) {
+          await cancelPreparedProcessCorrectionQuit();
+          UiSnack.showError(PluginMessages.correctionQuitFlushFailed);
+          return;
+        }
+        correctionQuitFinished = true;
         // לפני הפירוק: כשל בהמשך הסגירה אינו קריסה שכדאי להציע לדווח עליה.
         AppCrashSession.markCleanExitSync();
         await _shutdownProcessUpToFlush();
@@ -327,6 +363,9 @@ class AppWindowListener extends WindowListener {
           await TabsRepository().discardWindowSession();
         }
 
+        // המנוע נשאר חי, ולכן הכתיבות האחרונות לטיוטה ממשיכות אחרי ההסתרה.
+        PluginCorrectionSessionService.instance.endAll('window_closed');
+
         // מוסתר ולא נהרס: תוספים שממשיכים לרוץ היו צורכים משאבים ברקע.
         PluginRuntimeDispatcher.instance.setWindowShown(false);
 
@@ -335,6 +374,9 @@ class AppWindowListener extends WindowListener {
         await const MultiWindowService().closeSelf();
       }
     } finally {
+      if (!correctionQuitFinished) {
+        unawaited(cancelPreparedProcessCorrectionQuit());
+      }
       // רק בעל הניסיון מנקה: בקשת עדכון יכולה להגיע בזמן שומר הסגירה.
       MultiWindowService.closingAll = false;
       _isClosing = false;

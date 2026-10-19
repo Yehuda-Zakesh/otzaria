@@ -2,7 +2,7 @@ import 'dart:math' show min;
 
 import 'package:flutter/material.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/book_protection/models/book_protection.dart';
 import 'package:otzaria/book_protection/repository/book_protection_repository.dart';
@@ -31,6 +31,8 @@ import 'package:otzaria/core/messages/text_book_messages.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
 import 'package:otzaria/utils/text/copy_utils.dart';
 import 'package:otzaria/settings/settings_exports.dart';
+import 'package:otzaria/shortcuts/shortcut_helper.dart';
+import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 import 'package:otzaria/widgets/misc/direct_link_menu_entries.dart';
 import 'package:otzaria/text_book/view/selection/selected_text_copy.dart';
@@ -367,6 +369,34 @@ class ContextMenuUtils {
   static TextBookLoaded? _maybeTextBookState(BuildContext context) {
     final state = context.read<TextBookBloc?>()?.state;
     return state is TextBookLoaded ? state : null;
+  }
+
+  /// קיצור "דווח על טעות בספר" ברשימת מפרשים: הדיווח של תפריט ההקשר, על
+  /// המפרש שבו הבחירה. בלי בחירה הקיצור ממשיך לטיפול הרגיל (issue #2678).
+  static KeyEventResult reportCommentaryErrorShortcut(
+    BuildContext context,
+    KeyEvent event, {
+    required Link? link,
+    required String? selectedText,
+    required double fontSize,
+  }) {
+    final shortcut = ShortcutValidator.getShortcutValue(
+      ShortcutValidator.reportErrorKey,
+    );
+    if (link == null ||
+        (selectedText?.trim().isEmpty ?? true) ||
+        !ShortcutHelper.matchesShortcut(event, shortcut ?? '')) {
+      return KeyEventResult.ignored;
+    }
+    if (link.targetSource.isOfficial) {
+      _reportCommentaryError(
+        context: context,
+        link: link,
+        fontSize: fontSize,
+        savedSelectedText: selectedText,
+      );
+    }
+    return KeyEventResult.handled;
   }
 
   /// פותח את דיאלוג דיווח הטעות עבור מפרש.

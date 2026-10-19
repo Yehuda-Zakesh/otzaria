@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 
@@ -949,6 +949,18 @@ class AppPaths {
     'personal_notes.db',
     'user_books.db',
   ];
+
+  /// האם המסדים האישיים נמחקו מבחוץ: ספרייה כבר נטענה כאן, ואף מסד אישי
+  /// אינו קיים. נקרא רק כש-`user_state.db` נוצר עכשיו (issue #2610).
+  static Future<bool> personalDatabasesWiped() async {
+    final marker = p.join(await getDataRootPath(), 'library_loaded.marker');
+    if (!await File(marker).exists()) return false;
+    final dir = await _writableDatabasesDirectory();
+    for (final fileName in _personalDatabaseFileNames) {
+      if (await File(p.join(dir, fileName)).exists()) return false;
+    }
+    return true;
+  }
 
   /// Resolves the notes database path - for cross-platform compatibility.
   ///

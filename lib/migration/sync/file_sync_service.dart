@@ -662,6 +662,11 @@ class FileSyncService {
     // ל-seforim.db v3 אין עמודת fileType (וגם הוא read-only).
     final existingBook = caches.booksByKey['$categoryId|$title|$fileType'];
 
+    // קובץ קיים שנסרק אינו מחיקה, גם אם קריאתו או עדכונו נכשלים זמנית.
+    if (existingBook != null) {
+      validBookKeys?.add('$categoryId|$title|$fileType');
+    }
+
     bool wasAdded = false;
     bool wasUpdated = false;
 
@@ -735,7 +740,7 @@ class FileSyncService {
       }
     }
 
-    // רק קובץ שעבר את ההמרה (או ספר קיים שלא השתנה) נחשב תקין ל-prune.
+    // ספר חדש נחשב תקין ל-prune רק לאחר שהעיבוד הצליח.
     validBookKeys?.add('$categoryId|$title|$fileType');
 
     return _FileProcessResult(

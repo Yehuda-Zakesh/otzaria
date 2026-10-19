@@ -1,4 +1,4 @@
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 
 /// תדירות בדיקת העדכונים האוטומטית בעליית התוכנה (תוכנה וספרייה כאחד).

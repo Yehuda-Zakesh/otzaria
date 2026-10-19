@@ -1,5 +1,6 @@
 import 'package:otzaria/shortcuts/dynamic/dynamic_shortcut_dispatcher.dart';
 import 'dart:async';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/data/repository/text_book_repository.dart';
 // [EDITING DISABLED] import 'package:otzaria/text_book/editing/repository/local_overrides_repository.dart';
@@ -10,7 +11,7 @@ import 'package:otzaria/tabs/models/reading_tab_search_state.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_plugin_api.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_settings_manager.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/utils/text/ref_helper.dart';
@@ -260,6 +261,10 @@ class TextBookTab extends OpenedTab {
   @override
   void dispose() {
     _isDisposed = true;
+    final correctionTabId = PluginCorrectionSessionService.knownTabIdFor(this);
+    if (correctionTabId != null) {
+      PluginCorrectionSessionService.instance.removeTab(correctionTabId);
+    }
     _stateSubscription?.cancel();
     currentTitle.dispose();
     toggleCommentatorsPaneNotifier.dispose();

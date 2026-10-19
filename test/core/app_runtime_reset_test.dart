@@ -1,6 +1,7 @@
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/app_runtime_reset.dart';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/data/data_providers/book_composite_key.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/data/data_providers/file_system_library_provider.dart';
@@ -131,7 +132,7 @@ void main() {
       );
       FileSystemData.instance.libraryPath = oldLibraryPath;
 
-      Settings.clearCache();
+      await Settings.clearCache();
       await resetRuntimeStateForAppRestart();
 
       expect(providerManager.isInitialized, isFalse);
@@ -154,7 +155,7 @@ void main() {
 
     FileSystemData.instance.libraryPath = oldLibraryPath;
 
-    Settings.clearCache();
+    await Settings.clearCache();
     await resetRuntimeStateAfterSettingsReset();
 
     expect(FileSystemData.instance.libraryPath, isNot(oldLibraryPath));
@@ -175,6 +176,19 @@ void main() {
     expect(FileSystemData.instance.libraryPath, 'C:/restored-library');
     expect(DataRepository.instance.cachedLibraryFutureForTesting, isNull);
     expect(DataRepository.instance.lastSuccessfulLibrary, isNull);
+  });
+
+  test('איפוס אחרי העברת מסדים שומר את נעילת ההכנה הקיימת', () async {
+    final corrections = PluginCorrectionSessionService.instance;
+    const requestId = 'storage-move-reset-test';
+    expect(corrections.beginProcessQuitPreparation(requestId), isTrue);
+    addTearDown(() => corrections.cancelProcessQuitPreparation(requestId));
+
+    await resetRuntimeStateForAppRestart(
+      correctionStorageMoveRequestId: requestId,
+    );
+
+    expect(corrections.isProcessQuitPreparedFor(requestId), isTrue);
   });
 
   test('איפוס מנקה את תוצאות האיתור המוצגות', () async {

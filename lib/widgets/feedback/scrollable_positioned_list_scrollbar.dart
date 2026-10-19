@@ -196,8 +196,7 @@ class _ScrollablePositionedListScrollbarState
   void _updateScrollPosition() {
     if (!mounted) return;
 
-    // הערך הוא Iterable עצל שמסנן מחדש בכל מעבר; עוברים עליו כאן כמה פעמים.
-    final positions = widget.itemPositionsListener.itemPositions.value.toList();
+    final positions = widget.itemPositionsListener.itemPositions.value;
     if (positions.isEmpty || widget.itemCount == 0) return;
 
     // האינדקסים הראשון והאחרון הנראים והקצוות שלהם — מהם נגזרים גובה האגודל

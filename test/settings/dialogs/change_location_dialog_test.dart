@@ -3,14 +3,16 @@ import 'dart:io';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
 import 'package:otzaria/migration/models/book.dart' as migration_models;
 import 'package:otzaria/migration/models/category.dart' as migration_models;
 import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
+import 'package:otzaria/plugins/storage/plugin_system_database.dart';
 import 'package:otzaria/settings/dialogs/change_location_dialog.dart';
+import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:path/path.dart' as p;
 
 Widget _openButton(void Function(BuildContext) onOpen) => MaterialApp(
@@ -483,6 +485,75 @@ void main() {
 
       expect(await Directory(newVectors).exists(), isFalse);
     });
+  });
+
+  test('host DB ממתין לנתיב החדש עד להעתקה ולשחרור נעילת ההעברה', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'otzaria-plugin-db-move-',
+    );
+    final previousDataRoot = AppPaths.cachedDataRootPath;
+    final previousDatabasesPath = Settings.getValue<String>(
+      SettingsRepository.keyDatabasesPath,
+    );
+    final oldDatabases = p.join(tempDir.path, 'old', 'databases');
+    final newDatabases = p.join(tempDir.path, 'new', 'databases');
+    const requestId = 'plugin-db-move-test';
+
+    addTearDown(() async {
+      PluginSystemDatabase.instance.releaseStorageMove(requestId);
+      await PluginSystemDatabase.instance.close();
+      await Settings.setValue<String?>(
+        SettingsRepository.keyDatabasesPath,
+        previousDatabasesPath,
+      );
+      AppPaths.debugOverrideDataRootPath(previousDataRoot);
+      await tempDir.delete(recursive: true);
+    });
+
+    await Settings.init(cacheProvider: _MemoryCacheProvider());
+    AppPaths.debugOverrideDataRootPath(p.join(tempDir.path, 'data-root'));
+    await Settings.setValue<String>(
+      SettingsRepository.keyDatabasesPath,
+      oldDatabases,
+    );
+    final database = PluginSystemDatabase.instance;
+    await database.setPluginKV('plugin', 'default', 'key', '"value"');
+    final oldDatabaseFile = p.join(oldDatabases, 'plugins_host.db');
+    expect(await File(oldDatabaseFile).exists(), isTrue);
+
+    await database.close();
+    var readCompleted = false;
+    final pendingRead = database.getPluginKV('plugin', 'default', 'key').then((
+      value,
+    ) {
+      readCompleted = true;
+      return value;
+    });
+    await database.lockForStorageMove(requestId);
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(readCompleted, isFalse);
+    final secondPendingRead = database.getPluginKV(
+      'plugin',
+      'default',
+      'key',
+    );
+    database.releaseStorageMove('stale-request');
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(readCompleted, isFalse);
+
+    await Settings.setValue<String>(
+      SettingsRepository.keyDatabasesPath,
+      newDatabases,
+    );
+    final newDatabaseFile = p.join(newDatabases, 'plugins_host.db');
+    expect(await File(newDatabaseFile).exists(), isFalse);
+    await Directory(newDatabases).create(recursive: true);
+    await File(oldDatabaseFile).copy(newDatabaseFile);
+
+    database.releaseStorageMove(requestId);
+    expect(await pendingRead, '"value"');
+    expect(await secondPendingRead, '"value"');
+    expect(await File(newDatabaseFile).exists(), isTrue);
   });
 }
 

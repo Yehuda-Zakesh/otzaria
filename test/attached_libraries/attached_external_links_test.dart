@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/attached_libraries/models/attached_library.dart';
 import 'package:otzaria/attached_libraries/repository/attached_libraries_repository.dart';
@@ -21,6 +21,7 @@ import 'package:otzaria/migration/database/untrusted_database.dart';
 import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/links.dart';
+import 'package:otzaria/pdf_book/view/pdf_commentary_panel.dart';
 import 'package:otzaria/services/commentary_service.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/data/repository/text_book_repository.dart';
@@ -219,6 +220,50 @@ void main() {
     try {
       await tempDir.delete(recursive: true);
     } catch (_) {}
+  });
+
+  test('מפרשי PDF משני מסדים בעלי אותה כותרת נשארים נפרדים', () async {
+    final sources = <BookSource>[];
+    for (final name in ['library-a', 'library-b']) {
+      final path = attachedDb(name, rows: [_row(0, targetLineIndex: 1)]);
+      final db = sqlite3.sqlite3.open(path);
+      try {
+        db.execute(
+          'UPDATE line SET content = ? WHERE bookId = ? AND lineIndex = 0',
+          ['תוכן של $name', SeforimFixtureIds.rashiId],
+        );
+      } finally {
+        db.close();
+      }
+      final library = await attach(path);
+      sources.add(BookSource.attached(library.slug));
+    }
+    await links.sync();
+    final book = await bookOf(
+      BookSource.official,
+      SeforimFixtureIds.bereshitTitle,
+    );
+    final loaded = (await externalIn(
+      book,
+    )).where((link) => link.path2 == _commentaryTitle).toList();
+    expect(loaded, hasLength(2));
+    expect(loaded.map((link) => link.targetSource), sources);
+    expect(
+      await Future.wait(loaded.map(provider.getLinkContent)),
+      ['תוכן של library-a', 'תוכן של library-b'],
+    );
+
+    expect(
+      pdfScopedCommentaryLinks(
+        links: loaded,
+        startLine: 1,
+        endLine: 10,
+        extraLineIndices: null,
+        activeCommentators: {_commentaryTitle},
+        showAllWhenEmpty: false,
+      ),
+      loaded,
+    );
   });
 
   group('כיוון ישיר — קורא ספר מהמסד המצורף', () {

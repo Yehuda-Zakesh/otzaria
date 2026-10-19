@@ -1,7 +1,7 @@
 // שמירת סינון סוגי הקישורים בהגדרות.
 // ON_BOOK ("על <הספר הפתוח>") אינו נשמר: תוויתו נגזרת מהספר הפתוח, ובספר אחר
 // הוא היה מסנן "על <ספר אחר>" בלי שהמשתמש ביקש זאת.
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/models/books.dart';

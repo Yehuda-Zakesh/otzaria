@@ -5,8 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart'
-    hide SettingsGroup, SwitchSettingsTile;
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -23,6 +22,7 @@ import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
 import 'package:otzaria/settings/search/settings_search_models.dart';
 import 'package:otzaria/settings/view/settings_screen.dart';
 import 'package:otzaria/settings/dialogs/settings_dialogs_exports.dart';
+import 'package:otzaria/settings/dialogs/backup_restore_flow.dart';
 import 'package:otzaria/settings/services/safer_mode_guard.dart';
 import 'package:otzaria/settings/panels/reports_card.dart';
 import 'package:otzaria/settings/panels/search_feedback_panel.dart';
@@ -935,30 +935,7 @@ class _SystemSettingsTabState extends State<SystemSettingsTab> {
     await _performRestore(filePath, mode: BackupImportMode.merge);
   }
 
-  Future<void> _restoreBackup() async {
-    final backups = await BackupService.getAvailableBackups();
-    if (backups.isEmpty) {
-      if (!mounted) return;
-      UiSnack.showError(SettingsMessages.noBackupFileFound);
-      return;
-    }
-    final filePath = backups.first.path;
-    if (!mounted) return;
-
-    final confirmed = await showWarningDialog(
-      context: context,
-      title: context.settingsText('שחזור מגיבוי?'),
-      content: context.settingsText(
-        'פעולה זו תחליף את הנתונים הקיימים בנתונים מקובץ הגיבוי העדכני ביותר שנמצא בתיקיית הגיבוי.',
-      ),
-      subtitle: context.settingsText('פעולה זו אינה הפיכה!'),
-      cancelText: context.settingsText('ביטול'),
-      confirmText: context.settingsText('שחזר'),
-    );
-    if (confirmed != true) return;
-
-    await _performRestore(filePath);
-  }
+  Future<void> _restoreBackup() => BackupRestoreFlow.restoreLatest(context);
 
   /// שחזור מהארכיון הממוזג — כולל פריטים שנמחקו בעבר, ולכן אזהרה נפרדת.
   Future<void> _restoreFromArchive() async {
@@ -1081,70 +1058,7 @@ class _SystemSettingsTabState extends State<SystemSettingsTab> {
         await _showImportSummary(added, result.skippedSections);
         return;
       }
-      final skipped = result.skippedSections;
-      final missingFolders = result.missingCustomFolders;
-      final isPartial =
-          skipped.isNotEmpty ||
-          missingFolders.isNotEmpty ||
-          result.hasLegacyPartialSettings ||
-          result.notesWithoutAnchor > 0 ||
-          result.userBooksNotReplaced;
-      final content = [
-        if (skipped.isEmpty)
-          context.settingsText('הנתונים שוחזרו בהצלחה.')
-        else
-          context.settingsText(
-            'שחזור חלקי — חסרים בקובץ הגיבוי: {items}.',
-            args: {'items': skipped.join(", ")},
-          ),
-        if (result.userBooksNotReplaced)
-          context.settingsText(
-            'הספרים האישיים לא שוחזרו: לא ניתן היה להחליף את הקובץ שלהם '
-            '(ייתכן שהוא בשימוש). יש לשחזר שוב אחרי הפעלה מחדש של התוכנה.',
-          ),
-        if (result.hasLegacyPartialSettings)
-          context.settingsText(
-            'קובץ גיבוי זה נוצר בגרסה שגיבתה רק חלק מההגדרות, ולכן הגדרות '
-            'שאינן בו לא שוחזרו — בהן קיצורי מקלדת, ברירות המחדל של החיפוש, '
-            'התאמות צורת הדף והתאמות פר-ספר. יש לבדוק אם קיים גיבוי חדש יותר, '
-            'או להגדיר אותן מחדש.',
-          ),
-        if (result.notesWithoutAnchor > 0)
-          context.settingsText(
-            'ב-{count} הערות קובץ הגיבוי אינו כולל את המילים שאליהן הן קושרו, '
-            'ולכן הן מסומנות כעת על הקטע כולו. הקישור למילים נכנס לגיבוי '
-            'בגרסה מאוחרת יותר.',
-            args: {'count': result.notesWithoutAnchor},
-          ),
-        if (result.restoredPlugins > 0)
-          context.settingsText(
-            'התוספים שוחזרו מושבתים. יש להפעיל אותם בהגדרות ← ניהול כלים, '
-            'ולתת מחדש גישה לתיקיות אם נדרשת.',
-          ),
-        if (missingFolders.isNotEmpty)
-          context.settingsText(
-            'תיקיות הספרים הבאות שוחזרו אך לא נמצאו במחשב זה:\n{folders}\n'
-            'יש להוסיף אותן מחדש בהגדרות הספרייה, או לחברן לאותו נתיב.',
-            args: {'folders': missingFolders.join('\n')},
-          ),
-        context.settingsText('האפליקציה תיטען מחדש כעת.'),
-      ].join('\n\n');
-      await showSingleActionDialog(
-        context: context,
-        title: context.settingsText(
-          isPartial ? 'שחזור חלקי' : 'השחזור הושלם',
-        ),
-        content: content,
-        confirmText: context.settingsText('טען מחדש'),
-      );
-      if (!mounted) return;
-      await resetRuntimeStateForAppRestart();
-      if (!mounted) return;
-      MultiWindowService.restartPeers();
-      RestartWidget.restartApp(
-        context,
-        afterRestart: WebViewEnvironmentHolder.disposeForAppRestart,
-      );
+      await BackupRestoreFlow.showResultAndRestart(context, result);
     } catch (e) {
       if (!mounted) return;
       UiSnack.showError(SettingsMessages.backupRestoreError(e));

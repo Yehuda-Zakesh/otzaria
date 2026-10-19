@@ -249,4 +249,115 @@ void main() {
     expect(report.reportKind, DirectErrorReportKind.freeText);
     expect(report.errorDetails, contains('מוצע: ג'));
   });
+
+  group('reportKind ו-requireTextCorrection', () {
+    late int deliveries;
+    setUp(() {
+      deliveries = 0;
+      service = PluginBookCorrectionService(
+        senderEmail: () => 'reader@example.com',
+        deliver: (value, {required bool allowQueue}) async {
+          deliveries++;
+          report = value;
+          return DirectReportDeliveryResult.sent('נשלח');
+        },
+      );
+    });
+    Matcher coded(String code) =>
+        throwsA(predicate((Object e) => e.toString().contains(code)));
+
+    test('reportKind מתאר תיקון מובנה ודיווח חופשי', () async {
+      final structured = await submit(['אָב'], 'אָב', 'אֵם', start: 0, end: 3);
+      expect(structured['reportKind'], 'text_correction');
+      expect(structured['correctionSupported'], isTrue);
+      final free = await submit(
+        ['מי<b>לה</b>'],
+        'מילה',
+        'חדש',
+        start: 0,
+        end: 4,
+      );
+      expect(free['reportKind'], 'free_text');
+      expect(free['correctionSupported'], isFalse);
+    });
+
+    test('בלי האפשרות נשמרים שדות התוצאה הקודמים', () async {
+      final result = await submit(['א&amp;ב'], '&', 'וגם', start: 1, end: 2);
+      expect(result, {
+        'status': 'sent',
+        'reportId': 'stable-id',
+        'nativeReportId': 'test.plugin:stable-id',
+        'message': 'נשלח',
+        'duplicate': false,
+        'reportKind': 'free_text',
+        'correctionSupported': false,
+      });
+    });
+
+    test('שינוי שחוצה HTML נדחה בלי לשלוח', () async {
+      await expectLater(
+        submit(
+          ['מי<b>לה</b>'],
+          'מילה',
+          'חדש',
+          start: 0,
+          end: 4,
+          extra: {'requireTextCorrection': true},
+        ),
+        coded('error.text_correction_unavailable'),
+      );
+      expect(deliveries, 0);
+    });
+
+    test('טווח רב-פסקאי נדחה בלי לשלוח', () async {
+      await expectLater(
+        submit(
+          ['אחד', 'שניים'],
+          'אחד\nשניים',
+          '',
+          extra: {'requireTextCorrection': true},
+        ),
+        coded('error.text_correction_unavailable'),
+      );
+      expect(deliveries, 0);
+    });
+
+    test('שילוב עם forceFreeText נדחה כפרמטר שגוי', () async {
+      await expectLater(
+        submit(
+          ['אָב'],
+          'אָב',
+          'אֵם',
+          start: 0,
+          end: 3,
+          extra: {'requireTextCorrection': true, 'forceFreeText': true},
+        ),
+        coded('error.invalid_params'),
+      );
+      expect(deliveries, 0);
+      expect(loaded, isEmpty);
+    });
+
+    test('ערך שאינו bool נדחה', () async {
+      await expectLater(
+        submit(['אָב'], 'אָב', 'אֵם', extra: {'requireTextCorrection': 'yes'}),
+        coded('error.invalid_params'),
+      );
+      expect(deliveries, 0);
+    });
+
+    test('שינוי שניתן למיפוי נשלח כתיקון מובנה', () async {
+      final result = await submit(
+        ['<b>אָב</b> סוף'],
+        'אָב',
+        'אֵם',
+        start: 0,
+        end: 3,
+        extra: {'requireTextCorrection': true},
+      );
+      expect(deliveries, 1);
+      expect(result['reportKind'], 'text_correction');
+      expect(report.reportKind, DirectErrorReportKind.textCorrection);
+    });
+  });
 }

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/messages/report_messages.dart';
 import 'package:otzaria/text_book/view/error_report_dialog.dart';

@@ -2,7 +2,7 @@
 // מוצג רק כשלספר יש קטגוריות, פותח את הדיאלוג, והאישור שומר את הבחירה
 // לקטגוריה ומפעיל את ניקוי הבחירה הפר-ספרית.
 import 'package:flutter/material.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/settings/services/category_commentators_service.dart';
 import 'package:otzaria/book_common/models/commentator_group.dart';

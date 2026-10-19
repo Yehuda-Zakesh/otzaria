@@ -12,6 +12,10 @@ const double kReadingAnchorAlignment = 0.05;
 double initialReadingAlignment(int initialIndex) =>
     initialIndex == 0 ? 0 : kReadingAnchorAlignment;
 
+/// טווח המטמון של רשימות הקריאה, במסכים לכל צד. כל קפיצה בונה אותו מחדש,
+/// וברירת המחדל של החבילה (2) בונה כחמישה מסכים של פסקאות.
+const double kReaderCacheExtentScreens = 1.5;
+
 /// קו העוגן לניווט אל תוצאת חיפוש — ממקם את המילה שנמצאה סביב מרכז-עליון
 /// התצוגה (ולא בראש), כדי שיהיה הקשר גם מעל המילה. זהה לסרגל התוצאות בחלונית
 /// ולפתיחת ספר מהחיפוש הכללי.

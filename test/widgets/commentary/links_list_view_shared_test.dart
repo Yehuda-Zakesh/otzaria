@@ -2,8 +2,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/link_types.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/services/commentary_service.dart';
@@ -11,6 +12,7 @@ import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
 import 'package:otzaria/settings/engine/settings_state.dart';
 import 'package:otzaria/widgets/commentary/links_list_view.dart';
+import 'package:otzaria/widgets/commentary/panel_anchor_links.dart';
 import 'package:otzaria/text_display/models/text_display_profile.dart';
 import 'package:otzaria/widgets/feedback/scrollable_positioned_list_scrollbar.dart';
 import 'package:otzaria/widgets/lists/filter_chips_widget.dart';
@@ -52,6 +54,9 @@ class _LongContentLink extends Link {
     required super.index2,
     required super.connectionType,
     required this._content,
+    super.targetSource,
+    super.targetBookId,
+    super.targetCategoryId,
   });
 
   final String _content;
@@ -270,6 +275,55 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
       expect(find.text('לא נמצאו קישורים מהסוגים שנבחרו'), findsOneWidget);
     });
+  });
+
+  testWidgets('שני מסדי יעד שומרים תוכן והרחבה נפרדים באותה כותרת', (
+    tester,
+  ) async {
+    final links = [
+      for (final slug in ['library-a', 'library-b'])
+        _LongContentLink(
+          heRef: 'אותה הפניה',
+          index1: 1,
+          path2: 'ספר משותף',
+          index2: 1,
+          connectionType: LinkTypes.mesoratHashas,
+          targetSource: BookSource.attached(slug),
+          targetBookId: 2,
+          targetCategoryId: 2,
+          content: 'תוכן של $slug',
+        ),
+    ];
+    CommentaryService.seedEraCache({
+      for (final link in links)
+        '${link.targetSource.wireKey}\u0000ספר משותף': CommentaryEra.other,
+    });
+    addTearDown(CommentaryService.clearEraCache);
+    await _pumpWithoutTextBookBloc(tester, links: links);
+    await tester.pumpAndSettle();
+
+    List<String> contents() => tester
+        .widgetList<PanelAnchoredText>(find.byType(PanelAnchoredText))
+        .map((widget) => widget.html)
+        .toList();
+    final tiles = find.byType(ExpansionTile);
+    Finder header(int index) => find.descendant(
+      of: tiles.at(index),
+      matching: find.text('ספר משותף'),
+    );
+    expect(tiles, findsNWidgets(2));
+    await tester.tap(header(0));
+    await tester.pumpAndSettle();
+    expect(contents(), ['תוכן של library-a']);
+
+    await tester.tap(header(1));
+    await tester.pumpAndSettle();
+    expect(contents(), ['תוכן של library-a', 'תוכן של library-b']);
+
+    await tester.tap(header(0));
+    await tester.pumpAndSettle();
+    expect(contents(), ['תוכן של library-b']);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('שינוי contentScopeKey מאפס גלילה בלי לפרק את ה-State', (

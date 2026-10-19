@@ -3,7 +3,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/data/data_providers/database_library_provider.dart';
@@ -77,6 +77,55 @@ void main() {
 
   setUp(() async {
     await Settings.init(cacheProvider: _MemoryCacheProvider());
+  });
+
+  test('כשל כתיבת כותרות בסריקת תיקייה משמר חותמת קובץ לניסיון חוזר', () async {
+    final tempDir = await Directory.systemTemp.createTemp(
+      'external-toc-failure-',
+    );
+    final previousDataRootPath = AppPaths.cachedDataRootPath;
+    final provider = DatabaseLibraryProvider.instance;
+    addTearDown(() => tempDir.delete(recursive: true));
+    addTearDown(() => AppPaths.debugOverrideDataRootPath(previousDataRootPath));
+    addTearDown(() => provider.clearCache());
+    addTearDown(() => UserBooksDatabaseHolder.instance.close());
+    await UserBooksDatabaseHolder.instance.close();
+    AppPaths.debugOverrideDataRootPath(path.join(tempDir.path, 'data'));
+    final repository = await UserBooksDatabaseHolder.instance.repository;
+    final folder = Directory(path.join(tempDir.path, 'ספרים'))..createSync();
+    final file = File(path.join(folder.path, 'ספר.txt'))
+      ..writeAsStringSync('<h1>ספר</h1>\n<h2>פרק א</h2>');
+    Future<ScanResult> scan() => provider.scanAndAddExternalBooksFromFolder(
+      folder.path,
+      'ספרים',
+      repository,
+    );
+    expect((await scan()).addedBooks, 1);
+    final before = (await repository.getAllBooksLean()).single;
+    final db = await repository.database.database;
+    db.execute('''
+      CREATE TRIGGER fail_external_toc BEFORE INSERT ON tocEntry
+      BEGIN SELECT RAISE(FAIL, 'injected TOC write failure'); END
+    ''');
+    file.writeAsStringSync('<h1>ספר</h1>\n<h2>פרק ב</h2>');
+    file.setLastModifiedSync(DateTime.now().add(const Duration(minutes: 5)));
+    expect((await scan()).failedBooks, 1);
+    final failed = (await repository.getAllBooksLean()).single;
+    expect(failed.lastModified, before.lastModified);
+    expect(failed.fileSize, before.fileSize);
+    expect((await repository.getBookToc(before.id)).map((e) => e.text), [
+      'ספר',
+      'פרק א',
+    ]);
+    db.execute('DROP TRIGGER fail_external_toc');
+    expect((await scan()).updatedBooks, 1);
+    final after = (await repository.getAllBooksLean()).single;
+    expect(after.id, before.id);
+    expect(after.lastModified, file.statSync().modified.millisecondsSinceEpoch);
+    expect((await repository.getBookToc(before.id)).map((e) => e.text), [
+      'ספר',
+      'פרק ב',
+    ]);
   });
 
   test(

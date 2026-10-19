@@ -563,6 +563,32 @@ class MultiWindowService {
   /// בקשה לחלון להיסגר במסלול הסגירה הרגיל שלו.
   static const String requestCloseWindow = 'closeWindow';
 
+  /// Flushes correction drafts in this window before a process-wide quit.
+  static const String requestPrepareCorrectionQuit = 'prepareCorrectionQuit';
+
+  static const String requestPrepareCorrectionStorageMove =
+      'prepareCorrectionStorageMove';
+
+  static const String requestFinishCorrectionStorageMove =
+      'finishCorrectionStorageMove';
+
+  /// Ends correction sessions after the user confirmed process-wide quit.
+  static const String requestEndCorrectionSessions = 'endCorrectionSessions';
+
+  static const String requestCancelCorrectionQuit = 'cancelCorrectionQuit';
+
+  static const String requestFinishCorrectionQuit = 'finishCorrectionQuit';
+  static const String requestFlushCorrectionSessions =
+      'flushCorrectionSessions';
+
+  static Duration correctionQuitRequestTimeout = const Duration(seconds: 6);
+
+  static bool correctionQuitPeersUnchanged(Iterable<int> preparedPeers) {
+    final current = WindowBus.instance.otherRegisteredSlots().toSet();
+    return current.length == preparedPeers.length &&
+        current.containsAll(preparedPeers);
+  }
+
   /// סגירה לעדכון בחלון הזה; מנוקה בתום הניסיון, גם בביטול.
   static bool closingAll = false;
 

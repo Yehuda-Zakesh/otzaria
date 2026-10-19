@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/models/books.dart';
+import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/link_types.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/services/commentary_service.dart';
@@ -248,6 +249,35 @@ void main() {
     });
   });
 
+  test('כל מפתחות הקישור מבחינים בין מסדים ובין ספרים באותו מסד', () {
+    final links = [
+      for (final source in [
+        BookSource.official,
+        BookSource.user,
+        BookSource.attached('library-a'),
+        BookSource.attached('library-b'),
+      ])
+        for (final id in [2, 3])
+          Link(
+            heRef: 'אותה הפניה',
+            index1: 1,
+            path2: 'ספר משותף',
+            index2: 1,
+            connectionType: LinkTypes.mesoratHashas,
+            targetSource: source,
+            targetBookId: id,
+            targetCategoryId: 2,
+          ),
+    ];
+    for (final keyOf in [
+      buildSelectedLinkContentKey,
+      buildSelectedLinkInstanceKey,
+      buildSelectedLinkTargetKey,
+    ]) {
+      expect(links.map(keyOf).toSet(), hasLength(links.length));
+    }
+  });
+
   group('dedupeLinksByTarget', () {
     Link linkTo({
       required String title,
@@ -256,6 +286,9 @@ void main() {
       String type = 'reference',
       int? index2End,
       String? targetFileType,
+      BookSource targetSource = BookSource.official,
+      int? targetBookId,
+      int? targetCategoryId,
     }) => Link(
       heRef: 'הפניה',
       index1: index1,
@@ -264,6 +297,9 @@ void main() {
       index2End: index2End,
       connectionType: type,
       targetFileType: targetFileType,
+      targetSource: targetSource,
+      targetBookId: targetBookId,
+      targetCategoryId: targetCategoryId,
     );
 
     test('אותו קטע-יעד מכמה שורות מקור ממוזג לפריט אחד', () {
@@ -311,6 +347,55 @@ void main() {
       ]);
 
       expect(deduped, hasLength(2));
+    });
+
+    test('מקורות יעד שונים נשארים נפרדים גם כששאר הזהות זהה', () {
+      final sources = [
+        BookSource.official,
+        BookSource.user,
+        BookSource.attached('library-a'),
+        BookSource.attached('library-b'),
+      ];
+      final links = [
+        for (final source in sources)
+          linkTo(
+            title: 'רש״י',
+            targetSource: source,
+            targetBookId: 2,
+            targetCategoryId: 2,
+          ),
+      ];
+
+      expect(dedupeLinksByTarget(links), links);
+      expect(
+        dedupeLinksByTarget([
+          ...links,
+          for (final source in sources)
+            linkTo(
+              title: 'רש״י',
+              index1: 2,
+              targetSource: source,
+              targetBookId: 2,
+              targetCategoryId: 2,
+            ),
+        ]),
+        links,
+      );
+    });
+
+    test('ספרים שונים באותו מקור ובאותה קטגוריה נשארים נפרדים', () {
+      final links = [
+        for (final id in [2, 3])
+          linkTo(title: 'רש״י', targetBookId: id, targetCategoryId: 2),
+      ];
+      expect(dedupeLinksByTarget(links), links);
+    });
+
+    test('קטגוריות שונות באותו מקור נשארות נפרדות', () {
+      final links = [
+        for (final id in [2, 3]) linkTo(title: 'רש״י', targetCategoryId: id),
+      ];
+      expect(dedupeLinksByTarget(links), links);
     });
 
     test('הסדר הנתון נשמר', () {

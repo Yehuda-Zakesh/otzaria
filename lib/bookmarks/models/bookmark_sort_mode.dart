@@ -1,4 +1,4 @@
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 
 /// אופן מיון רשימת הסימניות. הבחירה נשמרת בין הפעלות.
 enum BookmarkSortMode {

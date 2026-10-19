@@ -1,7 +1,7 @@
 // issue #1392: הסתרת טור בצורת הדף נשמרת יחד עם בחירת המפרשים, ולכן חלה
 // רק על אותו תחום (קטגוריה / ספר / שולחן עבודה) ולא על כל הספרים.
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_settings_manager.dart';
 

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/core/messages/common_messages.dart';

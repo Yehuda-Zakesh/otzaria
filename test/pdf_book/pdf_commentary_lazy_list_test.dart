@@ -7,7 +7,7 @@ import 'package:flutter/rendering.dart';
 import 'package:otzaria/text_display/models/text_display_profile.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/data/data_providers/book_composite_key.dart';
 import 'package:otzaria/data/data_providers/library_provider.dart';
@@ -26,6 +26,8 @@ import 'package:otzaria/services/commentary_service.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
 import 'package:otzaria/settings/engine/settings_state.dart';
+import 'package:otzaria/shortcuts/shortcut_helper.dart';
+import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
 
 import '../helpers/memory_settings_cache.dart';
@@ -304,6 +306,72 @@ void main() {
     expect('טקסט נטען'.allMatches(copy.text!).length, 100);
     expect(tester.takeException(), isNull);
   });
+
+  for (final (key, shortcut) in [
+    (LogicalKeyboardKey.keyR, null),
+    (LogicalKeyboardKey.arrowUp, 'ctrl+shift+arrowup'),
+    (LogicalKeyboardKey.arrowDown, 'ctrl+shift+arrowdown'),
+  ]) {
+    testWidgets(
+      'קיצור ${key.keyLabel} מדווח על בחירה במפרש PDF (issue #2678)',
+      (
+        tester,
+      ) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+        ShortcutHelper.isMacForTesting = false;
+        addTearDown(() {
+          debugDefaultTargetPlatformOverride = null;
+          ShortcutHelper.isMacForTesting = null;
+        });
+        final previous = Settings.getValue<String>(
+          ShortcutValidator.reportErrorKey,
+        );
+        await Settings.setValue(
+          ShortcutValidator.reportErrorKey,
+          shortcut,
+        );
+        addTearDown(
+          () => Settings.setValue(ShortcutValidator.reportErrorKey, previous),
+        );
+        final tab = _bigGroupTab(1, group: 9);
+        addTearDown(tab.dispose);
+        final outerKeys = <LogicalKeyboardKey>[];
+        final outerFocus = FocusNode();
+        addTearDown(outerFocus.dispose);
+        await tester.pumpWidget(
+          _wrap(
+            KeyboardListener(
+              focusNode: outerFocus,
+              onKeyEvent: (e) {
+                if (e is KeyDownEvent) outerKeys.add(e.logicalKey);
+              },
+              child: _panel(tab),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.textContaining('טָהוֹר'),
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pump(kDoubleTapTimeout);
+        _ClipboardCapture(tester).selectAll();
+        await tester.pump();
+        final modifier = ShortcutHelper.usesMacModifiers
+            ? LogicalKeyboardKey.metaLeft
+            : LogicalKeyboardKey.controlLeft;
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(key);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pump();
+        expect(outerKeys, isNot(contains(key)));
+        await tester.pumpWidget(const SizedBox.shrink());
+        debugDefaultTargetPlatformOverride = null;
+      },
+    );
+  }
 
   group('רשימת המפרשים של PDF בונה רק את מה שעל המסך (#844)', () {
     testWidgets('קבוצה גדולה ופתוחה אינה בונה את כל הקטעים', (tester) async {

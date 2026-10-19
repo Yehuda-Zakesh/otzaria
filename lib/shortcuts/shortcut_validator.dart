@@ -1,4 +1,4 @@
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/shortcuts/shortcut_helper.dart';
 
 /// יעד הפעולה של קיצור מקלדת שתוסף הצהיר עליו: התוסף, מזהה הקיצור, תווית

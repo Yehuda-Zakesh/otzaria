@@ -1058,17 +1058,27 @@ class SeforimRepository {
     );
   }
 
-  /// מחליף את ה-TOC של ספר חיצוני קיים (מחיקת הישן + הוספת החדש). נדרש
-  /// כשקובץ DOCX/TXT נערך — כדי שהניווט יתעדכן לפי התוכן החדש, ולא יישאר
-  /// לפי הגרסה הישנה.
+  /// מחליף אטומית את תוכן העניינים ומנקה שורות שנשמרו במסד,
+  /// כדי שכשל כתיבה ישמר את התוכן הקודם לניסיון חוזר.
   Future<void> replaceExternalBookToc(
     int bookId,
     List<TocEntry> tocEntries,
   ) async {
-    await deleteBookTocEntries(bookId);
-    if (tocEntries.isNotEmpty) {
-      await _insertTocEntriesForExternalBook(bookId, tocEntries);
-    }
+    final db = await _database.database;
+    _invalidateTocCache(bookId: bookId);
+    withTransaction(db, () {
+      db.execute(
+        'DELETE FROM line_toc WHERE lineId IN '
+        '(SELECT id FROM line WHERE bookId = ?) OR tocEntryId IN '
+        '(SELECT id FROM tocEntry WHERE bookId = ?)',
+        [bookId, bookId],
+      );
+      db.execute('DELETE FROM line_ref WHERE bookId = ?', [bookId]);
+      db.execute('DELETE FROM line WHERE bookId = ?', [bookId]);
+      db.execute('DELETE FROM tocEntry WHERE bookId = ?', [bookId]);
+      db.execute('UPDATE book SET totalLines = 0 WHERE id = ?', [bookId]);
+      _insertTocEntriesForExternalBookSync(db, bookId, tocEntries);
+    });
   }
 
   /// Updates a book's storage details (file path, file size, last modified).
@@ -1101,20 +1111,7 @@ class SeforimRepository {
     return await _database.bookDao.getBookByFilePath(filePath);
   }
 
-  /// Inserts TOC entries for an external book.
-  /// Creates toc_text entries and toc_entry entries.
-  Future<void> _insertTocEntriesForExternalBook(
-    int bookId,
-    List<TocEntry> entries,
-  ) async {
-    final db = await _database.database;
-    withTransaction(db, () {
-      _insertTocEntriesForExternalBookSync(db, bookId, entries);
-    });
-  }
-
-  /// גרעין סינכרוני של [_insertTocEntriesForExternalBook] — רץ בתוך
-  /// טרנזקציה פתוחה, עם קאש מקומי של tocText למניעת שאילתות כפולות.
+  /// מוסיף תוכן עניינים בטרנזקציה פתוחה, עם קאש טקסטים מקומי.
   void _insertTocEntriesForExternalBookSync(
     sqlite3.Database db,
     int bookId,

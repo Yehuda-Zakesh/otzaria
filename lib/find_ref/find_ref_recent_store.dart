@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 
 /// שאילתות האיתור האחרונות שהובילו לפתיחת מקור, מהחדשה לישנה.
 ///

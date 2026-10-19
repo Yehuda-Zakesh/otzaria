@@ -1,6 +1,6 @@
 import 'dart:ui' as ui;
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/theme/layout_tokens.dart';
 
 double _currentLogicalScreenWidth() {

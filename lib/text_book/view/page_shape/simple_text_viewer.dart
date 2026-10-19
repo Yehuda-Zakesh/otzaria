@@ -26,6 +26,7 @@ import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/utils/reader_build_policy.dart';
+import 'package:otzaria/text_book/utils/reading_segment_navigation.dart';
 import 'package:otzaria/bookmarks/utils/section_bookmark.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/book_common/models/commentator_group.dart';
@@ -57,7 +58,7 @@ import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/personal_notes/personal_notes_system.dart';
 import 'package:otzaria/personal_notes/utils/personal_note_source_selection.dart';
 import 'package:otzaria/personal_notes/storage/personal_notes_changes.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/view/widgets/book_source_banner.dart';
 import 'package:otzaria/text_book/view/sibling_commentaries_menu.dart';
@@ -242,11 +243,15 @@ bool isMenuFocusNode(FocusNode? focusNode) {
   return hasMenuAncestor;
 }
 
-/// האם הפוקוס נמצא בתוך חלונית מפרש של צורת הדף.
-bool isCommentaryFocusNode(FocusNode? focusNode) {
-  final viewer = focusNode?.context
-      ?.findAncestorStateOfType<_SimpleTextViewerState>();
-  return viewer != null && !viewer.widget.isMainText;
+/// האם הפוקוס באזור בחירה שאינו הטקסט הראשי — חלונית מפרש, או חלונית צפה
+/// (שכבת-על מחוץ לכל מסך; פאנל צד באותו מסך אינו נחשב).
+bool isOtherSelectionFocusNode(FocusNode? focusNode) {
+  final context = focusNode?.context;
+  if (context == null) return false;
+  final viewer = context.findAncestorStateOfType<_SimpleTextViewerState>();
+  if (viewer != null) return !viewer.widget.isMainText;
+  return ModalRoute.of(context) == null &&
+      context.findAncestorStateOfType<SelectableRegionState>() != null;
 }
 
 /// היסט הגלילה של מקש בחלונית מפרש: שורה = 50px, עמוד = 80% מהחלונית
@@ -949,8 +954,8 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
       return;
     }
 
-    // המשתמש לחץ בחלונית מפרש — החיצים שייכים לה עד שילחץ שוב בטקסט הראשי.
-    if (isCommentaryFocusNode(FocusManager.instance.primaryFocus)) {
+    // לחיצה בחלונית מפרש או בחלונית צפה — המקשים (חיצים, Ctrl+C) שייכים לה.
+    if (isOtherSelectionFocusNode(FocusManager.instance.primaryFocus)) {
       return;
     }
 
@@ -1974,6 +1979,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     if (widget.isMainText) {
       entries.addAll(
         buildReaderPluginMenuEntries(
+          tabId: readerBookTabId(widget.tab, state),
           root: context.findRenderObject(),
           state: state,
           lines: widget.content,
@@ -2714,6 +2720,8 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
                                             scrollOffsetController:
                                                 _offsetController,
                                             itemCount: itemCount,
+                                            cacheExtentScreens:
+                                                kReaderCacheExtentScreens,
                                             padding: const EdgeInsets.all(4),
                                             itemBuilder: (context, index) {
                                               final item = _buildLineItem(

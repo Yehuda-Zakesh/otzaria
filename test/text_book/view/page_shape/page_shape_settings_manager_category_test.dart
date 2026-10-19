@@ -3,7 +3,7 @@
 // שהיא כללית מדי ומשותפת לכל ספרי הספרייה מאותו סוג — כך שההגדרה דלפה
 // לספרים אחרים שלא היו אמורים להיות מושפעים ממנה (פורום #774, #393).
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/text_book/view/page_shape/utils/page_shape_settings_manager.dart';
 

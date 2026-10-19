@@ -19,6 +19,7 @@ import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/core/windowing/window_bus_host.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/plugins/utils/plugin_safe_mode.dart';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 
 /// ⚠️ קידומת ייחודית לסוויטה — [ui.IsolateNameServer] גלובלי לתהליך.
 const String _namespace = 'otzaria.test.bushost.close';
@@ -171,6 +172,96 @@ void main() {
     expect(IndexingCrashCanary.current, isNull);
     expect(File('${temp.path}/index.in_flight.json').readAsStringSync(), '{}');
     expect(window.closeCalls, 0);
+  });
+
+  testWidgets('בקשת יציאה נועלת הכנות ומבטלת רק את הניסיון המתאים', (
+    tester,
+  ) async {
+    final window = _RecordingWindow(visible: false);
+    await tester.pumpWidget(
+      AppWindowScope(
+        controller: window,
+        geometry: window,
+        child: const WindowBusHost(child: SizedBox()),
+      ),
+    );
+    final service = PluginCorrectionSessionService.instance;
+    final prepared = await WindowBus.instance.onRequest!({
+      'type': MultiWindowService.requestPrepareCorrectionQuit,
+      'requestId': 'quit-a',
+    });
+    expect((prepared as Map)['locked'], isTrue);
+    expect(service.processQuitPending, isTrue);
+
+    await WindowBus.instance.onRequest!({
+      'type': MultiWindowService.requestCancelCorrectionQuit,
+      'requestId': 'quit-b',
+    });
+    expect(service.processQuitPending, isTrue);
+
+    await WindowBus.instance.onRequest!({
+      'type': MultiWindowService.requestCancelCorrectionQuit,
+      'requestId': 'quit-a',
+    });
+    expect(service.processQuitPending, isFalse);
+  });
+
+  testWidgets('אימות חלון אינו מסיים סשנים לפני שכל החלונות אומתו', (
+    tester,
+  ) async {
+    final window = _RecordingWindow(visible: false);
+    await tester.pumpWidget(
+      AppWindowScope(
+        controller: window,
+        geometry: window,
+        child: const WindowBusHost(child: SizedBox()),
+      ),
+    );
+    final service = PluginCorrectionSessionService.instance;
+    await WindowBus.instance.onRequest!({
+      'type': MultiWindowService.requestPrepareCorrectionQuit,
+      'requestId': 'quit-validation',
+    });
+    expect(
+      await WindowBus.instance.onRequest!({
+        'type': MultiWindowService.requestFinishCorrectionQuit,
+        'requestId': 'quit-validation',
+        'accepted': const <String>[],
+      }),
+      isTrue,
+    );
+    expect(service.processQuitPending, isTrue);
+    await WindowBus.instance.onRequest!({
+      'type': MultiWindowService.requestCancelCorrectionQuit,
+      'requestId': 'quit-validation',
+    });
+  });
+
+  testWidgets('הכנת העברת מסדים נועלת את החלון עד ביטול מפורש', (
+    tester,
+  ) async {
+    final window = _RecordingWindow(visible: false);
+    await tester.pumpWidget(
+      AppWindowScope(
+        controller: window,
+        geometry: window,
+        child: const WindowBusHost(child: SizedBox()),
+      ),
+    );
+    final service = PluginCorrectionSessionService.instance;
+    expect(
+      await WindowBus.instance.onRequest!({
+        'type': MultiWindowService.requestPrepareCorrectionStorageMove,
+        'requestId': 'move-databases',
+      }),
+      isTrue,
+    );
+    expect(service.processQuitPending, isTrue);
+    await WindowBus.instance.onRequest!({
+      'type': MultiWindowService.requestCancelCorrectionQuit,
+      'requestId': 'move-databases',
+    });
+    expect(service.processQuitPending, isFalse);
   });
 
   testWidgets('בקשת סגירה נכנסת עוברת במסלול הסגירה הרגיל', (tester) async {

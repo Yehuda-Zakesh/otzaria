@@ -99,6 +99,9 @@ class AppSurfaces {
       ? const Color(0xFFF8FAFC)
       : cs.primary.withValues(alpha: 0.08);
 
+  /// פס בצד תחילת השורה לפסקה שתוקנה מקומית בסשן תיקון של תוסף.
+  static Color correctedParagraphMarker(ColorScheme cs) => cs.tertiary;
+
   /// רקע זמני לשורת ספר שהודגשה (מעבר מקישור/חיפוש/תוכן עניינים).
   static Color highlightedLineBackground(ColorScheme cs) =>
       cs.secondaryContainer.withValues(alpha: 0.4);

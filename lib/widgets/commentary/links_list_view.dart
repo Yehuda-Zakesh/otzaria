@@ -52,33 +52,30 @@ RenderSettings buildSelectedLinkRenderSettings({
   );
 }
 
+String _selectedLinkBookKey(Link link) =>
+    '${link.targetSource.wireKey}_${link.targetCategoryId ?? ''}_${link.targetBookId ?? ''}';
+
 @visibleForTesting
 String buildSelectedLinkContentKey(Link link) {
-  // זהות היעד (אישי/רשמי+קטגוריה) נכללת כדי שלא יתערבב תוכן בין שני קישורים
-  // לאותה כותרת ואינדקס — אחד אישי ואחד רשמי.
-  final target =
-      '${link.targetIsUserBook ? 'u' : 'o'}_${link.targetCategoryId ?? ''}';
+  final target = _selectedLinkBookKey(link);
   return '${link.path2}_${link.index2}_$target';
 }
 
 @visibleForTesting
 String buildSelectedLinkInstanceKey(Link link) {
-  final target =
-      '${link.targetIsUserBook ? 'u' : 'o'}_${link.targetCategoryId ?? ''}';
+  final target = _selectedLinkBookKey(link);
   return '${link.path2}_${link.index1}_${link.index2}_${link.index2End ?? ''}_${link.heRef}_${link.start}_${link.end}_${link.connectionType}_$target';
 }
 
-/// זהות פריט התצוגה — [buildSelectedLinkInstanceKey] בלי שורת המקור (index1).
+/// זהות קטע היעד, כולל המסד והספר, בלי שורת המקור (index1).
 @visibleForTesting
 String buildSelectedLinkTargetKey(Link link) {
-  final target =
-      '${link.targetIsUserBook ? 'u' : 'o'}_${link.targetCategoryId ?? ''}';
+  final target = _selectedLinkBookKey(link);
   return '${link.path2}_${link.index2}_${link.index2End ?? ''}_${link.start}_${link.end}_${link.connectionType}_${link.targetFileType ?? ''}_$target';
 }
 
 /// מסיר קישורים כפולים לאותו קטע-יעד. הקטע המוצג פורש כמה שורות מקור, ואותו
 /// קטע-יעד מקושר לעיתים מכמה מהן — בלי המיזוג הוא מופיע ברשימה כמה פעמים.
-@visibleForTesting
 List<Link> dedupeLinksByTarget(List<Link> links) {
   final seen = <String>{};
   return links

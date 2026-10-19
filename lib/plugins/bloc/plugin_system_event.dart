@@ -131,19 +131,31 @@ class CancelPluginInstall extends PluginSystemEvent {
 
 class UninstallPluginRequested extends PluginSystemEvent {
   final String pluginId;
-  const UninstallPluginRequested(this.pluginId);
+
+  /// רק כשהמשתמש אישר במפורש גם את מחיקת טיוטות התיקון שלא נשלחו.
+  final bool deleteCorrectionDrafts;
+  const UninstallPluginRequested(
+    this.pluginId, {
+    this.deleteCorrectionDrafts = false,
+  });
 
   @override
-  List<Object?> get props => [pluginId];
+  List<Object?> get props => [pluginId, deleteCorrectionDrafts];
 }
 
 /// איפוס כל הנתונים שהתוסף אגר (KV, רשומות שפורסמו, התראות, קבצים) בלי להסירו.
 class ResetPluginDataRequested extends PluginSystemEvent {
   final String pluginId;
-  const ResetPluginDataRequested(this.pluginId);
+
+  /// רק כשהמשתמש אישר במפורש גם את מחיקת טיוטות התיקון שלא נשלחו.
+  final bool deleteCorrectionDrafts;
+  const ResetPluginDataRequested(
+    this.pluginId, {
+    this.deleteCorrectionDrafts = false,
+  });
 
   @override
-  List<Object?> get props => [pluginId];
+  List<Object?> get props => [pluginId, deleteCorrectionDrafts];
 }
 
 class EnablePluginRequested extends PluginSystemEvent {

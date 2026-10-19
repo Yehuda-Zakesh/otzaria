@@ -38,12 +38,15 @@ Future<bool> showDeletePluginDialog(
     title: 'מחיקת תוסף סופית',
     content: 'האם אתה בטוח שברצונך למחוק את התוסף "${plugin.name}"?',
     subtitle:
-        'המחיקה תכלול את כל נתוני התוסף, המטמון והפעולות שלו. הליך זה סופי.',
+        'המחיקה תכלול את כל נתוני התוסף, המטמון והפעולות שלו, '
+        'וגם טיוטות תיקון שלא נשלחו. הליך זה סופי.',
     cancelText: 'ביטול',
     confirmText: 'מחק',
   );
   if (confirmed != true) return false;
-  bloc.add(UninstallPluginRequested(plugin.pluginId));
+  bloc.add(
+    UninstallPluginRequested(plugin.pluginId, deleteCorrectionDrafts: true),
+  );
   return true;
 }
 
@@ -62,12 +65,15 @@ Future<bool> showResetPluginDataDialog(
     content: 'האם לאפס את כל הנתונים של התוסף "${plugin.name}"?',
     subtitle:
         'כל המידע שהתוסף שמר יימחק — הגדרות, נתונים, אירועים שהוסיף ללוח השנה '
-        'והתראות שתזמן. התוסף יישאר מותקן. הליך זה סופי.',
+        'והתראות שתזמן, וגם טיוטות תיקון שלא נשלחו. התוסף יישאר מותקן. '
+        'הליך זה סופי.',
     cancelText: 'ביטול',
     confirmText: 'אפס',
   );
   if (confirmed != true) return false;
-  bloc.add(ResetPluginDataRequested(plugin.pluginId));
+  bloc.add(
+    ResetPluginDataRequested(plugin.pluginId, deleteCorrectionDrafts: true),
+  );
   return true;
 }
 

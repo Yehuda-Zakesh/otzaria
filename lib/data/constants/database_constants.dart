@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/semantic_search/models/semantic_paths.dart'
     show kSemanticModelFolderName;
 import 'package:otzaria/settings/engine/settings_repository.dart';

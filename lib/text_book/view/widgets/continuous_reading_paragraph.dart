@@ -637,8 +637,12 @@ TextStyle _styleForElement(
       ),
     );
     // הגליף שקוף; הווריאנט נשאר עליו כדי שרוחב המקום יתאים לציור המורם.
+    // גם הקו התחתון שלו — אחרת נצבע בצבע ה-decoration שבירושה (#2758).
     if (hideRaisedMarkers) {
-      style = style.copyWith(color: const Color(0x00000000));
+      style = style.copyWith(
+        color: const Color(0x00000000),
+        decorationColor: const Color(0x00000000),
+      );
     }
   }
   if (localName == 'i' ||

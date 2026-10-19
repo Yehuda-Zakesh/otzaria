@@ -705,7 +705,7 @@
   "גישה לרשת": "Allow Network Access",
   "מחיקת תוספים": "Delete Plugins",
   "האם למחוק {count} תוסף(ים)?\n\n• {names}": "Delete {count} plugin(s)?\n\n• {names}",
-  "פעולה זו אינה הפיכה! נתוני התוסף יימחקו.": "This cannot be undone — the plugin's data will be deleted.",
+  "פעולה זו אינה הפיכה! נתוני התוסף יימחקו, וגם טיוטות תיקון שלא נשלחו.": "This cannot be undone — the plugin's data will be deleted, including unsent correction drafts.",
   "הצג בממשק": "Show in Menu",
   "הסתר מהממשק": "Hide From Menu",
   "הסר מסרגל הניווט": "Unpin from the Navigation Bar",

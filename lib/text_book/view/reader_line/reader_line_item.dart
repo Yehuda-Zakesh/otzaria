@@ -75,6 +75,7 @@ Widget buildReaderMultiLineItem(
   Widget Function(List<String> headings)? blockHeadings,
   int? splitAfter,
   Widget Function(int line)? belowSplit,
+  bool linesAsBlocks = false,
 }) {
   final specs = <int, ReaderLineSpec>{
     for (final line in itemLines)
@@ -85,7 +86,7 @@ Widget buildReaderMultiLineItem(
   final children = <Widget>[];
   for (final part in readerItemParts(
     specs.keys.toList(),
-    (line) => specs[line]!.isBlock,
+    (line) => linesAsBlocks || specs[line]!.isBlock,
     splitAfter: splitAfter,
   )) {
     if (part.isBlock) {

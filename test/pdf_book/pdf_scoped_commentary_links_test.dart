@@ -10,13 +10,14 @@ Link _link({
   required int index1,
   int? index1End,
   required String path2,
+  int index2 = 1,
   String connectionType = 'COMMENTARY',
 }) => Link(
   heRef: 'הפניה',
   index1: index1,
   index1End: index1End,
   path2: path2,
-  index2: 1,
+  index2: index2,
   connectionType: connectionType,
 );
 
@@ -151,8 +152,14 @@ void main() {
   group('pdfScopedCommentaryLinks — שמירת סדר וזהות', () {
     test('הסדר נשמר כסדר הקלט', () {
       final a = _link(index1: 12, path2: 'רש"י');
-      final b = _link(index1: 13, path2: 'רש"י');
+      final b = _link(index1: 13, path2: 'רש"י', index2: 2);
       expect(scoped(links: [b, a]), [b, a]);
+    });
+
+    test('קטע מפרש שמקושר מכמה שורות בעמוד מוצג פעם אחת (issue #2697)', () {
+      final first = _link(index1: 12, path2: 'רש"י');
+      final second = _link(index1: 15, path2: 'רש"י');
+      expect(scoped(links: [first, second]), [first]);
     });
 
     test('קלט ריק מחזיר רשימה ריקה', () {

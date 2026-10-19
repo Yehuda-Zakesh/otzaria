@@ -3,7 +3,7 @@ import 'package:otzaria/text_book/models/book_notes.dart';
 import 'package:otzaria/book_protection/models/book_protection.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/links.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/book_common/models/commentator_group.dart';
 import 'package:otzaria/divine_names/models/divine_name_spans.dart';
 import 'package:otzaria/search/models/search_configuration.dart';

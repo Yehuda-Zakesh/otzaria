@@ -338,7 +338,7 @@ class SmartTextWidget extends StatelessWidget {
               }
               // סמן-אות של מפרש (עוגן-נקודה): הגליף שקוף — הווריאנט הטיפוגרפי
               // נשאר עליו כדי שרוחב המקום בשורה יתאים לציור המורם, שנושא את
-              // הצבע והרקע הפעיל (ראו RaisedMarkerOverlay).
+              // הצבע, הקו התחתון והרקע הפעיל (ראו RaisedMarkerOverlay).
               if ((element.localName == 'span' || element.localName == 'a') &&
                   element.classes.contains('link-anchor')) {
                 return {
@@ -349,6 +349,7 @@ class SmartTextWidget extends StatelessWidget {
                   ...linkAnchorVariantCss(
                     linkAnchorVariantFromClasses(element.classes),
                   ),
+                  'text-decoration-color': 'transparent',
                 };
               }
               // טווח-ציטוט (לינקר): צבע הקישור בגופן הטקסט הסובב, בלי קו תחתון.

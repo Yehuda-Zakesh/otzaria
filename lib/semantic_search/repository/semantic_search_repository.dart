@@ -7,7 +7,7 @@ import 'package:archive/archive.dart'
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:http/http.dart' as http;
 import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/data/constants/database_constants.dart';

@@ -93,7 +93,7 @@ import 'package:otzaria/widgets/dialogs/password_dialog.dart';
 
 import 'pdf_thumbnails_screen.dart';
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/utils/file/page_converter.dart';
 import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';

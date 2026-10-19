@@ -57,7 +57,7 @@ import 'package:otzaria/utils/file/document_format.dart';
 import 'package:otzaria/utils/file/file_book_path_resolver.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'link_visibility_sql.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'package:path/path.dart' as p;
 
@@ -5284,19 +5284,18 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
         }
         try {
           if (book.existingBookId != null) {
-            // File changed since last scan — update metadata, and refresh the
-            // TOC if it was re-parsed (so navigation matches the new content).
-            await repository.updateExternalBookMetadata(
-              book.existingBookId!,
-              book.fileSize,
-              book.lastModified,
-            );
+            // חותמת הקובץ מתעדכנת אחרי ה-TOC, כדי שכשל יאפשר ניסיון חוזר.
             if (book.tocEntries != null) {
               await repository.replaceExternalBookToc(
                 book.existingBookId!,
                 _rawTocToDbEntries(book.tocEntries!),
               );
             }
+            await repository.updateExternalBookMetadata(
+              book.existingBookId!,
+              book.fileSize,
+              book.lastModified,
+            );
             debugPrint(
               '📁 Updated external book (metadata+TOC): ${book.title}',
             );
@@ -5437,7 +5436,7 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
   /// into [db_models.TocEntry] objects ready for DB insertion.
   ///
   /// The flat list uses 0-based [_RawTocEntry.parentIndex]; the DB model uses
-  /// 1-based local IDs that are resolved by [SeforimRepository._insertTocEntriesForExternalBook].
+  /// 1-based local IDs that are resolved by [SeforimRepository._insertTocEntriesForExternalBookSync].
   List<db_models.TocEntry> _rawTocToDbEntries(List<_RawTocEntry> raw) {
     // For each parentIndex value, record the last entry that has it so we can
     // flag isLastChild correctly.
@@ -5454,7 +5453,7 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
       return db_models.TocEntry(
         id: i + 1, // 1-based local ID; resolved during insertion
         bookId:
-            0, // placeholder; overridden in _insertTocEntriesForExternalBook
+            0, // placeholder; overridden in _insertTocEntriesForExternalBookSync
         parentId: r.parentIndex != null ? r.parentIndex! + 1 : null,
         text: r.text,
         level: r.level,

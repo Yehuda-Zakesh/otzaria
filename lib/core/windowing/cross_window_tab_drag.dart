@@ -10,6 +10,7 @@ import 'package:otzaria/core/windowing/tab_drag_preview.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/models/tab.dart';
+import 'package:otzaria/tabs/utils/confirm_close_tabs.dart';
 
 /// גרירת כרטיסיה **מחוץ** לחלון: לחלון אוצריא אחר, או אל שולחן העבודה.
 ///
@@ -29,6 +30,12 @@ class CrossWindowTabDrag {
   /// המסירה המוקדמת משאירה ל-Windows תנועה שתפעיל את Snap Layouts.
   /// יציאה מהרצועה מבדילה אותה מסידור כרטיסיות מקומי.
   static const MultiWindowService _service = MultiWindowService();
+
+  /// ההעברה סוגרת את הכרטיסיה במקור ומסיימת סשן תיקון שבה, ולכן קודמת לה
+  /// בדיקת שינויים שלא נשמרו כמו ב"העבר לחלון" שבתפריט.
+  @visibleForTesting
+  static Future<bool> Function(OpenedTab tab) confirmTransfer =
+      confirmTabTransferWithUnsavedChanges;
 
   /// נשמרת יציאה מהרצועה, גם אם הסמן חזר אליה בדרך מעלה.
   bool _leftStrip = false;
@@ -431,6 +438,8 @@ class CrossWindowTabDrag {
       }
     }
 
+    if (!await confirmTransfer(tab)) return _hidePreview();
+
     if (!outcome.snapped && outcome.slot != null) {
       // הכרטיסיה נכנסת לחלון קיים — אין מה להחליף את הרוח, והיא מוסתרת
       // מיד כדי שלא תרחף מעל היעד.
@@ -538,6 +547,8 @@ class CrossWindowTabDrag {
       UiSnack.showError(WindowMessages.cannotTransferTab);
       return;
     }
+
+    if (!await confirmTransfer(tab)) return _hidePreview();
 
     if (target.slot != null) {
       // הכרטיסיה נכנסת לחלון קיים — אין מה להחליף את הרוח, והיא מוסתרת

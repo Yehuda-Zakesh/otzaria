@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:otzaria/attached_libraries/models/attached_library.dart';
@@ -47,7 +47,7 @@ void main() {
     await Hive.close();
     AppPaths.debugOverrideDataRootPath(null);
     AppPaths.debugOverrideResolvedExecutable(null);
-    Settings.clearCache();
+    await Settings.clearCache();
     if (await exeRoot.exists()) {
       await exeRoot.delete(recursive: true);
     }

@@ -13,9 +13,9 @@ class ProgressiveScroll extends StatefulWidget {
   final double curve;
   final FocusNode? focusNode;
   final bool autofocus;
-  // ScrollOffsetController לא חושף isAttached, ו-animateScroll זורק אם הרשימה
-  // אינה מחוברת (נטענת/לא ב-tree). ItemScrollController (שמתחבר יחד עם
-  // ScrollOffsetController לאותו ScrollablePositionedList) כן חושף isAttached.
+  // קיצורי התוכן מקבלים קדימות על פני גלילת החיצים.
+  final FocusOnKeyEventCallback? onKeyEvent;
+  // ItemScrollController חושף isAttached ומונע גלילה כשהרשימה אינה מחוברת.
   final ItemScrollController? itemScrollController;
 
   const ProgressiveScroll({
@@ -28,6 +28,7 @@ class ProgressiveScroll extends StatefulWidget {
     this.focusNode,
     this.autofocus = false,
     this.itemScrollController,
+    this.onKeyEvent,
   });
 
   @override
@@ -73,8 +74,7 @@ class _ProgressiveScrollState extends State<ProgressiveScroll> {
     super.dispose();
   }
 
-  // הטיימר רץ רק בזמן לחיצת חץ. טיימר תמידי + KeyUp שהלך לאיבוד (מעבר
-  // פוקוס באמצע לחיצה) גרמו בעבר לגלילה אוטונומית אינסופית שנלחמת במשתמש.
+  // הטיימר רץ רק בזמן לחיצת חץ, כדי שאיבוד KeyUp לא יגרום לגלילה אינסופית.
   void _startScrolling() {
     if (_scrollTickTimer?.isActive ?? false) return;
     _scrollTickTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
@@ -106,9 +106,19 @@ class _ProgressiveScrollState extends State<ProgressiveScroll> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    final result =
+        widget.onKeyEvent?.call(node, event) ?? KeyEventResult.ignored;
+    if (result != KeyEventResult.ignored) return result;
+
     final isArrowDown = event.logicalKey == LogicalKeyboardKey.arrowDown;
     final isArrowUp = event.logicalKey == LogicalKeyboardKey.arrowUp;
     if (!isArrowDown && !isArrowUp) return KeyEventResult.ignored;
+    // קיצורי העריכה יושבים בשורש האפליקציה, ולכן החץ מגיע לכאן לפני שדה טקסט מקונן.
+    if (FocusManager.instance.primaryFocus?.context
+            ?.findAncestorWidgetOfExactType<EditableText>() !=
+        null) {
+      return KeyEventResult.ignored;
+    }
 
     // Shift+חץ שמור לבחירת טקסט, ושאר הצירופים לקיצורים — לא מתערבים בהם.
     if (HardwareKeyboard.instance.isShiftPressed ||

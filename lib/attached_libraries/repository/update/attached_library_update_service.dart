@@ -6,7 +6,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart'
     show ValueListenable, ValueNotifier, debugPrint;
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/attached_libraries/models/attached_library.dart';
 import 'package:otzaria/attached_libraries/models/attached_library_update_source.dart';
 import 'package:otzaria/attached_libraries/models/attached_library_update_status.dart';

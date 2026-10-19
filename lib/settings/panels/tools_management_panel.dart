@@ -680,7 +680,7 @@ class _ActionBar extends StatelessWidget {
         args: {'count': plugins.length, 'names': names},
       ),
       subtitle: context.settingsText(
-        'פעולה זו אינה הפיכה! נתוני התוסף יימחקו.',
+        'פעולה זו אינה הפיכה! נתוני התוסף יימחקו, וגם טיוטות תיקון שלא נשלחו.',
       ),
       confirmText: context.settingsText('מחק'),
     );
@@ -689,7 +689,9 @@ class _ActionBar extends StatelessWidget {
       if (p.isDevelopment) {
         bloc.add(DetachDevelopmentPluginRequested(p.pluginId));
       } else {
-        bloc.add(UninstallPluginRequested(p.pluginId));
+        bloc.add(
+          UninstallPluginRequested(p.pluginId, deleteCorrectionDrafts: true),
+        );
       }
     }
     UiSnack.show(SettingsMessages.pluginsMarkedForDeletion);

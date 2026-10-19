@@ -6,7 +6,7 @@ import 'package:otzaria/indexing/models/index_check_scope.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';

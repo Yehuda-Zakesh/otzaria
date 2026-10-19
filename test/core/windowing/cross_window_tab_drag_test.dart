@@ -15,17 +15,28 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart' as services;
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/windowing/cross_window_tab_drag.dart';
 import 'package:otzaria/core/windowing/drag_preview_colors.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/core/windowing/tab_drag_preview.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
+import 'package:otzaria/data/sqlite/sqlite3_api.dart';
+import 'package:otzaria/models/books.dart';
+import 'package:otzaria/plugins/repository/plugin_correction_draft_repository.dart';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/bloc/tabs_state.dart';
 import 'package:otzaria/tabs/models/tab.dart';
+import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
+import 'package:otzaria/tabs/utils/confirm_close_tabs.dart';
+
+import '../../test_helpers/controllable_correction_draft_repository.dart';
+import '../../test_helpers/memory_cache_provider.dart';
 
 /// ⚠️ קידומת ייחודית לסוויטה — [ui.IsolateNameServer] גלובלי לתהליך.
 const String _namespace = 'otzaria.test.crosswindowdrag';
@@ -1063,6 +1074,254 @@ void main() {
       expect(tabsBloc.events, isEmpty);
       // הפעימות נמשכו 400ms; בלי העצירה היו כאן שש קריאות ומעלה.
       expect(runner.cursorQueries, lessThanOrEqualTo(2));
+    });
+  });
+
+  group('העברה של לשונית עם תיקוני תוסף שלא נשמרו', () {
+    // הבדיקה המקורית (confirmTransfer) ולא מדומה — כולל השמירה לטיוטה והדיאלוג.
+    final service = PluginCorrectionSessionService.instance;
+    late Database db;
+    late ControllableCorrectionDraftRepository drafts;
+    late Duration savedFlushTimeout;
+    late TextBookTab tab;
+    late String tabId;
+
+    setUpAll(() async {
+      await Settings.init(cacheProvider: MemoryCacheProvider());
+    });
+
+    setUp(() {
+      savedFlushTimeout = PluginCorrectionSessionService.flushTimeout;
+      PluginCorrectionSessionService.flushTimeout = const Duration(
+        milliseconds: 50,
+      );
+      db = sqlite3.openInMemory();
+      drafts = ControllableCorrectionDraftRepository(
+        PluginCorrectionDraftRepository.direct(db),
+      );
+      service.draftRepository = drafts;
+      tab = TextBookTab(book: TextBook(id: 1, title: 'ספר'), index: 0);
+      tabId = PluginCorrectionSessionService.tabIdFor(tab);
+      tabsBloc.emitState(
+        TabsState(tabs: [tab, firstTab()], currentTabIndex: 0),
+      );
+    });
+
+    tearDown(() async {
+      drafts.failWrites = false;
+      if (drafts.gate case final gate? when !gate.isCompleted) gate.complete();
+      await service.purgeOwner('p');
+      PluginCorrectionSessionService.flushTimeout = savedFlushTimeout;
+      db.close();
+    });
+
+    Future<void> pumpApp(WidgetTester tester) => tester.pumpWidget(
+      MaterialApp(navigatorKey: navigatorKey, home: const SizedBox()),
+    );
+
+    /// סשן עם עריכה אחת; רץ בזמן אמת כדי שטיימרי השמירה לא יהיו מדומים.
+    Future<void> beginAndEdit(WidgetTester tester) => tester.runAsync(() async {
+      await service.begin(
+        owner: 'p',
+        tabId: tabId,
+        bookId: 'ספר',
+        bookUid: 'id:1',
+        libraryVersion: 'v1',
+        loadSource: (_) async => 'מקור',
+      );
+      service.editParagraph(tabId, 0, 'מקור', 'תיקון');
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    });
+
+    /// מתחיל את [action] בזמן אמת ומחזיר אותו בלי לחכות לסופו (הדיאלוג חוסם).
+    Future<({Future<void> done})> start(
+      WidgetTester tester,
+      Future<void> Function() action,
+    ) async {
+      late Future<void> pending;
+      await tester.runAsync(() async {
+        pending = action();
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      });
+      await tester.pumpAndSettle();
+      return (done: pending);
+    }
+
+    Future<void> finish(
+      WidgetTester tester,
+      ({Future<void> done}) pending,
+    ) async {
+      await tester.pumpAndSettle();
+      await tester.runAsync(() => pending.done);
+      UiSnack.hide();
+      await tester.pumpAndSettle();
+    }
+
+    void expectTransferred() {
+      expect(tabsBloc.events.whereType<RemoveTab>(), hasLength(1));
+    }
+
+    void expectStayed(_FakePeer? peer) {
+      expect(tabsBloc.events.whereType<RemoveTab>(), isEmpty);
+      expect(runner.openWindowCalls, 0);
+      expect(peer?.receivedTabs ?? 0, 0);
+      expect(service.hasSessionForTab(tabId), isTrue);
+      expect(service.displayText(tabId, 0, 'מקור'), 'תיקון');
+    }
+
+    // שני היעדים של שחרור מחוץ לחלון: חלון אוצריא אחר, או שולחן העבודה.
+    for (final toPeer in [true, false]) {
+      final where = toPeer ? 'לחלון אחר' : 'לחלון חדש';
+
+      _FakePeer? setTarget() {
+        if (!toPeer) {
+          runner.cursorTarget = (slot: null, isSelf: false, isShellTray: false);
+          return null;
+        }
+        final peer = _FakePeer(2, accept: true)..register();
+        addTearDown(peer.dispose);
+        runner.cursorTarget = (slot: 2, isSelf: false, isShellTray: false);
+        return peer;
+      }
+
+      void expectSent(_FakePeer? peer) {
+        expectTransferred();
+        if (toPeer) {
+          expect(peer!.receivedTabs, 1);
+          expect(runner.openWindowCalls, 0);
+        } else {
+          expect(runner.openWindowCalls, 1);
+        }
+      }
+
+      testWidgets('$where: כתיבה ממתינה שמסתיימת בזמן השמירה — בלי דיאלוג', (
+        tester,
+      ) async {
+        PluginCorrectionSessionService.flushTimeout = const Duration(
+          seconds: 5,
+        );
+        await pumpApp(tester);
+        drafts.gate = Completer<void>();
+        await beginAndEdit(tester);
+        final peer = setTarget();
+
+        var done = false;
+        final pending = await start(
+          tester,
+          () => drag.handleDroppedOutside(tab, tabsBloc).whenComplete(() {
+            done = true;
+          }),
+        );
+        expect(done, isFalse, reason: 'ההעברה אמורה להמתין לכתיבה');
+        expect(tabsBloc.events, isEmpty);
+
+        drafts.gate!.complete();
+        await finish(tester, pending);
+
+        expect(find.text(unsavedChangesDialogTitle), findsNothing);
+        expectSent(peer);
+      });
+
+      testWidgets('$where: כתיבה שנכשלת — דיאלוג, וביטול משאיר הכל', (
+        tester,
+      ) async {
+        await pumpApp(tester);
+        drafts.failWrites = true;
+        await beginAndEdit(tester);
+        final peer = setTarget();
+
+        final pending = await start(
+          tester,
+          () => drag.handleDroppedOutside(tab, tabsBloc),
+        );
+        expect(find.text(unsavedChangesDialogTitle), findsOneWidget);
+
+        await tester.tap(find.text('ביטול'));
+        await finish(tester, pending);
+
+        expectStayed(peer);
+      });
+
+      testWidgets('$where: כתיבה שנכשלת — "סגור בכל זאת" מעביר', (
+        tester,
+      ) async {
+        await pumpApp(tester);
+        drafts.failWrites = true;
+        await beginAndEdit(tester);
+        final peer = setTarget();
+
+        final pending = await start(
+          tester,
+          () => drag.handleDroppedOutside(tab, tabsBloc),
+        );
+        expect(find.text(unsavedChangesDialogTitle), findsOneWidget);
+
+        await tester.tap(find.text(unsavedChangesCloseAnyway));
+        await finish(tester, pending);
+
+        expectSent(peer);
+      });
+
+      testWidgets('$where: טיוטה שנשמרה — בלי דיאלוג', (tester) async {
+        await pumpApp(tester);
+        await beginAndEdit(tester);
+        await tester.runAsync(() async {
+          expect(await service.flushAll(), isTrue);
+        });
+        final peer = setTarget();
+
+        final pending = await start(
+          tester,
+          () => drag.handleDroppedOutside(tab, tabsBloc),
+        );
+        expect(find.text(unsavedChangesDialogTitle), findsNothing);
+        await finish(tester, pending);
+
+        expectSent(peer);
+      });
+    }
+
+    testWidgets('מסירה ל-Windows: כתיבה שנכשלת — ביטול בדיאלוג משאיר הכל', (
+      tester,
+    ) async {
+      await pumpApp(tester);
+      drafts.failWrites = true;
+      await beginAndEdit(tester);
+      final peer = _FakePeer(2, accept: true)..register();
+      addTearDown(peer.dispose);
+      runner.cursorTarget = (slot: null, isSelf: false, isShellTray: false);
+      runner.systemDragTarget = (slot: 2, isSelf: false, isShellTray: false);
+
+      await tester.runAsync(() async {
+        drag.begin(
+          tab,
+          const DragPreviewColors(
+            tab: Color(0xFF202020),
+            border: Color(0xFF404040),
+            text: Color(0xFFF0F0F0),
+          ),
+          tabsBloc: tabsBloc,
+          cancelDrag: () {},
+        );
+        await _waitAtLeastUntil(
+          const Duration(milliseconds: 900),
+          () => runner.systemDragCalls == 1,
+        );
+      });
+      await tester.pumpAndSettle();
+      expect(runner.systemDragCalls, 1);
+      expect(find.text(unsavedChangesDialogTitle), findsOneWidget);
+
+      await tester.tap(find.text('ביטול'));
+      await tester.pumpAndSettle();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      UiSnack.hide();
+      await tester.pumpAndSettle();
+
+      expectStayed(peer);
+      expect(runner.endCalls, greaterThanOrEqualTo(1), reason: 'הרוח הוסתרה');
     });
   });
 }

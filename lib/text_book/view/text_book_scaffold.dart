@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
+import 'package:otzaria/plugins/view/plugin_correction_session_banner.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/utils/reader_build_policy.dart';
@@ -70,9 +72,26 @@ class TextBookScaffold extends StatelessWidget {
           onSidebarTabChanged: onSidebarTabChanged,
         );
 
-        // Build the view using the selected strategy
-        return strategy.buildView(context, config);
+        return _withCorrectionBanner(
+          strategy.buildView(context, config),
+          pageShape: state.showPageShapeView,
+        );
       },
+    );
+  }
+
+  /// מבנה קבוע מהבנייה הראשונה: שינוי המבנה בתחילת סשן היה בונה את הקורא
+  /// מחדש ומאבד בחירה ומצב. הבאנר עצמו ריק כשאין סשן.
+  Widget _withCorrectionBanner(Widget view, {required bool pageShape}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        PluginCorrectionSessionBanner(
+          tabId: PluginCorrectionSessionService.tabIdFor(tab),
+          pageShape: pageShape,
+        ),
+        Expanded(child: view),
+      ],
     );
   }
 

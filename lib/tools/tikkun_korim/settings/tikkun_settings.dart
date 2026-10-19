@@ -4,7 +4,7 @@ library;
 import 'dart:convert';
 
 import 'package:equatable/equatable.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/theme/app_fonts.dart';
 import 'package:otzaria/tools/calendar/models/calendar_location.dart';

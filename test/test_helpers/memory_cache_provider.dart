@@ -1,4 +1,4 @@
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 
 /// In-memory [CacheProvider] for use in tests.
 /// Replaces [HiveCache] so tests don't need a real file-system Hive box.

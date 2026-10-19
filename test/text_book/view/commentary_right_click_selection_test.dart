@@ -1,9 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/data/data_providers/book_composite_key.dart';
 import 'package:otzaria/data/data_providers/library_provider.dart';
 import 'package:otzaria/data/data_providers/library_provider_manager.dart';
@@ -14,6 +15,8 @@ import 'package:otzaria/models/links.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
 import 'package:otzaria/settings/engine/settings_state.dart';
+import 'package:otzaria/shortcuts/shortcut_helper.dart';
+import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
@@ -25,13 +28,6 @@ import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 import 'package:otzaria/widgets/misc/progressive_scrolling.dart';
 import '../../test_helpers/memory_cache_provider.dart';
 
-// שני היבטים של באג לחיצה ימנית במפרשים בצד ובכרטיסיית המפרשים:
-// (1) פוקוס — ה-Listener שעוטף את רשימת המפרשים (מעל ה-ProgressiveScroll שהוא
-//     אב ל-SelectionArea) מיקד את ProgressiveScroll בכל pointer-down כולל ימני,
-//     וגזל פוקוס מ-SelectableRegion — כך שההדגשה נמחקה. התיקון מגדר את
-//     ה-onPointerDown לדלג בלחיצה ימנית (kSecondaryButton).
-// (2) העתקה — פעולת "העתק" קראה את הטקסט הנבחר בזמן הלחיצה (כבר null אחרי
-//     שהבחירה שוחררה) במקום בזמן בניית התפריט. התיקון לוכד snapshot בבנייה.
 AppContextMenuIconAction iconAction(
   List<AppContextMenuEntry> entries,
   String label,
@@ -572,12 +568,77 @@ void main() {
       );
     });
   });
+
+  for (final (key, shortcut) in [
+    (LogicalKeyboardKey.keyR, null),
+    (LogicalKeyboardKey.arrowUp, 'ctrl+shift+arrowup'),
+    (LogicalKeyboardKey.arrowDown, 'ctrl+shift+arrowdown'),
+  ]) {
+    testWidgets('קיצור ${key.keyLabel} מדווח על בחירה במפרש (issue #2678)', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      ShortcutHelper.isMacForTesting = false;
+      addTearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+        ShortcutHelper.isMacForTesting = null;
+      });
+      final previous = Settings.getValue<String>(
+        ShortcutValidator.reportErrorKey,
+      );
+      await Settings.setValue(
+        ShortcutValidator.reportErrorKey,
+        shortcut,
+      );
+      addTearDown(
+        () => Settings.setValue(ShortcutValidator.reportErrorKey, previous),
+      );
+      final bookKeys = <LogicalKeyboardKey>[];
+      await _pump(
+        tester,
+        textBookBloc: textBookBloc,
+        settingsBloc: settingsBloc,
+        onBookKey: (e) {
+          if (e is KeyDownEvent) bookKeys.add(e.logicalKey);
+        },
+      );
+      final modifier = ShortcutHelper.usesMacModifiers
+          ? LogicalKeyboardKey.metaLeft
+          : LogicalKeyboardKey.controlLeft;
+      Future<void> pressReport() async {
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(key);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pump();
+      }
+
+      await tester.tap(find.textContaining('זהו פירוש'));
+      await tester.pump(kDoubleTapTimeout);
+      await pressReport();
+      expect(bookKeys, contains(key), reason: 'בלי בחירה');
+
+      bookKeys.clear();
+      tester
+          .state<SelectableRegionState>(find.byType(SelectableRegion))
+          .selectAll();
+      await pressReport();
+      expect(
+        bookKeys,
+        isNot(contains(key)),
+        reason: 'הדיווח נפתח על המפרש, ולא על הספר הראשי שמסביב',
+      );
+      debugDefaultTargetPlatformOverride = null;
+    });
+  }
 }
 
 Future<void> _pump(
   WidgetTester tester, {
   required TextBookBloc textBookBloc,
   required SettingsBloc settingsBloc,
+  ValueChanged<KeyEvent>? onBookKey,
 }) async {
   addTearDown(() async {
     await tester.pumpWidget(const SizedBox.shrink());
@@ -592,11 +653,16 @@ Future<void> _pump(
           BlocProvider<SettingsBloc>.value(value: settingsBloc),
         ],
         child: Scaffold(
-          body: CommentaryListBase(
-            openBookCallback: (_) {},
-            fontSize: 18,
-            showSearch: true,
-            shrinkWrap: false,
+          // כמו ה-KeyboardListener של מסך הספר שמעל חלונית המפרשים.
+          body: KeyboardListener(
+            focusNode: FocusNode(),
+            onKeyEvent: onBookKey ?? (_) {},
+            child: CommentaryListBase(
+              openBookCallback: (_) {},
+              fontSize: 18,
+              showSearch: true,
+              shrinkWrap: false,
+            ),
           ),
         ),
       ),
