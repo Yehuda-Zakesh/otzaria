@@ -32,5 +32,7 @@ metainfo: linux/packaging/otzaria.metainfo.xml
 
 # רישום סכימת otzaria:// — בלעדיו קישורי deep-link (התקנת תוסף מהדפדפן)
 # לא מגיעים לאפליקציה. ה-runner מעביר את ה-URI כארגומנט ל-Dart דרך %U.
+# קובצי .otzplugin: את סוג ה-MIME עצמו האפליקציה רושמת אצל המשתמש.
 supported_mime_type:
   - x-scheme-handler/otzaria
+  - application/x-otzaria-plugin

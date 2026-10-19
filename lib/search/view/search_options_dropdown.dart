@@ -1,61 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:otzaria/theme/app_tokens.dart';
-import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria/search/search_query_builder.dart';
-
-class SearchOptionsDropdown extends StatefulWidget {
-  final Function(bool)? onToggle;
-  final bool isExpanded;
-
-  const SearchOptionsDropdown({
-    super.key,
-    this.onToggle,
-    this.isExpanded = false,
-  });
-
-  @override
-  State<SearchOptionsDropdown> createState() => _SearchOptionsDropdownState();
-}
-
-class _SearchOptionsDropdownState extends State<SearchOptionsDropdown> {
-  late bool _isExpanded;
-
-  @override
-  void initState() {
-    super.initState();
-    _isExpanded = widget.isExpanded;
-  }
-
-  @override
-  void didUpdateWidget(SearchOptionsDropdown oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.isExpanded != oldWidget.isExpanded) {
-      setState(() {
-        _isExpanded = widget.isExpanded;
-      });
-    }
-  }
-
-  void _toggleExpanded() {
-    setState(() {
-      _isExpanded = !_isExpanded;
-    });
-    widget.onToggle?.call(_isExpanded);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      icon: Icon(
-        _isExpanded
-            ? FluentIcons.chevron_up_24_regular
-            : FluentIcons.chevron_down_24_regular,
-      ),
-      tooltip: 'אפשרויות חיפוש',
-      onPressed: _toggleExpanded,
-    );
-  }
-}
 
 class SearchOptionsRow extends StatefulWidget {
   final bool isVisible;

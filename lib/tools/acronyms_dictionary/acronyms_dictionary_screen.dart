@@ -62,11 +62,6 @@ class _AcronymsDictionaryScreenState extends State<AcronymsDictionaryScreen>
     );
   }
 
-  void requestKeyboardFocus() {
-    if (!mounted || !_searchFocusNode.canRequestFocus) return;
-    _searchFocusNode.requestFocus();
-  }
-
   @override
   void dispose() {
     _searchController.dispose();

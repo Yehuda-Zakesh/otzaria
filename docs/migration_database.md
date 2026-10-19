@@ -87,11 +87,6 @@ final sqliteProvider = SqliteDataProvider.instance;
 await sqliteProvider.initialize();
 ```
 
-### בדיקה אם ספר במסד נתונים
-```dart
-final isInDb = await sqliteProvider.isBookInDatabase('שם הספר');
-```
-
 ### קריאת תוכן ספר
 ```dart
 final text = await sqliteProvider.getBookTextFromDb('שם הספר');

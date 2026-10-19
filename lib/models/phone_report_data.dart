@@ -51,18 +51,6 @@ class PhoneReportData extends Equatable {
     'more_info': moreInfo,
   };
 
-  /// Create from JSON (for testing purposes)
-  factory PhoneReportData.fromJson(Map<String, dynamic> json) {
-    return PhoneReportData(
-      selectedText: '', // Not included in API payload
-      errorId: json['error_id'] as int,
-      moreInfo: json['more_info'] as String,
-      libraryVersion: json['library_ver'] as String,
-      bookId: json['book_id'] as int,
-      lineNumber: json['line'] as int,
-    );
-  }
-
   /// Create a copy with updated fields
   PhoneReportData copyWith({
     String? selectedText,

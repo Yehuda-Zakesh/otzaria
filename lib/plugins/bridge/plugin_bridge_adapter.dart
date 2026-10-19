@@ -47,6 +47,7 @@ import 'package:otzaria/book_common/models/commentator_group.dart';
 import 'package:otzaria/book_common/utils/commentator_group_builder.dart';
 import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/search/search_repository.dart';
+import 'package:otzaria/search/search_query_builder.dart';
 import 'package:otzaria/plugins/bridge/plugin_search_api.dart';
 import 'package:otzaria/plugins/bridge/plugin_save_target.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart'
@@ -2329,7 +2330,7 @@ class PluginBridgeAdapter {
           return {
             'type': r.isPdf ? 'pdf' : 'text',
             'book': r.title,
-            'text': isRestricted ? '' : r.text,
+            'text': isRestricted ? '' : removeAttachedMarks(r.text),
             'textStatus': r.textStatus.name,
             'continuesToNextLine': r.continuesToNextLine,
             'index': r.segment.toInt(),
@@ -2452,6 +2453,9 @@ class PluginBridgeAdapter {
       ),
       chunkSize: 50,
     );
+    final vocalizedSearch = SearchQueryBuilder.optionsRequestVocalized(
+      request.effectiveSearchOptions,
+    );
     final iterator = StreamIterator<SearchStreamUpdate>(stream);
     var cancelled = false;
     var expired = false;
@@ -2505,6 +2509,7 @@ class PluginBridgeAdapter {
                   booksByPath[result.filePath],
                   booksByPath: booksByPath,
                   textRestricted: restrictedByPath[result.filePath] ?? false,
+                  vocalizedSearch: vocalizedSearch,
                 ),
             ],
             'total': totalCount,

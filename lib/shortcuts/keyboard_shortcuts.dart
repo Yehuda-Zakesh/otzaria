@@ -99,7 +99,9 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
       return KeyEventResult.handled;
     }
     if (event is! KeyDownEvent || !mounted) return KeyEventResult.ignored;
-    final result = _isEditing() ? null : _handleDynamicShortcut(event);
+    final result = ShortcutHelper.isEditingText
+        ? null
+        : _handleDynamicShortcut(event);
     _dynamicKey = result == KeyEventResult.handled ? event.physicalKey : null;
     return result ?? KeyEventResult.ignored;
   }
@@ -151,22 +153,6 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
     LogicalKeyboardKey.numpad9.keyId: 9,
   };
 
-  /// בודק אם הפוקוס הנוכחי נמצא על שדה טקסט — כל widget שה-State שלו מקבל
-  /// קלט מהמקלדת (EditableText, וגם עורך Quill של ההערות; issue #1302).
-  bool _isEditing() {
-    final context = FocusManager.instance.primaryFocus?.context;
-    if (context == null) return false;
-    if (context is StatefulElement && context.state is TextInputClient) {
-      return true;
-    }
-    var found = false;
-    context.visitAncestorElements((element) {
-      found = element is StatefulElement && element.state is TextInputClient;
-      return !found;
-    });
-    return found;
-  }
-
   /// מטפל באירועי מקלדת ברמה הגלובלית - עובד גם כשיש TextField עם focus
   KeyEventResult _handleKeyEvent(
     KeyEvent event,
@@ -174,24 +160,8 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
   ) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
-    // מניעת הפעלת קיצורי מקשים של תו בודד (ללא modifiers) בזמן עריכת טקסט
-    if (_isEditing()) {
-      final isModifierPressed =
-          HardwareKeyboard.instance.isControlPressed ||
-          ShortcutHelper.isAltModifierPressed ||
-          HardwareKeyboard.instance.isMetaPressed;
-
-      if (!isModifierPressed) {
-        // מתיר רק מקשי F ומקש Escape
-        final isAllowed =
-            event.logicalKey == LogicalKeyboardKey.escape ||
-            (event.logicalKey.keyId >= LogicalKeyboardKey.f1.keyId &&
-                event.logicalKey.keyId <= LogicalKeyboardKey.f12.keyId);
-
-        if (!isAllowed) {
-          return KeyEventResult.ignored;
-        }
-      }
+    if (ShortcutHelper.shouldIgnoreWhileEditing(event)) {
+      return KeyEventResult.ignored;
     }
 
     // קריאת ערכי הקיצורים מההגדרות. ברירת המחדל נלקחת מהמקור הקנוני היחיד

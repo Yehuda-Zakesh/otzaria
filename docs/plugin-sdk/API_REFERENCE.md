@@ -4158,6 +4158,15 @@ const { data } = await Otzaria.call('database.query', {
 await Otzaria.call('reader.openBook', { external: { provider: 'otzar', id: 1234 } });
 ```
 
+בעמוד מסוים: `index` הוא מספר העמוד (מבוסס-1, כמו בספר PDF). הוא נשלח לתוכנת אוצר החכמה המקומית; באתר נפתח הספר כולו.
+
+```javascript
+await Otzaria.call('reader.openBook', {
+  external: { provider: 'otzar', id: 1234 },
+  index: 57
+});
+```
+
 האם המשתמש מציג תוצאות אוצר החכמה — שתי הגדרות, שתיהן חייבות להיות דלוקות:
 
 ```javascript

@@ -250,12 +250,19 @@ class TabTitleTooltip extends StatelessWidget {
     );
     final truncated = width > available + 0.5;
     if (!truncated && message == title) return child;
-    return Tooltip(message: message, child: child);
+    return _tooltip;
   }
+
+  // במגע לחיצה ארוכה פותחת את תפריט הכרטיסיה, כמו לחיצה ימנית.
+  Widget get _tooltip => Tooltip(
+    message: message,
+    triggerMode: TooltipTriggerMode.manual,
+    child: child,
+  );
 
   @override
   Widget build(BuildContext context) {
-    if (alwaysShow) return Tooltip(message: message, child: child);
+    if (alwaysShow) return _tooltip;
     final available = titleWidth;
     if (available != null) {
       return _wrapIfNeeded(

@@ -472,44 +472,17 @@ class _LinksListViewState extends State<LinksListView> {
   }) {
     final rowKeys = keys.toSet();
     final rowSelected = effectiveTypes.intersection(rowKeys);
-    return KeyedSubtree(
+    return compactFilterChips(
       key: key,
-      child: FilterChipsSelector<String>(
-        items: keys,
-        selectedItems: rowSelected.toList(),
-        wrapAlignment: WrapAlignment.center,
-        wrapSpacing: AppTokens.spaceXS,
-        runSpacing: AppTokens.spaceXS,
-        padding: const EdgeInsets.symmetric(vertical: AppTokens.spaceXS),
-        labelBuilder: chipLabel,
-        onSelectionChanged: (selected) => widget.onSelectedLinkTypesChanged(
-          applyChipSelectionDelta(
-            savedTypes: savedTypes,
-            effectiveTypes: rowSelected,
-            newSelection: selected.toSet(),
-          ),
+      items: keys,
+      selected: rowSelected.toList(),
+      labelBuilder: chipLabel,
+      onSelectionChanged: (selected) => widget.onSelectedLinkTypesChanged(
+        applyChipSelectionDelta(
+          savedTypes: savedTypes,
+          effectiveTypes: rowSelected,
+          newSelection: selected.toSet(),
         ),
-        chipBuilder: (context, item, isSelected) {
-          return Chip(
-            label: Text(chipLabel(item)),
-            backgroundColor: isSelected
-                ? Theme.of(context).colorScheme.secondary
-                : null,
-            labelStyle: TextStyle(
-              color: isSelected
-                  ? Theme.of(context).colorScheme.onSecondary
-                  : null,
-              fontSize: 10,
-            ),
-            labelPadding: EdgeInsets.zero,
-            padding: const EdgeInsets.symmetric(
-              horizontal: 6,
-              vertical: 2,
-            ),
-            visualDensity: VisualDensity.compact,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          );
-        },
       ),
     );
   }

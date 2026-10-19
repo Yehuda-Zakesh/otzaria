@@ -66,10 +66,4 @@ class TocDao {
     ]);
     return db.lastInsertRowId;
   }
-
-  Future<int> delete(int id) async {
-    final db = await database;
-    db.execute(_queries['delete']!, [id]);
-    return db.updatedRows;
-  }
 }

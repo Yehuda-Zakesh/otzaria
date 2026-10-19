@@ -204,7 +204,6 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     on<UpdateFontSize>(_onUpdateFontSize);
     on<ToggleLeftPane>(_onToggleLeftPane);
     on<ToggleSplitView>(_onToggleSplitView);
-    on<ToggleTzuratHadafView>(_onToggleTzuratHadafView);
     on<TogglePageShapeView>(_onTogglePageShapeView);
     on<UpdateCommentators>(_onUpdateCommentators);
     on<UpdateLinkTypeFilter>(_onUpdateLinkTypeFilter);
@@ -222,7 +221,6 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     on<ApplyFullBookContent>(_onApplyFullBookContent);
     on<ApplyBookContentRange>(_onApplyBookContentRange);
     on<ApplyBookContentRanges>(_onApplyBookContentRanges);
-    on<CreateNoteFromToolbar>(_onCreateNoteFromToolbar);
     on<UpdateSelectedTextForNote>(_onUpdateSelectedTextForNote);
     // המיזוג רץ לעיתים ב-isolate; עיבוד מקבילי מאפשר לאצווה איטית לדרוס
     // אצווה מהירה שהגיעה אחריה, והקישורים שאבדו לא ייטענו שוב (issue #1095).
@@ -1160,24 +1158,6 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     }
   }
 
-  void _onToggleTzuratHadafView(
-    ToggleTzuratHadafView event,
-    Emitter<TextBookState> emit,
-  ) {
-    if (state is TextBookLoaded) {
-      final currentState = state as TextBookLoaded;
-
-      emit(
-        currentState.copyWith(
-          showTzuratHadafView: event.show,
-          showPageShapeView: false,
-          selectedIndex: currentState.selectedIndex,
-          showLeftPane: event.show ? false : currentState.showLeftPane,
-        ),
-      );
-    }
-  }
-
   void _onTogglePageShapeView(
     TogglePageShapeView event,
     Emitter<TextBookState> emit,
@@ -1193,7 +1173,6 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       _setAwaitingInitialPageShapeVisibleSync(event.show);
       final updatedState = currentState.copyWith(
         showPageShapeView: event.show,
-        showTzuratHadafView: false,
         selectedIndex: currentState.selectedIndex,
         showLeftPane: event.show ? false : currentState.showLeftPane,
       );
@@ -2228,13 +2207,6 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
       );
     }
     return next;
-  }
-
-  void _onCreateNoteFromToolbar(
-    CreateNoteFromToolbar event,
-    Emitter<TextBookState> emit,
-  ) {
-    // הלוגיקה האמיתית תהיה בכפתור בשורת הכלים
   }
 
   void _onUpdateSelectedTextForNote(

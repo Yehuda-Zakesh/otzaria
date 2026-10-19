@@ -49,18 +49,51 @@ class SessionLock {
   }
 }
 
+/// סוג האירוע שמדווחים עליו: סגירה לא צפויה, או תוכנה שהפסיקה להגיב.
+enum CrashIncidentKind { crash, hang }
+
 /// קריסה של ההפעלה הקודמת: הנעילה שנשארה, הראיות והחתימה.
 class CrashCandidate {
   const CrashCandidate({
-    required this.previousSession,
+    required SessionLock this.previousSession,
     required this.entries,
     required this.signature,
     required this.hasStartupStall,
     required this.hasMinidump,
     this.minidump,
-  });
+    this.kind = CrashIncidentKind.crash,
+  }) : hangDuration = null,
+       details = null,
+       occurredInPreviousRun = true;
 
-  final SessionLock previousSession;
+  /// תקיעה שזוהתה בזמן ריצה (או ANR של אנדרואיד). [details] נכנס לאבחון
+  /// הפרטי, למשל מחסנית שאינה ב-errors.txt.
+  const CrashCandidate.hang({
+    required this.signature,
+    this.hangDuration,
+    this.details,
+    this.entries = const [],
+    this.previousSession,
+    this.occurredInPreviousRun = false,
+  }) : kind = CrashIncidentKind.hang,
+       hasStartupStall = false,
+       hasMinidump = false,
+       minidump = null;
+
+  final CrashIncidentKind kind;
+
+  /// קובע את נוסח ההצעה: ANR מגיע מההפעלה הקודמת גם בלי [previousSession].
+  final bool occurredInPreviousRun;
+
+  bool get isHang => kind == CrashIncidentKind.hang;
+
+  /// משך התקיעה, כשהיא הסתיימה ונמדדה.
+  final Duration? hangDuration;
+
+  final String? details;
+
+  /// null בתקיעה שזוהתה בהפעלה הנוכחית.
+  final SessionLock? previousSession;
 
   /// רשומות errors.txt מאז תחילת ההפעלה הקודמת, מהישנה לחדשה.
   final List<ErrorLogBlock> entries;
@@ -153,10 +186,22 @@ class UncleanExitDetector {
     if (lock.pid == _currentPid) return null;
     if (_isStillRunning(lock)) return null;
 
-    final blocks = await _errorBlocksSince(lock.startedAt);
+    final blocks = await _errorBlocksSince(
+      lock.startedAt,
+      until: _processStartedAt,
+    );
     final hasStall = blocks.any((b) => b.isStartupStall);
     final dump = await _minidumpSince(lock.startedAt);
-    final evidence = blocks.where((b) => b.isCrashEvidence).toList();
+    // תקיעה שהשתחררה כבר דווחה בזמן ריצה; שלא השתחררה — התהליך נהרג תקוע.
+    bool unrecoveredHang(ErrorLogBlock hang) =>
+        hang.isAppHang &&
+        !blocks.any(
+          (b) =>
+              b.isAppHangRecovered && !b.timestamp!.isBefore(hang.timestamp!),
+        );
+    final evidence = blocks
+        .where((b) => b.isCrashEvidence || unrecoveredHang(b))
+        .toList();
     if (evidence.isEmpty && !dump.found) return null;
 
     final newestDump = dump.newest;
@@ -171,6 +216,21 @@ class UncleanExitDetector {
       hasStartupStall: hasStall,
       hasMinidump: dump.found,
       minidump: newestDump,
+      kind: evidence.isNotEmpty && evidence.last.isAppHang
+          ? CrashIncidentKind.hang
+          : CrashIncidentKind.crash,
+    );
+  }
+
+  /// התקיעה האחרונה שהתהליך הנוכחי רשם, אחרי שהגלאי הנייטיב דיווח שהשתחררה.
+  Future<CrashCandidate?> detectRecoveredHang({Duration? duration}) async {
+    final blocks = await _errorBlocksSince(_processStartedAt, until: null);
+    final hangs = blocks.where((b) => b.isAppHang);
+    if (hangs.isEmpty) return null;
+    return CrashCandidate.hang(
+      signature: hangs.last.signature,
+      hangDuration: duration,
+      entries: blocks,
     );
   }
 
@@ -183,7 +243,10 @@ class UncleanExitDetector {
     }
   }
 
-  Future<List<ErrorLogBlock>> _errorBlocksSince(DateTime since) async {
+  Future<List<ErrorLogBlock>> _errorBlocksSince(
+    DateTime since, {
+    required DateTime? until,
+  }) async {
     try {
       final file = File(errorLogPath);
       if (!await file.exists()) return const [];
@@ -191,7 +254,7 @@ class UncleanExitDetector {
       if (stat.modified.isBefore(since)) return const [];
       // הלוג אינו מוגבל בגודלו והבדיקה רצה בעלייה: רק הזנב, והפענוח ב-isolate.
       final content = await _readTail(file, maxErrorLogReadBytes);
-      return await _blocksInIsolate(content, since, _processStartedAt);
+      return await _blocksInIsolate(content, since, until);
     } catch (error) {
       debugPrint('UncleanExitDetector: errors.txt unreadable: $error');
       return const [];
@@ -204,7 +267,7 @@ class UncleanExitDetector {
   static Future<List<ErrorLogBlock>> _blocksInIsolate(
     String content,
     DateTime since,
-    DateTime until,
+    DateTime? until,
   ) => Isolate.run(
     () =>
         parseErrorLogBlocks(content)
@@ -213,7 +276,7 @@ class UncleanExitDetector {
                   b.timestamp != null &&
                   !b.timestamp!.isBefore(since) &&
                   // רשומות של התהליך הנוכחי אינן ראיה לקריסה של הקודם.
-                  b.timestamp!.isBefore(until),
+                  (until == null || b.timestamp!.isBefore(until)),
             )
             .toList()
           ..sort((a, b) => a.timestamp!.compareTo(b.timestamp!)),

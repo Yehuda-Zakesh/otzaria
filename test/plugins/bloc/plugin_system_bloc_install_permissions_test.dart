@@ -122,7 +122,6 @@ void main() {
             sourcePath: request.sourcePath,
             sourceType: request.sourceType,
             grantedPermissions: const {},
-            allowOrderBeforeBuiltInsGranted: false,
           ),
         );
         await loaded;

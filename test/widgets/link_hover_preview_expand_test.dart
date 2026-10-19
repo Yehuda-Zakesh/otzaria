@@ -1,4 +1,10 @@
+import 'dart:async';
+
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +18,7 @@ import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
 import 'package:otzaria/settings/engine/settings_state.dart';
 import 'package:otzaria/widgets/misc/link_context_menu_entry.dart';
+import 'package:otzaria/widgets/misc/link_preview_overlay.dart';
 import 'package:otzaria/text_display/models/text_display_profile.dart';
 
 import '../test_helpers/memory_cache_provider.dart';
@@ -168,6 +175,88 @@ void main() {
     await pumpFrames(tester);
   }
 
+  testWidgets(
+    'בחלונית שליד התפריט הכותרת נשארת במקומה בגלילת התוכן (issue #2698)',
+    (tester) async {
+      addTearDown(LinkPreviewOverlay.dismiss);
+      LibraryProviderManager.instance.seedMappingsForTesting(
+        mapping: const {},
+        providers: [
+          _FakeContentProvider(List.filled(600, 'מילה').join(' ')),
+        ],
+      );
+      var opened = 0;
+      final entry = buildLinkContextMenuEntry(
+        link: Link(
+          heRef: 'מפרש ח, א',
+          index1: 1,
+          path2: 'מפרש ח',
+          index2: 1,
+          connectionType: 'commentary',
+        ),
+        onTap: () => opened++,
+        displayProfile: TextDisplayProfile.defaults,
+      );
+      late BuildContext hostContext;
+      // החלונית יושבת ב-overlay של האפליקציה — הספק חייב להיות מעליה.
+      await tester.pumpWidget(
+        BlocProvider<SettingsBloc>.value(
+          value: _TestSettingsBloc(SettingsState.initial()),
+          child: MaterialApp(
+            home: Builder(
+              builder: (context) {
+                hostContext = context;
+                return const Scaffold();
+              },
+            ),
+          ),
+        ),
+      );
+      LinkPreviewOverlay.showBesideMenuItem(
+        hostContext,
+        contentBuilder: entry.hoverPreviewBuilder!,
+        itemGlobalRect: const Rect.fromLTWH(500, 50, 150, 30),
+        minWidth: 200,
+      );
+      await pumpFrames(tester);
+
+      final title = find.byIcon(FluentIcons.open_24_regular);
+      final titleTop = tester.getTopLeft(title).dy;
+      // גלילת גלגלת בתוך גוף המפרש, כמו בעכבר.
+      final pointer = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(
+        pointer.hover(
+          tester.getCenter(
+            find
+                .ancestor(
+                  of: find.byType(LinkHoverPreviewContent),
+                  matching: find.byType(Material),
+                )
+                .first,
+          ),
+        ),
+      );
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 300)));
+      await pumpFrames(tester);
+
+      // גוף המפרש הארוך עדיין נגלל בתוך החלונית.
+      expect(
+        tester
+            .state<ScrollableState>(find.byType(Scrollable).last)
+            .position
+            .pixels,
+        greaterThan(0),
+      );
+      expect(
+        tester.getTopLeft(title).dy,
+        titleTop,
+        reason: 'הכותרת (פתיחת הספר) נגללה יחד עם התוכן אל מחוץ לחלונית',
+      );
+      await tester.tap(title);
+      expect(opened, 1);
+    },
+  );
+
   testWidgets('תוכן קצר אינו מציג לחצן פרישה', (tester) async {
     await pumpPreviewWithContent(tester, 'שורה קצרה', path2: 'מפרש ב');
 
@@ -253,6 +342,137 @@ void main() {
       expect(previewFontSize(settings, null), 30);
     });
   });
+
+  group('כותרת ארוכה וגופן גדול בתצוגה המקדימה', () {
+    const longTitle =
+        'חידושים ומקורים מבעל מנחת חינוך על משנה תורה, '
+        'הלכות ביכורים ושאר מתנות כהונה שבגבולין';
+
+    setUpAll(() async {
+      final loader = FontLoader('NotoRashiHebrew')
+        ..addFont(
+          rootBundle.load('fonts/NotoRashiHebrew-VariableFont_wght.ttf'),
+        );
+      await loader.load();
+    });
+
+    for (final sample in [
+      (size: const Size(800, 600), scale: 1.0),
+      (size: const Size(800, 600), scale: 1.5),
+      (size: const Size(420, 400), scale: 1.5),
+      (size: const Size(320, 400), scale: 1.5),
+    ]) {
+      testWidgets('טעינה ותוכן נשארים נגישים: $sample', (tester) async {
+        tester.view.physicalSize = sample.size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(LinkPreviewOverlay.dismiss);
+        Link.clearContentCache();
+        final provider = _DeferredContentProvider();
+        LibraryProviderManager.instance.seedMappingsForTesting(
+          mapping: const {},
+          providers: [provider],
+        );
+        final settings = _TestSettingsBloc(
+          SettingsState.initial().copyWith(commentatorsFontSize: 40),
+        );
+        addTearDown(settings.close);
+        var opened = 0;
+        final entry = buildLinkContextMenuEntry(
+          link: Link(
+            heRef: '$longTitle, א, י, א',
+            index1: 1,
+            path2: longTitle,
+            index2: 4,
+            connectionType: 'commentary',
+          ),
+          onTap: () => opened++,
+          displayProfile: TextDisplayProfile.defaults,
+        );
+        late BuildContext host;
+        await tester.pumpWidget(
+          BlocProvider<SettingsBloc>.value(
+            value: settings,
+            child: MaterialApp(
+              locale: const Locale('he', 'IL'),
+              localizationsDelegates: GlobalMaterialLocalizations.delegates,
+              supportedLocales: const [Locale('he', 'IL')],
+              builder: (context, child) => MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  textScaler: TextScaler.linear(sample.scale),
+                ),
+                child: child!,
+              ),
+              home: Builder(
+                builder: (context) {
+                  host = context;
+                  return const Scaffold();
+                },
+              ),
+            ),
+          ),
+        );
+        LinkPreviewOverlay.showBesideMenuItem(
+          host,
+          contentBuilder: entry.hoverPreviewBuilder!,
+          itemGlobalRect: Rect.fromLTWH(sample.size.width - 180, 50, 150, 30),
+          minWidth: 200,
+          touchTriggered: sample.size.width < 420,
+        );
+        await pumpFrames(tester);
+        expect(tester.takeException(), isNull);
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        expect(
+          tester.getSize(find.byType(CircularProgressIndicator)).height,
+          greaterThan(0),
+        );
+
+        provider.pending.complete(
+          List.filled(100, 'והבכור מקריבין חלבו ודמו.').join(' '),
+        );
+        await pumpFrames(tester);
+        expect(tester.takeException(), isNull);
+        final scrollables = find.descendant(
+          of: find.byType(LinkHoverPreviewContent),
+          matching: find.byType(Scrollable),
+        );
+        expect(scrollables, findsNWidgets(2));
+        final header = tester
+            .state<ScrollableState>(scrollables.first)
+            .position;
+        final body = tester.state<ScrollableState>(scrollables.last).position;
+        expect(header.viewportDimension, greaterThan(0));
+        expect(body.viewportDimension, greaterThanOrEqualTo(140));
+        expect(body.maxScrollExtent, greaterThan(0));
+        final headerTop = tester.getTopLeft(scrollables.first);
+        await tester.drag(scrollables.last, const Offset(0, -100));
+        await pumpFrames(tester);
+        expect(body.pixels, greaterThan(0));
+        expect(header.pixels, 0);
+        expect(tester.getTopLeft(scrollables.first), headerTop);
+        expect(header.maxScrollExtent, greaterThan(0));
+        header.jumpTo(header.maxScrollExtent);
+        await pumpFrames(tester);
+        expect(tester.takeException(), isNull);
+        final title = find.descendant(
+          of: scrollables.first,
+          matching: find.byType(Text),
+        );
+        expect(title, findsOneWidget);
+        expect(tester.widget<Text>(title).data, contains(longTitle));
+        final headerBounds = tester.getRect(scrollables.first);
+        final textBounds = tester.getRect(title);
+        expect(
+          textBounds.bottom,
+          lessThanOrEqualTo(headerBounds.bottom + 0.01),
+        );
+        await tester.tapAt(headerBounds.center);
+        await tester.pump();
+        expect(opened, 1);
+      });
+    }
+  });
 }
 
 class _TestSettingsBloc extends Bloc<SettingsEvent, SettingsState>
@@ -320,4 +540,13 @@ class _FakeContentProvider implements LibraryProvider {
   Future<Map<String, List<Book>>> loadBooks(
     Map<String, Map<String, dynamic>> metadata,
   ) async => const {};
+}
+
+class _DeferredContentProvider extends _FakeContentProvider {
+  _DeferredContentProvider() : super('');
+
+  final pending = Completer<String>();
+
+  @override
+  Future<String> getLinkContent(Link link) => pending.future;
 }

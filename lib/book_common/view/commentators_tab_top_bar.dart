@@ -5,12 +5,40 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/settings/settings_exports.dart';
+import 'package:otzaria/shortcuts/shortcut_helper.dart';
+import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/widgets/controls/bar_button.dart';
 import 'package:otzaria/widgets/navigation/app_top_bar.dart';
 import 'package:otzaria/widgets/navigation/nav_side_panel.dart';
 import 'package:otzaria/widgets/navigation/reader_nav_center.dart';
 import 'package:otzaria/widgets/navigation/responsive_action_bar.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
+
+/// קיצורי המקלדת של כרטיסיית מפרשים — אותן פעולות של כפתורי הסרגל.
+KeyEventResult handleCommentatorsTabShortcuts(
+  KeyEvent event, {
+  required VoidCallback onPrint,
+  required VoidCallback onSearch,
+  required VoidCallback onToggleNavPane,
+}) {
+  if (ShortcutHelper.shouldIgnoreWhileEditing(event)) {
+    return KeyEventResult.ignored;
+  }
+  for (final (key, action) in [
+    (ShortcutValidator.printKey, onPrint),
+    (ShortcutValidator.currentWindowSearchKey, onSearch),
+    ('key-shortcut-toggle-nav-pane', onToggleNavPane),
+  ]) {
+    if (ShortcutHelper.matchesShortcut(
+      event,
+      ShortcutValidator.getShortcutValue(key) ?? '',
+    )) {
+      action();
+      return KeyEventResult.handled;
+    }
+  }
+  return KeyEventResult.ignored;
+}
 
 /// The top bar of a commentators tab, for text and PDF books: the side pane
 /// toggles, the navigation between sections, and the tab's actions.

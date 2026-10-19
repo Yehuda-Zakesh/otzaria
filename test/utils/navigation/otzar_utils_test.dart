@@ -81,6 +81,21 @@ void main() {
       );
     });
 
+    test('העמוד נכנס לקישור, ועמוד קטן מ-1 נחשב לראשון', () {
+      expect(
+        OtzarUtils.macBookUri(151130, tabId: 42, page: 57),
+        'OtzarBook://book/151130/p/57/t/42/fs/0/start/0/end/0/c',
+      );
+      expect(
+        OtzarUtils.macBookUri(7, tabId: 1, page: 0),
+        startsWith('OtzarBook://book/7/p/1/'),
+      );
+      expect(
+        OtzarUtils.macBookUri(7, tabId: 1, page: -3),
+        startsWith('OtzarBook://book/7/p/1/'),
+      );
+    });
+
     test('בלי רווח — כתובת שעוברת ב-LaunchServices', () {
       // הרווח שלפני `/c` במסלול Windows תקין שם כי ה-URI הוא ארגומנט תהליך;
       // בכתובת הוא היה נחתך.
@@ -93,6 +108,22 @@ void main() {
       expect(first, startsWith('OtzarBook://book/7/p/1/t/'));
       expect(second, startsWith('OtzarBook://book/7/p/1/t/'));
       expect(first, endsWith('/fs/0/start/0/end/0/c'));
+    });
+  });
+
+  group('windowsBookLink', () {
+    test('ברירת המחדל — העמוד הראשון, והרווח שלפני /c נשמר', () {
+      expect(
+        OtzarUtils.windowsBookLink(7, 42),
+        'OtzarBook://book/7/p/1/t/42/fs/0/start/0/end/0 /c',
+      );
+    });
+
+    test('העמוד שהתבקש נכנס לקישור', () {
+      expect(
+        OtzarUtils.windowsBookLink(7, 42, page: 57),
+        'OtzarBook://book/7/p/57/t/42/fs/0/start/0/end/0 /c',
+      );
     });
   });
 

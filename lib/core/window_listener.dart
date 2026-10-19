@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:otzaria/plugins/services/startup_crash_counter.dart';
 import 'package:otzaria/app_report/services/app_crash_session.dart';
+import 'package:otzaria/app_report/services/app_hang_report.dart';
 import 'package:otzaria/core/http_client_registry.dart';
 import 'package:otzaria/core/pre_close_registry.dart';
 import 'package:otzaria/core/window_persistence.dart';
@@ -25,6 +26,7 @@ import 'package:otzaria/plugins/storage/plugin_system_database.dart';
 import 'package:otzaria/plugins/services/plugin_crash_guard.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 import 'package:otzaria/plugins/view/webview_environment_holder.dart';
+import 'package:otzaria/printing/print_work_status.dart';
 import 'package:otzaria/tabs/utils/confirm_close_tabs.dart';
 import 'package:otzaria/tabs/tabs_repository.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -66,6 +68,12 @@ class AppWindowListener extends WindowListener {
         // חייבות להישטף בפעם הבאה.
         _sessionEndFlushStarted = false;
         unawaited(AppCrashSession.restoreSessionLockIfReleased());
+        return null;
+      case 'appHangRecovered':
+        // ה-UI isolate חזר להגיב; הדיווח לא יעכב את המשך הטיפול בהודעות.
+        if (!WindowRole.isSecondary) {
+          unawaited(AppHangReport.onRecovered(call.arguments));
+        }
         return null;
       default:
         return null;
@@ -288,6 +296,7 @@ class AppWindowListener extends WindowListener {
     try {
       if (canClose != null && !canClose()) return;
       if (!await confirmAppCloseWithUnsavedChanges()) return;
+      if (!await confirmCloseWhilePrinting()) return;
       if (canClose != null && !canClose()) return;
 
       // הגיבוב עשוי להימשך מעבר לכלב השמירה של הכיבוי.

@@ -57,6 +57,9 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 add_subdirectory("runner")
 
 
+# Keep printing on a recent PDFium build; its private DLL is independent of pdfrx.
+set(PDFIUM_VERSION "7811" CACHE STRING "Version of pdfium used" FORCE)
+
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)

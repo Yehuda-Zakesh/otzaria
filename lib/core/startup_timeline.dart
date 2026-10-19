@@ -34,6 +34,7 @@ class StartupTimeline {
   /// מתחיל את השעון ואת מזהה הקיפאון. קריאה חוזרת אינה מאפסת אותם.
   void start() {
     if (_clock.isRunning || _clock.elapsedTicks != 0) return;
+    _startedAt = DateTime.now();
     _clock.start();
     // ציר הזמן מראה מתי חלון של קוד רץ, לא מה חסם בין לבין; טיימר שמאחר
     // חושף חסימה סינכרונית ומתי היא קרתה, גם אם איש לא עטף אותה בפאזה.
@@ -49,6 +50,10 @@ class StartupTimeline {
   }
 
   int get elapsedMs => _clock.elapsedMilliseconds;
+
+  /// שעת [start]. השעון נעצר בחשיפה, ולכן אחריה רק היא מציינת את תחילת התהליך.
+  DateTime? get startedAt => _startedAt;
+  DateTime? _startedAt;
 
   /// מריץ שלב עלייה ורושם את משכו. חריגה עוברת הלאה; המשך נרשם גם אז.
   Future<T> phase<T>(String name, Future<T> Function() body) async {

@@ -574,80 +574,38 @@ class PdfBookBloc extends Bloc<PdfBookEvent, PdfBookState> {
     emit(current.copyWith(zoom: event.zoom));
   }
 
-  void _onZoomIn(
-    ZoomIn event,
+  void _onZoomIn(ZoomIn event, Emitter<PdfBookState> emit) =>
+      _applyZoom(emit, (zoom) => zoom * 1.1);
+
+  void _onZoomOut(ZoomOut event, Emitter<PdfBookState> emit) =>
+      _applyZoom(emit, (zoom) => zoom / 1.1);
+
+  void _onFitZoom(FitZoom event, Emitter<PdfBookState> emit) =>
+      _applyZoom(emit, (_) => event.zoom, center: event.center);
+
+  void _onResetZoom(ResetZoom event, Emitter<PdfBookState> emit) =>
+      _applyZoom(emit, (_) => 1.0);
+
+  /// זום מכפתורי הסרגל ומהקיצורים: מוחל מיד (בלי אנימציה) סביב [center]
+  /// או מרכז התצוגה, נשמר בטאב ובהגדרות הספר, וסרגל הזום מוצג.
+  void _applyZoom(
     Emitter<PdfBookState> emit,
-  ) {
+    double Function(double zoom) zoomFrom, {
+    Offset? center,
+  }) {
     if (!pdfController.isReady) return;
     final current = state;
     if (current is! PdfBookLoaded) return;
 
-    final newZoom = current.zoom * 1.1;
+    final zoom = zoomFrom(current.zoom);
     pdfController.setZoom(
-      pdfController.centerPosition,
-      newZoom,
+      center ?? pdfController.centerPosition,
+      zoom,
       duration: Duration.zero,
     );
+    tab.savedZoom = zoom;
 
-    tab.savedZoom = newZoom;
-
-    emit(current.copyWith(zoom: newZoom, showZoomBar: true));
-    _startZoomBarTimer(emit);
-    add(const SavePerBookSettings());
-  }
-
-  void _onZoomOut(
-    ZoomOut event,
-    Emitter<PdfBookState> emit,
-  ) {
-    if (!pdfController.isReady) return;
-    final current = state;
-    if (current is! PdfBookLoaded) return;
-
-    final newZoom = current.zoom / 1.1;
-    pdfController.setZoom(
-      pdfController.centerPosition,
-      newZoom,
-      duration: Duration.zero,
-    );
-
-    tab.savedZoom = newZoom;
-
-    emit(current.copyWith(zoom: newZoom, showZoomBar: true));
-    _startZoomBarTimer(emit);
-    add(const SavePerBookSettings());
-  }
-
-  void _onFitZoom(FitZoom event, Emitter<PdfBookState> emit) {
-    if (!pdfController.isReady) return;
-    final current = state;
-    if (current is! PdfBookLoaded) return;
-
-    pdfController.setZoom(event.center, event.zoom, duration: Duration.zero);
-    tab.savedZoom = event.zoom;
-
-    emit(current.copyWith(zoom: event.zoom, showZoomBar: true));
-    _startZoomBarTimer(emit);
-    add(const SavePerBookSettings());
-  }
-
-  void _onResetZoom(
-    ResetZoom event,
-    Emitter<PdfBookState> emit,
-  ) {
-    if (!pdfController.isReady) return;
-    final current = state;
-    if (current is! PdfBookLoaded) return;
-
-    pdfController.setZoom(
-      pdfController.centerPosition,
-      1.0,
-      duration: Duration.zero,
-    );
-
-    tab.savedZoom = 1.0;
-
-    emit(current.copyWith(zoom: 1.0, showZoomBar: true));
+    emit(current.copyWith(zoom: zoom, showZoomBar: true));
     _startZoomBarTimer(emit);
     add(const SavePerBookSettings());
   }

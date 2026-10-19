@@ -7,6 +7,7 @@ import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/directory_writability.dart';
 import 'package:otzaria/plugins/services/plugin_asset_scheme.dart';
 import 'package:otzaria/plugins/services/plugin_webview_failure_log.dart';
+import 'package:otzaria/plugins/services/webview2_creation_diagnostics.dart';
 
 /// מחזיק סביבת WebView2 עם תיקיית נתונים הניתנת לכתיבה ב-APPDATA,
 /// כדי שהתקנה ב-Program Files לא תנסה לכתוב לצד ה-EXE.
@@ -57,6 +58,7 @@ class WebViewEnvironmentHolder {
     if (!Platform.isWindows) return true;
     try {
       final version = await WebViewEnvironment.getAvailableVersion();
+      WebView2CreationDiagnostics.runtimeVersion = version;
       return version != null && version.isNotEmpty;
     } catch (_) {
       return false;
@@ -142,9 +144,11 @@ class WebViewEnvironmentHolder {
       // מדידה: integration_test/webview_scroll_smoothness_probe_test.dart.
       // מונע ממופע אחר לשתף את תהליך הדפדפן שמחזיק בתיקייה; במקרה של
       // התנגשות WebView2 דוחה את יצירת ה-controller והכשל נרשם בדיאגנוסטיקה.
-      _environment = await WebViewEnvironment.create(
+      final environment = await WebViewEnvironment.create(
         settings: _environmentSettings(webviewDataFolder),
       );
+      environment.onBrowserProcessExited = _logAbnormalBrowserExit;
+      _environment = environment;
     } catch (error, stackTrace) {
       // כשל כאן = כל התוספים יעלו ריקים; בלי הרישום אין לזה שום עקבות.
       logPluginWebViewFailure(
@@ -152,6 +156,7 @@ class WebViewEnvironmentHolder {
         error,
         stackTrace: stackTrace,
         details: {'UserDataFolder': webviewDataFolder},
+        creationFailure: true,
       );
       rethrow;
     } finally {
@@ -161,6 +166,30 @@ class WebViewEnvironmentHolder {
       _initializeFuture = null;
     }
   }
+
+  static int _browserExitsLogged = 0;
+  static const int _maxBrowserExitsLogged = 3;
+
+  // יציאה תקינה (סגירת כל ה-WebViews או של התוכנה) אינה נרשמת.
+  static void _logAbnormalBrowserExit(BrowserProcessExitedDetail detail) {
+    if (detail.kind.toValue() == BrowserProcessExitKind.NORMAL.toValue()) {
+      return;
+    }
+    if (_browserExitsLogged >= _maxBrowserExitsLogged) return;
+    _browserExitsLogged++;
+    logPluginWebViewFailure(
+      'WebView2 browser process exited',
+      detail.kind.name(),
+      details: {'ProcessId': detail.processId?.toString()},
+    );
+  }
+
+  @visibleForTesting
+  static void debugBrowserProcessExited(BrowserProcessExitedDetail detail) =>
+      _logAbnormalBrowserExit(detail);
+
+  @visibleForTesting
+  static void debugResetBrowserExitCount() => _browserExitsLogged = 0;
 
   @visibleForTesting
   static WebViewEnvironmentSettings debugEnvironmentSettings(

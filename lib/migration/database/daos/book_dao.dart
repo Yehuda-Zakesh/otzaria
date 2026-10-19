@@ -303,15 +303,6 @@ class BookDao {
     ]);
   }
 
-  /// Gets a book by its title and file type.
-  Future<Book?> getBookByTitleAndFileType(String title, String fileType) async {
-    if (!(await _capabilities).hasColumn('book', 'fileType')) return null;
-    return _selectOne(_queries['selectByTitleAndFileType']!, [
-      title,
-      fileType,
-    ]);
-  }
-
   Future<int> insertBook(
     int categoryId,
     int sourceId,
@@ -423,12 +414,6 @@ class BookDao {
     return db.updatedRows;
   }
 
-  Future<int> updateBookCategoryId(int id, int categoryId) async {
-    final db = await database;
-    db.execute(_queries['updateCategoryId']!, [categoryId, id]);
-    return db.updatedRows;
-  }
-
   /// Updates external book metadata (file size and last modified).
   Future<int> updateExternalMetadata(
     int id,
@@ -452,26 +437,6 @@ class BookDao {
     ]).toMapList();
     if (result.isEmpty) return null;
     return bookFromRow(result.first);
-  }
-
-  Future<int> updateBookConnectionFlags(
-    int id,
-    bool hasTargum,
-    bool hasReference,
-    bool hasSource,
-    bool hasCommentary,
-    bool hasOther,
-  ) async {
-    final db = await database;
-    db.execute(_queries['updateConnectionFlags']!, [
-      hasTargum ? 1 : 0,
-      hasReference ? 1 : 0,
-      hasSource ? 1 : 0,
-      hasCommentary ? 1 : 0,
-      hasOther ? 1 : 0,
-      id,
-    ]);
-    return db.updatedRows;
   }
 
   Future<int> countAllBooks() async {

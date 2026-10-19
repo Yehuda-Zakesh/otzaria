@@ -63,7 +63,26 @@ void main() {
     final reportCall = watcher.indexOf('ReportStall(');
     expect(captureCall, greaterThanOrEqualTo(0));
     expect(reportCall, greaterThan(captureCall));
+    // הגדרה + קריאה יחידה ב-AppendStackSection, שרץ רק אחרי החידוש.
     expect(RegExp(r'\bDescribeAddress\(').allMatches(source), hasLength(2));
+    final section = source.substring(
+      source.indexOf('void AppendStackSection('),
+      source.indexOf('void ReportStall('),
+    );
+    expect(section, contains('DescribeAddress(frame)'));
+  });
+
+  test('הכלים המשותפים ל-hang_monitor עוטפים את אותם מימושים', () {
+    final shared = source.substring(source.indexOf('}  // namespace\n'));
+    expect(
+      shared,
+      contains(
+        'bool CaptureMainStack(std::vector<ULONG_PTR>* frames) {\n'
+        '  return CaptureMainThreadStack(frames);',
+      ),
+    );
+    expect(shared, contains('AppendStackSection(frames, report);'));
+    expect(shared, contains('AppendToLog(text);'));
   });
 
   test('כשל timer אינו מפעיל watcher', () {
@@ -89,6 +108,97 @@ void main() {
     expect(stop, contains('RequestStop();'));
     expect(stop, contains('g_watcher.joinable()'));
     expect(stop, contains('g_watcher.join()'));
+  });
+
+  group('hang_monitor', () {
+    final hang = File(
+      'windows/runner/hang_monitor.cpp',
+    ).readAsStringSync().replaceAll('\r\n', '\n');
+    final normalizedMain = mainSource.replaceAll('\r\n', '\n');
+    final normalizedWindow = windowSource.replaceAll('\r\n', '\n');
+    final watcher = hang.substring(
+      hang.indexOf('void WatcherLoop()'),
+      hang.indexOf('}  // namespace'),
+    );
+
+    test('IsHungAppWindow ולא WM_TIMER, שמורעב בהצפת הודעות', () {
+      expect(watcher, contains('::IsHungAppWindow(g_window)'));
+      expect(hang, isNot(contains('SetTimer(')));
+      expect(watcher, isNot(contains('WM_TIMER')));
+      expect(watcher, contains('kRequiredHungPolls'));
+    });
+
+    test('מתעלם מדיבאגר ומחזרה משינה', () {
+      expect(watcher, contains('::IsDebuggerPresent()'));
+      expect(hang, contains('::QueryUnbiasedInterruptTime('));
+      expect(watcher, contains('::GetTickCount64()'));
+      expect(watcher, contains('awake < grace_until'));
+    });
+
+    test('מתרגם לשמות מודולים רק אחרי חידוש ה-thread', () {
+      final reserve = watcher.indexOf('frames.reserve(kMaxFrames);');
+      final capture = watcher.indexOf(
+        'startup_watchdog::CaptureMainStack(&frames);',
+      );
+      final report = watcher.indexOf('ReportHang(frames);');
+      expect(reserve, greaterThanOrEqualTo(0));
+      expect(capture, greaterThan(reserve));
+      expect(report, greaterThan(capture));
+      expect(watcher, isNot(contains('AppendStack(')));
+      expect(watcher, isNot(contains('RefreshModules')));
+      expect(watcher, isNot(contains('EnumProcessModules')));
+      expect(hang, isNot(contains('DescribeAddress')));
+      expect(hang, isNot(contains('SuspendThread')));
+    });
+
+    test('פורמט הרשומה תואם את המפענח (App hang / AppHang)', () {
+      expect(hang, contains('"\\n=== App hang " + startup_watchdog::'));
+      expect(hang, contains('"Message: AppHang: UI thread not responding\\n"'));
+      expect(hang, contains('"\\n=== App hang recovered " +'));
+      expect(hang, contains('"Duration: %llums\\n"'));
+    });
+
+    test('מתחיל בחשיפה, רק בחלון ראשי שאינו CLI, ונעצר לפני ה-watchdog', () {
+      final revealStart = normalizedWindow.indexOf(
+        'if (call.method_name() == "close")',
+      );
+      final reveal = normalizedWindow.substring(
+        revealStart,
+        normalizedWindow.indexOf('result->Success();', revealStart),
+      );
+      expect(
+        reveal.indexOf('hang_monitor::Start();'),
+        greaterThan(reveal.indexOf('startup_watchdog::RequestStop();')),
+      );
+      expect(
+        normalizedMain,
+        contains(
+          'if (!is_cli_invocation) hang_monitor::SetMainWindow(main_hwnd);',
+        ),
+      );
+      final exit = normalizedMain.lastIndexOf('startup_watchdog::Stop();');
+      expect(
+        normalizedMain.lastIndexOf('hang_monitor::Stop();'),
+        allOf(greaterThanOrEqualTo(0), lessThan(exit)),
+      );
+      expect(
+        File('windows/runner/CMakeLists.txt').readAsStringSync(),
+        contains('"hang_monitor.cpp"'),
+      );
+    });
+
+    test('השחרור מגיע ל-Dart דרך process_control', () {
+      final start = normalizedWindow.indexOf(
+        'if (message == hang_monitor::kMsgAppHangRecovered)',
+      );
+      expect(start, greaterThanOrEqualTo(0));
+      final handler = normalizedWindow.substring(
+        start,
+        normalizedWindow.indexOf('return 0;', start),
+      );
+      expect(handler, contains('"appHangRecovered"'));
+      expect(handler, contains('"durationMs"'));
+    });
   });
 
   test('יצירת חלון מרעננת snapshot וכשל מנקה משאבים', () {

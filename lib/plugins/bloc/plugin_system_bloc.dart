@@ -107,8 +107,6 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     on<PluginOverwriteDeclined>(_onPluginOverwriteDeclined);
     on<UninstallPluginRequested>(_onUninstallPluginRequested);
     on<ResetPluginDataRequested>(_onResetPluginDataRequested);
-    on<PinPluginRequested>(_onPinPluginRequested);
-    on<UnpinPluginRequested>(_onUnpinPluginRequested);
     on<PinPluginToNavRailRequested>(_onPinPluginToNavRailRequested);
     on<UnpinPluginFromNavRailRequested>(_onUnpinPluginFromNavRailRequested);
     on<SetPluginShowInToolsRequested>(_onSetPluginShowInToolsRequested);
@@ -219,6 +217,8 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     SeedBundledPlugins event,
     Emitter<PluginSystemState> emit,
   ) async {
+    // פר-מחשב: חלון משני היה מתקין במקביל לראשי לאותה תיקייה ו-DB.
+    if (WindowRole.isSecondary) return;
     await PluginSafeMode.ready;
     if (PluginSafeMode.isActive) return;
     try {
@@ -310,30 +310,6 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       return;
     }
     unawaited(declarativeHost?.readerBookChanged(null, context: 'reader-text'));
-  }
-
-  Future<void> _onPinPluginRequested(
-    PinPluginRequested event,
-    Emitter<PluginSystemState> emit,
-  ) async {
-    try {
-      await repository.updatePinState(event.pluginId, true);
-      add(LoadPlugins());
-    } catch (e) {
-      UiSnack.showError(PluginMessages.pinPluginError(e));
-    }
-  }
-
-  Future<void> _onUnpinPluginRequested(
-    UnpinPluginRequested event,
-    Emitter<PluginSystemState> emit,
-  ) async {
-    try {
-      await repository.updatePinState(event.pluginId, false);
-      add(LoadPlugins());
-    } catch (e) {
-      UiSnack.showError(PluginMessages.unpinPluginError(e));
-    }
   }
 
   Future<void> _onPinPluginToNavRailRequested(
@@ -455,8 +431,6 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
           manifest: prepareInfo.manifest,
           tempDirPath: prepareInfo.tempDirPath,
           previousVersion: prepareInfo.previousVersion,
-          previousAllowOrderBeforeBuiltInsGranted:
-              prepareInfo.previousAllowOrderBeforeBuiltInsGranted,
           previousGrantedPermissions: prepareInfo.previousGrantedPermissions,
           isUserInitiated: event.isUserInitiated,
         ),
@@ -547,8 +521,6 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
           manifest: prepareInfo.manifest,
           tempDirPath: prepareInfo.tempDirPath,
           previousVersion: prepareInfo.previousVersion,
-          previousAllowOrderBeforeBuiltInsGranted:
-              prepareInfo.previousAllowOrderBeforeBuiltInsGranted,
           previousGrantedPermissions: prepareInfo.previousGrantedPermissions,
           reportContext: event.reportContext,
           isUserInitiated: event.isUserInitiated,
@@ -620,7 +592,6 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       await _installerService.finalizeInstall(
         event.tempDirPath,
         event.manifest,
-        allowOrderBeforeBuiltInsGranted: event.allowOrderBeforeBuiltInsGranted,
         grantedPermissions: event.grantedPermissions,
       );
 
@@ -1118,16 +1089,12 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
           event.sourcePath,
           preValidatedManifest: event.manifest,
           grantedPermissions: event.grantedPermissions,
-          allowOrderBeforeBuiltInsGranted:
-              event.allowOrderBeforeBuiltInsGranted,
         );
       } else {
         await devLoader.loadDevelopmentPlugin(
           event.sourcePath,
           preValidatedManifest: event.manifest,
           grantedPermissions: event.grantedPermissions,
-          allowOrderBeforeBuiltInsGranted:
-              event.allowOrderBeforeBuiltInsGranted,
         );
       }
       add(LoadPlugins());

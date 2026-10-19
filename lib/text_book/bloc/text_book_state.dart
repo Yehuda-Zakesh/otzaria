@@ -200,7 +200,6 @@ class TextBookLoaded extends TextBookState {
   final int contentVersion;
   final double fontSize;
   final bool showSplitView;
-  final bool showTzuratHadafView;
   final bool showPageShapeView;
   final List<String> activeCommentators;
   final List<CommentatorGroup> commentatorGroups;
@@ -316,7 +315,6 @@ class TextBookLoaded extends TextBookState {
     this.contentVersion = 0,
     required this.fontSize,
     required this.showSplitView,
-    this.showTzuratHadafView = false,
     this.showPageShapeView = false,
     required this.activeCommentators,
     required this.commentatorGroups,
@@ -409,7 +407,6 @@ class TextBookLoaded extends TextBookState {
       fontSize: 25.0, // Default font size
       showLeftPane: showLeftPane,
       showSplitView: splitView,
-      showTzuratHadafView: false,
       showPageShapeView: false,
       activeCommentators: commentators ?? const [],
       commentatorGroups: const [],
@@ -530,7 +527,6 @@ class TextBookLoaded extends TextBookState {
     double? fontSize,
     bool? showLeftPane,
     bool? showSplitView,
-    bool? showTzuratHadafView,
     bool? showPageShapeView,
     List<String>? activeCommentators,
     List<CommentatorGroup>? commentatorGroups,
@@ -670,7 +666,6 @@ class TextBookLoaded extends TextBookState {
       fontSize: fontSize ?? this.fontSize,
       showLeftPane: showLeftPane ?? this.showLeftPane,
       showSplitView: showSplitView ?? this.showSplitView,
-      showTzuratHadafView: showTzuratHadafView ?? this.showTzuratHadafView,
       showPageShapeView: showPageShapeView ?? this.showPageShapeView,
       activeCommentators: activeCommentators ?? this.activeCommentators,
       commentatorGroups: commentatorGroups ?? this.commentatorGroups,
@@ -774,7 +769,6 @@ class TextBookLoaded extends TextBookState {
     fontSize,
     showLeftPane,
     showSplitView,
-    showTzuratHadafView,
     showPageShapeView,
     // השוואה לפי תוכן (לא רק אורך) — אחרת החלפת מפרש אחד באחר באותו אורך
     // נבלעת ע"י השוואת ה-state והבחירה לא מתעדכנת.

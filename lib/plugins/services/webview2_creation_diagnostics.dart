@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:path/path.dart' as p;
 
 /// תוצאת הסריקה, שורת תיאור לכל תהליך. [unreadable] — תהליכים ששורת הפקודה
@@ -17,42 +18,86 @@ typedef WebView2FolderScan = ({
   int otherBrowsers,
 });
 
-/// אבחון ל-HRESULT 0x8007139F/0x8000FFFF: מי מחזיק בתיקיית `webview2` שלנו.
-/// נרשם ל-errors.txt פעם אחת לתהליך, ברקע, ולעולם לא זורק.
-class WebView2FolderHolders {
-  WebView2FolderHolders._();
+/// אבחון לכשל יצירת WebView2 ב-Windows: מי מחזיק בתיקיית `webview2`, מה יש בה,
+/// אילו runtimes, משתנים, מדיניות ואירועים. ריצת PowerShell אחת לתהליך, ברקע.
+class WebView2CreationDiagnostics {
+  WebView2CreationDiagnostics._();
 
-  static const String logTitle = 'WebView2 data folder holders';
-  static const Duration _processTimeout = Duration(seconds: 10);
-  static const List<String> _folderConflictHresults = [
-    '0x8007139f',
-    '0x8000ffff',
-  ];
+  static const String logTitle = 'WebView2 creation failure diagnostics';
+  static const Duration _processTimeout = Duration(seconds: 20);
+  static const int maxFieldLength = 2000;
 
-  // Emits every msedgewebview2 process with its parent; [parse] keeps the roots.
-  static const String _script = r'''
+  // Each section fails alone; a failed process query is reported, not fatal.
+  static const String _scriptBody = r'''
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 function Stamp($d) { if ($d) { $d.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'") } }
-$w = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'")
-$ids = @($w | ForEach-Object { $_.ParentProcessId } | Sort-Object -Unique)
-$parents = @()
-if ($ids.Count -gt 0) {
-  $filter = ($ids | ForEach-Object { "ProcessId=$_" }) -join ' OR '
-  $parents = @(Get-CimInstance Win32_Process -Filter $filter)
+function Clip($s, $n) { $s = "$s" -replace '\s+', ' '; if ($s.Length -gt $n) { $s.Substring(0, $n) + '...' } else { $s } }
+function Names($dir) {
+  if (-not $dir -or -not (Test-Path -LiteralPath $dir)) { return $null }
+  $all = @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue)
+  $names = @($all | Select-Object -First 30 | ForEach-Object { $_.Name })
+  if ($all.Count -gt 30) { $names += "... +$($all.Count - 30)" }
+  ,$names
 }
-[pscustomobject]@{
-  processes = @($w | ForEach-Object { [pscustomobject]@{
+function Section($block) { try { & $block } catch { 'error: ' + (Clip $_ 200) } }
+$r = [ordered]@{}
+try {
+  $w = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'")
+  $ids = @($w | ForEach-Object { $_.ParentProcessId } | Sort-Object -Unique)
+  $parents = @()
+  if ($ids.Count -gt 0) {
+    $filter = ($ids | ForEach-Object { "ProcessId=$_" }) -join ' OR '
+    $parents = @(Get-CimInstance Win32_Process -Filter $filter)
+  }
+  $r.processes = @($w | ForEach-Object { [pscustomobject]@{
     pid = $_.ProcessId; ppid = $_.ParentProcessId; exe = $_.ExecutablePath
     cmd = $_.CommandLine; created = Stamp $_.CreationDate } })
-  parents = @($parents | ForEach-Object { [pscustomobject]@{
+  $r.parents = @($parents | ForEach-Object { [pscustomobject]@{
     pid = $_.ProcessId; name = $_.Name; exe = $_.ExecutablePath
     created = Stamp $_.CreationDate } })
-} | ConvertTo-Json -Compress -Depth 4
+} catch { $r.processError = Clip $_ 200 }
+$r.ebWebView = Section { Names (Join-Path $folder 'EBWebView') }
+$udf = $env:WEBVIEW2_USER_DATA_FOLDER
+if ($udf) { $r.envFolderEbWebView = Section { Names (Join-Path $udf 'EBWebView') } }
+$r.runtimes = [ordered]@{
+  machine = Section { Names (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\EdgeWebView\Application') }
+  user = Section { Names (Join-Path $env:LOCALAPPDATA 'Microsoft\EdgeWebView\Application') }
+}
+$r.env = @(Get-ChildItem Env: | Where-Object { $_.Name -like 'WEBVIEW2_*' } |
+  ForEach-Object { $_.Name + '=' + (Clip $_.Value 300) })
+$r.policies = @(foreach ($hive in 'HKLM', 'HKCU') {
+  Section {
+    $key = Get-Item -LiteralPath "${hive}:\SOFTWARE\Policies\Microsoft\Edge\WebView2" -ErrorAction SilentlyContinue
+    if ($key) {
+      $key.GetValueNames() | ForEach-Object { "$hive value $_" }
+      $key.GetSubKeyNames() | ForEach-Object { "$hive key $_" }
+    }
+  }
+})
+$r.smartAppControl = Section {
+  (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' -Name VerifiedAndReputablePolicyState -ErrorAction SilentlyContinue).VerifiedAndReputablePolicyState
+}
+$r.events = Section {
+  @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = (Get-Date).AddMinutes(-10) } -MaxEvents 300 -ErrorAction SilentlyContinue |
+    ForEach-Object {
+      $m = $_.Message; if (-not $m) { $m = ($_.Properties | ForEach-Object { $_.Value }) -join ' ' }
+      if ("$($_.ProviderName) $m" -match 'msedgewebview2|WebView2|otzaria') {
+        Clip ((Stamp $_.TimeCreated) + " $($_.ProviderName) #$($_.Id): $m") 400
+      }
+    } | Select-Object -First 6)
+}
+[pscustomobject]$r | ConvertTo-Json -Compress -Depth 4
 ''';
 
+  static String _script(String folder) =>
+      "\$folder = '${folder.replaceAll("'", "''")}'\n$_scriptBody";
+
   static bool _triggered = false;
+
+  /// הגרסה שהחזיר `WebViewEnvironment.getAvailableVersion`, אם כבר נקרא.
+  static String? runtimeVersion;
 
   /// Process.start חוסם את ה-thread הראשי ב-Windows; ממתינים לחשיפת החלון.
   static Future<void> Function() startupGate = () => Future<void>.value();
@@ -67,23 +112,20 @@ if ($ids.Count -gt 0) {
   @visibleForTesting
   static void debugReset() {
     _triggered = false;
+    runtimeVersion = null;
     debugRunnerOverride = null;
     debugIsWindowsOverride = null;
   }
 
-  static bool isFolderConflict(Object error) {
-    final text = error.toString().toLowerCase();
-    return _folderConflictHresults.any(text.contains);
-  }
+  static bool get _isWindows => debugIsWindowsOverride ?? Platform.isWindows;
 
-  /// מפעיל את הסריקה ברקע אם [error] הוא התנגשות על התיקייה (פעם אחת לתהליך).
+  /// מפעיל את הסריקה ברקע אחרי כשל יצירה (פעם אחת לתהליך).
   /// מחזיר את ה-Future לצורכי בדיקה בלבד; הקוראים אינם ממתינים לו.
-  static Future<void>? recordIfFolderConflict(Object error) {
+  static Future<void>? recordCreationFailure(Object error) {
     try {
       if (WindowRole.isSecondary) return null;
       if (_triggered) return null;
-      if (!(debugIsWindowsOverride ?? Platform.isWindows)) return null;
-      if (!isFolderConflict(error)) return null;
+      if (!_isWindows) return null;
       _triggered = true;
       final future = _record(error);
       unawaited(future);
@@ -102,15 +144,20 @@ if ($ids.Count -gt 0) {
         '-NonInteractive',
         '-EncodedCommand',
         base64.encode(
-          Uint16List.fromList(_script.codeUnits).buffer.asUint8List(),
+          Uint16List.fromList(_script(folder).codeUnits).buffer.asUint8List(),
         ),
       ];
       String? output;
+      final stopwatch = Stopwatch()..start();
       try {
         output = await (debugRunnerOverride ?? _runPowerShell)(args);
       } catch (_) {}
+      stopwatch.stop();
 
-      final scan = output == null ? null : parse(output, folder);
+      final decoded = _decode(output);
+      final scan = decoded == null || decoded['processError'] != null
+          ? null
+          : _scan(decoded, folder);
       final String holders;
       if (scan == null) {
         holders = 'process query failed or timed out';
@@ -123,20 +170,84 @@ if ($ids.Count -gt 0) {
             'none readable: may be an unreadable process '
             '(elevated or another user)';
       }
+      final redactor = AppReportRedactor.fromPlatform();
       ErrorLogFile.append(
         title: logTitle,
-        error: 'HRESULT folder conflict: ${_firstLine(trigger)}',
+        error: redactor.redactText(
+          'WebView2 creation failed: ${_firstLine(trigger)}',
+        ),
         details: {
-          'UserDataFolder': folder,
-          'OwnPid': '$pid',
-          'Holders': holders,
-          'UnreadableWebView2Processes': scan?.unreadable.length.toString(),
-          'Unreadable': scan?.unreadable.join('\n'),
-          'OtherWebView2Browsers': scan?.otherBrowsers.toString(),
+          for (final MapEntry(:key, :value) in {
+            'UserDataFolder': folder,
+            'OwnPid': '$pid',
+            'ScanMs': '${stopwatch.elapsedMilliseconds}',
+            'RuntimeVersion': runtimeVersion,
+            'ProcessQueryError': decoded?['processError']?.toString(),
+            'Holders': holders,
+            'UnreadableWebView2Processes': scan?.unreadable.length.toString(),
+            'Unreadable': scan?.unreadable.join('\n'),
+            'OtherWebView2Browsers': scan?.otherBrowsers.toString(),
+            ...describeEnvironment(decoded),
+          }.entries)
+            key: value == null ? null : redactor.redactText(_clip(value)),
         },
       );
     } catch (_) {}
   }
+
+  /// שדות הסביבה מפלט הסקריפט כשורות טקסט; ערך null מושמט מהרשומה.
+  @visibleForTesting
+  static Map<String, String?> describeEnvironment(Map? decoded) {
+    if (decoded == null) return const {};
+    final runtimes = decoded['runtimes'];
+    return {
+      'EBWebView': _joinNames(decoded['ebWebView']) ?? '(missing)',
+      'WEBVIEW2_USER_DATA_FOLDER': _envValue(
+        decoded['env'],
+        'WEBVIEW2_USER_DATA_FOLDER',
+      ),
+      'EBWebViewAtEnvFolder': _joinNames(decoded['envFolderEbWebView']),
+      if (runtimes is Map) ...{
+        'RuntimesMachine': _joinNames(runtimes['machine']) ?? '(missing)',
+        'RuntimesUser': _joinNames(runtimes['user']) ?? '(missing)',
+      },
+      'WebView2EnvVars': _lines(decoded['env']) ?? '(none)',
+      'WebView2Policies': _lines(decoded['policies']) ?? '(none)',
+      'SmartAppControl': switch ('${decoded['smartAppControl'] ?? ''}') {
+        '' => '(not set)',
+        '0' => '0 (off)',
+        '1' => '1 (on)',
+        '2' => '2 (evaluation)',
+        final other => other,
+      },
+      'RecentAppEvents': _lines(decoded['events']) ?? '(none)',
+    };
+  }
+
+  static String? _joinNames(Object? value) {
+    if (value == null) return null;
+    if (value is String) return value;
+    final names = _asList(value);
+    return names.isEmpty ? '(empty)' : names.join(', ');
+  }
+
+  static String? _lines(Object? value) {
+    final items = _asList(value);
+    return items.isEmpty ? null : items.join('\n');
+  }
+
+  static String? _envValue(Object? env, String name) {
+    for (final entry in _asList(env)) {
+      if (entry is String && entry.startsWith('$name=')) {
+        return entry.substring(name.length + 1);
+      }
+    }
+    return null;
+  }
+
+  static String _clip(String value) => value.length <= maxFieldLength
+      ? value
+      : '${value.substring(0, maxFieldLength)}... [clipped]';
 
   static String _firstLine(Object error) {
     final text = error.toString().trim();
@@ -171,12 +282,25 @@ if ($ids.Count -gt 0) {
     }
   }
 
+  static Map? _decode(String? output) {
+    if (output == null) return null;
+    try {
+      final decoded = jsonDecode(output.trim());
+      return decoded is Map ? decoded : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// מפענח את פלט ה-JSON של הסקריפט; null כשהפלט אינו בצורה הצפויה.
   @visibleForTesting
   static WebView2FolderScan? parse(String output, String folder) {
+    final decoded = _decode(output);
+    return decoded == null ? null : _scan(decoded, folder);
+  }
+
+  static WebView2FolderScan? _scan(Map decoded, String folder) {
     try {
-      final decoded = jsonDecode(output.trim());
-      if (decoded is! Map) return null;
       final parents = <Object?, Map>{
         for (final parent in _asList(decoded['parents']))
           if (parent is Map) parent['pid']: parent,

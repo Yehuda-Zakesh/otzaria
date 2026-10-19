@@ -227,8 +227,6 @@ PluginInstallDecision resolvePluginInstallPrompt(
   manifest: state.manifest,
   previousVersion: state.previousVersion,
   previousGrantedPermissions: state.previousGrantedPermissions,
-  previousAllowOrderBeforeBuiltInsGranted:
-      state.previousAllowOrderBeforeBuiltInsGranted,
   isOfflineMode: isOfflineMode,
   isUserInitiated: state.isUserInitiated,
 );
@@ -1475,8 +1473,6 @@ class MainWindowScreenState extends State<MainWindowScreen>
             state.tempDirPath,
             state.manifest,
             Map.unmodifiable(decision.permissionToggles),
-            state.previousAllowOrderBeforeBuiltInsGranted ??
-                state.manifest.allowOrderBeforeBuiltIns,
             reportContext: state.reportContext,
             previousVersion: state.previousVersion,
           ),
@@ -1491,8 +1487,6 @@ class MainWindowScreenState extends State<MainWindowScreen>
             manifest: state.manifest,
             tempDirPath: state.tempDirPath,
             previousVersion: state.previousVersion,
-            previousAllowOrderBeforeBuiltInsGranted:
-                state.previousAllowOrderBeforeBuiltInsGranted,
             previousGrantedPermissions: state.previousGrantedPermissions,
             reportContext: state.reportContext,
             isOfflineMode: isOfflineMode,
@@ -1516,16 +1510,13 @@ class MainWindowScreenState extends State<MainWindowScreen>
           manifest: state.manifest,
           tempDirPath: '',
           previousVersion: state.previousVersion,
-          previousAllowOrderBeforeBuiltInsGranted:
-              state.previousAllowOrderBeforeBuiltInsGranted,
           isOfflineMode: isOfflineMode,
-          onConfirm: (perms, allowOrder) => bloc.add(
+          onConfirm: (perms) => bloc.add(
             ConfirmDevPluginInstall(
               manifest: state.manifest,
               sourcePath: state.sourcePath,
               sourceType: state.sourceType,
               grantedPermissions: perms,
-              allowOrderBeforeBuiltInsGranted: allowOrder,
               previousVersion: state.previousVersion,
             ),
           ),

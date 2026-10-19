@@ -175,6 +175,10 @@ class SettingsRepository {
   /// שהמשתמש הסיר היה חוזר ונרשם בעלייה הבאה.
   static const String keySeededBundledPlugins = 'key-seeded-bundled-plugins';
 
+  /// גרסת התוכנה האחרונה שבה נבדק שדרוג התוספים המצורפים מהארכיונים שלה.
+  static const String keyBundledPluginsUpgradeCheckedVersion =
+      'key-bundled-plugins-upgrade-checked-version';
+
   /// CSV של מזהי כלים מובנים שהמשתמש הצמיד לסרגל הניווט הראשי.
   static const String keyBuiltInToolsPinnedToNavRail =
       'key-builtin-tools-pinned-to-nav-rail';
@@ -324,6 +328,7 @@ class SettingsRepository {
     keyHiddenBookKeys,
     keyHiddenCategoryPaths,
     keySeededBundledPlugins,
+    keyBundledPluginsUpgradeCheckedVersion,
     keyBuiltInToolsPinnedToNavRail,
     keyBuiltInToolsOrder,
     keyProtectedModeEnabled,

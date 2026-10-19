@@ -16,7 +16,10 @@ import 'package:otzaria/semantic_search/models/semantic_paths.dart';
 import 'package:otzaria/semantic_search/models/semantic_vectors_family.dart';
 import 'package:otzaria/semantic_search/models/semantic_vectors_release.dart';
 import 'package:otzaria/semantic_search/repository/semantic_search_repository.dart';
+import 'package:otzaria/semantic_search/repository/semantic_download_client.dart';
 import 'package:path/path.dart' as p;
+import 'package:seforim_library_updater/seforim_library_updater.dart'
+    show PatchDownloadException;
 
 import 'semantic_test_support.dart';
 
@@ -1040,6 +1043,442 @@ void main() {
       repository.scheduleVectorsUpdate();
       await repository.pendingJob;
       expect(downloads.urls.length, before);
+    });
+
+    for (final field in [
+      'store.store_format_version',
+      'store.vector_precision',
+    ]) {
+      test('$field שהמנוע אינו קורא — נרשם ולא מורד שוב', () async {
+        installModelFiles(root);
+        final downloads = FakeDownloads();
+        final settings = FakeSettingsStore()..dataEnabled = true;
+        final backend = FakeBackend()
+          ..vectors = installedAnchorV30
+          ..installFailures.add(
+            SemanticFailure(
+              SemanticFailureKind.artifactIncompatible,
+              'this build reads another store',
+              field,
+            ),
+          );
+        final repository = buildRepository(
+          root: root,
+          backend: backend,
+          settings: settings,
+          download: downloads.call,
+          locator: FakeLocator(releaseV30()),
+          libraryVersion: 31,
+        );
+
+        repository.scheduleVectorsUpdate();
+        await repository.pendingJob;
+        expect(settings.skippedVectorsRelease, 'vectors-v30-20260930165019');
+        final before = downloads.urls.length;
+
+        repository.scheduleVectorsUpdate();
+        await repository.pendingJob;
+        expect(downloads.urls.length, before);
+        expect(backend.installRequests, hasLength(1));
+      });
+    }
+  });
+
+  group('deltas של משפחת החלונות', () {
+    final digest = 'ab' * 32;
+    late int chunking;
+    late FakeBackend backend;
+    late FakeDownloads downloads;
+    late FakeLocator locator;
+    late FakeSettingsStore settings;
+    late SemanticSearchRepository repository;
+
+    setUp(() {
+      chunking = SemanticModelIdentity.parse(
+        bundledModelJson(SemanticVectorsFamily.windows),
+      ).chunkingIdentity;
+      installModelFiles(root);
+      markInstalledWindowsSet(root, digest);
+      backend = FakeBackend()
+        ..supportsLongLineWindows = true
+        ..installedIdentityDigest = digest
+        ..vectors = SemanticVectorsSummary(
+          present: true,
+          identityDigest: digest,
+          libraryVersion: 28,
+          libraryReleaseTag: 'v28-20260930165019',
+        );
+      downloads = FakeDownloads();
+      locator = FakeLocator(
+        releaseV30(
+          family: SemanticVectorsFamily.windows,
+          identityDigest: digest,
+          chunkingIdentity: chunking,
+        ),
+      );
+      settings = FakeSettingsStore()..dataEnabled = true;
+      repository = buildRepository(
+        root: root,
+        backend: backend,
+        settings: settings,
+        download: downloads.call,
+        locator: locator,
+      );
+    });
+
+    List<SemanticVectorsRelease> chainTo30() => [
+      deltaRelease(28, 29, identityDigest: digest, chunkingIdentity: chunking),
+      deltaRelease(29, 30, identityDigest: digest, chunkingIdentity: chunking),
+    ];
+
+    SemanticInstallSummary delta(
+      int version, {
+      bool alreadyApplied = false,
+      bool needsCompaction = false,
+    }) => SemanticInstallSummary(
+      kind: 'delta',
+      libraryVersion: version,
+      segments: 2,
+      bytesOnDisk: 20,
+      needsCompaction: needsCompaction,
+      alreadyApplied: alreadyApplied,
+    );
+
+    Future<void> update() async {
+      repository.scheduleVectorsUpdate();
+      await repository.pendingJob;
+    }
+
+    test('שרשרת: מורידים ומתקינים רק את ה-deltas, לפי הסדר', () async {
+      locator.chain = chainTo30();
+      backend.installResults.addAll([delta(29), delta(30)]);
+
+      await update();
+
+      expect(locator.chainLookups.single.installedVersion, 28);
+      expect(downloads.urls, [
+        'https://github.test/delta/28-29',
+        'https://github.test/delta/29-30',
+      ]);
+      expect(backend.installRequests.map((r) => r.manifestJson), [
+        for (final release in chainTo30()) release.manifestJson,
+      ]);
+      expect(backend.vectors.libraryVersion, 30);
+      expect(settings.skippedVectorsRelease, isNull);
+      expect(Directory(paths().vectorsDownloadDirectory).existsSync(), isFalse);
+      expect(backend.calls, isNot(contains('compact')));
+    });
+
+    test('בלי שרשרת — ה-base', () async {
+      await update();
+
+      expect(locator.chainLookups, hasLength(1));
+      expect(downloads.urls, ['https://github.test/vectors/0']);
+      expect(backend.installRequests.single.manifestJson, '{"kind":"base"}');
+    });
+
+    test('delta שכבר הוחל — ממשיכים לבא', () async {
+      locator.chain = chainTo30();
+      backend.installResults.addAll([
+        delta(29, alreadyApplied: true),
+        delta(30),
+      ]);
+
+      await repository.enableAndDownload();
+
+      // אינו כשל ואינו נפילה ל-base: הצעד הבא בשרשרת מותקן.
+      expect(backend.installRequests.map((r) => r.manifestJson), [
+        for (final release in chainTo30()) release.manifestJson,
+      ]);
+      expect(downloads.urls, isNot(contains('https://github.test/vectors/0')));
+      expect(repository.availability.failure, isNull);
+      expect(backend.vectors.libraryVersion, 30);
+      expect(repository.availability.phase, SemanticAvailabilityPhase.ready);
+    });
+
+    for (final field in [
+      'delta.from_library_version',
+      'delta.identity',
+      'delta.codec_params',
+      'store.store_format_version',
+    ]) {
+      test('$field — נופלים ל-base, בלי לדלג על ה-release', () async {
+        locator.chain = chainTo30();
+        backend.installFailures.add(
+          SemanticFailure(
+            SemanticFailureKind.artifactIncompatible,
+            'delta does not follow the set',
+            field,
+          ),
+        );
+
+        await update();
+
+        expect(downloads.urls, [
+          'https://github.test/delta/28-29',
+          'https://github.test/vectors/0',
+        ]);
+        expect(backend.installRequests.last.manifestJson, '{"kind":"base"}');
+        expect(settings.skippedVectorsRelease, isNull);
+        expect(backend.vectors.libraryVersion, 30);
+        expect(repository.availability.failure, isNull);
+      });
+    }
+
+    test('delta פגום — base, וגם העבודה הבאה אינה חוזרת לשרשרת', () async {
+      locator.chain = chainTo30();
+      backend.installFailures.add(
+        const SemanticFailure(SemanticFailureKind.artifactCorrupt),
+      );
+
+      await update();
+
+      expect(downloads.urls, [
+        'https://github.test/delta/28-29',
+        'https://github.test/vectors/0',
+      ]);
+      expect(backend.installRequests.last.manifestJson, '{"kind":"base"}');
+      expect(settings.skippedVectorsRelease, isNull);
+
+      // הסט חזר ל-v28 (למשל שחזור הדור הקודם): שוב base, בלי השרשרת.
+      backend.vectors = SemanticVectorsSummary(
+        present: true,
+        identityDigest: digest,
+        libraryVersion: 28,
+        libraryReleaseTag: 'v28-20260930165019',
+      );
+      downloads.urls.clear();
+      await update();
+
+      expect(locator.chainLookups, hasLength(1));
+      expect(downloads.urls, ['https://github.test/vectors/0']);
+    });
+
+    test('SHA שגוי בהורדת delta — base', () async {
+      locator.chain = chainTo30();
+      final urls = <String>[];
+      repository = buildRepository(
+        root: root,
+        backend: backend,
+        settings: settings,
+        locator: locator,
+        download:
+            ({
+              required url,
+              required destPath,
+              required resumeIdentity,
+              expectedSize,
+              expectedSha256,
+              onProgress,
+              isCancelled,
+            }) async {
+              urls.add(url);
+              if (url.contains('/delta/')) {
+                throw PatchDownloadException('sha mismatch');
+              }
+              await File(destPath).create(recursive: true);
+            },
+      );
+
+      await update();
+
+      expect(urls, [
+        'https://github.test/delta/28-29',
+        'https://github.test/vectors/0',
+      ]);
+      expect(backend.installRequests.single.manifestJson, '{"kind":"base"}');
+    });
+
+    test('כשל רשת בהורדת delta אינו מוריד base', () async {
+      locator.chain = chainTo30();
+      downloads.error = const SocketException('offline');
+
+      await repository.enableAndDownload();
+
+      expect(downloads.urls, ['https://github.test/delta/28-29']);
+      expect(backend.installRequests, isEmpty);
+      expect(
+        repository.availability.failure?.kind,
+        SemanticFailureKind.network,
+      );
+    });
+
+    for (final (status, headers) in [
+      (408, <String, String>{}),
+      (429, <String, String>{}),
+      (429, {'retry-after': '60'}),
+      (403, {'x-ratelimit-remaining': '0'}),
+      (502, <String, String>{}),
+      (503, <String, String>{}),
+    ]) {
+      test('HTTP $status $headers בהורדת delta אינו מוריד base', () async {
+        locator.chain = chainTo30();
+        final urls = <String>[];
+        var responseCancelled = false;
+        final responseBody = StreamController<List<int>>(
+          onCancel: () => responseCancelled = true,
+        );
+        repository = buildRepository(
+          root: root,
+          backend: backend,
+          settings: settings,
+          locator: locator,
+          download: CompanionAssetsService(
+            clientFactory: () => SemanticDownloadClient(
+              MockClient.streaming((request, _) async {
+                urls.add(request.url.toString());
+                return http.StreamedResponse(
+                  responseBody.stream,
+                  status,
+                  headers: headers,
+                );
+              }),
+            ),
+          ).downloadVerifiedFile,
+        );
+
+        await repository.enableAndDownload();
+
+        expect(urls, ['https://github.test/delta/28-29']);
+        expect(responseCancelled, isTrue);
+        await responseBody.close();
+        expect(backend.installRequests, isEmpty);
+        expect(
+          repository.availability.failure?.kind,
+          status == 429 || status == 403
+              ? SemanticFailureKind.rateLimited
+              : SemanticFailureKind.network,
+        );
+      });
+    }
+
+    test('התקדמות השרשרת אינה חוזרת אחורה', () async {
+      locator.chain = chainTo30();
+      backend.installResults.addAll([delta(29), delta(30)]);
+      final seen = <double>[];
+      final sub = repository.availabilityChanges.listen((availability) {
+        final fraction = availability.progress?.fraction;
+        if (fraction != null) seen.add(fraction);
+      });
+
+      await repository.enableAndDownload();
+      await sub.cancel();
+
+      for (var i = 1; i < seen.length; i++) {
+        expect(seen[i], greaterThanOrEqualTo(seen[i - 1]));
+      }
+      expect(seen.last, 1.0);
+    });
+
+    test('המקום בכונן נבדק לכל השרשרת', () async {
+      locator.chain = chainTo30();
+      repository = buildRepository(
+        root: root,
+        backend: backend,
+        settings: settings,
+        download: downloads.call,
+        locator: locator,
+        freeBytes: 11,
+      );
+
+      await repository.enableAndDownload();
+
+      // שתי הורדות של בית ושני segments של 5.
+      expect(
+        repository.availability.failure?.kind,
+        SemanticFailureKind.insufficientDiskSpace,
+      );
+      expect(downloads.urls, isEmpty);
+    });
+
+    test('סט של זהות אחרת או של המשפחה הישנה — בלי חיפוש שרשרת', () async {
+      backend.vectors = SemanticVectorsSummary(
+        present: true,
+        identityDigest: 'ee' * 32,
+        libraryVersion: 28,
+        libraryReleaseTag: 'v28-20260930165019',
+      );
+      locator.chain = chainTo30();
+
+      await update();
+
+      expect(locator.chainLookups, isEmpty);
+      expect(downloads.urls, ['https://github.test/vectors/0']);
+    });
+
+    test('איחוד אוטומטי שומר רשומות: גרסת המסד אינה גרסת האינדקס', () async {
+      locator.chain = chainTo30();
+      backend.installResults.addAll([
+        delta(29),
+        delta(30, needsCompaction: true),
+      ]);
+
+      await update();
+      await waitFor(() => backend.vectors.needsCompaction == false);
+
+      expect(backend.compactVersions, [null]);
+      expect(repository.availability.phase, SemanticAvailabilityPhase.ready);
+    });
+
+    test('איחוד שנתקל ב-vectorsBusy מנסה שוב מאוחר יותר', () async {
+      locator.chain = chainTo30();
+      backend
+        ..installResults.addAll([delta(29), delta(30, needsCompaction: true)])
+        ..compactFailures.add(
+          const SemanticFailure(SemanticFailureKind.vectorsBusy),
+        );
+
+      await update();
+      await waitFor(() => backend.compactVersions.length >= 2);
+
+      expect(backend.compactVersions, [null, null]);
+      expect(backend.vectors.needsCompaction, isFalse);
+      expect(repository.availability.failure, isNull);
+    });
+
+    test('ביטול בזמן המתנה לאיחוד אינו מחדש כתיבה בתיקיית ההורדות', () async {
+      final gate = Completer<void>();
+      locator.chain = chainTo30();
+      backend
+        ..installResults.addAll([delta(29), delta(30, needsCompaction: true)])
+        ..compactGate = gate;
+      await update();
+      await waitFor(() => backend.compactHandles.isNotEmpty);
+      backend.vectors = SemanticVectorsSummary(
+        present: true,
+        identityDigest: digest,
+        libraryVersion: 28,
+      );
+      downloads.urls.clear();
+
+      repository.scheduleVectorsUpdate();
+      await waitFor(() => backend.compactHandles.single.isCancelled);
+      await repository.cancelDownload();
+      gate.complete();
+      await repository.pendingJob;
+
+      expect(downloads.urls, isEmpty);
+      expect(Directory(paths().vectorsDownloadDirectory).existsSync(), isFalse);
+    });
+
+    test('מחיקת הנתונים מבטלת איחוד שרץ וממתינה לו', () async {
+      final gate = Completer<void>();
+      locator.chain = chainTo30();
+      backend
+        ..installResults.addAll([delta(29), delta(30, needsCompaction: true)])
+        ..compactGate = gate;
+
+      await update();
+      await waitFor(() => backend.compactHandles.isNotEmpty);
+      var removed = false;
+      final removing = repository.removeData().then((_) => removed = true);
+      await pumpEventQueue();
+      expect(backend.compactHandles.single.isCancelled, isTrue);
+      expect(removed, isFalse);
+      gate.complete();
+      await removing;
+
+      expect(settings.dataEnabled, isFalse);
     });
   });
 

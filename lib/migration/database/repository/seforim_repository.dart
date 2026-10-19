@@ -15,12 +15,10 @@ import '../../models/docx_text_cache_entry.dart';
 import '../../models/line.dart';
 import '../daos/line_dh_dao.dart';
 import '../daos/line_ref_dao.dart';
-import '../../models/link.dart';
 import '../../models/pdf_anchor_cache_entry.dart';
 import '../../models/pdf_outline_cache_entry.dart';
 import '../../models/pub_date.dart';
 import '../../models/pub_place.dart';
-import '../../models/search_result.dart';
 import '../../models/source.dart';
 import '../../models/toc_entry.dart';
 import '../../models/toc_text.dart';
@@ -280,10 +278,6 @@ class SeforimRepository {
       result = block();
     });
     return result;
-  }
-
-  Future<void> setSynchronous(String mode) async {
-    await executeRawQuery('PRAGMA synchronous=$mode');
   }
 
   Future<void> setJournalMode(String mode) async {
@@ -633,11 +627,6 @@ class SeforimRepository {
     };
   }
 
-  // Get an author by name, returns null if not found
-  Future<Author?> getAuthorByName(String name) async {
-    return await _database.authorDao.getAuthorByName(name);
-  }
-
   // Insert an author and return its ID
   Future<int> insertAuthor(String name) async {
     // Check if author already exists
@@ -727,32 +716,6 @@ class SeforimRepository {
       pubPlaces: pubPlaces,
       pubDates: pubDates,
     );
-  }
-
-  /// מחזיר ספר לפי כותרת וסוג קובץ.
-  Future<Book?> getBookByTitleAndFileType(String title, String fileType) async {
-    final bookData = await _database.bookDao.getBookByTitleAndFileType(
-      title,
-      fileType,
-    );
-    if (bookData == null) return null;
-
-    final authors = await _getBookAuthors(bookData.id);
-    final topics = await _getBookTopics(bookData.id);
-    final pubPlaces = await _getBookPubPlaces(bookData.id);
-    final pubDates = await _getBookPubDates(bookData.id);
-
-    return bookData.copyWith(
-      authors: authors,
-      topics: topics,
-      pubPlaces: pubPlaces,
-      pubDates: pubDates,
-    );
-  }
-
-  // Get a topic by name, returns null if not found
-  Future<Topic?> getTopicByName(String name) async {
-    return await _database.topicDao.getTopicByName(name);
   }
 
   // Get a publication place by name, returns null if not found
@@ -1017,10 +980,6 @@ class SeforimRepository {
 
   Future<void> updateBookTotalLines(int bookId, int totalLines) async {
     await _database.bookDao.updateBookTotalLines(bookId, totalLines);
-  }
-
-  Future<void> updateBookCategoryId(int bookId, int categoryId) async {
-    await _database.bookDao.updateBookCategoryId(bookId, categoryId);
   }
 
   // --- External Content Books ---
@@ -1487,16 +1446,6 @@ class SeforimRepository {
     return true;
   }
 
-  /// Gets only IDs and indices for all lines in a book.
-  /// Optimized for link processing to avoid loading content.
-  Future<List<Map<String, dynamic>>> getLineIdsAndIndices(int bookId) async {
-    final db = await _database.database;
-    return db.select(
-      'SELECT id, lineIndex FROM line WHERE bookId = ?',
-      [bookId],
-    ).toMapList();
-  }
-
   Future<int> insertLine(Line line) async {
     _logger.fine('Repository inserting line with bookId: ${line.bookId}');
 
@@ -1542,20 +1491,6 @@ class SeforimRepository {
         }
       } finally {
         stmt.close();
-      }
-    });
-  }
-
-  Future<void> updateLineHeRefsBatch(Map<int, String> lineIdToHeRef) async {
-    if (lineIdToHeRef.isEmpty) return;
-
-    final db = await _database.database;
-    withTransaction(db, () {
-      for (final entry in lineIdToHeRef.entries) {
-        db.execute(
-          'UPDATE line SET heRef = ? WHERE id = ? AND (heRef IS NULL OR heRef = "" OR LENGTH(heRef) < LENGTH(?))',
-          [entry.value, entry.key, entry.value],
-        );
       }
     });
   }
@@ -1922,129 +1857,7 @@ class SeforimRepository {
     );
   }
 
-  Future<int> insertLink(Link link) async {
-    try {
-      // Get or create the connection type
-      final connectionTypeId = await getOrCreateConnectionType(
-        link.connectionType.name,
-      );
-      final linkId = await _database.linkDao.insertLink(link, connectionTypeId);
-      // Check if insertion failed
-      if (linkId == 0) {
-        // Try to find a matching link
-        final existingResult = await _database.linkDao.selectLinkByDetails(
-          link.sourceBookId,
-          link.targetBookId,
-          link.sourceLineId,
-          link.targetLineId,
-        );
-
-        if (existingResult != null) {
-          return existingResult.id;
-        }
-        throw Exception(
-          'Failed to insert link from book ${link.sourceBookId} to book ${link.targetBookId} - insertion returned ID 0. Context: sourceLineId=${link.sourceLineId}, targetLineId=${link.targetLineId}, connectionType=${link.connectionType.name}',
-        );
-      }
-
-      return linkId;
-    } catch (e) {
-      // Changed from error to warning level to reduce unnecessary error logs
-      _logger.warning('Error inserting link: ${e.toString()}');
-      rethrow;
-    }
-  }
-
-  /// Inserts multiple links in a single batch operation for better performance
-  /// Uses raw SQL with multiple VALUES for maximum performance
-  Future<void> insertLinksBatch(List<Link> links) async {
-    if (links.isEmpty) return;
-
-    // Ensure cache is populated (safety check)
-    if (_connectionTypeCache.isEmpty) {
-      await initializeConnectionTypes();
-    }
-
-    final db = await _database.database;
-
-    // Build VALUES string with all links in a single SQL statement
-    final values = links
-        .map((link) {
-          // שמות הסוגים ב-DB באותיות גדולות (COMMENTARY), אך enum.name קטן
-          // (commentary) — בלי toUpperCase הלוקאפ מחטיא וכל לינק נופל ל-default.
-          int? connectionTypeId =
-              _connectionTypeCache[link.connectionType.name.toUpperCase()];
-
-          // אם הסוג לא נמצא — נופלים ל-OTHER (מובטח קיים ב-DB כתיב), לא ל-1 קשיח
-          // שב-v3 הוא דווקא COMMENTARY ולכן היה ממפה לינק לא-מזוהה כמפרש.
-          connectionTypeId ??= _connectionTypeCache['OTHER'] ?? 1;
-
-          return '(${link.sourceBookId}, ${link.targetBookId}, ${link.sourceLineId}, ${link.targetLineId}, $connectionTypeId)';
-        })
-        .join(',');
-
-    db.execute('''
-      INSERT OR IGNORE INTO link (sourceBookId, targetBookId, sourceLineId, targetLineId, connectionTypeId)
-      VALUES $values
-    ''');
-  }
-
-  // --- Search ---
-
-  /// Searches for text across all books.
-  ///
-  /// @param query The search query
-  /// @param limit Maximum number of results to return
-  /// @param offset Number of results to skip (for pagination)
-  /// @return A list of search results
-  Future<List<SearchResult>> search(String query, int limit, int offset) async {
-    final ftsQuery = _prepareFtsQuery(query);
-    final db = await _database.database;
-    final result = db
-        .select(
-          '''
-      SELECT l.id, l.bookId, l.lineIndex, b.title as bookTitle, l.plainText,
-             snippet(line_search, 4, '<b>', '</b>', '...', 50) as snippet
-      FROM line_search
-      JOIN line l ON line_search.id = l.id
-      JOIN book b ON line_search.bookId = b.id
-      WHERE line_search.plainText MATCH ?
-      ORDER BY rank
-      LIMIT ? OFFSET ?
-    ''',
-          [ftsQuery, limit, offset],
-        )
-        .toMapList();
-
-    return result
-        .map(
-          (row) => SearchResult(
-            bookId: row['bookId'] as int,
-            bookTitle: row['bookTitle'] as String,
-            lineId: row['id'] as int,
-            lineIndex: row['lineIndex'] as int,
-            snippet: row['snippet'] as String? ?? '',
-            rank: 1.0, // Default rank since FTS doesn't provide it directly
-          ),
-        )
-        .toList();
-  }
-
   // --- Helpers ---
-
-  /// Prepares a search query for full-text search.
-  /// Adds wildcards and quotes to improve search results.
-  ///
-  /// @param query The raw search query
-  /// @return The formatted query for FTS
-  String _prepareFtsQuery(String query) {
-    return query
-        .trim()
-        .split(RegExp(r'\s+'))
-        .where((word) => word.isNotEmpty)
-        .map((word) => '"$word"*')
-        .join(' ');
-  }
 
   /// Executes a raw SQL query.
   /// This is useful for operations that are not covered by the generated queries,
@@ -2056,96 +1869,12 @@ class SeforimRepository {
     db.execute(sql);
   }
 
-  /// Begins a database transaction for better performance on bulk operations.
-  Future<void> beginTransaction() async {
-    final db = await _database.database;
-    db.execute('BEGIN TRANSACTION');
-  }
-
-  /// Commits the current database transaction.
-  Future<void> commitTransaction() async {
-    final db = await _database.database;
-    db.execute('COMMIT');
-  }
-
-  /// Rolls back the current database transaction.
-  Future<void> rollbackTransaction() async {
-    final db = await _database.database;
-    db.execute('ROLLBACK');
-  }
-
   // FTS5 removed - rebuildFts5Index function no longer needed
   // Future<void> rebuildFts5Index() async {
   //   _logger.fine('Rebuilding FTS5 index for line_search table');
   //   await executeRawQuery('INSERT INTO line_search(line_search) VALUES(\'rebuild\')');
   //   _logger.fine('FTS5 index rebuilt successfully');
   // }
-
-  /// Updates the book_has_links table to indicate whether a book has source links, target links, or both.
-  ///
-  /// @param bookId The ID of the book to update
-  /// @param hasSourceLinks Whether the book has source links (true) or not (false)
-  /// @param hasTargetLinks Whether the book has target links (true) or not (false)
-  Future<void> updateBookHasLinks(
-    int bookId,
-    bool hasSourceLinks,
-    bool hasTargetLinks,
-  ) async {
-    final db = await _database.database;
-    db.execute(
-      '''
-      INSERT OR REPLACE INTO book_has_links (bookId, hasSourceLinks, hasTargetLinks)
-      VALUES (?, ?, ?)
-    ''',
-      [bookId, hasSourceLinks ? 1 : 0, hasTargetLinks ? 1 : 0],
-    );
-  }
-
-  // --- Connection type specific helpers ---
-
-  Future<int> countLinksBySourceBookAndType(int bookId, String typeName) async {
-    final db = await _database.database;
-    final result = db.select(
-      '''
-      SELECT COUNT(*) FROM link l
-      JOIN connection_type ct ON l.connectionTypeId = ct.id
-      WHERE l.sourceBookId = ? AND ct.name = ?
-    ''',
-      [bookId, typeName],
-    );
-    return result.first.values.first as int;
-  }
-
-  Future<int> countLinksByTargetBookAndType(int bookId, String typeName) async {
-    final db = await _database.database;
-    final result = db.select(
-      '''
-      SELECT COUNT(*) FROM link l
-      JOIN connection_type ct ON l.connectionTypeId = ct.id
-      WHERE l.targetBookId = ? AND ct.name = ?
-    ''',
-      [bookId, typeName],
-    );
-    return result.first.values.first as int;
-  }
-
-  Future<void> updateBookConnectionFlags(
-    int bookId,
-    bool hasTargum,
-    bool hasReference,
-    bool hasSource,
-    bool hasCommentary,
-    bool hasOther,
-  ) async {
-    await _database.bookDao.updateBookConnectionFlags(
-      bookId,
-      hasTargum,
-      hasReference,
-      hasSource,
-      hasCommentary,
-      hasOther,
-    );
-  }
 
   /// Gets all books from the database.
   ///
@@ -2172,48 +1901,6 @@ class SeforimRepository {
   /// lastModified), ולכן חוסכים את מעברי היחסים היקרים של [getAllBooks].
   Future<List<Book>> getAllBooksLean() async {
     return _database.bookDao.getAllBooks();
-  }
-
-  /// Counts the total number of books in the database.
-  ///
-  /// @return The total number of books
-  Future<int> countAllBooks() async {
-    _logger.fine('Counting all books');
-    final count = await _database.bookDao.countAllBooks();
-    _logger.fine('Found $count books');
-    return count;
-  }
-
-  /// Counts the number of links where the given book is the source.
-  ///
-  /// @param bookId The ID of the book to count links for
-  /// @return The number of links where the book is the source
-  Future<int> countLinksBySourceBook(int bookId) async {
-    _logger.fine('Counting links where book $bookId is the source');
-    final db = await _database.database;
-    final result = db.select(
-      'SELECT COUNT(*) FROM link WHERE sourceBookId = ?',
-      [bookId],
-    );
-    final count = result.first.values.first as int;
-    _logger.fine('Found $count links where book $bookId is the source');
-    return count;
-  }
-
-  /// Counts the number of links where the given book is the target.
-  ///
-  /// @param bookId The ID of the book to count links for
-  /// @return The number of links where the book is the target
-  Future<int> countLinksByTargetBook(int bookId) async {
-    _logger.fine('Counting links where book $bookId is the target');
-    final db = await _database.database;
-    final result = db.select(
-      'SELECT COUNT(*) FROM link WHERE targetBookId = ?',
-      [bookId],
-    );
-    final count = result.first.values.first as int;
-    _logger.fine('Found $count links where book $bookId is the target');
-    return count;
   }
 
   /// Closes the database connection.
@@ -2449,14 +2136,6 @@ extension FileSyncRepository on SeforimRepository {
 
 /// Extension methods for book acronyms
 extension BookAcronymRepository on SeforimRepository {
-  /// Searches for books by acronym term.
-  Future<List<int>> searchBooksByAcronym(String term, {int? limit}) async {
-    return await _database.bookAcronymDao.searchBooksByAcronym(
-      term,
-      limit: limit,
-    );
-  }
-
   /// Gets TOC entries for a book that match a reference query.
   /// Returns entries with their full path (e.g., "פרק א" -> "בראשית פרק א")
   ///

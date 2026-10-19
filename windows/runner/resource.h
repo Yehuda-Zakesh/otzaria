@@ -4,6 +4,9 @@
 //
 #define IDI_APP_ICON                    101
 #define IDI_OTZPLUGIN_FILE_ICON         102
+#define IDR_SPLASH_BOOK_100             201
+#define IDR_SPLASH_BOOK_150             202
+#define IDR_SPLASH_BOOK_200             203
 
 // Next default values for new objects
 //

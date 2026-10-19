@@ -100,6 +100,8 @@ class TantivyDataProvider {
     } else {
       engine = await _initEngine();
     }
+    // תקציר התוצאות מגיע עם הניקוד והטעמים; התצוגה מסירה אותם לפי הגדרות הספר.
+    setVocalizedSnippets(enabled: true);
     await _loadIndexedFilePaths(engine);
 
     // indexedFilePaths כעת משקפת את מצב האינדקס בפועל. צרכנים שמסיקים

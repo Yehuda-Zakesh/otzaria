@@ -683,62 +683,10 @@ class ShamorZachorDataProvider with ChangeNotifier {
 
   /// מסיר ספר מרשימת המעקב לפי מזהה, ללא תלות בהיותו ספר בסיס.
   ///
-  /// בניגוד ל-[removeCustomBook], אינו זורק על ספר בסיס - הוא פשוט יורד
-  /// מרשימת "בתהליך". ספר בסיס יישאר זמין תחת "הכל".
+  /// ספר בסיס יורד מרשימת "בתהליך" ויישאר זמין תחת "הכל".
   Future<void> removeBookFromTracking(int bookId) async {
     await _removeFromTrackedBooksList(bookId);
     await loadAllData();
-  }
-
-  /// Remove a book from Shamor Zachor tracking
-  /// This removes the book ID from the tracked books list
-  /// WITHOUT modifying the books database
-  Future<void> removeCustomBook({
-    required String categoryName,
-    required String bookName,
-    int? bookId,
-    int? categoryId,
-  }) async {
-    final repository = _sqliteDataProvider?.repository;
-    if (repository == null) {
-      _logger.warning("Repository not initialized");
-      return;
-    }
-
-    try {
-      final existing = await _findOfficialBook(
-        repository,
-        id: bookId,
-        title: bookName,
-        categoryId: categoryId,
-      );
-      if (existing == null) {
-        _logger.warning(
-          "Book '$bookName'${bookId != null ? ' (ID: $bookId)' : ''} not found in database",
-        );
-        return;
-      }
-
-      // Only allow removing books that are not base books
-      if (existing.isBaseBook) {
-        _logger.warning(
-          "Cannot remove base book '$bookName' from Shamor Zachor",
-        );
-        throw Exception('לא ניתן להסיר ספר בסיס מ"שמור וזכור"');
-      }
-
-      // Remove book ID from tracked books list
-      await _removeFromTrackedBooksList(existing.id);
-      _logger.info(
-        "Book '$bookName' (ID: ${existing.id}) removed from Shamor Zachor tracking",
-      );
-
-      // Reload data to remove the book from Shamor Zachor
-      await loadAllData();
-    } catch (e) {
-      _logger.warning("Failed to remove book from Shamor Zachor tracking", e);
-      rethrow;
-    }
   }
 
   /// Load tracked books list from Hive

@@ -88,12 +88,6 @@ class LineDao {
     return db.lastInsertRowId;
   }
 
-  Future<int> delete(int id) async {
-    final db = await database;
-    db.execute(_queries['delete']!, [id]);
-    return db.updatedRows;
-  }
-
   Line _mapToLine(Map<String, dynamic> map, LineContentCodec codec) {
     return Line(
       id: map['id'] as int,

@@ -22,6 +22,7 @@ import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/models/search_results.dart';
 import 'package:otzaria/text_book/utils/section_search_utils.dart';
 import 'package:otzaria/text_book/view/text_book_search_screen.dart';
+import 'package:otzaria/text_display/text_display_exports.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 
 import '../../support/search_engine_test_init.dart';
@@ -60,10 +61,15 @@ Future<void> main() async {
     Future<List<TextSearchResult>> Function(List<String>, String)?
     simpleSearchRunner,
     String bookTitle = 'ספר בדיקה',
+    bool removeNikud = false,
   }) async {
     final textBookBloc = _TestTextBookBloc(
       bookLoaded
-          ? _loadedState(content: content, bookTitle: bookTitle)
+          ? _loadedState(
+              content: content,
+              bookTitle: bookTitle,
+              removeNikud: removeNikud,
+            )
           : TextBookInitial.named(
               TextBook(title: bookTitle),
               0,
@@ -473,6 +479,127 @@ Future<void> main() async {
     skip: !engineReady,
   );
 
+  for (final status in [
+    TextStatus.ok,
+    TextStatus.unavailable,
+    TextStatus.stale,
+  ]) {
+    for (final initiallyHidden in [false, true]) {
+      testWidgets(
+        'שינוי ניקוד וטעמים מעדכן תוצאה $status בלי חיפוש נוסף (מוסתר בתחילה: $initiallyHidden)',
+        (tester) async {
+          const original = 'יָדֹ֨עַ תֵּדַ֜ע כִּי־גֵ֣ר';
+          final repository = _RecordingSearchRepository(
+            results: [
+              _result(
+                title: 'בראשית',
+                reference: 'פרק טו',
+                segment: 0,
+                text: status == TextStatus.ok
+                    ? 'יָדֹ֨עַ <font color=red>תֵּדַ֜ע</font> כִּי־גֵ֣ר'
+                    : '',
+                textStatus: status,
+              ),
+            ],
+          );
+          final harness = await pumpSearchView(
+            tester,
+            searchRepository: repository,
+            initialQuery: 'תדע כי',
+            searchDistance: 1,
+            bookTitle: 'בראשית',
+            content: const [original],
+            removeNikud: initiallyHidden,
+          );
+          await harness.settle();
+
+          String shownText() => tester
+              .widgetList<RichText>(find.byType(RichText))
+              .map((widget) => widget.text.toPlainText())
+              .singleWhere(
+                (text) => text.contains('כִּי') || text.contains('כי'),
+              );
+          expect(shownText(), initiallyHidden ? 'ידע תדע כי גר' : original);
+
+          final loaded = harness.bloc.state as TextBookLoaded;
+          for (final mode in [
+            (
+              nikud: MarkVisibility.hide,
+              teamim: TeamimVisibility.followNikud,
+              text: 'ידע תדע כי גר',
+            ),
+            (
+              nikud: MarkVisibility.show,
+              teamim: TeamimVisibility.hide,
+              text: 'יָדֹעַ תֵּדַע כִּי גֵר',
+            ),
+            (
+              nikud: MarkVisibility.hide,
+              teamim: TeamimVisibility.show,
+              text: 'יד֨ע תד֜ע כי־ג֣ר',
+            ),
+            (
+              nikud: MarkVisibility.show,
+              teamim: TeamimVisibility.followNikud,
+              text: original,
+            ),
+          ]) {
+            harness.bloc.emitLoaded(
+              loaded.copyWith(
+                displayOverrides: loaded.displayOverrides.withSlot(
+                  TextDisplaySlot.root,
+                  TextDisplayPatch(nikud: mode.nikud, teamim: mode.teamim),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+            expect(shownText(), mode.text);
+          }
+          expect(repository.requests, hasLength(1));
+          expect(find.text('נמצאו 1 תוצאות'), findsOneWidget);
+          expect(harness.bloc.reportedResultLines, [
+            {0},
+          ]);
+        },
+        skip: !engineReady,
+      );
+    }
+  }
+
+  testWidgets(
+    'תוצאת מנוע מנוקדת מוצגת לפי הגדרת הניקוד של הלשונית',
+    (tester) async {
+      final repository = _RecordingSearchRepository(
+        results: [
+          _result(
+            title: 'בראשית',
+            reference: 'פרק טו',
+            segment: 0,
+            text: 'יָדֹ֨עַ <font color=red>תֵּדַ֜ע</font> כִּי־גֵ֣ר',
+          ),
+        ],
+      );
+
+      await (await pumpSearchView(
+        tester,
+        searchRepository: repository,
+        initialQuery: 'תדע כי',
+        searchDistance: 1,
+        bookTitle: 'בראשית',
+        content: const ['ידע תדע כי־גר'],
+        removeNikud: true,
+      )).settle();
+
+      final shown = tester
+          .widgetList<RichText>(find.byType(RichText))
+          .map((widget) => widget.text.toPlainText())
+          .where((text) => text.contains('תדע'));
+      // כמו בספר: הסרת ניקוד וטעמים הופכת גם מקף לרווח.
+      expect(shown, ['ידע תדע כי גר']);
+    },
+    skip: !engineReady,
+  );
+
   testWidgets(
     'תוצאת מנוע שנמשכת לשורה הבאה נספרת פעם אחת ומסמנת את שתי השורות',
     (tester) async {
@@ -698,6 +825,7 @@ class _RecordingSearchRepository extends SearchRepository {
 TextBookLoaded _loadedState({
   List<String> content = const ['שורה א'],
   String bookTitle = 'ספר בדיקה',
+  bool removeNikud = false,
 }) {
   return TextBookLoaded(
     book: TextBook(title: bookTitle),
@@ -712,7 +840,7 @@ TextBookLoaded _loadedState({
     visibleLinks: const [],
     linksByLine: const {},
     tableOfContents: const [],
-    removeNikud: false,
+    removeNikud: removeNikud,
     visibleIndices: const [0],
     selectedIndex: 0,
     pinLeftPane: false,

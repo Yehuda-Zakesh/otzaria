@@ -69,7 +69,7 @@ class WindowPersistence {
   static double? _restoredDpr;
 
   /// בזמן מסך הפתיחה החלון קטן/שקוף; אסור לשמור את גודלו (אחרת ההפעלה הבאה
-  /// "תשחזר" חלון זעיר). כשהדגל דלוק, [scheduleSave]/[saveNow] הם no-op.
+  /// "תשחזר" חלון זעיר). כשהדגל דלוק, [scheduleSave] הוא no-op.
   /// זהו גם המנגנון שמונע שמירת גודל ה-splash מלכתחילה — ולכן אין צורך ב-clamp
   /// "שפיות" בשחזור (שפגע בחלונות קטנים חוקיים כמו 500x420).
   static bool _splashMode = false;
@@ -307,18 +307,6 @@ class WindowPersistence {
       // Fire-and-forget; any failure here shouldn't crash the app.
       unawaited(_saveNow());
     });
-  }
-
-  static Future<void> saveNow() async {
-    if (_splashMode) return;
-    _debounce?.cancel();
-    _debounce = null;
-
-    try {
-      await _saveNow();
-    } catch (_) {
-      // Ignore persistence errors; should never crash the app.
-    }
   }
 
   /// שומר לסשן של החלון הזה. חלון בלי משבצת אינו שומר — ובשום מצב אינו

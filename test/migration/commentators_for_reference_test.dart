@@ -97,10 +97,9 @@ void main() {
     required int targetLineId,
     String connectionTypeName = 'COMMENTARY',
   }) async {
-    // עוקפים את `repository.insertLink` הציבורי: הוא משתמש ב-`enum.name`
-    // (lowercase "commentary") בעוד `initializeConnectionTypes` מכניס
-    // "COMMENTARY" (uppercase) — שזה מה שהשאילתה מחפשת. אנו מחברים את
-    // ה-link ישירות ל-id של סוג הקישור הרצוי.
+    // `initializeConnectionTypes` מכניס את שמות הסוגים באותיות גדולות
+    // ("COMMENTARY") — וזה מה שהשאילתה מחפשת, בעוד `enum.name` קטן
+    // ("commentary"). לכן מחברים את ה-link ישירות ל-id של סוג הקישור הרצוי.
     final connectionTypeId = await repository.getOrCreateConnectionType(
       connectionTypeName,
     );

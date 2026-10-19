@@ -150,6 +150,7 @@ class PersonalNote extends Equatable {
   String get title => displayTitle ?? '';
 
   PersonalNote copyWith({
+    String? id,
     int? lineNumber,
     bool clearLineNumber = false,
     String? displayTitle,
@@ -170,7 +171,7 @@ class PersonalNote extends Equatable {
     DateTime? updatedAt,
   }) {
     return PersonalNote(
-      id: id,
+      id: id ?? this.id,
       bookId: bookId,
       lineNumber: clearLineNumber ? null : (lineNumber ?? this.lineNumber),
       displayTitle: clearDisplayTitle

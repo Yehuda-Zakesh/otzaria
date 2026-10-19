@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:otzaria/library_update/services/github_rate_limit.dart';
 import 'package:otzaria/semantic_search/models/semantic_failure.dart';
 import 'package:otzaria/semantic_search/models/semantic_vectors_family.dart';
+import 'package:otzaria/semantic_search/models/semantic_vectors_release.dart';
 import 'package:otzaria/semantic_search/repository/semantic_release_locator.dart';
 
 const _api = 'https://api.github.test/repos/Otzaria/SeforimLibrary';
@@ -279,7 +280,8 @@ void main() {
     );
   });
 
-  test('delta נדחה בבירור (unsupportedRelease)', () async {
+  // deltas מתפרסמים רק בתג נפרד (findDeltaChain); תג של base נושא base בלבד.
+  test('delta בתג של base נדחה (unsupportedRelease)', () async {
     final server = _Server()..manifest = _manifestFor(kind: 'delta');
     final locator = SemanticVectorsReleaseLocator(
       clientFactory: server.client,
@@ -621,5 +623,273 @@ void main() {
       'v30-20260930165019',
     );
     expect(SemanticVectorsReleaseLocator.libraryTagFor(releases, 29), isNull);
+  });
+
+  group('שרשרת deltas', _deltaChainTests);
+}
+
+String _libraryTagOf(int version) => 'v$version-20260930165019';
+final String _windowsDigest = '$_windowsChunking'.padLeft(64, '0');
+
+/// ה-base של משפחת החלונות ב-v30, בגודל הורדה 1000.
+SemanticVectorsRelease _windowsBase({
+  SemanticVectorsFamily family = SemanticVectorsFamily.windows,
+}) => SemanticVectorsRelease(
+  libraryTag: _libraryTagOf(30),
+  releaseTag: '${family.releaseTagPrefix}${_libraryTagOf(30)}',
+  toLibraryVersion: 30,
+  kind: 'base',
+  manifestJson: '{}',
+  publishedManifestSha256: 'aa' * 32,
+  files: const [
+    SemanticVectorsFile(
+      name: 'otzaria-vectors-5d1e7a20-v30-base.oxv.zst',
+      downloadUrl: 'https://github.test/download/base',
+      size: 1000,
+      sha256: 'ab',
+      assetId: '1',
+    ),
+  ],
+  segmentUncompressedSize: 1200,
+  identityDigest: _windowsDigest,
+  chunkingIdentity: _windowsChunking,
+  family: family,
+);
+
+/// deltas שפורסמו: לפי גרסת היעד — הגרסה שממנה וגודל ההורדה.
+class _DeltaServer {
+  final Map<int, ({int from, int size})> deltas = {};
+  final List<String> requested = [];
+  String identityDigest = _windowsDigest;
+  String? notesSha;
+
+  /// `fromLibraryVersion` שהמניפסט מצהיר במקום הגרסה שבשמו.
+  int? manifestFrom;
+
+  /// תשובה במקום ה-release של ה-delta.
+  http.Response? deltaResponse;
+
+  String _manifestName(int from, int to) =>
+      'otzaria-vectors-5d1e7a20-v$from-v$to.manifest.json';
+
+  String manifest(int to) {
+    final delta = deltas[to]!;
+    return jsonEncode({
+      'kind': 'delta',
+      'identity': {
+        'model': {'chunking_identity': _windowsChunking},
+      },
+      'identityDigest': identityDigest,
+      'fromLibraryVersion': manifestFrom ?? delta.from,
+      'toLibraryVersion': to,
+      'libraryReleaseTag': _libraryTagOf(to),
+      'segment': {'sha256': 'cd' * 32, 'size': delta.size * 2},
+      'files': [
+        {
+          'file': 'otzaria-vectors-5d1e7a20-v${delta.from}-v$to.oxv.zst',
+          'sha256': 'ef' * 32,
+          'size': delta.size,
+        },
+      ],
+    });
+  }
+
+  MockClient client() => MockClient((request) async {
+    final url = request.url.toString();
+    requested.add(url);
+    if (url == '$_api/releases?per_page=100&page=1') {
+      return http.Response(
+        jsonEncode([
+          for (var v = 31; v >= 10; v--) ...[
+            {'tag_name': 'vectors-windows-delta-${_libraryTagOf(v)}'},
+            {'tag_name': _libraryTagOf(v)},
+          ],
+        ]),
+        200,
+      );
+    }
+    if (url.contains('per_page=100&page=')) return http.Response('[]', 200);
+    final tag = RegExp(
+      r'/releases/tags/vectors-windows-delta-v(\d+)-',
+    ).firstMatch(url);
+    if (tag != null) {
+      final to = int.parse(tag.group(1)!);
+      final delta = deltas[to];
+      final override = deltaResponse;
+      if (override != null) return override;
+      if (delta == null) return http.Response('{}', 404);
+      final name = _manifestName(delta.from, to);
+      final segment = 'otzaria-vectors-5d1e7a20-v${delta.from}-v$to.oxv.zst';
+      return http.Response(
+        jsonEncode({
+          'tag_name': 'vectors-windows-delta-${_libraryTagOf(to)}',
+          'body':
+              'Manifest: `$name`, SHA-256 `${notesSha ?? _shaOf(manifest(to))}`',
+          'assets': [
+            {
+              'id': 100 + to,
+              'name': name,
+              'browser_download_url': 'https://github.test/download/$name',
+            },
+            {
+              'id': 200 + to,
+              'name': segment,
+              'browser_download_url': 'https://github.test/download/$segment',
+            },
+          ],
+        }),
+        200,
+      );
+    }
+    final manifestUrl = RegExp(r'-v(\d+)-v(\d+)\.manifest\.json$');
+    final match = manifestUrl.firstMatch(url);
+    if (match != null) {
+      return http.Response.bytes(
+        utf8.encode(manifest(int.parse(match.group(2)!))),
+        200,
+      );
+    }
+    return http.Response('not found', 404);
+  });
+
+  Future<List<SemanticVectorsRelease>?> chain(
+    int installed, {
+    SemanticVectorsRelease? target,
+  }) =>
+      SemanticVectorsReleaseLocator(
+        clientFactory: client,
+        apiBase: _api,
+      ).findDeltaChain(
+        target: target ?? _windowsBase(),
+        installedVersion: installed,
+      );
+}
+
+void _deltaChainTests() {
+  test('השרשרת מהגרסה המותקנת אל היעד, לפי סדר ההתקנה', () async {
+    final server = _DeltaServer()
+      ..deltas[29] = (from: 28, size: 100)
+      ..deltas[30] = (from: 29, size: 100);
+
+    final chain = await server.chain(28);
+
+    expect(chain!.map((d) => (d.fromLibraryVersion, d.toLibraryVersion)), [
+      (28, 29),
+      (29, 30),
+    ]);
+    final last = chain.last;
+    expect(last.kind, 'delta');
+    expect(last.isDelta, isTrue);
+    expect(last.releaseTag, 'vectors-windows-delta-${_libraryTagOf(30)}');
+    expect(last.publishedManifestSha256, _shaOf(server.manifest(30)));
+    expect(last.files.single.name, 'otzaria-vectors-5d1e7a20-v29-v30.oxv.zst');
+    expect(last.family, SemanticVectorsFamily.windows);
+  });
+
+  test('delta שמדלג על גרסה ריקה, בלי סריקת releases', () async {
+    final server = _DeltaServer()..deltas[30] = (from: 28, size: 100);
+
+    final chain = await server.chain(28);
+
+    expect(chain!.single.fromLibraryVersion, 28);
+    expect(server.requested.where((u) => u.contains('per_page')), isEmpty);
+  });
+
+  test('יותר מ-${kSemanticDeltaChainLimits.maxSteps} צעדים — base', () async {
+    final steps = kSemanticDeltaChainLimits.maxSteps + 1;
+    final server = _DeltaServer();
+    for (var to = 30; to > 30 - steps; to--) {
+      server.deltas[to] = (from: to - 1, size: 1);
+    }
+
+    expect(await server.chain(30 - steps), isNull);
+    expect(await server.chain(30 - steps + 1), hasLength(steps - 1));
+  });
+
+  test('deltas גדולים ממחצית ה-base — base', () async {
+    final server = _DeltaServer()
+      ..deltas[29] = (from: 28, size: 250)
+      ..deltas[30] = (from: 29, size: 251);
+
+    expect(await server.chain(28), isNull);
+    server.deltas[30] = (from: 29, size: 250);
+    expect(await server.chain(28), hasLength(2));
+  });
+
+  test('חוליה חסרה (404) — base', () async {
+    final server = _DeltaServer()..deltas[30] = (from: 29, size: 1);
+
+    expect(await server.chain(28), isNull);
+  });
+
+  test('delta שמתחיל לפני הגרסה המותקנת — base', () async {
+    final server = _DeltaServer()..deltas[30] = (from: 28, size: 1);
+
+    expect(await server.chain(29), isNull);
+  });
+
+  test('זהות אחרת ב-delta — base', () async {
+    final server = _DeltaServer()
+      ..deltas[30] = (from: 29, size: 1)
+      ..identityDigest = 'ee' * 32;
+
+    expect(await server.chain(29), isNull);
+  });
+
+  test('מניפסט שאינו תואם ל-digest שבהערות — base', () async {
+    final server = _DeltaServer()
+      ..deltas[30] = (from: 29, size: 1)
+      ..notesSha = 'ee' * 32;
+
+    expect(await server.chain(29), isNull);
+  });
+
+  test('המשפחה הישנה מתעדכנת רק ב-base, בלי לפנות לרשת', () async {
+    final server = _DeltaServer()..deltas[30] = (from: 29, size: 1);
+
+    expect(
+      await server.chain(
+        29,
+        target: _windowsBase(family: SemanticVectorsFamily.anchor),
+      ),
+      isNull,
+    );
+    expect(server.requested, isEmpty);
+  });
+
+  for (final from in [30, 31, 28]) {
+    test('מניפסט שמצהיר v$from-v30 בשם v29-v30 — base', () async {
+      final server = _DeltaServer()
+        ..deltas[30] = (from: 29, size: 1)
+        ..manifestFrom = from;
+
+      expect(await server.chain(29), isNull);
+    });
+  }
+
+  test('חסימת מכסה בגילוי השרשרת נזרקת, לא base', () async {
+    final server = _DeltaServer()
+      ..deltas[30] = (from: 29, size: 1)
+      ..deltaResponse = http.Response(
+        '',
+        403,
+        headers: {'x-ratelimit-remaining': '0'},
+      );
+
+    await expectLater(
+      server.chain(29),
+      throwsA(isA<GithubRateLimitException>()),
+    );
+  });
+
+  test('שגיאת שרת בגילוי השרשרת נזרקת, לא base', () async {
+    final server = _DeltaServer()
+      ..deltas[30] = (from: 29, size: 1)
+      ..deltaResponse = http.Response('oops', 502);
+
+    await expectLater(
+      server.chain(29),
+      throwsA(isA<http.ClientException>()),
+    );
   });
 }

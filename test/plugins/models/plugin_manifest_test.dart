@@ -43,28 +43,6 @@ void main() {
       expect(manifest.toolTabIconName, isNull);
     });
 
-    test('allowOrderBeforeBuiltIns defaults to false when omitted', () {
-      final manifest = PluginManifest.fromJson({
-        'schemaVersion': 1,
-        'id': 'test.plugin.default.order.permission',
-        'name': 'Default Placement Plugin',
-        'version': '1.0.0',
-        'entrypoint': 'index.html',
-        'contributes': {
-          'toolTab': {
-            'title': 'Default Placement Plugin',
-          },
-        },
-      });
-
-      expect(manifest.allowOrderBeforeBuiltIns, isFalse);
-
-      final toolTab =
-          (manifest.toJson()['contributes'] as Map<String, dynamic>)['toolTab']
-              as Map<String, dynamic>;
-      expect(toolTab['allowOrderBeforeBuiltIns'], isFalse);
-    });
-
     test('backgroundEntrypoint is null when omitted', () {
       final manifest = PluginManifest.fromJson({
         'schemaVersion': 1,
@@ -99,29 +77,6 @@ void main() {
                   as Map<String, dynamic>)['background']
               as Map<String, dynamic>;
       expect(background['entrypoint'], 'dist/background.html');
-    });
-
-    test('parses allowOrderBeforeBuiltIns=true and serializes it back', () {
-      final manifest = PluginManifest.fromJson({
-        'schemaVersion': 1,
-        'id': 'test.plugin.before.builtins',
-        'name': 'Leading Plugin',
-        'version': '1.0.0',
-        'entrypoint': 'index.html',
-        'contributes': {
-          'toolTab': {
-            'title': 'Leading Plugin',
-            'allowOrderBeforeBuiltIns': true,
-          },
-        },
-      });
-
-      expect(manifest.allowOrderBeforeBuiltIns, isTrue);
-
-      final toolTab =
-          (manifest.toJson()['contributes'] as Map<String, dynamic>)['toolTab']
-              as Map<String, dynamic>;
-      expect(toolTab['allowOrderBeforeBuiltIns'], isTrue);
     });
   });
 }

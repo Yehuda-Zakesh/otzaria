@@ -3,12 +3,15 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/plugins/services/plugin_webview_failure_log.dart';
-import 'package:otzaria/plugins/services/webview2_folder_holders.dart';
+import 'package:otzaria/plugins/services/webview2_creation_diagnostics.dart';
+import 'package:otzaria/plugins/view/webview_environment_holder.dart';
+import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:path/path.dart' as p;
 
 const _folder = r'C:\Users\Moshe\AppData\Roaming\otzaria\webview2';
@@ -28,7 +31,7 @@ String _output({
 }) => jsonEncode({'processes': processes, 'parents': parents});
 
 WebView2FolderScan _parse(String output) =>
-    WebView2FolderHolders.parse(output, _folder)!;
+    WebView2CreationDiagnostics.parse(output, _folder)!;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -151,23 +154,59 @@ void main() {
     });
 
     test('garbage output yields null', () {
-      expect(WebView2FolderHolders.parse('not json', _folder), isNull);
-      expect(WebView2FolderHolders.parse('[1,2]', _folder), isNull);
-      expect(WebView2FolderHolders.parse('', _folder), isNull);
+      expect(WebView2CreationDiagnostics.parse('not json', _folder), isNull);
+      expect(WebView2CreationDiagnostics.parse('[1,2]', _folder), isNull);
+      expect(WebView2CreationDiagnostics.parse('', _folder), isNull);
     });
   });
 
-  test('only folder-conflict HRESULTs match, case-insensitively', () {
-    expect(WebView2FolderHolders.isFolderConflict(_conflict), isTrue);
-    expect(
-      WebView2FolderHolders.isFolderConflict('HRESULT 0x8000ffff'),
-      isTrue,
-    );
-    expect(
-      WebView2FolderHolders.isFolderConflict('HRESULT 0x80070005'),
-      isFalse,
-    );
-    expect(WebView2FolderHolders.isFolderConflict(StateError('x')), isFalse);
+  group('describeEnvironment', () {
+    test('formats every section of the script output', () {
+      final fields = WebView2CreationDiagnostics.describeEnvironment({
+        'ebWebView': ['EBWebViewMetrics'],
+        'envFolderEbWebView': <String>[],
+        'runtimes': {
+          'machine': ['141.0.3537.71', 'SetupMetrics'],
+          'user': null,
+        },
+        'env': [
+          r'WEBVIEW2_USER_DATA_FOLDER=D:\wv',
+          'WEBVIEW2_RELEASE_CHANNEL_PREFERENCE=1',
+        ],
+        'policies': [
+          'HKLM value BrowserExecutableFolder',
+          'HKCU key ReleaseChannels',
+        ],
+        'smartAppControl': 2,
+        'events': [
+          '2026-10-17T08:00:00Z Application Error #1000: msedgewebview2.exe',
+        ],
+      });
+      expect(fields['EBWebView'], 'EBWebViewMetrics');
+      expect(fields['WEBVIEW2_USER_DATA_FOLDER'], r'D:\wv');
+      expect(fields['EBWebViewAtEnvFolder'], '(empty)');
+      expect(fields['RuntimesMachine'], '141.0.3537.71, SetupMetrics');
+      expect(fields['RuntimesUser'], '(missing)');
+      expect(fields['WebView2EnvVars'], contains('\nWEBVIEW2_RELEASE_CHANNEL'));
+      expect(fields['WebView2Policies'], contains('HKCU key ReleaseChannels'));
+      expect(fields['SmartAppControl'], '2 (evaluation)');
+      expect(fields['RecentAppEvents'], contains('#1000'));
+    });
+
+    test('missing sections stay explicit, section errors are kept', () {
+      final fields = WebView2CreationDiagnostics.describeEnvironment({
+        'ebWebView': null,
+        'runtimes': {'machine': 'error: Access denied', 'user': null},
+        'env': <String>[],
+      });
+      expect(fields['EBWebView'], '(missing)');
+      expect(fields['RuntimesMachine'], 'error: Access denied');
+      expect(fields['WEBVIEW2_USER_DATA_FOLDER'], isNull);
+      expect(fields['EBWebViewAtEnvFolder'], isNull);
+      expect(fields['WebView2EnvVars'], '(none)');
+      expect(fields['SmartAppControl'], '(not set)');
+      expect(WebView2CreationDiagnostics.describeEnvironment(null), isEmpty);
+    });
   });
 
   group('record', () {
@@ -175,9 +214,10 @@ void main() {
     late String folder;
 
     setUp(() {
-      WebView2FolderHolders.debugReset();
-      WebView2FolderHolders.debugIsWindowsOverride = true;
-      tempDir = Directory.systemTemp.createTempSync('wv_holders');
+      WebView2CreationDiagnostics.debugReset();
+      WebView2CreationDiagnostics.debugIsWindowsOverride = true;
+      WebViewEnvironmentHolder.debugResetBrowserExitCount();
+      tempDir = Directory.systemTemp.createTempSync('wv_diagnostics');
       folder = p.join(tempDir.path, 'webview2');
       AppPaths.debugOverrideDataRootPath(tempDir.path);
       debugForcePluginWebViewFailureFileLog = true;
@@ -185,7 +225,7 @@ void main() {
 
     tearDown(() {
       WindowRole.isSecondary = false;
-      WebView2FolderHolders.debugReset();
+      WebView2CreationDiagnostics.debugReset();
       debugForcePluginWebViewFailureFileLog = false;
       AppPaths.debugOverrideDataRootPath(null);
       try {
@@ -199,43 +239,55 @@ void main() {
     }
 
     Future<String> recordWith(String? output) async {
-      WebView2FolderHolders.debugRunnerOverride = (_) async => output;
-      await WebView2FolderHolders.recordIfFolderConflict(_conflict);
+      WebView2CreationDiagnostics.debugRunnerOverride = (_) async => output;
+      await WebView2CreationDiagnostics.recordCreationFailure(_conflict);
       return errorsTxt();
     }
 
+    String redacted(String text) =>
+        AppReportRedactor.fromPlatform().redactText(text);
+
+    Future<void> settle() => Future<void>.delayed(
+      const Duration(milliseconds: 50),
+    );
+
     test('non-Windows does not run', () {
-      WebView2FolderHolders.debugIsWindowsOverride = false;
-      expect(WebView2FolderHolders.recordIfFolderConflict(_conflict), isNull);
+      WebView2CreationDiagnostics.debugIsWindowsOverride = false;
+      expect(
+        WebView2CreationDiagnostics.recordCreationFailure(_conflict),
+        isNull,
+      );
     });
 
     test('secondary window skips the gate and runner', () async {
       var runs = 0;
       var gateCalls = 0;
-      WebView2FolderHolders.startupGate = () async => gateCalls++;
+      WebView2CreationDiagnostics.startupGate = () async => gateCalls++;
       addTearDown(
-        () => WebView2FolderHolders.startupGate = () => Future<void>.value(),
+        () =>
+            WebView2CreationDiagnostics.startupGate = () =>
+                Future<void>.value(),
       );
-      WebView2FolderHolders.debugRunnerOverride = (_) async {
+      WebView2CreationDiagnostics.debugRunnerOverride = (_) async {
         runs++;
         return _output(processes: const []);
       };
 
       WindowRole.isSecondary = true;
-      await WebView2FolderHolders.recordIfFolderConflict(_conflict);
+      await WebView2CreationDiagnostics.recordCreationFailure(_conflict);
       expect(runs, 0);
       expect(gateCalls, 0);
       expect(errorsTxt(), isEmpty);
 
       WindowRole.isSecondary = false;
-      await WebView2FolderHolders.recordIfFolderConflict(_conflict);
+      await WebView2CreationDiagnostics.recordCreationFailure(_conflict);
       expect(runs, 1);
     });
 
     for (final failure in ['empty', 'browser query', 'parent query']) {
       test('PowerShell $failure preserves query outcome', () async {
         int? exitCode;
-        WebView2FolderHolders.debugRunnerOverride = (args) async {
+        WebView2CreationDiagnostics.debugRunnerOverride = (args) async {
           final script = String.fromCharCodes(
             Uint16List.view(base64Decode(args.last).buffer),
           );
@@ -262,9 +314,10 @@ $script
           return result.stdout as String;
         };
 
-        await WebView2FolderHolders.recordIfFolderConflict(_conflict);
+        await WebView2CreationDiagnostics.recordCreationFailure(_conflict);
+        final content = errorsTxt();
         expect(
-          errorsTxt(),
+          content,
           contains(
             failure == 'empty'
                 ? 'Holders: none: no msedgewebview2 browser process uses the folder'
@@ -272,25 +325,34 @@ $script
           ),
         );
         if (failure != 'empty') {
-          expect(errorsTxt(), isNot(contains('parent=exited')));
+          expect(content, isNot(contains('parent=exited')));
+          expect(content, contains('ProcessQueryError: '));
         }
-        expect(exitCode, failure == 'empty' ? 0 : isNonZero);
+        // A failed process query no longer hides the other sections.
+        expect(exitCode, 0);
+        expect(content, contains('EBWebView: (missing)'));
+        expect(content, contains('SmartAppControl: '));
+        expect(content, contains('RuntimesMachine: '));
       }, skip: !hasPowerShell ? 'PowerShell is not installed' : false);
     }
 
     test('waits for the startup gate before spawning', () async {
       final gate = Completer<void>();
       var runs = 0;
-      WebView2FolderHolders.startupGate = () => gate.future;
+      WebView2CreationDiagnostics.startupGate = () => gate.future;
       addTearDown(
-        () => WebView2FolderHolders.startupGate = () => Future<void>.value(),
+        () =>
+            WebView2CreationDiagnostics.startupGate = () =>
+                Future<void>.value(),
       );
-      WebView2FolderHolders.debugRunnerOverride = (_) async {
+      WebView2CreationDiagnostics.debugRunnerOverride = (_) async {
         runs++;
         return null;
       };
 
-      final future = WebView2FolderHolders.recordIfFolderConflict(_conflict)!;
+      final future = WebView2CreationDiagnostics.recordCreationFailure(
+        _conflict,
+      )!;
       await Future<void>.delayed(Duration.zero);
       expect(runs, 0);
       gate.complete();
@@ -300,7 +362,7 @@ $script
 
     test('runs at most once per process and lists the holder', () async {
       var runs = 0;
-      WebView2FolderHolders.debugRunnerOverride = (args) async {
+      WebView2CreationDiagnostics.debugRunnerOverride = (args) async {
         runs++;
         expect(args, containsAllInOrder(['-NoProfile', '-NonInteractive']));
         return _output(
@@ -310,23 +372,24 @@ $script
         );
       };
 
+      await WebView2CreationDiagnostics.recordCreationFailure(
+        'HRESULT 0x80070005',
+      );
       expect(
-        WebView2FolderHolders.recordIfFolderConflict('HRESULT 0x1'),
+        WebView2CreationDiagnostics.recordCreationFailure(_conflict),
         isNull,
       );
-      await WebView2FolderHolders.recordIfFolderConflict(_conflict);
-      expect(WebView2FolderHolders.recordIfFolderConflict(_conflict), isNull);
 
       expect(runs, 1);
       final content = errorsTxt();
       expect(
-        RegExp(WebView2FolderHolders.logTitle).allMatches(content),
+        RegExp(WebView2CreationDiagnostics.logTitle).allMatches(content),
         hasLength(1),
       );
-      expect(content, contains('UserDataFolder: $folder'));
+      expect(content, contains('UserDataFolder: ${redacted(folder)}'));
+      expect(content, contains('WebView2 creation failed: HRESULT 0x80070005'));
       expect(content, contains('OwnPid: $pid'));
       expect(content, contains('Holders: pid=9 parentPid=8 parent=exited'));
-      expect(content, contains('0x8007139F'));
     });
 
     test('no holder is written explicitly', () async {
@@ -359,8 +422,8 @@ $script
       'returns garbage': (_) async => '\u0000garbage{',
     }.entries) {
       test('runner that ${entry.key} never throws', () async {
-        WebView2FolderHolders.debugRunnerOverride = entry.value;
-        await WebView2FolderHolders.recordIfFolderConflict(_conflict);
+        WebView2CreationDiagnostics.debugRunnerOverride = entry.value;
+        await WebView2CreationDiagnostics.recordCreationFailure(_conflict);
         expect(
           errorsTxt(),
           contains('Holders: process query failed or timed out'),
@@ -370,11 +433,15 @@ $script
 
     test('logged folder conflict adds a holders entry after it', () async {
       final ran = Completer<void>();
-      WebView2FolderHolders.debugRunnerOverride = (_) async {
+      WebView2CreationDiagnostics.debugRunnerOverride = (_) async {
         ran.complete();
         return _output(processes: const []);
       };
-      logPluginWebViewFailure('Plugin WebView creation failed', _conflict);
+      logPluginWebViewFailure(
+        'Plugin WebView creation failed',
+        _conflict,
+        creationFailure: true,
+      );
       await ran.future;
       // After the runner the record is synchronous; a timer runs after it.
       await Future<void>.delayed(Duration.zero);
@@ -382,19 +449,111 @@ $script
       final content = errorsTxt();
       final failureAt = content.indexOf('=== Plugin WebView creation failed');
       final holdersAt = content.indexOf(
-        '=== ${WebView2FolderHolders.logTitle}',
+        '=== ${WebView2CreationDiagnostics.logTitle}',
       );
       expect(failureAt, greaterThanOrEqualTo(0));
       expect(holdersAt, greaterThan(failureAt));
     });
 
-    test('other logged failures add no holders entry', () {
-      logPluginWebViewFailure('Plugin WebView creation failed', 'HRESULT 0x5');
-      expect(errorsTxt(), isNot(contains(WebView2FolderHolders.logTitle)));
+    test('failures that are not creation failures do no work', () async {
+      var runs = 0;
+      WebView2CreationDiagnostics.debugRunnerOverride = (_) async {
+        runs++;
+        return null;
+      };
+      logPluginWebViewFailure('Plugin WebView2 process failed', _conflict);
+      await settle();
+      expect(runs, 0);
       expect(
-        WebView2FolderHolders.recordIfFolderConflict(_conflict),
+        errorsTxt(),
+        isNot(contains(WebView2CreationDiagnostics.logTitle)),
+      );
+      expect(
+        WebView2CreationDiagnostics.recordCreationFailure(_conflict),
         isNotNull,
       );
+    });
+
+    test(
+      'fields are clipped and the user profile is redacted',
+      () async {
+        final profile =
+            Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
+        final content = await recordWith(
+          jsonEncode({
+            'processes': const [],
+            'ebWebView': List.filled(500, 'EBWebViewMetrics'),
+            'env': ['WEBVIEW2_USER_DATA_FOLDER=$profile${p.separator}wv'],
+          }),
+        );
+        final line = content
+            .split('\n')
+            .firstWhere((line) => line.startsWith('EBWebView: '));
+        expect(
+          line.length,
+          lessThan(WebView2CreationDiagnostics.maxFieldLength + 40),
+        );
+        expect(line, endsWith('... [clipped]'));
+        expect(
+          content,
+          contains(
+            'WEBVIEW2_USER_DATA_FOLDER: '
+            '${AppReportRedactor.profilePlaceholder}${p.separator}wv',
+          ),
+        );
+        expect(content, isNot(contains('$profile${p.separator}wv')));
+      },
+      skip:
+          (Platform.environment['USERPROFILE'] ??
+                  Platform.environment['HOME'] ??
+                  '')
+              .length <
+          4,
+    );
+
+    test('runtime version joins the record', () async {
+      WebView2CreationDiagnostics.runtimeVersion = '141.0.3537.71';
+      final content = await recordWith(_output(processes: const []));
+      expect(content, contains('RuntimeVersion: 141.0.3537.71'));
+    });
+
+    test('watchdog of a slow load does not trigger the scan', () async {
+      var runs = 0;
+      WebView2CreationDiagnostics.debugRunnerOverride = (_) async {
+        runs++;
+        return null;
+      };
+      logPluginWebViewFailure(
+        'Plugin WebView never created (silent blank)',
+        'onWebViewCreated did not fire within 20s',
+      );
+      await settle();
+      expect(runs, 0);
+    });
+
+    test('only abnormal browser exits are logged, a few per process', () {
+      WebViewEnvironmentHolder.debugBrowserProcessExited(
+        BrowserProcessExitedDetail(
+          kind: BrowserProcessExitKind.NORMAL,
+          processId: 1,
+        ),
+      );
+      expect(errorsTxt(), isEmpty);
+      for (var i = 0; i < 5; i++) {
+        WebViewEnvironmentHolder.debugBrowserProcessExited(
+          BrowserProcessExitedDetail(
+            kind: BrowserProcessExitKind.FAILED,
+            processId: 40 + i,
+          ),
+        );
+      }
+      final content = errorsTxt();
+      expect(
+        RegExp('=== WebView2 browser process exited').allMatches(content),
+        hasLength(3),
+      );
+      expect(content, contains('Exception: FAILED'));
+      expect(content, contains('ProcessId: 40'));
     });
   });
 }

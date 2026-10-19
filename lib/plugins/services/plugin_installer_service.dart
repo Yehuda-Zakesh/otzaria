@@ -53,10 +53,6 @@ class PreparedInstall {
   /// גרסה מותקנת קודמת — null אם זו התקנה ראשונה.
   final String? previousVersion;
 
-  /// החלטת המשתמש על ההקדמה — null כשהמניפסט הקודם כלל לא ביקש אותה,
-  /// שאם לא כן בקשה חדשה הייתה נראית כסירוב קודם.
-  final bool? previousAllowOrderBeforeBuiltInsGranted;
-
   /// החלטות ההרשאה השמורות של הגרסה המותקנת. הרשאה שאינה במפה היא חדשה.
   final Map<String, bool> previousGrantedPermissions;
 
@@ -65,7 +61,6 @@ class PreparedInstall {
     this.tempDirPath,
     this.isOverwrite, {
     this.previousVersion,
-    this.previousAllowOrderBeforeBuiltInsGranted,
     this.previousGrantedPermissions = const {},
   });
 }
@@ -153,11 +148,6 @@ class PluginInstallerService {
         tempDir.path,
         isOverwrite,
         previousVersion: existingPlugin?.version,
-        previousAllowOrderBeforeBuiltInsGranted:
-            existingPlugin != null &&
-                existingPlugin.manifest.allowOrderBeforeBuiltIns
-            ? existingPlugin.allowOrderBeforeBuiltInsGranted
-            : null,
         previousGrantedPermissions: previousGrants,
       );
     } catch (e) {
@@ -171,8 +161,9 @@ class PluginInstallerService {
   Future<void> finalizeInstall(
     String tempDirPath,
     PluginManifest manifest, {
-    required bool allowOrderBeforeBuiltInsGranted,
     required Map<String, bool> grantedPermissions,
+    InstalledPlugin? expectedPlugin,
+    Map<String, bool> expectedPermissions = const {},
   }) async {
     final tempDir = Directory(tempDirPath);
     Directory? stagedInstallDir;
@@ -193,7 +184,8 @@ class PluginInstallerService {
           'Permission decisions must exactly match manifest permissions',
         );
       }
-      final existingPlugin = await _repository.getPlugin(manifest.id);
+      final existingPlugin =
+          expectedPlugin ?? await _repository.getPlugin(manifest.id);
 
       final canonicalPath = await AppPaths.getPluginInstallPath(manifest.id);
       final installParent = Directory(p.dirname(canonicalPath));
@@ -220,17 +212,25 @@ class PluginInstallerService {
         pinned: existingPlugin?.pinned ?? manifest.defaultPinned,
         pinnedToNavRail: existingPlugin?.pinnedToNavRail ?? false,
         showInTools: existingPlugin?.showInTools ?? true,
-        allowOrderBeforeBuiltInsGranted: allowOrderBeforeBuiltInsGranted,
         manifest: manifest,
         installedAt: existingPlugin?.installedAt ?? DateTime.now(),
         updatedAt: DateTime.now(),
         userOrder: newUserOrder,
       );
 
-      await _repository.savePluginWithPermissions(
-        plugin,
-        Map.unmodifiable(grantedPermissions),
-      );
+      if (expectedPlugin == null) {
+        await _repository.savePluginWithPermissions(
+          plugin,
+          Map.unmodifiable(grantedPermissions),
+        );
+      } else {
+        await _repository.upgradePluginWithPermissions(
+          plugin,
+          Map.unmodifiable(grantedPermissions),
+          expectedPlugin,
+          expectedPermissions,
+        );
+      }
       installCommitted = true;
 
       final pluginInstallRoot = p.dirname(canonicalPath);

@@ -18,6 +18,10 @@ class ErrorLogBlock {
 
   bool get isStartupStall => title.startsWith('Startup stall');
 
+  /// תקיעה בזמן ריצה שגלאי הנייטיב רשם (`hang_monitor.cpp`).
+  bool get isAppHang => title == 'App hang';
+  bool get isAppHangRecovered => title == 'App hang recovered';
+
   /// שגיאה לא מטופלת או תקיעה — ראיה לקריסה, בניגוד לאזהרות כמו `Slow startup`.
   bool get isCrashEvidence =>
       isStartupStall || title == 'FlutterError' || title == 'Unhandled Error';
@@ -53,8 +57,42 @@ class ErrorLogBlock {
   /// חתימה לפי ההודעה וה-stack; לרשומה בלי הודעה — לפי הכותרת.
   CrashSignature get signature => CrashSignature.fromLogText(
     exceptionMessage: exceptionMessage ?? title,
-    stackText: stackText,
+    stackText: isAppHang ? _withoutSystemFrames(stackText) : stackText,
   );
+}
+
+/// בתקיעה הפריימים העליונים הם המתנה של מערכת ההפעלה, זהה לכל התקיעות.
+const Set<String> _systemModules = {
+  'ntdll.dll',
+  'win32u.dll',
+  'kernelbase.dll',
+  'kernel32.dll',
+  'user32.dll',
+  'gdi32.dll',
+  'gdi32full.dll',
+  'combase.dll',
+  'ole32.dll',
+  'rpcrt4.dll',
+  'sechost.dll',
+  'advapi32.dll',
+  'ucrtbase.dll',
+  'msvcrt.dll',
+  'msvcp140.dll',
+  'vcruntime140.dll',
+  'vcruntime140_1.dll',
+};
+
+String _withoutSystemFrames(String stackText) {
+  final lines = const LineSplitter().convert(stackText);
+  final kept = lines.where((line) {
+    final frame = line.trim().toLowerCase();
+    final plus = frame.indexOf('+');
+    return plus <= 0 || !_systemModules.contains(frame.substring(0, plus));
+  }).toList();
+  final hasFrame = kept.any(
+    (line) => CrashSignature.normalizeFrame(line) != null,
+  );
+  return hasFrame ? kept.join('\n') : stackText;
 }
 
 final RegExp _blockHeader = RegExp(r'^===\s+(.*?)\s+(\S+)\s+===\s*$');

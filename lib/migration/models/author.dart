@@ -15,15 +15,6 @@ class Author {
     this.generationId,
   });
 
-  /// Creates an Author instance from a map (e.g., a database row).
-  factory Author.fromMap(Map<String, dynamic> map) {
-    return Author(
-      id: map['id'] as int,
-      name: map['name'] as String,
-      generationId: map['generationId'] as int?,
-    );
-  }
-
   /// Creates an Author instance from JSON.
   factory Author.fromJson(Map<String, dynamic> json) {
     return Author(

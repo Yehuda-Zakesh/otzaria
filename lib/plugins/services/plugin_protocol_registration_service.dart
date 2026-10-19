@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
@@ -19,6 +20,9 @@ class PluginProtocolRegistrationService {
   static const String pluginFileExtension = '.otzplugin';
   static const String pluginFileProgId = 'OtzariaPluginFile';
   static const String pluginMimeType = 'application/x-otzaria-plugin';
+
+  /// אותו שם כמו בחבילות deb/rpm, כדי שהשיוכים הקיימים יצביעו עליו.
+  static const String desktopFileName = 'otzaria.desktop';
 
   /// גרסאות Office שעבורן נרשם `otzaria:` כפרוטוקול מהימן:
   /// 12.0=2007, 14.0=2010, 15.0=2013, 16.0=2016 ואילך (כולל Microsoft 365).
@@ -57,7 +61,10 @@ class PluginProtocolRegistrationService {
         '${root}Software\\Classes\\${entry.subkey}',
       );
       try {
-        key.setValue(entry.name, entry.value);
+        // כותבים רק ערך שונה: אנטי-וירוס מאט כתיבות לכאן (issue #1549).
+        if (key.getValue(entry.name) != entry.value) {
+          key.setValue(entry.name, entry.value);
+        }
       } finally {
         key.close();
       }
@@ -104,14 +111,13 @@ class PluginProtocolRegistrationService {
     final applicationsDir = Directory(
       p.join(home, '.local', 'share', 'applications'),
     );
-    await applicationsDir.create(recursive: true);
 
     final mimePackagesDir = Directory(
       p.join(home, '.local', 'share', 'mime', 'packages'),
     );
     await mimePackagesDir.create(recursive: true);
 
-    final desktopFile = File(p.join(applicationsDir.path, 'otzaria.desktop'));
+    final desktopFile = File(p.join(applicationsDir.path, desktopFileName));
     final executable = AppPaths.launchExecutable;
     final iconPath = p.join(
       p.dirname(executable),
@@ -121,47 +127,80 @@ class PluginProtocolRegistrationService {
       'icon',
       'iconnew.png',
     );
-    final desktopEntry = buildLinuxDesktopEntry(
-      executable: executable,
-      scheme: scheme,
-      pluginMimeType: pluginMimeType,
-      iconPath: File(iconPath).existsSync() ? iconPath : null,
+    final existingEntry = await desktopFile.exists()
+        ? utf8.decode(await desktopFile.readAsBytes(), allowMalformed: true)
+        : null;
+    final desktopFileIsOurs =
+        existingEntry == null ||
+        isGeneratedLinuxDesktopEntry(
+          existingEntry,
+          executables: {executable, Platform.resolvedExecutable},
+          iconPath: iconPath,
+        );
+    // קובץ באותו שם ב-~/.local/share/applications דורס את זה של החבילה,
+    // ושייך למשתמש. נוגעים רק בעותק שהאפליקציה עצמה כתבה ולא שונה.
+    final hasSystemEntry = hasSystemLinuxDesktopEntry(
+      Platform.environment['XDG_DATA_DIRS'],
+      userDesktopFile: desktopFile.path,
     );
+    final writesDesktopFile = desktopFileIsOurs && !hasSystemEntry;
+    final removesDesktopFile =
+        existingEntry != null && desktopFileIsOurs && hasSystemEntry;
 
-    await desktopFile.writeAsString(desktopEntry, flush: true);
+    if (writesDesktopFile) {
+      await applicationsDir.create(recursive: true);
+      await desktopFile.writeAsString(
+        buildLinuxDesktopEntry(
+          executable: executable,
+          scheme: scheme,
+          pluginMimeType: pluginMimeType,
+          iconPath: File(iconPath).existsSync() ? iconPath : null,
+        ),
+        flush: true,
+      );
+    } else if (removesDesktopFile) {
+      await desktopFile.delete();
+    }
 
     // שם האייקון שיוטמע ב-XML של ה-MIME וייעתק לתיקיית האייקונים.
     // freedesktop ממיר את שם ה-MIME (`application/x-otzaria-plugin`) ל-
     // `application-x-otzaria-plugin` כשהוא מחפש אייקון.
     const mimeIconName = 'application-x-otzaria-plugin';
 
+    final mimeDir = p.join(home, '.local', 'share', 'mime');
     final mimeFile = File(p.join(mimePackagesDir.path, 'otzaria-plugin.xml'));
-    await mimeFile.writeAsString(
+    final mimeChanged = await writeIfChanged(
+      mimeFile,
       buildLinuxMimeXml(
         mimeType: pluginMimeType,
         extension: pluginFileExtension,
         iconName: mimeIconName,
       ),
-      flush: true,
     );
 
     // ===== רישום קריטי — חייב להצליח =====
-    await _runLinuxCommandIfAvailable('update-mime-database', [
-      p.join(home, '.local', 'share', 'mime'),
-    ]);
-    await _runLinuxCommandIfAvailable('update-desktop-database', [
-      applicationsDir.path,
-    ]);
-    await _runLinuxCommandIfAvailable('xdg-mime', [
-      'default',
-      p.basename(desktopFile.path),
-      'x-scheme-handler/$scheme',
-    ]);
-    await _runLinuxCommandIfAvailable('xdg-mime', [
-      'default',
-      p.basename(desktopFile.path),
-      pluginMimeType,
-    ]);
+    // הקובץ ש-update-mime-database מייצר מעיד שריצה קודמת לא נכשלה באמצע.
+    final mimeCompiled = File(p.join(mimeDir, '$pluginMimeType.xml'));
+    if (mimeChanged || !await mimeCompiled.exists()) {
+      await _runLinuxCommandIfAvailable('update-mime-database', [mimeDir]);
+    }
+    if (writesDesktopFile || removesDesktopFile) {
+      await _runLinuxCommandIfAvailable('update-desktop-database', [
+        applicationsDir.path,
+      ]);
+    }
+    if (writesDesktopFile) {
+      await _runLinuxCommandIfAvailable('xdg-mime', [
+        'default',
+        desktopFileName,
+        'x-scheme-handler/$scheme',
+      ]);
+      await _runLinuxCommandIfAvailable('xdg-mime', [
+        'default',
+        desktopFileName,
+        pluginMimeType,
+      ]);
+    }
 
     // ===== אייקון — תוספת קוסמטית =====
     // נריץ אחרי הרישום הקריטי וניתן ל-failures להיבלע, כדי שכשל
@@ -205,6 +244,13 @@ class PluginProtocolRegistrationService {
     await mimetypesDir.create(recursive: true);
 
     final destination = File(p.join(mimetypesDir.path, '$mimeIconName.png'));
+    if (await destination.exists() &&
+        listEquals(
+          await destination.readAsBytes(),
+          await sourceIcon.readAsBytes(),
+        )) {
+      return;
+    }
     await sourceIcon.copy(destination.path);
 
     // gtk-update-icon-cache דורש index.theme בתיקיית התמה כדי להצליח.
@@ -220,6 +266,19 @@ class PluginProtocolRegistrationService {
         iconsRoot,
       ]);
     }
+  }
+
+  /// כותב רק כשהתוכן שונה, כדי לא לגעת בכל הפעלה בקבצים שכבר מעודכנים.
+  /// מחזיר האם נכתב.
+  @visibleForTesting
+  static Future<bool> writeIfChanged(File file, String content) async {
+    if (await file.exists() &&
+        utf8.decode(await file.readAsBytes(), allowMalformed: true) ==
+            content) {
+      return false;
+    }
+    await file.writeAsString(content, flush: true);
+    return true;
   }
 
   Future<void> _runLinuxCommandIfAvailable(
@@ -267,6 +326,48 @@ class PluginProtocolRegistrationService {
     ];
 
     return '${lines.join('\n')}\n';
+  }
+
+  /// האם [content] זהה למה שהאפליקציה עצמה כותבת, כלומר המשתמש לא ערך אותו.
+  @visibleForTesting
+  static bool isGeneratedLinuxDesktopEntry(
+    String content, {
+    required Iterable<String> executables,
+    required String iconPath,
+  }) {
+    for (final executable in executables) {
+      for (final icon in [iconPath, null]) {
+        final entry = buildLinuxDesktopEntry(
+          executable: executable,
+          scheme: scheme,
+          pluginMimeType: pluginMimeType,
+          iconPath: icon,
+        );
+        // גרסאות עד 0.10.4 כתבו את השם העברי בלבד.
+        final hebrewOnlyEntry = entry.replaceFirst(
+          'Name=Otzaria\nName[he]=',
+          'Name=',
+        );
+        if (content == entry || content == hebrewOnlyEntry) return true;
+      }
+    }
+    return false;
+  }
+
+  /// האם חבילת deb/rpm התקינה [desktopFileName] בתיקיות הנתונים של המערכת
+  /// ([xdgDataDirs] לפי XDG). [userDesktopFile] אינו נחשב, גם אם תיקייתו ברשימה.
+  @visibleForTesting
+  static bool hasSystemLinuxDesktopEntry(
+    String? xdgDataDirs, {
+    required String userDesktopFile,
+  }) {
+    final dataDirs = (xdgDataDirs == null || xdgDataDirs.trim().isEmpty)
+        ? '/usr/local/share:/usr/share'
+        : xdgDataDirs;
+    return dataDirs.split(':').where((dir) => dir.isNotEmpty).any((dir) {
+      final path = p.join(dir, 'applications', desktopFileName);
+      return !p.equals(path, userDesktopFile) && File(path).existsSync();
+    });
   }
 
   @visibleForTesting

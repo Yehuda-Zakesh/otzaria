@@ -36,6 +36,30 @@ Future<AppReportDeliveryResult?> showCrashPromptDialog(
   );
 }
 
+bool _crashPromptOpen = false;
+
+/// מציג את ההצעה מעל ה-Navigator הראשי; false כשאין בו context, או כשהצעה
+/// אחרת כבר פתוחה — הצעות אינן נערמות זו על זו.
+Future<bool> showCrashPromptOnNavigator(
+  CrashCandidate candidate, {
+  @visibleForTesting
+  Future<void> Function(BuildContext context, CrashCandidate candidate)? show,
+}) async {
+  if (_crashPromptOpen) return false;
+  final context = navigatorKey.currentContext;
+  if (context == null || !context.mounted) return false;
+  _crashPromptOpen = true;
+  try {
+    await (show ?? _showDefault)(context, candidate);
+  } finally {
+    _crashPromptOpen = false;
+  }
+  return true;
+}
+
+Future<void> _showDefault(BuildContext context, CrashCandidate candidate) =>
+    showCrashPromptDialog(context, candidate: candidate);
+
 /// "אוצריא נסגרה באופן לא צפוי": תיאור ומייל רשות, תצוגה מקדימה, ובחירה
 /// מה לעשות בקריסות הבאות.
 class CrashPromptDialog extends StatefulWidget {
@@ -51,6 +75,7 @@ class CrashPromptDialog extends StatefulWidget {
   final Future<void> Function(AppCrashReportMode mode)? saveMode;
 
   static const String title = 'אוצריא נסגרה באופן לא צפוי';
+  static const String hangTitle = 'אוצריא נתקעה';
 
   @override
   State<CrashPromptDialog> createState() => _CrashPromptDialogState();
@@ -69,10 +94,13 @@ class _CrashPromptDialogState extends State<CrashPromptDialog> {
         (widget.createBloc?.call() ??
               AppReportBloc(
                 trigger: AppReportTrigger.crashPrompt,
-                initialType: AppReportType.crash,
+                initialType: CrashReportDecision.reportTypeFor(
+                  widget.candidate,
+                ),
                 initialTitle: CrashReportDecision.titleFor(widget.candidate),
                 signature: widget.candidate.signature,
                 minidumpFile: widget.candidate.minidump,
+                details: widget.candidate.details ?? '',
               ))
           ..add(const AppReportAttachmentsRequested());
   }
@@ -99,7 +127,11 @@ class _CrashPromptDialogState extends State<CrashPromptDialog> {
   Future<void> _dismiss() async {
     await _saveMode();
     if (!mounted) return;
-    UiSnack.show(ReportMessages.appReportCrashDismissed);
+    UiSnack.show(
+      widget.candidate.isHang
+          ? ReportMessages.appReportHangDismissed
+          : ReportMessages.appReportCrashDismissed,
+    );
     Navigator.of(context).pop();
   }
 
@@ -142,7 +174,9 @@ class _CrashPromptDialogState extends State<CrashPromptDialog> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
                     child: Text(
-                      CrashPromptDialog.title,
+                      widget.candidate.isHang
+                          ? CrashPromptDialog.hangTitle
+                          : CrashPromptDialog.title,
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                   ),
@@ -162,6 +196,20 @@ class _CrashPromptDialogState extends State<CrashPromptDialog> {
     );
   }
 
+  String _incidentText() {
+    final candidate = widget.candidate;
+    if (!candidate.isHang) {
+      return 'בהפעלה הקודמת התוכנה נסגרה בלי סגירה מסודרת.';
+    }
+    if (candidate.occurredInPreviousRun) {
+      return 'בהפעלה הקודמת התוכנה הפסיקה להגיב.';
+    }
+    final seconds = candidate.hangDuration?.inSeconds ?? 0;
+    return seconds > 0
+        ? 'התוכנה הפסיקה להגיב למשך $seconds שניות.'
+        : 'התוכנה הפסיקה להגיב.';
+  }
+
   Widget _buildBody(BuildContext context, AppReportEditing? state) {
     final theme = Theme.of(context);
     final bloc = context.read<AppReportBloc>();
@@ -170,8 +218,8 @@ class _CrashPromptDialogState extends State<CrashPromptDialog> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'בהפעלה הקודמת התוכנה נסגרה בלי סגירה מסודרת. שליחת דיווח '
-          'תעזור לנו למצוא את הסיבה ולתקן אותה.',
+          '${_incidentText()} שליחת דיווח תעזור לנו למצוא את הסיבה ולתקן '
+          'אותה.',
           style: theme.textTheme.bodyMedium,
         ),
         const SizedBox(height: 16),
@@ -181,8 +229,10 @@ class _CrashPromptDialogState extends State<CrashPromptDialog> {
           enabled: enabled,
           minLines: 2,
           maxLines: 5,
-          decoration: const InputDecoration(
-            labelText: 'מה עשית לפני הסגירה? (לא חובה)',
+          decoration: InputDecoration(
+            labelText: widget.candidate.isHang
+                ? 'מה עשית לפני שהתוכנה נתקעה? (לא חובה)'
+                : 'מה עשית לפני הסגירה? (לא חובה)',
             alignLabelWithHint: true,
           ),
           onChanged: (value) => bloc.add(AppReportDescriptionChanged(value)),

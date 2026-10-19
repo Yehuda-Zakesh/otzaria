@@ -206,6 +206,7 @@ class SemanticStagedImport {
       throw const FormatException('manifest is not an object');
     }
     final tag = manifest['libraryReleaseTag'];
+    // רק base: המסייע אינו אורז deltas, והם מורדים רק מהרשת.
     if (manifest['kind'] != 'base' ||
         manifest['toLibraryVersion'] != libraryVersion ||
         tag is! String ||

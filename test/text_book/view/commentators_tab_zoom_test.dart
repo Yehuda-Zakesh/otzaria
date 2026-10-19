@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mockito/mockito.dart';
 import 'package:otzaria/models/books.dart';
+import 'package:otzaria/shortcuts/shortcut_helper.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_event.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_state.dart';
@@ -17,6 +19,7 @@ import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/commentary_list_base.dart';
 import 'package:otzaria/text_book/view/commentators_tab_screen.dart';
+import 'package:otzaria/widgets/navigation/nav_side_panel.dart';
 
 import '../../helpers/memory_settings_cache.dart';
 import '../../unit/mocks/mock_settings_repository.mocks.dart';
@@ -155,5 +158,55 @@ void main() {
           .fontSize,
       24,
     );
+  });
+
+  testWidgets('קיצור חלונית הניווט פותח וסוגר אותה בכרטיסיית המפרשים '
+      '(issue #2678)', (tester) async {
+    tester.view.physicalSize = const Size(1600, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final book = TextBook(title: 'חולין');
+    final tabBloc = _TestTextBookBloc(_loaded(book));
+    final sourceTab = TextBookTab(book: book, index: 0);
+    final tab = CommentatorsTab(sourceTab: sourceTab, blocOverride: tabBloc);
+    final settings = SettingsBloc(repository: MockSettingsRepository());
+    final notes = _TestPersonalNotesBloc();
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await settings.close();
+      await notes.close();
+      await tabBloc.close();
+      sourceTab.dispose();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MultiBlocProvider(
+          providers: [
+            BlocProvider<SettingsBloc>.value(value: settings),
+            BlocProvider<PersonalNotesBloc>.value(value: notes),
+          ],
+          child: Scaffold(
+            body: CommentatorsTabScreen(tab: tab, openBookCallback: (_) {}),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    bool paneOpen() =>
+        tester.widget<NavSidePanel>(find.byType(NavSidePanel)).isOpen;
+    // בלי מפרשים הרשימה פותחת את לשונית הבחירה, ולכן נבדק היפוך המצב.
+    final initial = paneOpen();
+    final modifier = ShortcutHelper.usesMacModifiers
+        ? LogicalKeyboardKey.metaLeft
+        : LogicalKeyboardKey.controlLeft;
+    for (final expected in [!initial, initial]) {
+      await tester.sendKeyDownEvent(modifier);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(modifier);
+      await tester.pump();
+      expect(paneOpen(), expected);
+    }
   });
 }

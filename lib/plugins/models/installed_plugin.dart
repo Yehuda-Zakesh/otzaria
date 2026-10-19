@@ -23,13 +23,6 @@ class InstalledPlugin {
   /// הסרגל אינו מושפע.
   final bool showInTools;
 
-  /// האם המשתמש אישר בפועל לתוסף להופיע לפני כלים מובנים במסך "כלים".
-  ///
-  /// זהו מתג התקנה/עדכון שנשמר על ההתקנה עצמה. גם אם התוסף מבקש את היכולת
-  /// במניפסט, המשתמש יכול לכבות אותה. אם המניפסט לא ביקש את היכולת, הערך
-  /// הזה לבדו לא מספיק כדי להפעיל אותה.
-  final bool allowOrderBeforeBuiltInsGranted;
-
   /// האם הרשאת גישה לרשת (`network.access`) הוענקה בפועל על-ידי המשתמש.
   /// שונה מ-[requiresNetwork] שמשקף את ההצהרה במניפסט בלבד.
   final bool networkAccessGranted;
@@ -57,19 +50,12 @@ class InstalledPlugin {
   /// הסדר האפקטיבי שבו יוצג התוסף ברשימת הכלים. אם המשתמש קבע סדר ידני
   /// משתמשים בו (עם [userOrderToolTabOffset] כדי לשמור על טווח נפרד מהכלים
   /// המובנים); אחרת משתמשים בערך מהמניפסט.
-  ///
-  /// ההחלטה האם תוסף רשאי בכלל להופיע לפני כלים מובנים נקבעת בנפרד ע"י
-  /// [PluginManifest.allowOrderBeforeBuiltIns] במסך "כלים".
   int get effectiveToolTabOrder => userOrder != null
       ? userOrderToolTabOffset + userOrder!
       : manifest.toolTabOrder;
 
   /// האם לתוסף יש דף — כרטיסייה, כניסה בפאנל הכלים והצמדה לסרגל הניווט.
   bool get hasToolPage => !manifest.headless;
-
-  /// האם התוסף רשאי בפועל להקדים כלים מובנים במסך "כלים".
-  bool get allowsOrderBeforeBuiltIns =>
-      manifest.allowOrderBeforeBuiltIns && allowOrderBeforeBuiltInsGranted;
 
   /// נתיב קובץ הכניסה לריצת רקע (`app.run_on_startup`). אם התוסף הצהיר על
   /// background.entrypoint קליל (ללא UI) משתמשים בו; אחרת נופלים לקובץ הכניסה
@@ -102,7 +88,6 @@ class InstalledPlugin {
     required this.pinned,
     this.pinnedToNavRail = false,
     this.showInTools = true,
-    bool? allowOrderBeforeBuiltInsGranted,
     this.networkAccessGranted = false,
     this.runOnStartupGranted = false,
     required this.manifest,
@@ -111,9 +96,7 @@ class InstalledPlugin {
     this.sourceType = 'packaged',
     this.devRootPath,
     this.userOrder,
-  }) : savedEnabled = savedEnabled ?? enabled,
-       allowOrderBeforeBuiltInsGranted =
-           allowOrderBeforeBuiltInsGranted ?? manifest.allowOrderBeforeBuiltIns;
+  }) : savedEnabled = savedEnabled ?? enabled;
 
   factory InstalledPlugin.fromDbMap(Map<String, dynamic> map) {
     final manifest = PluginManifest.fromJson(
@@ -130,10 +113,6 @@ class InstalledPlugin {
       pinned: (map['pinned'] as int) != 0,
       pinnedToNavRail: ((map['pinned_to_nav_rail'] as int?) ?? 0) != 0,
       showInTools: ((map['hidden_from_tools'] as int?) ?? 0) == 0,
-      allowOrderBeforeBuiltInsGranted:
-          ((map['allow_order_before_built_ins_granted'] as int?) ??
-              (manifest.allowOrderBeforeBuiltIns ? 1 : 0)) !=
-          0,
       networkAccessGranted: ((map['network_access_granted'] as int?) ?? 0) != 0,
       runOnStartupGranted: ((map['run_on_startup_granted'] as int?) ?? 0) != 0,
       manifest: manifest,
@@ -157,9 +136,6 @@ class InstalledPlugin {
       'pinned': pinned ? 1 : 0,
       'pinned_to_nav_rail': pinnedToNavRail ? 1 : 0,
       'hidden_from_tools': showInTools ? 0 : 1,
-      'allow_order_before_built_ins_granted': allowOrderBeforeBuiltInsGranted
-          ? 1
-          : 0,
       'manifest_json': jsonEncode(manifest.toJson()),
       'installed_at': installedAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
@@ -181,7 +157,6 @@ class InstalledPlugin {
     bool? pinned,
     bool? pinnedToNavRail,
     bool? showInTools,
-    bool? allowOrderBeforeBuiltInsGranted,
     bool? networkAccessGranted,
     bool? runOnStartupGranted,
     PluginManifest? manifest,
@@ -205,9 +180,6 @@ class InstalledPlugin {
       pinned: pinned ?? this.pinned,
       pinnedToNavRail: pinnedToNavRail ?? this.pinnedToNavRail,
       showInTools: showInTools ?? this.showInTools,
-      allowOrderBeforeBuiltInsGranted:
-          allowOrderBeforeBuiltInsGranted ??
-          this.allowOrderBeforeBuiltInsGranted,
       networkAccessGranted: networkAccessGranted ?? this.networkAccessGranted,
       runOnStartupGranted: runOnStartupGranted ?? this.runOnStartupGranted,
       manifest: manifest ?? this.manifest,

@@ -1,6 +1,11 @@
 #ifndef RUNNER_STARTUP_WATCHDOG_H_
 #define RUNNER_STARTUP_WATCHDOG_H_
 
+#include <windows.h>
+
+#include <string>
+#include <vector>
+
 // גלאי תקיעות של ה-thread הראשי בעלייה. ב-Windows ה-UI isolate של Dart רץ על
 // ה-thread הזה, ולכן קוד נייטיב סינכרוני חוסם גם את הפריימים וגם את הטיימרים.
 namespace startup_watchdog {
@@ -16,6 +21,14 @@ void RequestStop();
 
 // משלים עצירה ושחרור משאבים ביציאה. בטוח לקריאה חוזרת.
 void Stop();
+
+// כלים משותפים לגלאי התקיעה בזמן ריצה (hang_monitor). ה-handle של ה-thread
+// הראשי חי עד Stop, ולכן יש לעצור את hang_monitor לפניו.
+bool CaptureMainStack(std::vector<ULONG_PTR>* frames);
+// מתרגם לשמות מודולים — רק אחרי ש-CaptureMainStack חידש את ה-thread.
+void AppendStack(const std::vector<ULONG_PTR>& frames, std::string* report);
+void AppendReport(const std::string& text);
+std::string UtcTimestamp();
 
 }  // namespace startup_watchdog
 

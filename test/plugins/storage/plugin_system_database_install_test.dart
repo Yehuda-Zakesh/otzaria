@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/models/plugin_manifest.dart';
@@ -52,6 +54,137 @@ void main() {
     });
 
     tearDown(() => db.close());
+
+    test('שדרוג מותנה של רשומה ללא שינוי שומר הרשאות', () {
+      final previous = _plugin(version: '1.0.0', permissions: ['reader.open']);
+      PluginSystemDatabase.applyPluginInstall(db, previous, {
+        'reader.open': false,
+      });
+      PluginSystemDatabase.applyPluginInstall(
+        db,
+        _plugin(
+          version: '2.0.0',
+          permissions: ['reader.open', 'network.access'],
+        ),
+        {'reader.open': false, 'network.access': true},
+        expectedPlugin: previous,
+        expectedPermissions: {'reader.open': false},
+      );
+      expect(_version(db), '2.0.0');
+      expect(_grants(db), {'reader.open': false, 'network.access': true});
+    });
+
+    for (final mutation in [
+      'remove',
+      'reinstall',
+      'development',
+      'order',
+      'permission',
+    ]) {
+      test('שדרוג מותנה מבוטל אחרי שינוי $mutation מחיבור SQLite אחר', () {
+        final root = Directory.systemTemp.createTempSync('otzaria_upgrade_db_');
+        final path = '${root.path}/plugins.db';
+        final first = sqlite3.open(path);
+        final second = sqlite3.open(path);
+        addTearDown(() {
+          second.close();
+          first.close();
+          root.deleteSync(recursive: true);
+        });
+        first.execute(_pluginTable);
+        first.execute(_permissionTable);
+        final previous = _plugin(
+          version: '1.0.0',
+          permissions: ['network.access'],
+        );
+        PluginSystemDatabase.applyPluginInstall(first, previous, {
+          'network.access': true,
+        });
+        switch (mutation) {
+          case 'remove':
+            second.execute('DELETE FROM plugin_installation');
+            second.execute('DELETE FROM plugin_permission_grant');
+          case 'reinstall':
+            second.execute(
+              "UPDATE plugin_installation SET install_path = '/plugins/reinstalled'",
+            );
+          case 'development':
+            second.execute(
+              "UPDATE plugin_installation SET source_type = 'development', dev_root_path = '/dev'",
+            );
+          case 'order':
+            second.execute('UPDATE plugin_installation SET user_order = 7');
+          case 'permission':
+            second.execute('UPDATE plugin_permission_grant SET granted = 0');
+        }
+        final rows = second
+            .select('SELECT * FROM plugin_installation')
+            .map((r) => Map<String, dynamic>.from(r))
+            .toList();
+        final grants = _grants(second);
+        expect(
+          () => PluginSystemDatabase.applyPluginInstall(
+            first,
+            _plugin(version: '2.0.0', permissions: ['network.access']),
+            {'network.access': true},
+            expectedPlugin: previous,
+            expectedPermissions: {'network.access': true},
+          ),
+          throwsStateError,
+        );
+        expect(
+          first
+              .select('SELECT * FROM plugin_installation')
+              .map((r) => Map<String, dynamic>.from(r))
+              .toList(),
+          rows,
+        );
+        expect(_grants(first), grants);
+        second.execute(
+          'INSERT INTO plugin_permission_grant VALUES (?, ?, 0, ?)',
+          ['other', 'network.access', '2026'],
+        );
+      });
+    }
+
+    test('snapshot SQLite ישן אינו יכול לדרוס החלטה מחיבור אחר', () {
+      final root = Directory.systemTemp.createTempSync(
+        'otzaria_upgrade_snapshot_',
+      );
+      final first = sqlite3.open('${root.path}/plugins.db');
+      final second = sqlite3.open('${root.path}/plugins.db');
+      addTearDown(() {
+        second.close();
+        first.close();
+        root.deleteSync(recursive: true);
+      });
+      first.execute('PRAGMA journal_mode = WAL');
+      first.execute(_pluginTable);
+      first.execute(_permissionTable);
+      final previous = _plugin(
+        version: '1.0.0',
+        permissions: ['network.access'],
+      );
+      PluginSystemDatabase.applyPluginInstall(first, previous, {
+        'network.access': true,
+      });
+      first.execute('BEGIN');
+      first.select('SELECT * FROM plugin_installation');
+      second.execute('UPDATE plugin_permission_grant SET granted = 0');
+      expect(
+        () => PluginSystemDatabase.applyPluginInstall(
+          first,
+          _plugin(version: '2.0.0', permissions: ['network.access']),
+          {'network.access': true},
+          expectedPlugin: previous,
+          expectedPermissions: {'network.access': true},
+        ),
+        throwsA(isA<SqliteException>()),
+      );
+      first.execute('ROLLBACK');
+      expect(_version(first), '1.0.0');
+      expect(_grants(first), {'network.access': false});
+    });
 
     test('החלטת כפתור מארח נשמרת בעדכון ואינה נדרסת ממניפסט', () {
       PluginSystemDatabase.applyPluginInstall(

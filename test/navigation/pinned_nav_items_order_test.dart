@@ -16,7 +16,6 @@ InstalledPlugin _plugin(String id, {bool pinnedToNavRail = true}) =>
       pinned: false,
       pinnedToNavRail: pinnedToNavRail,
       showInTools: true,
-      allowOrderBeforeBuiltInsGranted: false,
       networkAccessGranted: false,
       manifest: PluginManifest(
         schemaVersion: 1,
@@ -34,7 +33,6 @@ InstalledPlugin _plugin(String id, {bool pinnedToNavRail = true}) =>
         networkAllowlist: const [],
         toolTabTitle: id,
         toolTabOrder: 900,
-        allowOrderBeforeBuiltIns: false,
         defaultPinned: false,
         publishedDataTypes: const [],
         toolTabIconName: 'apps',

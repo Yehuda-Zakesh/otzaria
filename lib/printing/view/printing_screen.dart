@@ -221,6 +221,10 @@ class _PrintingScreenState extends State<PrintingScreen> {
   final Map<String, String> _commentaryContentCache = {};
   List<PersonalNote>? _personalNotesCache;
   bool _isLoadingNotes = false;
+
+  /// עבודת הדפסה בתהליך: ציור והעברה למדפסת יכולים לקחת דקות.
+  String? _printProgress;
+  bool get _isPrinting => _printProgress != null;
   Timer? _previewRefreshTimer;
 
   // נקודות הקצה של טווח ההדפסה — כל אחת עצמאית בסוגה (כותרת/כותרת משנה/שורה).
@@ -1689,13 +1693,47 @@ class _PrintingScreenState extends State<PrintingScreen> {
     }
     switch (_destination) {
       case _PrintDestination.printer:
-        final printed = await printPdfWithSaferMode(
-          context: context,
-          name: widget.bookId,
-          usePrinterSettings: true,
-          onLayout: _createOutputPdf,
-          format: format,
-        );
+        if (_isPrinting) return;
+        setState(() => _printProgress = PdfMessages.printPreparing);
+        var layoutFailed = false;
+        final bool printed;
+        try {
+          printed = await printPdfWithSaferMode(
+            context: context,
+            name: widget.bookId,
+            usePrinterSettings: true,
+            onLayout: (format) async {
+              try {
+                return await _createOutputPdf(format);
+              } catch (_) {
+                layoutFailed = true;
+                rethrow;
+              }
+            },
+            format: format,
+            onSpooling: (_) {
+              if (mounted) {
+                setState(() => _printProgress = PdfMessages.printSending);
+              }
+            },
+          );
+        } catch (e, stack) {
+          if (mounted) setState(() => _printProgress = null);
+          UiSnack.showError(PdfMessages.printError);
+          // כשל ב-onLayout כבר דווח על ידי printing, עם החריגה המקורית.
+          if (!layoutFailed) {
+            FlutterError.reportError(
+              FlutterErrorDetails(
+                exception: e,
+                stack: stack,
+                library: 'printing',
+              ),
+            );
+          }
+          return;
+        }
+        if (mounted) setState(() => _printProgress = null);
+        if (printed) UiSnack.show(PdfMessages.printSent);
         if (printed && context.mounted) {
           Navigator.of(context).pop(true);
         }
@@ -2478,13 +2516,17 @@ class _PrintingScreenState extends State<PrintingScreen> {
     );
     // הקוראים פותחים עם barrierDismissible: false — לחיצה בחוץ לא סוגרת, ESC כן.
     // ה-Focus מחזיק פוקוס בדיאלוג כדי שה-DismissIntent הגלובלי יגיע לכאן.
-    return Actions(
-      actions: {
-        DismissIntent: CallbackAction<DismissIntent>(
-          onInvoke: (_) => Navigator.of(context).maybePop(),
-        ),
-      },
-      child: Focus(autofocus: true, skipTraversal: true, child: dialog),
+    return PopScope(
+      canPop: !_isPrinting,
+      child: Actions(
+        actions: {
+          DismissIntent: CallbackAction<DismissIntent>(
+            onInvoke: (_) =>
+                _isPrinting ? null : Navigator.of(context).maybePop(),
+          ),
+        },
+        child: Focus(autofocus: true, skipTraversal: true, child: dialog),
+      ),
     );
   }
 
@@ -2498,18 +2540,27 @@ class _PrintingScreenState extends State<PrintingScreen> {
           Expanded(
             child: ActionButton.neutral(
               text: 'ביטול',
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: _isPrinting ? null : () => Navigator.of(context).pop(),
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: ActionButton.recommended(
-              text: isPrint ? 'הדפסה' : 'שמירה',
-              icon: isPrint
-                  ? FluentIcons.print_24_regular
-                  : FluentIcons.save_24_regular,
-              onPressed: () => _performDestinationAction(context),
-            ),
+            child: _isPrinting
+                ? ActionButton.recommended(
+                    text: _printProgress!,
+                    iconWidget: SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    onPressed: null,
+                  )
+                : ActionButton.recommended(
+                    text: isPrint ? 'הדפסה' : 'שמירה',
+                    icon: isPrint
+                        ? FluentIcons.print_24_regular
+                        : FluentIcons.save_24_regular,
+                    onPressed: () => _performDestinationAction(context),
+                  ),
           ),
         ],
       ),

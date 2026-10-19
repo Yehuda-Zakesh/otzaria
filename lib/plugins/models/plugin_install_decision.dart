@@ -20,9 +20,6 @@ class PluginInstallDecision {
   /// מצב ה-toggle ההתחלתי לכל הרשאה.
   final Map<String, bool> permissionToggles;
 
-  /// שאלת ההקדמה לפני הכלים המובנים נשאלת רק כשאין עליה החלטה קודמת.
-  final bool requestsOrderBeforeBuiltIns;
-
   /// הרשאות שההחלטה עליהן נשמרה אך הגישה אינה זמינה כרגע (מצב מנותק).
   final Set<String> temporarilyUnavailablePermissions;
 
@@ -38,7 +35,6 @@ class PluginInstallDecision {
     required this.newPermissions,
     required this.revokedPermissions,
     required this.permissionToggles,
-    required this.requestsOrderBeforeBuiltIns,
     required this.temporarilyUnavailablePermissions,
     required this.isUpdate,
     required this.isUserInitiated,
@@ -46,10 +42,7 @@ class PluginInstallDecision {
 
   /// עדכון שאינו דורש שום החלטה מהמשתמש.
   bool get isPlainUpdate =>
-      isUpdate &&
-      newPermissions.isEmpty &&
-      revokedPermissions.isEmpty &&
-      !requestsOrderBeforeBuiltIns;
+      isUpdate && newPermissions.isEmpty && revokedPermissions.isEmpty;
 
   /// האם יש בכלל מה לשאול. עדכון שאין בו החלטה מדלג על הדיאלוג רק כשהמשתמש
   /// עצמו יזם אותו בממשק — אחרת תוסף היה מעדכן את עצמו בלי ידיעתו.
@@ -64,7 +57,6 @@ PluginInstallDecision resolvePluginInstallDecision({
   required PluginManifest manifest,
   required String? previousVersion,
   required Map<String, bool> previousGrantedPermissions,
-  required bool? previousAllowOrderBeforeBuiltInsGranted,
   required bool isOfflineMode,
   required bool isUserInitiated,
 }) {
@@ -101,9 +93,6 @@ PluginInstallDecision resolvePluginInstallDecision({
         )
         .toList(),
     permissionToggles: toggles,
-    requestsOrderBeforeBuiltIns:
-        manifest.allowOrderBeforeBuiltIns &&
-        previousAllowOrderBeforeBuiltInsGranted == null,
     temporarilyUnavailablePermissions: ordered
         .where(isTemporarilyUnavailable)
         .toSet(),

@@ -1,11 +1,16 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:http/http.dart' as http;
 import 'package:otzaria/library_update/services/github_rate_limit.dart';
 import 'package:otzaria/semantic_search/models/semantic_failure.dart';
 import 'package:otzaria/semantic_search/models/semantic_vectors_family.dart';
 import 'package:otzaria/semantic_search/models/semantic_vectors_release.dart';
+
+/// מתי שרשרת deltas עדיפה על base: עד [maxSteps] צעדים, ובסך הורדה של עד
+/// [maxBaseSizeRatio] מה-base. מעבר לזה — ה-base.
+const kSemanticDeltaChainLimits = (maxSteps: 8, maxBaseSizeRatio: 0.5);
 
 /// מאתר ב-SeforimLibrary את release הוקטורים של גרסת ספרייה.
 ///
@@ -20,6 +25,9 @@ class SemanticVectorsReleaseLocator {
   static const int _maxPages = 3;
 
   static final RegExp _libraryTag = RegExp(r'^v(\d+)-');
+  static final RegExp _deltaManifest = RegExp(
+    r'-v(\d+)-v(\d+)\.manifest\.json$',
+  );
   static final RegExp _sha256 = RegExp(r'\b[0-9a-f]{64}\b');
 
   final http.Client Function() _clientFactory;
@@ -70,6 +78,105 @@ class SemanticVectorsReleaseLocator {
     } finally {
       client.close();
     }
+  }
+
+  /// ה-deltas מ-[installedVersion] אל [target] לפי סדר ההתקנה; `null` — ה-base
+  /// עדיף. כשל רשת נזרק: base של כמה GB אינו תחליף לניסיון חוזר.
+  Future<List<SemanticVectorsRelease>?> findDeltaChain({
+    required SemanticVectorsRelease target,
+    required int installedVersion,
+  }) async {
+    final prefix = target.family.deltaReleaseTagPrefix;
+    if (prefix == null ||
+        target.identityDigest.isEmpty ||
+        installedVersion >= target.toLibraryVersion) {
+      return null;
+    }
+    final maxBytes =
+        target.downloadSize * kSemanticDeltaChainLimits.maxBaseSizeRatio;
+    final client = GithubRateLimitAwareClient(_clientFactory());
+    try {
+      final chain = <SemanticVectorsRelease>[];
+      final scanned = <dynamic>[];
+      var scannedPages = 0;
+      Future<String?> tagOf(int version) async {
+        var tag = libraryTagFor(scanned, version);
+        while (tag == null && scannedPages < _maxPages) {
+          final list = await _getJson(
+            client,
+            '$_apiBase/releases?per_page=100&page=${++scannedPages}',
+          );
+          if (list is! List || list.isEmpty) return null;
+          scanned.addAll(list);
+          tag = libraryTagFor(list, version);
+        }
+        return tag;
+      }
+
+      String? tag = target.libraryTag;
+      var to = target.toLibraryVersion;
+      var bytes = 0;
+      while (to > installedVersion) {
+        if (tag == null || chain.length >= kSemanticDeltaChainLimits.maxSteps) {
+          return null;
+        }
+        final delta = await _findDelta(client, '$prefix$tag', tag, to, target);
+        if (delta == null || delta.fromLibraryVersion < installedVersion) {
+          return null;
+        }
+        bytes += delta.downloadSize;
+        if (bytes > maxBytes) return null;
+        chain.insert(0, delta);
+        to = delta.fromLibraryVersion;
+        if (to > installedVersion) tag = await tagOf(to);
+      }
+      return chain;
+    } on SemanticFailure catch (failure) {
+      if (!const {
+        SemanticFailureKind.releaseMalformed,
+        SemanticFailureKind.unsupportedRelease,
+        SemanticFailureKind.artifactNotPublished,
+        SemanticFailureKind.releaseUnverified,
+      }.contains(failure.kind)) {
+        rethrow;
+      }
+      debugPrint('[SemanticSearch] delta chain unusable: $failure');
+      return null;
+    } on FormatException catch (error) {
+      debugPrint('[SemanticSearch] delta chain unusable: $error');
+      return null;
+    } finally {
+      client.close();
+    }
+  }
+
+  /// ה-delta שב-[releaseTag] אל [to]; `null` כשלא פורסם או כשאינו של זהות [target].
+  Future<SemanticVectorsRelease?> _findDelta(
+    http.Client client,
+    String releaseTag,
+    String tag,
+    int to,
+    SemanticVectorsRelease target,
+  ) async {
+    final release = await _getJson(
+      client,
+      '$_apiBase/releases/tags/${Uri.encodeComponent(releaseTag)}',
+    );
+    if (release == null) return null;
+    if (release is! Map<String, dynamic>) throw _malformed('release JSON');
+    final delta = await _parseRelease(
+      client,
+      release,
+      tag,
+      releaseTag,
+      to,
+      target.family,
+      kind: 'delta',
+    );
+    return delta.identityDigest == target.identityDigest &&
+            delta.chunkingIdentity == target.chunkingIdentity
+        ? delta
+        : null;
   }
 
   /// ה-release של [candidate]; `null` כשלא פורסם.
@@ -160,8 +267,9 @@ class SemanticVectorsReleaseLocator {
     String libraryTag,
     String releaseTag,
     int libraryVersion,
-    SemanticVectorsFamily family,
-  ) async {
+    SemanticVectorsFamily family, {
+    String kind = 'base',
+  }) async {
     final releaseAssets = release['assets'];
     if (releaseAssets is! List) throw _malformed('release assets');
     final assets = <String, Map<String, dynamic>>{
@@ -169,11 +277,22 @@ class SemanticVectorsReleaseLocator {
         if (asset is Map<String, dynamic> && asset['name'] is String)
           asset['name'] as String: asset,
     };
-    final manifestAsset = assets.values.where((asset) {
+    final manifests = assets.values.where((asset) {
       final name = asset['name'] as String;
       return name.startsWith('otzaria-vectors-') &&
           name.endsWith('.manifest.json');
-    }).firstOrNull;
+    });
+    final manifestAsset = kind == 'delta'
+        ? manifests
+              .where((a) => _deltaManifest.hasMatch(a['name'] as String))
+              .firstOrNull
+        : manifests
+                  .where(
+                    (a) =>
+                        (a['name'] as String).endsWith('-base.manifest.json'),
+                  )
+                  .firstOrNull ??
+              manifests.firstOrNull;
     if (manifestAsset == null) throw _malformed('manifest asset missing');
     final manifestName = manifestAsset['name'] as String;
 
@@ -216,14 +335,27 @@ class SemanticVectorsReleaseLocator {
     if (manifest is! Map<String, dynamic>) throw _malformed('manifest shape');
     final files = manifest['files'];
     if (files is! List || files.isEmpty) throw _malformed('manifest files');
-    final kind = manifest['kind'];
-    if (kind != 'base') {
+    final manifestKind = manifest['kind'];
+    if (manifestKind != kind) {
       throw SemanticFailure(
         SemanticFailureKind.unsupportedRelease,
-        'release kind $kind is not installed yet',
+        '$releaseTag holds a $manifestKind manifest, expected $kind',
       );
     }
     final toVersion = _int(manifest['toLibraryVersion'], 'toLibraryVersion');
+    final fromVersion = switch (manifest['fromLibraryVersion']) {
+      final int version => version,
+      _ when kind == 'base' => 0,
+      _ => throw _malformed('fromLibraryVersion missing'),
+    };
+    if (kind == 'delta') {
+      final named = _deltaManifest.firstMatch(manifestName)!;
+      if (fromVersion >= toVersion ||
+          int.parse(named.group(1)!) != fromVersion ||
+          int.parse(named.group(2)!) != toVersion) {
+        throw _malformed('$manifestName holds v$fromVersion-v$toVersion');
+      }
+    }
     if (toVersion != libraryVersion ||
         manifest['libraryReleaseTag'] != libraryTag) {
       throw _malformed(
@@ -239,7 +371,8 @@ class SemanticVectorsReleaseLocator {
       libraryTag: libraryTag,
       releaseTag: releaseTag,
       toLibraryVersion: toVersion,
-      kind: 'base',
+      kind: kind,
+      fromLibraryVersion: fromVersion,
       manifestJson: manifestJson,
       publishedManifestSha256: published,
       files: [

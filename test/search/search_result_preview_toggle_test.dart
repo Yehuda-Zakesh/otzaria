@@ -143,8 +143,9 @@ void main() {
       providedSearchBloc: searchBloc,
     );
 
+    final displayResolutionRequests = searchBloc.resolutionRequests;
     await singleTap(tester, harness.resultFinder);
-    expect(searchBloc.resolutionRequests, 1);
+    expect(searchBloc.resolutionRequests, displayResolutionRequests + 1);
 
     searchBloc.updateState(_searchState(query: 'חיפוש חדש'));
     await tester.pump();

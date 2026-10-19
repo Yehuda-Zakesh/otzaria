@@ -41,83 +41,6 @@ class BookCategory {
     this.schemaVersion,
   });
 
-  factory BookCategory.fromJson(
-    Map<String, dynamic> json,
-    String sourceFile, {
-    bool isCustom = false,
-    String? parentCategoryName,
-  }) {
-    // Keep schema version for compatibility checks
-    final schemaVersion = JsonUtils.asInt(json['schemaVersion'] ?? 1);
-
-    Map<String, dynamic> rawData = JsonUtils.asMap(
-      json['books'] ?? json['data'],
-    );
-    Map<String, BookDetails> parsedBooks = {};
-
-    int defaultStartPage = JsonUtils.asString(json['content_type']) == "דף"
-        ? 2
-        : 1;
-
-    rawData.forEach((key, value) {
-      if (value is Map<String, dynamic>) {
-        parsedBooks[key] = BookDetails.fromJson(
-          value,
-          contentType: JsonUtils.asString(json['content_type']),
-          isCustom: isCustom,
-        );
-      }
-    });
-
-    List<BookCategory>? subcategories;
-    if (json['subcategories'] is List) {
-      subcategories = (json['subcategories'] as List)
-          .map(
-            (subJson) => BookCategory.fromJson(
-              JsonUtils.asMap(subJson),
-              sourceFile,
-              isCustom: isCustom,
-              parentCategoryName: JsonUtils.asString(json['name']),
-            ),
-          )
-          .toList();
-    }
-
-    return BookCategory(
-      name: JsonUtils.asString(json['name']),
-      contentType: JsonUtils.asString(json['content_type']),
-      books: parsedBooks,
-      defaultStartPage: defaultStartPage,
-      isCustom: isCustom,
-      sourceFile: sourceFile,
-      subcategories: subcategories,
-      parentCategoryName: parentCategoryName,
-      schemaVersion: schemaVersion,
-    );
-  }
-
-  /// Recursively search for a book by name
-  BookSearchResult? findBookRecursive(String bookNameToFind) {
-    if (books.containsKey(bookNameToFind)) {
-      return BookSearchResult(
-        books[bookNameToFind]!,
-        name,
-        this,
-        bookNameToFind,
-        name,
-      );
-    }
-    if (subcategories != null) {
-      for (final subCategory in subcategories!) {
-        final result = subCategory.findBookRecursive(bookNameToFind);
-        if (result != null) {
-          return result;
-        }
-      }
-    }
-    return null;
-  }
-
   /// Get all books recursively including subcategories
   Map<String, BookDetails> getAllBooksRecursive() {
     final allBooks = <String, BookDetails>{...books};
@@ -203,17 +126,6 @@ class BookPart {
       sectionId: json['sectionId'] as String?,
     );
   }
-
-  factory BookPart.fromSection(BookSection section) {
-    return BookPart(
-      name: section.title,
-      startPage: section.startPage,
-      endPage: section.endPage,
-      children: section.children.map(BookPart.fromSection).toList(),
-      level: section.level,
-      sectionId: section.id,
-    );
-  }
 }
 
 /// Detailed information about a book
@@ -238,66 +150,6 @@ class BookDetails {
     this.sections,
     this.categoryPath,
   });
-
-  factory BookDetails.fromJson(
-    Map<String, dynamic> json, {
-    required String contentType,
-    bool isCustom = false,
-    int? id, // Changed from String? to int?
-    String? categoryPath,
-  }) {
-    List<BookPart> parts = [];
-    num? pageCount;
-    List<BookSection>? sections;
-
-    if (json['parts'] is List) {
-      parts = (json['parts'] as List)
-          .map((partJson) => BookPart.fromJson(JsonUtils.asMap(partJson)))
-          .toList();
-    } else if (json.containsKey('pages')) {
-      pageCount = JsonUtils.asNum(json['pages']);
-      int startPage = JsonUtils.asInt(
-        json['startPage'] ?? (contentType == "דף" ? 2 : 1),
-      );
-
-      int endPage;
-      bool lastPageIsHalf = false;
-
-      if (contentType == "דף") {
-        endPage = startPage + pageCount.ceil() - 1;
-        if (pageCount.floor() != pageCount) {
-          lastPageIsHalf = true;
-        }
-      } else {
-        endPage = startPage + pageCount.toInt() - 1;
-      }
-
-      parts.add(
-        BookPart(
-          name: "ראשי",
-          startPage: startPage,
-          endPage: endPage,
-          hasHalfPageAtEnd: lastPageIsHalf,
-        ),
-      );
-    }
-
-    if (json['sections'] is List) {
-      sections = (json['sections'] as List)
-          .map((raw) => BookSection.fromJson(JsonUtils.asMap(raw)))
-          .toList();
-    }
-
-    return BookDetails(
-      contentType: contentType,
-      parts: parts,
-      isCustom: isCustom,
-      id: id,
-      originalPageCount: pageCount,
-      sections: sections,
-      categoryPath: categoryPath ?? json['categoryPath'] as String?,
-    );
-  }
 
   /// Check if this book uses "daf" (page) format
   bool get isDafType => contentType == "דף";

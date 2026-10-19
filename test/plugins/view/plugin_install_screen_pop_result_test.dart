@@ -16,7 +16,7 @@ void main() {
   Future<Future<bool?>> pumpAndOpenDialog(
     WidgetTester tester, {
     VoidCallback? onCancel,
-    void Function(Map<String, bool>, bool)? onConfirm,
+    void Function(Map<String, bool>)? onConfirm,
   }) async {
     late Future<bool?> dialogResult;
     await tester.pumpWidget(
@@ -31,7 +31,7 @@ void main() {
                     manifest: buildManifest(),
                     tempDirPath: '',
                     onCancel: onCancel ?? () {},
-                    onConfirm: onConfirm ?? (_, _) {},
+                    onConfirm: onConfirm ?? (_) {},
                   ),
                 );
               },
@@ -68,7 +68,7 @@ void main() {
     var confirmCalled = false;
     final result = await pumpAndOpenDialog(
       tester,
-      onConfirm: (_, _) => confirmCalled = true,
+      onConfirm: (_) => confirmCalled = true,
     );
 
     await tester.tap(find.text('התקן'));

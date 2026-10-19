@@ -601,6 +601,35 @@ Future<void> main() async {
       expect(json.containsKey('merged'), isFalse);
     });
 
+    test('בחיפוש רגיל הטקסט נמסר בלי ניקוד וטעמים; בחיפוש מנוקד — איתם', () {
+      final vocalized = engine.SearchResult(
+        title: 'בראשית',
+        reference: 'בראשית, פרק א',
+        text: 'בְּרֵאשִׁ֖ית <font color=red>בָּרָ֣א</font> עַל־פְּנֵ֥י',
+        id: BigInt.one,
+        segment: BigInt.from(12),
+        isPdf: false,
+        filePath: 'id:7',
+        mergedCount: 1,
+        merged: const [],
+        textStatus: engine.TextStatus.ok,
+        continuesToNextLine: false,
+      );
+
+      expect(
+        PluginSearchApi.resultToJson(vocalized, null)['text'],
+        'בראשית <font color=red>ברא</font> על־פני',
+      );
+      expect(
+        PluginSearchApi.resultToJson(
+          vocalized,
+          null,
+          vocalizedSearch: true,
+        )['text'],
+        vocalized.text,
+      );
+    });
+
     test('ספר שלא זוהה נופל ל-type לפי isPdf ו-id ריק', () {
       final json = PluginSearchApi.resultToJson(buildResult(), null);
 

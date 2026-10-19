@@ -33,6 +33,7 @@ class _FakeSettingsRepository extends Fake implements SettingsRepository {
 /// פלטפורמת הדפסה שרק שומרת את onLayout, כדי שהבדיקה תפיק את הפלט בעצמה.
 class _CapturingPrintingPlatform extends PrintingPlatform {
   LayoutCallback? onLayout;
+  final job = Completer<bool>();
 
   @override
   Future<bool> layoutPdf(
@@ -47,7 +48,7 @@ class _CapturingPrintingPlatform extends PrintingPlatform {
     bool windowsModernDialog,
   ) {
     this.onLayout = onLayout;
-    return Completer<bool>().future;
+    return job.future;
   }
 
   @override
@@ -186,6 +187,9 @@ void main() {
           )
           .onSelected!(PdfPageFormat.a4);
       final output = await _settle(tester, pending);
+      // סוף ה-spool: ב-Windows pdfrx מושהה עד שההדפסה מסתיימת.
+      platform.job.complete(false);
+      await tester.pump();
 
       expect(await _settle(tester, _pageCount(output)), 1);
 

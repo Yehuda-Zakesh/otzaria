@@ -132,27 +132,30 @@ void main() {
       );
     });
 
-    testWidgets('גובה החלונית מוגבל והתוכן הארוך נגלל בתוכה', (tester) async {
+    // התוכן גולל בעצמו את גופו בתוך המגבלה, כדי שהכותרת לא תיגלל (#2698).
+    testWidgets('גובה החלונית מוגבל, והתוכן מקבל את המגבלה לגלילה בתוכה', (
+      tester,
+    ) async {
       final hostContext = await pumpListHost(tester);
+      double? contentMaxHeight;
 
       showBesideItem(
         hostContext,
-        contentBuilder: (_) => const SizedBox(
-          width: 200,
-          height: 900,
-          child: Text('תוכן חלונית'),
+        contentBuilder: (_) => LayoutBuilder(
+          builder: (_, constraints) {
+            contentMaxHeight = constraints.maxHeight;
+            return const SizedBox(
+              width: 200,
+              height: 900,
+              child: Text('תוכן חלונית'),
+            );
+          },
         ),
       );
       await pumpPanel(tester);
 
       expect(panelRect(tester).height, lessThanOrEqualTo(360));
-      expect(
-        find.descendant(
-          of: find.byType(SingleChildScrollView),
-          matching: find.text('תוכן חלונית'),
-        ),
-        findsOneWidget,
-      );
+      expect(contentMaxHeight, lessThanOrEqualTo(360));
     });
 
     testWidgets('הקשה מחוץ לחלונית שנפתחה במגע אינה מגיעה למה שמתחתיה', (

@@ -18,12 +18,6 @@ class LinkGroup {
     required this.bookTitle,
     required this.links,
   });
-
-  /// האם הקבוצה ריקה
-  bool get isEmpty => links.isEmpty;
-
-  /// האם הקבוצה לא ריקה
-  bool get isNotEmpty => links.isNotEmpty;
 }
 
 /// סדר הדורות למיון

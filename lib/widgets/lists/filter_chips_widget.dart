@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:otzaria/theme/app_tokens.dart';
 
 /// A simple, reusable widget for displaying a list of selectable chips.
 /// Replaces the complex filter_list library with a lightweight solution
@@ -98,6 +99,44 @@ class FilterChipsSelector<T> extends StatelessWidget {
       ),
     );
   }
+}
+
+/// קבוצת צ׳יפים קומפקטית וממורכזת — סינון הקישורים ובחירת המפרשים חולקים
+/// אותו עיצוב, כדי ששתי השורות ייראו זהות.
+Widget compactFilterChips({
+  required Key key,
+  required List<String> items,
+  required List<String> selected,
+  required String Function(String item) labelBuilder,
+  required ValueChanged<List<String>> onSelectionChanged,
+}) {
+  return KeyedSubtree(
+    key: key,
+    child: FilterChipsSelector<String>(
+      items: items,
+      selectedItems: selected,
+      labelBuilder: labelBuilder,
+      wrapAlignment: WrapAlignment.center,
+      wrapSpacing: AppTokens.spaceXS,
+      runSpacing: AppTokens.spaceXS,
+      padding: const EdgeInsets.symmetric(vertical: AppTokens.spaceXS),
+      onSelectionChanged: onSelectionChanged,
+      chipBuilder: (context, item, isSelected) => Chip(
+        label: Text(labelBuilder(item)),
+        backgroundColor: isSelected
+            ? Theme.of(context).colorScheme.secondary
+            : null,
+        labelStyle: TextStyle(
+          color: isSelected ? Theme.of(context).colorScheme.onSecondary : null,
+          fontSize: 10,
+        ),
+        labelPadding: EdgeInsets.zero,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    ),
+  );
 }
 
 /// שם ישן — הבורר כבר אינו מחזיק עותק בחירה פנימי.

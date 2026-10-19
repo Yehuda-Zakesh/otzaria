@@ -50,7 +50,6 @@ InstalledPlugin _plugin(List<String> permissions) => InstalledPlugin(
     networkAllowlist: [],
     toolTabTitle: 'Tab',
     toolTabOrder: 0,
-    allowOrderBeforeBuiltIns: false,
     defaultPinned: false,
     publishedDataTypes: [],
   ),

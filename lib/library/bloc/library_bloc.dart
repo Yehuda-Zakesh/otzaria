@@ -611,7 +611,10 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
     Emitter<LibraryState> emit,
   ) {
     _searchGeneration++;
-    final isCategoryChange = !identical(event.category, state.currentCategory);
+    // סגירת תוצאות חיפוש מחליפה את התצוגה גם בלי מעבר תיקייה (issue #957).
+    final isViewChange =
+        !identical(event.category, state.currentCategory) ||
+        state.searchResults != null;
     emit(
       state.copyWith(
         currentCategory: event.category,
@@ -619,7 +622,7 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
         searchResults: null,
         isSearching: false,
         selectedTopics: null,
-        previewCategory: isCategoryChange ? event.category : null,
+        previewCategory: isViewChange ? event.category : null,
       ),
     );
   }
@@ -669,6 +672,9 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
         state.copyWith(
           searchResults: null,
           isSearching: false,
+          previewCategory: state.searchResults == null
+              ? null
+              : state.currentCategory,
         ),
       );
       return;

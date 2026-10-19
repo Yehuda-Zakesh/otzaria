@@ -1,7 +1,6 @@
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
 
 import 'author_dao.dart';
-import 'book_acronym_dao.dart';
 import 'book_dao.dart';
 import 'category_dao.dart';
 import 'docx_text_cache_dao.dart';
@@ -63,7 +62,6 @@ class MyDatabase {
 
   // נוצרים בגישה הראשונה: הבנאי טוען שאילתות מ-QueryLoader.
   late final AuthorDao authorDao = AuthorDao(this);
-  late final BookAcronymDao bookAcronymDao = BookAcronymDao(this);
   late final BookDao bookDao = BookDao(this);
   late final CategoryDao categoryDao = CategoryDao(this);
   late final DocxTextCacheDao docxTextCacheDao = DocxTextCacheDao(this);

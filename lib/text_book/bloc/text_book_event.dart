@@ -124,15 +124,6 @@ class ToggleSplitView extends TextBookEvent {
   List<Object?> get props => [show];
 }
 
-class ToggleTzuratHadafView extends TextBookEvent {
-  final bool show;
-
-  const ToggleTzuratHadafView(this.show);
-
-  @override
-  List<Object?> get props => [show];
-}
-
 class TogglePageShapeView extends TextBookEvent {
   final bool show;
 
@@ -360,13 +351,6 @@ class SetTabVisibility extends TextBookEvent {
 
   @override
   List<Object?> get props => [visible, allowBackgroundWarming];
-}
-
-class CreateNoteFromToolbar extends TextBookEvent {
-  const CreateNoteFromToolbar();
-
-  @override
-  List<Object?> get props => [];
 }
 
 class UpdateSelectedTextForNote extends TextBookEvent {

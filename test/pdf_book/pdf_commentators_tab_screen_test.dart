@@ -380,6 +380,117 @@ void main() {
     );
   }
 
+  for (final isMac in [false, true]) {
+    testWidgets('קיצור ניווט מכבד עריכת חיפוש עברי (macOS: $isMac)', (
+      tester,
+    ) async {
+      ShortcutHelper.isMacForTesting = isMac;
+      addTearDown(() => ShortcutHelper.isMacForTesting = null);
+      tester.view.physicalSize = const Size(1600, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final previousShortcut = Settings.getValue<String>(
+        'key-shortcut-toggle-nav-pane',
+      );
+      addTearDown(
+        () => Settings.setValue<String?>(
+          'key-shortcut-toggle-nav-pane',
+          previousShortcut,
+        ),
+      );
+      await Settings.setValue<String>('key-shortcut-toggle-nav-pane', 'l');
+      final sourceTab = PdfBookTab(
+        book: PdfBook(title: 'ספר בדיקה', path: '/tmp/book.pdf'),
+        pageNumber: 1,
+      );
+      addTearDown(sourceTab.dispose);
+      await tester.pumpWidget(
+        _wrap(
+          PdfCommentatorsTabScreen(
+            tab: PdfCommentatorsTab(sourceTab: sourceTab),
+          ),
+        ),
+      );
+      await tester.pump();
+      bool paneOpen() =>
+          tester.widget<NavSidePanel>(find.byType(NavSidePanel)).isOpen;
+      expect(paneOpen(), isFalse);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyL, character: 'ל');
+      await tester.pumpAndSettle();
+      expect(paneOpen(), isTrue);
+
+      final modifier = isMac
+          ? LogicalKeyboardKey.metaLeft
+          : LogicalKeyboardKey.controlLeft;
+      await tester.sendKeyDownEvent(modifier);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+      await tester.sendKeyUpEvent(modifier);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<CommentarySearchPane>(find.byType(CommentarySearchPane))
+            .focusNode
+            .hasFocus,
+        isTrue,
+      );
+      for (final shifted in [false, true]) {
+        await Settings.setValue<String>(
+          'key-shortcut-toggle-nav-pane',
+          shifted ? 'shift+l' : 'l',
+        );
+        if (shifted) {
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        }
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyL, character: 'ל');
+        if (shifted) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.pumpAndSettle();
+        expect(
+          paneOpen(),
+          isTrue,
+          reason: 'הקלדה בשדה אינה מפעילה קיצור ניווט',
+        );
+      }
+      await Settings.setValue<String>('key-shortcut-toggle-nav-pane', 'meta+l');
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      expect(paneOpen(), isFalse, reason: 'קיצור עם modifier פועל גם מתוך שדה');
+    });
+  }
+
+  testWidgets('קיצור חלונית הניווט פותח וסוגר אותה (issue #2678)', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final sourceTab = PdfBookTab(
+      book: PdfBook(title: 'PDF בדיקה', path: '/tmp/book.pdf'),
+      pageNumber: 1,
+    );
+    addTearDown(sourceTab.dispose);
+    final tab = PdfCommentatorsTab(sourceTab: sourceTab);
+    await tester.pumpWidget(_wrap(PdfCommentatorsTabScreen(tab: tab)));
+    await tester.pump();
+
+    final modifier = ShortcutHelper.usesMacModifiers
+        ? LogicalKeyboardKey.metaLeft
+        : LogicalKeyboardKey.controlLeft;
+    for (final expected in [true, false]) {
+      await tester.sendKeyDownEvent(modifier);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(modifier);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<NavSidePanel>(find.byType(NavSidePanel)).isOpen,
+        expected,
+      );
+    }
+  });
+
   testWidgets('חלונית הניווט בעיצוב האחיד: NavSidePanel, כותרת ועץ כרטיסים', (
     tester,
   ) async {

@@ -14,6 +14,7 @@
 #include "flutter_window.h"
 #include "jump_list_manager.h"
 #include "splash_window.h"
+#include "hang_monitor.h"
 #include "startup_watchdog.h"
 #include "utils.h"
 
@@ -467,6 +468,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // שרירותי. ראו [kMainWindowPropName].
   if (const HWND main_hwnd = window.GetHandle()) {
     ::SetPropW(main_hwnd, kMainWindowPropName, reinterpret_cast<HANDLE>(1));
+    if (!is_cli_invocation) hang_monitor::SetMainWindow(main_hwnd);
   }
 
   InstallActivationGuard();
@@ -484,6 +486,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::RemovePropW(main_hwnd, kMainWindowPropName);
   }
 
+  hang_monitor::Stop();
   startup_watchdog::Stop();
   jump_list::WaitForPendingTasks(200);
   if (mutex) CloseHandle(mutex);

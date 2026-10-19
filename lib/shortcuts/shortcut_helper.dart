@@ -17,6 +17,35 @@ import 'package:otzaria/shortcuts/key_map.dart';
 class ShortcutHelper {
   ShortcutHelper._();
 
+  /// בודק אם הפוקוס הנוכחי נמצא על שדה טקסט או עורך Quill.
+  static bool get isEditingText {
+    final context = FocusManager.instance.primaryFocus?.context;
+    if (context == null) return false;
+    if (context is StatefulElement && context.state is TextInputClient) {
+      return true;
+    }
+    var found = false;
+    context.visitAncestorElements((element) {
+      found = element is StatefulElement && element.state is TextInputClient;
+      return !found;
+    });
+    return found;
+  }
+
+  /// משאיר תווים ומקשי עריכה לשדה, ומתיר קיצורי modifiers, מקשי F ו-Escape.
+  static bool shouldIgnoreWhileEditing(KeyEvent event) {
+    if (!isEditingText) return false;
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isControlPressed ||
+        isAltModifierPressed ||
+        keyboard.isMetaPressed) {
+      return false;
+    }
+    return event.logicalKey != LogicalKeyboardKey.escape &&
+        !(event.logicalKey.keyId >= LogicalKeyboardKey.f1.keyId &&
+            event.logicalKey.keyId <= LogicalKeyboardKey.f12.keyId);
+  }
+
   // ─── modifiers ────────────────────────────────────────────────────────────────
   static const _modifiers = {'ctrl', 'control', 'shift', 'alt', 'meta'};
 

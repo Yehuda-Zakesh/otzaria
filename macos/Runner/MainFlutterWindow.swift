@@ -1,6 +1,8 @@
 import Cocoa
 import FlutterMacOS
+import ImageIO
 import Metal
+import QuartzCore
 
 /// Impeller (ברירת המחדל מ-Flutter 3.47) רק על GPU של Apple Silicon. על Intel, ובמיוחד
 /// על GPU ישן תחת OCLP, העלייה נתקעת (#1898), ולכן שם Skia. `OTZARIA_RENDERER` עוקף לבדיקה.
@@ -134,9 +136,17 @@ class MainFlutterWindow: OtzariaWindow {
   }
 
   private func showSplash() {
-    guard splashWindow == nil, let image = loadSplashIcon(),
-      let screen = NSScreen.main
-    else { return }
+    guard splashWindow == nil, let screen = NSScreen.main else { return }
+    if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+      showAnimatedSplash(on: screen)
+    {
+      return
+    }
+    showStaticSplash(on: screen)
+  }
+
+  private func showStaticSplash(on screen: NSScreen) {
+    guard let image = loadSplashIcon() else { return }
 
     let size: CGFloat = 160
     let visible = screen.visibleFrame
@@ -171,6 +181,127 @@ class MainFlutterWindow: OtzariaWindow {
     }
   }
 
+  // ציר הזמן של native/splash/splash_timeline.h (משותף ל-Windows ול-Linux).
+  private enum BookTimeline {
+    static let framesPerSecond = 24.0
+    static let frameSize: CGFloat = 177  // הספר הפתוח בגודל הסמל הסטטי
+    static let fadeIn: CFTimeInterval = 0.195
+    static let breathDelay: CFTimeInterval = 0.8
+    static let breathPeriod: CFTimeInterval = 2.8
+    static let breathDepth = 0.22
+  }
+
+  // הספר נפתח ב-Core Animation (שרת הרינדור, בלי טיימר באפליקציה). הפענוח ברקע;
+  // החלון קיים כבר עכשיו (שקוף), כדי שזמן התצוגה המינימלי יימדד כמו קודם.
+  private func showAnimatedSplash(on screen: NSScreen) -> Bool {
+    let name = screen.backingScaleFactor >= 2 ? "splash_book_200" : "splash_book_100"
+    guard let url = Bundle.main.url(forResource: name, withExtension: "png") else {
+      return false
+    }
+    let size = BookTimeline.frameSize
+    let visible = screen.visibleFrame
+    let rect = NSRect(
+      x: visible.midX - size / 2, y: visible.midY - size / 2,
+      width: size, height: size)
+
+    let win = NSWindow(
+      contentRect: rect, styleMask: .borderless, backing: .buffered,
+      defer: false)
+    win.isOpaque = false
+    win.backgroundColor = .clear
+    win.hasShadow = false
+    win.level = .floating
+    win.ignoresMouseEvents = true
+    win.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+    win.alphaValue = 0
+
+    let view = NSView(frame: NSRect(origin: .zero, size: rect.size))
+    view.wantsLayer = true
+    win.contentView = view
+    win.orderFrontRegardless()
+    splashWindow = win
+    splashShownAt = Date()
+
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      let frames = MainFlutterWindow.decodeFrames(url)
+      DispatchQueue.main.async {
+        guard let self = self, self.splashWindow === win, let layer = view.layer
+        else { return }
+        guard let frames = frames, !frames.isEmpty else {
+          // רצועה פגומה: הסמל הסטטי, כמו בהפחתת תנועה.
+          win.orderOut(nil)
+          self.splashWindow = nil
+          self.showStaticSplash(on: screen)
+          return
+        }
+        self.startBookAnimation(layer: layer, frames: frames)
+        NSAnimationContext.runAnimationGroup { context in
+          context.duration = BookTimeline.fadeIn
+          win.animator().alphaValue = self.splashAlpha
+        }
+      }
+    }
+    return true
+  }
+
+  // כל פריים מצויר לביטמפ משלו ברקע — כך Core Animation לא מפענח על ה-main thread.
+  private static func decodeFrames(_ url: URL) -> [CGImage]? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+      let strip = CGImageSourceCreateImageAtIndex(
+        source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
+    else { return nil }
+    let side = strip.width
+    guard side > 0, strip.height % side == 0 else { return nil }
+    let count = strip.height / side
+    var frames: [CGImage] = []
+    frames.reserveCapacity(count)
+    for i in 0..<count {
+      guard let crop = strip.cropping(to: CGRect(x: 0, y: i * side, width: side, height: side)),
+        let context = CGContext(
+          data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+          space: CGColorSpaceCreateDeviceRGB(),
+          bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+            | CGBitmapInfo.byteOrder32Little.rawValue)
+      else { return nil }
+      context.draw(crop, in: CGRect(x: 0, y: 0, width: side, height: side))
+      guard let frame = context.makeImage() else { return nil }
+      frames.append(frame)
+    }
+    return frames
+  }
+
+  private func startBookAnimation(layer: CALayer, frames: [CGImage]) {
+    let start = CACurrentMediaTime() + BookTimeline.fadeIn
+    let duration = Double(frames.count) / BookTimeline.framesPerSecond
+    layer.contentsGravity = .resize
+    layer.contentsScale = CGFloat(frames[0].width) / BookTimeline.frameSize
+    layer.contents = frames[frames.count - 1]  // המצב הסופי: הספר פתוח
+
+    let opening = CAKeyframeAnimation(keyPath: "contents")
+    opening.values = frames
+    opening.calculationMode = .discrete
+    // ב-discrete נדרש keyTime אחד יותר מהערכים, מ-0 עד 1.
+    opening.keyTimes = (0...frames.count).map {
+      NSNumber(value: Double($0) / Double(frames.count))
+    }
+    opening.beginTime = start
+    opening.duration = duration
+    opening.fillMode = .both
+    layer.add(opening, forKey: "opening")
+
+    // עלייה איטית: "נשימה" — גל אטימות רדוד, מתחיל באטימות מלאה.
+    let breath = CABasicAnimation(keyPath: "opacity")
+    breath.fromValue = 1.0
+    breath.toValue = 1.0 - BookTimeline.breathDepth
+    breath.duration = BookTimeline.breathPeriod / 2
+    breath.autoreverses = true
+    breath.repeatCount = .infinity
+    breath.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+    breath.beginTime =
+      start + duration - 1 / BookTimeline.framesPerSecond + BookTimeline.breathDelay
+    layer.add(breath, forKey: "breath")
+  }
+
   // חושף את החלון הראשי וסוגר את ה-splash *בו-זמנית* (crossfade), כך שהסמל אינו
   // "נשאר" אחרי שהחלון עלה. אוכף זמן תצוגה מינימלי: אם הסגירה הגיעה מוקדם
   // (טעינה מהירה), דוחה את כל החשיפה — לא רק את ה-fade — כדי שהחלון לא יקדים.
@@ -191,6 +322,9 @@ class MainFlutterWindow: OtzariaWindow {
         },
         completionHandler: {
           splash?.orderOut(nil)
+          // משחרר את הפריימים (עד 12MB ב-Retina) יחד עם החלון.
+          splash?.contentView?.layer?.removeAllAnimations()
+          splash?.contentView?.layer?.contents = nil
         })
     }
   }

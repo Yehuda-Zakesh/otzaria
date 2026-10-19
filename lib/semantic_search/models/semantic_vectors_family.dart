@@ -4,6 +4,7 @@ enum SemanticVectorsFamily {
   windows(
     identityAsset: 'assets/semantic/meivin-round2-windows-onnx/model.json',
     releaseTagPrefix: 'vectors-windows-',
+    deltaReleaseTagPrefix: 'vectors-windows-delta-',
   ),
 
   /// חלון אחד לכל שורה.
@@ -15,6 +16,7 @@ enum SemanticVectorsFamily {
   const SemanticVectorsFamily({
     required this.identityAsset,
     required this.releaseTagPrefix,
+    this.deltaReleaseTagPrefix,
   });
 
   /// נתיב ה-`model.json` של המשפחה באפליקציה.
@@ -22,6 +24,10 @@ enum SemanticVectorsFamily {
 
   /// תג ה-release הוא התחילית ואחריה תג הספרייה.
   final String releaseTagPrefix;
+
+  /// תחילית ה-release של delta אל תג ספרייה; `null` — המשפחה מתעדכנת רק ב-base.
+  /// נפרדת מ-[releaseTagPrefix]: גרסאות ישנות לוקחות את המניפסט הראשון שב-release.
+  final String? deltaReleaseTagPrefix;
 }
 
 /// release שאפשר להתקין: המשפחה, וה-`chunking_identity` שהמניפסט שלו חייב לשאת.

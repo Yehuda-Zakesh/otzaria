@@ -58,11 +58,6 @@ class _BiographiesScreenState extends State<BiographiesScreen>
     );
   }
 
-  void requestKeyboardFocus() {
-    if (!mounted || !_searchFocusNode.canRequestFocus) return;
-    _searchFocusNode.requestFocus();
-  }
-
   @override
   void dispose() {
     _searchController.dispose();

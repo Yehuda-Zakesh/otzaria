@@ -74,9 +74,9 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
         ),
         SettingsActionTile.segmentedTile<AppCrashReportMode>(
           icon: FluentIcons.warning_24_regular,
-          title: context.settingsText('דיווח אחרי סגירה לא צפויה'),
+          title: context.settingsText('דיווח אחרי קריסה או תקיעה'),
           subtitle: context.settingsText(
-            'מה לעשות כשהתוכנה מזהה שנסגרה בלי סגירה מסודרת',
+            'מה לעשות כשהתוכנה נסגרת בלי סגירה מסודרת או מפסיקה להגיב',
           ),
           options: [
             SegmentOption(

@@ -370,8 +370,45 @@ class _MySettingsScreenState extends State<MySettingsScreen> {
     );
   }
 
-  Widget _buildContent(BuildContext context) {
+  /// תפריט הלשוניות במובייל, בקבוצות.
+  Widget _buildMobileMenu(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        for (final group in _mobileGroups) ...[
+          SettingsCard(
+            title: context.settingsText(group.label),
+            children: [
+              for (final idx in group.indices)
+                if (_isTabAvailable(idx))
+                  ListTile(
+                    key: tourSettingsTabTargetKeys[idx],
+                    leading: RtlIcon(
+                      _tabsData[idx].icon,
+                      color: colorScheme.primary,
+                    ),
+                    title: Text(context.settingsText(_tabsData[idx].label)),
+                    trailing: const RtlIcon(
+                      FluentIcons.chevron_left_24_regular,
+                    ),
+                    onTap: () {
+                      setState(() {
+                        _selectedIndex = idx;
+                        _showMobileMenu = false;
+                      });
+                      _recordTabTourInteraction(idx);
+                    },
+                  ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     // panelBackground מוגדר ב-AppSurfaces ומשמש גם ספריה, כלים, והגדרות
     final bgColor = AppSurfaces.panelBackground(context);
     // במצב חיפוש מציגים תוצאות חוצות-קטגוריות, ולכן הכותרת אינה שם
@@ -387,151 +424,70 @@ class _MySettingsScreenState extends State<MySettingsScreen> {
             _selectedIndex,
           );
 
-          // ── מצב מובייל ────────────────────────────────────────────────
+          // ── מצב מובייל: תפריט הלשוניות או לשונית אחת, ובראשם שדה החיפוש ──
           if (isMobile) {
-            if (_showMobileMenu) {
-              final showResults = _searchQuery.trim().isNotEmpty;
-              return KeyboardNavigator(
-                currentTabIndex: currentTabPosition,
-                totalTabs: availableTabIndexes.length,
-                onTabChange: (i) => _changeTab(availableTabIndexes[i]),
-                onBack: showResults ? _handleMobileBack : null,
-                child: Scaffold(
+            // בתפריט ללא חיפוש אין לאן לחזור; בכל מצב אחר "חזור" סוגר את
+            // החיפוש, ואם אין חיפוש — חוזר לתפריט.
+            final onBack = _showMobileMenu && !isSearching
+                ? null
+                : _handleMobileBack;
+            return KeyboardNavigator(
+              currentTabIndex: currentTabPosition,
+              totalTabs: availableTabIndexes.length,
+              onTabChange: (i) => _changeTab(availableTabIndexes[i]),
+              onBack: onBack,
+              child: Scaffold(
+                backgroundColor: bgColor,
+                appBar: AppBar(
                   backgroundColor: bgColor,
-                  appBar: AppBar(
-                    backgroundColor: bgColor,
-                    elevation: 0,
-                    title: Text(
-                      context.settingsText(
-                        showResults ? 'תוצאות חיפוש' : 'הגדרות',
-                      ),
-                      style: _mobileTitleStyle(context),
+                  elevation: 0,
+                  title: Text(
+                    context.settingsText(
+                      isSearching
+                          ? 'תוצאות חיפוש'
+                          : _showMobileMenu
+                          ? 'הגדרות'
+                          : _tabsData[_selectedIndex].label,
                     ),
-                    leading: showResults
-                        ? Tooltip(
-                            message: context.settingsText('חזור (Esc)'),
-                            child: IconButton(
-                              icon: const RtlIcon(
-                                FluentIcons.arrow_right_24_regular,
-                              ),
-                              onPressed: _handleMobileBack,
+                    style: _mobileTitleStyle(context),
+                  ),
+                  leading: onBack == null
+                      ? null
+                      : Tooltip(
+                          message: context.settingsText('חזור (Esc)'),
+                          child: IconButton(
+                            icon: const RtlIcon(
+                              FluentIcons.arrow_right_24_regular,
                             ),
-                          )
-                        : null,
-                  ),
-                  body: Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                        child: SettingsSearchField(
-                          controller: _searchController,
-                          focusNode: _searchFocusNode,
-                          onChanged: _onSearchChanged,
+                            onPressed: onBack,
+                          ),
                         ),
-                      ),
-                      Expanded(
-                        child: showResults
-                            ? SettingsSearchResultsView(
-                                query: _searchQuery,
-                                results: _availableSearchResults,
-                                onResultTap: _onSearchResultTap,
-                              )
-                            : ListView(
-                                padding: const EdgeInsets.all(12),
-                                children: [
-                                  for (final group in _mobileGroups) ...[
-                                    SettingsCard(
-                                      title: context.settingsText(group.label),
-                                      children: [
-                                        for (final idx in group.indices)
-                                          if (_isTabAvailable(idx))
-                                            ListTile(
-                                              key:
-                                                  tourSettingsTabTargetKeys[idx],
-                                              leading: RtlIcon(
-                                                _tabsData[idx].icon,
-                                                color: colorScheme.primary,
-                                              ),
-                                              title: Text(
-                                                context.settingsText(
-                                                  _tabsData[idx].label,
-                                                ),
-                                              ),
-                                              trailing: const RtlIcon(
-                                                FluentIcons
-                                                    .chevron_left_24_regular,
-                                              ),
-                                              onTap: () {
-                                                setState(() {
-                                                  _selectedIndex = idx;
-                                                  _showMobileMenu = false;
-                                                });
-                                                _recordTabTourInteraction(idx);
-                                              },
-                                            ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                  ],
-                                ],
-                              ),
-                      ),
-                    ],
-                  ),
                 ),
-              );
-            } else {
-              final showResults = _searchQuery.trim().isNotEmpty;
-              return KeyboardNavigator(
-                currentTabIndex: currentTabPosition,
-                totalTabs: availableTabIndexes.length,
-                onTabChange: (i) => _changeTab(availableTabIndexes[i]),
-                onBack: _handleMobileBack,
-                child: Scaffold(
-                  backgroundColor: bgColor,
-                  appBar: AppBar(
-                    backgroundColor: bgColor,
-                    elevation: 0,
-                    title: Text(
-                      context.settingsText(
-                        isSearching
-                            ? 'תוצאות חיפוש'
-                            : _tabsData[_selectedIndex].label,
-                      ),
-                      style: _mobileTitleStyle(context),
-                    ),
-                    leading: Tooltip(
-                      message: context.settingsText('חזור (Esc)'),
-                      child: IconButton(
-                        icon: const RtlIcon(FluentIcons.arrow_right_24_regular),
-                        onPressed: _handleMobileBack,
+                body: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                      child: SettingsSearchField(
+                        controller: _searchController,
+                        focusNode: _searchFocusNode,
+                        onChanged: _onSearchChanged,
                       ),
                     ),
-                  ),
-                  body: Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                        child: SettingsSearchField(
-                          controller: _searchController,
-                          focusNode: _searchFocusNode,
-                          onChanged: _onSearchChanged,
-                        ),
-                      ),
-                      Expanded(
-                        child: showResults
-                            ? SettingsSearchResultsView(
-                                query: _searchQuery,
-                                results: _availableSearchResults,
-                                onResultTap: _onSearchResultTap,
-                              )
-                            : _tabsData[_selectedIndex].pageBuilder(),
-                      ),
-                    ],
-                  ),
+                    Expanded(
+                      child: isSearching
+                          ? SettingsSearchResultsView(
+                              query: _searchQuery,
+                              results: _availableSearchResults,
+                              onResultTap: _onSearchResultTap,
+                            )
+                          : _showMobileMenu
+                          ? _buildMobileMenu(context)
+                          : _tabsData[_selectedIndex].pageBuilder(),
+                    ),
+                  ],
                 ),
-              );
-            }
+              ),
+            );
           }
 
           // ── מצב דסקטופ: KeyboardNavigator + sidebar + תוכן ──────────

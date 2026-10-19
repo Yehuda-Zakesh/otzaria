@@ -38,12 +38,6 @@ class TocTextDao {
     throw StateError('Failed to insert tocText (length: ${text.length})');
   }
 
-  Future<int> delete(int id) async {
-    final db = await database;
-    db.execute(_queries['delete']!, [id]);
-    return db.updatedRows;
-  }
-
   Future<int> countAll() async {
     final db = await database;
     return firstIntValue(db.select(_queries['countAll']!)) ?? 0;

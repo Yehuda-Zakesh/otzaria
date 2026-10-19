@@ -311,37 +311,7 @@ class PersonalNotesImportExportService {
           }
           break;
         case NotesImportConflictStrategy.keepBoth:
-          final duplicatedNote = note.copyWith(
-            content: note.content,
-            contentPlain: note.contentPlain,
-            contentFormat: note.contentFormat,
-            createdAt: note.createdAt,
-            updatedAt: note.updatedAt,
-          );
-          final withNewId = duplicatedNote.copyWith(
-            createdAt: note.createdAt,
-            updatedAt: note.updatedAt,
-          );
-          await _database.insertNote(
-            PersonalNote(
-              id: _generateId(),
-              bookId: withNewId.bookId,
-              lineNumber: withNewId.lineNumber,
-              displayTitle: withNewId.displayTitle,
-              anchorText: withNewId.anchorText,
-              anchorPrefix: withNewId.anchorPrefix,
-              anchorSuffix: withNewId.anchorSuffix,
-              anchorStart: withNewId.anchorStart,
-              anchorEnd: withNewId.anchorEnd,
-              lastKnownLineNumber: withNewId.lastKnownLineNumber,
-              status: withNewId.status,
-              content: withNewId.content,
-              contentPlain: withNewId.contentPlain,
-              contentFormat: withNewId.contentFormat,
-              createdAt: withNewId.createdAt,
-              updatedAt: withNewId.updatedAt,
-            ),
-          );
+          await _database.insertNote(note.copyWith(id: _generateId()));
           duplicated++;
           break;
       }

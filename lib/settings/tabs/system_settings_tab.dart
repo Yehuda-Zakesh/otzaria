@@ -153,12 +153,12 @@ class SystemSettingsTab extends StatefulWidget {
     ),
     SettingsSearchEntry(
       id: 'system.appReports.crash_mode',
-      title: 'דיווח אחרי סגירה לא צפויה',
-      subtitle: 'מה לעשות כשהתוכנה מזהה שנסגרה בלי סגירה מסודרת',
+      title: 'דיווח אחרי קריסה או תקיעה',
+      subtitle: 'מה לעשות כשהתוכנה נסגרת בלי סגירה מסודרת או מפסיקה להגיב',
       tab: SettingsTab.system,
       cardId: 'system.reports',
       expandSection: 'app',
-      keywords: ['קריסה', 'דיווח', 'אוטומטי', 'שאל'],
+      keywords: ['קריסה', 'תקיעה', 'דיווח', 'אוטומטי', 'שאל'],
     ),
     SettingsSearchEntry(
       id: 'system.searchFeedback.consent',

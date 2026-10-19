@@ -1,17 +1,14 @@
 import 'dart:async';
 
-import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/book_common/view/commentators_tab_top_bar.dart';
 import 'package:otzaria/book_common/view/commentary_search_pane.dart';
 import 'package:otzaria/book_common/view/commentators_side_pane.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:otzaria/models/link_types.dart';
 import 'package:otzaria/library/hidden/hidden_library_store.dart';
 import 'package:otzaria/pdf_book/utils/pdf_commentary_visibility.dart';
-import 'package:otzaria/shortcuts/shortcut_helper.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/bookmarks/bloc/bookmark_bloc.dart';
 import 'package:otzaria/bookmarks/models/bookmark.dart';
@@ -686,7 +683,12 @@ class _PdfCommentatorsTabScreenState extends State<PdfCommentatorsTabScreen>
 
     return Focus(
       autofocus: true,
-      onKeyEvent: _handleTabShortcuts,
+      onKeyEvent: (_, event) => handleCommentatorsTabShortcuts(
+        event,
+        onPrint: () => _panelKey.currentState?.printDisplayedCommentaries(),
+        onSearch: _openSearchPanel,
+        onToggleNavPane: _toggleNavPane,
+      ),
       child: Scaffold(
         body: Column(
           children: [
@@ -772,23 +774,11 @@ class _PdfCommentatorsTabScreenState extends State<PdfCommentatorsTabScreen>
     );
   }
 
-  /// Handles the print and search shortcuts while the commentators tab has
-  /// focus, as the text commentators tab does.
-  KeyEventResult _handleTabShortcuts(FocusNode node, KeyEvent event) {
-    final printShortcut =
-        Settings.getValue<String>('key-shortcut-print') ?? 'ctrl+p';
-    if (ShortcutHelper.matchesShortcut(event, printShortcut)) {
-      _panelKey.currentState?.printDisplayedCommentaries();
-      return KeyEventResult.handled;
+  void _toggleNavPane() {
+    setState(() => _navPaneOpen = !_navPaneOpen);
+    if (_navPaneOpen && _navTabController.index == 0) {
+      _scrollNavToSelectedHeading();
     }
-    final searchShortcut =
-        Settings.getValue<String>(ShortcutValidator.currentWindowSearchKey) ??
-        'ctrl+f';
-    if (ShortcutHelper.matchesShortcut(event, searchShortcut)) {
-      _openSearchPanel();
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
   }
 
   void _navigateToPrevParagraph() {
@@ -898,12 +888,7 @@ class _PdfCommentatorsTabScreenState extends State<PdfCommentatorsTabScreen>
       nextMajorTooltip: 'הכותרת הבאה',
       navPaneOpen: _navPaneOpen,
       navPanePinned: _pinLeftPane,
-      onToggleNavPane: () {
-        setState(() => _navPaneOpen = !_navPaneOpen);
-        if (_navPaneOpen && _navTabController.index == 0) {
-          _scrollNavToSelectedHeading();
-        }
-      },
+      onToggleNavPane: _toggleNavPane,
       onTogglePin: () => setState(() => _pinLeftPane = !_pinLeftPane),
       onPrevMajor: _navigateToPrevHeading,
       onPrevMinor: _navigateToPrevParagraph,

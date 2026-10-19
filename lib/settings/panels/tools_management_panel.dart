@@ -335,33 +335,35 @@ class _ToolsManagementPanelState extends State<ToolsManagementPanel> {
             () => GlobalKey(),
           ),
           child: _DraggableSettingsPluginRow(
-            plugin: plugins[i],
-            rowMaxWidth: rowMaxWidth,
-            isSelectionMode: _isSelectionMode,
-            selected: _selectedIds.contains(plugins[i].pluginId),
-            onSelectChanged: (v) => _toggleSelection(plugins[i].pluginId, v),
-            isFirst: i == 0,
-            isLast: i == plugins.length - 1,
-            onMoveUp: i == 0 ? null : () => _handleMove(plugins, i, i - 1),
-            onMoveDown: i == plugins.length - 1
-                ? null
-                : () => _handleMove(plugins, i, i + 1),
             onAcceptSource: (sourceId) => _handleReorder(
               context: context,
               allPlugins: plugins,
               sourcePluginId: sourceId,
               targetPluginId: plugins[i].pluginId,
             ),
-            onToggleHide: () => togglePluginShowInTools(context, plugins[i]),
-            onTogglePinNavRail: () =>
-                togglePluginPinnedToNavRail(context, plugins[i]),
-            onToggleEnabled: () => togglePluginEnabled(context, plugins[i]),
-            onToggleNetworkAccess: () =>
-                togglePluginNetworkAccess(context, plugins[i]),
-            onToggleRunOnStartup: () =>
-                togglePluginRunOnStartup(context, plugins[i]),
-            onResetData: () => showResetPluginDataDialog(context, plugins[i]),
-            onDelete: () => showDeletePluginDialog(context, plugins[i]),
+            row: _PluginRow(
+              plugin: plugins[i],
+              rowMaxWidth: rowMaxWidth,
+              isSelectionMode: _isSelectionMode,
+              selected: _selectedIds.contains(plugins[i].pluginId),
+              onSelectChanged: (v) => _toggleSelection(plugins[i].pluginId, v),
+              isFirst: i == 0,
+              isLast: i == plugins.length - 1,
+              onMoveUp: i == 0 ? null : () => _handleMove(plugins, i, i - 1),
+              onMoveDown: i == plugins.length - 1
+                  ? null
+                  : () => _handleMove(plugins, i, i + 1),
+              onToggleHide: () => togglePluginShowInTools(context, plugins[i]),
+              onTogglePinNavRail: () =>
+                  togglePluginPinnedToNavRail(context, plugins[i]),
+              onToggleEnabled: () => togglePluginEnabled(context, plugins[i]),
+              onToggleNetworkAccess: () =>
+                  togglePluginNetworkAccess(context, plugins[i]),
+              onToggleRunOnStartup: () =>
+                  togglePluginRunOnStartup(context, plugins[i]),
+              onResetData: () => showResetPluginDataDialog(context, plugins[i]),
+              onDelete: () => showDeletePluginDialog(context, plugins[i]),
+            ),
           ),
         ),
     ];
@@ -784,74 +786,28 @@ class _BuiltInToolRow extends StatelessWidget {
   );
 }
 
+/// עוטף את [row] כיעד שחרור וכמקור גרירה לסידור התוספים מחדש.
 class _DraggableSettingsPluginRow extends StatelessWidget {
-  final InstalledPlugin plugin;
-  final double rowMaxWidth;
-  final bool isSelectionMode;
-  final bool selected;
-  final ValueChanged<bool?> onSelectChanged;
+  final _PluginRow row;
   final ValueChanged<String> onAcceptSource;
-  final bool isFirst;
-  final bool isLast;
-  final VoidCallback? onMoveUp;
-  final VoidCallback? onMoveDown;
-  final VoidCallback onToggleHide;
-  final VoidCallback onTogglePinNavRail;
-  final VoidCallback onToggleEnabled;
-  final VoidCallback onToggleNetworkAccess;
-  final VoidCallback onToggleRunOnStartup;
-  final VoidCallback onResetData;
-  final VoidCallback onDelete;
 
   const _DraggableSettingsPluginRow({
-    required this.plugin,
-    required this.rowMaxWidth,
-    required this.isSelectionMode,
-    required this.selected,
-    required this.onSelectChanged,
+    required this.row,
     required this.onAcceptSource,
-    required this.isFirst,
-    required this.isLast,
-    required this.onMoveUp,
-    required this.onMoveDown,
-    required this.onToggleHide,
-    required this.onTogglePinNavRail,
-    required this.onToggleEnabled,
-    required this.onToggleNetworkAccess,
-    required this.onToggleRunOnStartup,
-    required this.onResetData,
-    required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
+    final plugin = row.plugin;
     return DragTarget<String>(
       onWillAcceptWithDetails: (details) => details.data != plugin.pluginId,
       onAcceptWithDetails: (details) => onAcceptSource(details.data),
       builder: (context, candidateData, _) {
         final isHovering = candidateData.isNotEmpty;
         final cs = Theme.of(context).colorScheme;
-        final row = _PluginRow(
-          plugin: plugin,
-          rowMaxWidth: rowMaxWidth,
-          isSelectionMode: isSelectionMode,
-          selected: selected,
-          onSelectChanged: onSelectChanged,
-          isFirst: isFirst,
-          isLast: isLast,
-          onMoveUp: onMoveUp,
-          onMoveDown: onMoveDown,
-          onToggleHide: onToggleHide,
-          onTogglePinNavRail: onTogglePinNavRail,
-          onToggleEnabled: onToggleEnabled,
-          onToggleNetworkAccess: onToggleNetworkAccess,
-          onToggleRunOnStartup: onToggleRunOnStartup,
-          onResetData: onResetData,
-          onDelete: onDelete,
-        );
         // גרירה מכל מקום בכרטיס פעילה תמיד מחוץ למצב בחירה (גם לתוסף מושבת) —
         // כפתורי הפעולה שבתוך הכרטיס תופסים לחיצה קצרה משלהם דרך ה-gesture arena.
-        final draggableRow = isSelectionMode
+        final draggableRow = row.isSelectionMode
             ? row
             : Draggable<String>(
                 data: plugin.pluginId,

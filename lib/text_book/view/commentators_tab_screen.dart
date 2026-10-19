@@ -4,9 +4,6 @@ import 'package:otzaria/book_common/view/commentary_search_pane.dart';
 import 'package:otzaria/book_common/view/commentators_side_pane.dart';
 import 'package:otzaria/personal_notes/repository/personal_notes_repository.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_settings_screens/flutter_settings_screens.dart';
-import 'package:otzaria/shortcuts/shortcut_helper.dart';
-import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/models/link_types.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
 import 'package:otzaria/book_common/utils/category_settings_utils.dart';
@@ -740,7 +737,13 @@ class _CommentatorsTabScreenState extends State<CommentatorsTabScreen>
 
               return Focus(
                 autofocus: true,
-                onKeyEvent: _handleTabShortcuts,
+                onKeyEvent: (_, event) => handleCommentatorsTabShortcuts(
+                  event,
+                  onPrint: () =>
+                      _commentaryKey.currentState?.printDisplayedCommentaries(),
+                  onSearch: _openSearchPane,
+                  onToggleNavPane: _toggleNavPane,
+                ),
                 child: Scaffold(
                   body: Column(
                     children: [
@@ -929,6 +932,13 @@ class _CommentatorsTabScreenState extends State<CommentatorsTabScreen>
     });
   }
 
+  void _toggleNavPane() {
+    setState(() => _navPaneOpen = !_navPaneOpen);
+    if (_navPaneOpen && _navTabController.index == 0) {
+      _scrollNavToSelectedChapter();
+    }
+  }
+
   void _openCommentatorsSelectionPane() {
     setState(() => _navPaneOpen = true);
     _navTabController.animateTo(_commentatorsTabIndex);
@@ -937,24 +947,6 @@ class _CommentatorsTabScreenState extends State<CommentatorsTabScreen>
   void _updateSelectedCommentators(List<String> list) {
     widget.tab.selectedCommentators = List<String>.from(list);
     setState(() => _selectedCommentatorsOverride = list);
-  }
-
-  /// מטפל בקיצורי ההדפסה והחיפוש המוגדרים — פעילים רק בכרטיסיית המפרשים.
-  KeyEventResult _handleTabShortcuts(FocusNode node, KeyEvent event) {
-    final printShortcut =
-        ShortcutValidator.getShortcutValue(ShortcutValidator.printKey) ?? '';
-    if (ShortcutHelper.matchesShortcut(event, printShortcut)) {
-      _commentaryKey.currentState?.printDisplayedCommentaries();
-      return KeyEventResult.handled;
-    }
-    final searchShortcut =
-        Settings.getValue<String>(ShortcutValidator.currentWindowSearchKey) ??
-        'ctrl+f';
-    if (ShortcutHelper.matchesShortcut(event, searchShortcut)) {
-      _openSearchPane();
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
   }
 
   Future<void> _addBookmark(
@@ -1012,12 +1004,7 @@ class _CommentatorsTabScreenState extends State<CommentatorsTabScreen>
       nextMajorTooltip: 'הפרק הבא',
       navPaneOpen: _navPaneOpen,
       navPanePinned: _pinLeftPane,
-      onToggleNavPane: () {
-        setState(() => _navPaneOpen = !_navPaneOpen);
-        if (_navPaneOpen && _navTabController.index == 0) {
-          _scrollNavToSelectedChapter();
-        }
-      },
+      onToggleNavPane: _toggleNavPane,
       onTogglePin: () => setState(() => _pinLeftPane = !_pinLeftPane),
       onPrevMajor: () => _navigateToPrevChapter(chapters),
       onPrevMinor: () => _navigateToPrevVerse(chapters),

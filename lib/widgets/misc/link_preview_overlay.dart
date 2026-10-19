@@ -209,7 +209,7 @@ class _PanelStyle {
 
   final double maxWidth;
 
-  /// `null` — גובה חופשי (התוכן עצמו מגביל את עצמו); אחרת גלילה פנימית.
+  /// `null` — גובה חופשי; אחרת התוכן גולל בתוכו את גופו, והכותרת נשארת.
   final double? maxHeight;
   final double minWidth;
   final double elevation;
@@ -512,9 +512,7 @@ class _LinkPreviewPanelState extends State<_LinkPreviewPanel> {
         maxWidth: maxWidth,
         maxHeight: maxHeight,
       ),
-      child: maxHeight.isFinite
-          ? SingleChildScrollView(child: content)
-          : content,
+      child: content,
     );
   }
 

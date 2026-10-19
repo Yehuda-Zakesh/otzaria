@@ -18,6 +18,7 @@
 #include "phantom_mouse_button_filter.h"
 #include "shift_key_normalizer.h"
 #include "splash_window.h"
+#include "hang_monitor.h"
 #include "startup_watchdog.h"
 #include "utils.h"
 
@@ -1162,6 +1163,7 @@ bool FlutterWindow::OnCreate() {
         if (call.method_name() == "close") {
           // החלון נחשף — הניטור סיים את תפקידו.
           startup_watchdog::RequestStop();
+          hang_monitor::Start();
           // Defer the actual reveal until the engine *presents* the next
           // frame (raster output reaching the swapchain) — by then the
           // window is at its final size/state (Dart sends "close" after
@@ -1463,6 +1465,19 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     // את הכרטיסיה מהחלון המקורי.
     if (pending.result) {
       pending.result->Success(flutter::EncodableValue(created));
+    }
+    return 0;
+  }
+
+  // נשלחת רק לחלון הראשי: ל-Dart שלו יש את ה-Navigator להצעת הדיווח.
+  if (message == hang_monitor::kMsgAppHangRecovered) {
+    if (process_control_channel_) {
+      flutter::EncodableMap arguments;
+      arguments[flutter::EncodableValue("durationMs")] =
+          flutter::EncodableValue(static_cast<int64_t>(lparam));
+      process_control_channel_->InvokeMethod(
+          "appHangRecovered",
+          std::make_unique<flutter::EncodableValue>(arguments));
     }
     return 0;
   }

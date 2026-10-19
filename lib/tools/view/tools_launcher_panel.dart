@@ -75,24 +75,16 @@ List<ToolCatalogEntry> filterToolEntries(
 typedef ToolGroup = ({String label, List<ToolCatalogEntry> entries});
 
 /// מקבץ רשומות עוקבות לפי סוגן בלי לשנות את סדר הקטלוג.
-///
-/// הפיצול הוא גם לפי קבוצת המיון, ולא לפי התווית בלבד: כשכל הכלים המובנים
-/// מוסתרים, שתי קבוצות התוספים (זו שהורשתה להקדים אותם וזו הרגילה) נהיות
-/// עוקבות, וקבוצה מאוחדת הייתה מייצרת פעולות הזזה פעילות שאינן עושות דבר.
 @visibleForTesting
 List<ToolGroup> groupToolEntries(List<ToolCatalogEntry> entries) {
   final groups = <ToolGroup>[];
-  int? lastPriority;
   for (final entry in entries) {
     final label = entry.isPlugin ? kPluginsGroupLabel : kBuiltInToolsGroupLabel;
-    if (groups.isNotEmpty &&
-        groups.last.label == label &&
-        lastPriority == entry.sortGroupPriority) {
+    if (groups.isNotEmpty && groups.last.label == label) {
       groups.last.entries.add(entry);
     } else {
       groups.add((label: label, entries: [entry]));
     }
-    lastPriority = entry.sortGroupPriority;
   }
   return groups;
 }
@@ -132,14 +124,10 @@ int nextHighlightIndex({
 }
 
 /// האם שתי רשומות שייכות לאותה קבוצת תצוגה, כלומר האם מותר לסדר ביניהן.
-///
-/// כלי מובנה ותוסף אינם מתערבבים, וגם תוסף שהורשה להקדים את הכלים המובנים
-/// יושב בקבוצה נפרדת מתוסף רגיל.
+/// כלי מובנה ותוסף אינם מתערבבים.
 @visibleForTesting
 bool canReorderBetween(ToolCatalogEntry source, ToolCatalogEntry target) =>
-    source.toolId != target.toolId &&
-    source.isPlugin == target.isPlugin &&
-    source.sortGroupPriority == target.sortGroupPriority;
+    source.toolId != target.toolId && source.isPlugin == target.isPlugin;
 
 /// פעולה בתפריט הקובייה. מקור אמת אחד — נצרך גם בכפתור ⋯ וגם בבדיקות.
 /// [onTap] ריק (`null`) = הפעולה מוצגת מעומעמת (למשל הזזה בקצה הקבוצה).
@@ -402,9 +390,7 @@ class _ToolsLauncherPanelState extends State<ToolsLauncherPanel> {
   /// כשהמקור כבר אחרון ואין מה להזיז.
   ToolCatalogEntry? _endOfGroupTarget(ToolCatalogEntry source) {
     final last = _keyboardEntries.lastWhereOrNull(
-      (entry) =>
-          entry.isPlugin == source.isPlugin &&
-          entry.sortGroupPriority == source.sortGroupPriority,
+      (entry) => entry.isPlugin == source.isPlugin,
     );
     return (last == null || last.toolId == source.toolId) ? null : last;
   }

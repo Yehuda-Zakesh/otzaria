@@ -336,6 +336,7 @@ class _PluginTabPageState extends State<PluginTabPage> with PluginWebViewHost {
         'Plugin': widget.plugin.pluginId,
         'EmulatedOnArm': WindowsArchInfo.isEmulatedOnArm ? 'true' : 'false',
       },
+      creationFailure: true,
     );
     setState(() => _creationFailure = failure.error.toString());
   }

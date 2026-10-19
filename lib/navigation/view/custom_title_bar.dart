@@ -1213,7 +1213,11 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     return MetaData(
       metaData: _kTabCloseButtonHitMarker,
       child: TooltipTheme(
-        data: TooltipTheme.of(context).copyWith(preferBelow: false),
+        // במגע לחיצה ארוכה פותחת את תפריט הכרטיסיה, כמו לחיצה ימנית על ה-X.
+        data: TooltipTheme.of(context).copyWith(
+          preferBelow: false,
+          triggerMode: TooltipTriggerMode.manual,
+        ),
         child: IconButton(
           tooltip: tooltip,
           // shrinkWrap + padding אפס: בלעדיהם שטח-המגע ברירת-המחדל (48px)

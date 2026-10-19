@@ -57,14 +57,6 @@ class PluginSystemDatabase {
         'ALTER TABLE plugin_installation ADD COLUMN hidden_from_tools INTEGER NOT NULL DEFAULT 0',
       );
     }
-    final hasLeadingCol = cols.any(
-      (c) => c['name'] == 'allow_order_before_built_ins_granted',
-    );
-    if (!hasLeadingCol) {
-      db.execute(
-        'ALTER TABLE plugin_installation ADD COLUMN allow_order_before_built_ins_granted INTEGER',
-      );
-    }
   }
 
   void _createSchema(Database db) {
@@ -81,7 +73,6 @@ class PluginSystemDatabase {
         pinned INTEGER NOT NULL DEFAULT 1,
         pinned_to_nav_rail INTEGER NOT NULL DEFAULT 0,
         hidden_from_tools INTEGER NOT NULL DEFAULT 0,
-        allow_order_before_built_ins_granted INTEGER,
         manifest_json TEXT NOT NULL,
         installed_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -178,21 +169,54 @@ class PluginSystemDatabase {
 
   Future<void> insertOrUpdatePluginWithPermissions(
     InstalledPlugin plugin,
-    Map<String, bool> permissions,
-  ) async {
+    Map<String, bool> permissions, {
+    InstalledPlugin? expectedPlugin,
+    Map<String, bool> expectedPermissions = const {},
+  }) async {
     final db = await database;
-    applyPluginInstall(db, plugin, permissions);
+    applyPluginInstall(
+      db,
+      plugin,
+      permissions,
+      expectedPlugin: expectedPlugin,
+      expectedPermissions: expectedPermissions,
+    );
   }
 
   @visibleForTesting
   static void applyPluginInstall(
     Database db,
     InstalledPlugin plugin,
-    Map<String, bool> permissions,
-  ) {
+    Map<String, bool> permissions, {
+    InstalledPlugin? expectedPlugin,
+    Map<String, bool> expectedPermissions = const {},
+  }) {
     const savepoint = 'sp_plugin_install';
     db.execute('SAVEPOINT $savepoint');
     try {
+      // הבדיקה והכתיבה באותה טרנזקציה: הסרה או החלטת משתמש מבטלות שדרוג אוטומטי.
+      if (expectedPlugin != null) {
+        final rows = db.select(
+          'SELECT * FROM plugin_installation WHERE plugin_id = ?',
+          [plugin.pluginId],
+        );
+        final grants = {
+          for (final row in db.select(
+            'SELECT permission, granted FROM plugin_permission_grant WHERE plugin_id = ?',
+            [plugin.pluginId],
+          ))
+            if (expectedPlugin.manifest.permissions.contains(row['permission']))
+              row['permission'] as String: row['granted'] == 1,
+        };
+        if (rows.isEmpty ||
+            !mapEquals(
+              InstalledPlugin.fromDbMap(rows.single).toDbMap(),
+              expectedPlugin.toDbMap(),
+            ) ||
+            !mapEquals(grants, expectedPermissions)) {
+          throw StateError('Plugin changed during bundled upgrade');
+        }
+      }
       _insertOrUpdatePlugin(db, plugin);
       db.execute(
         'DELETE FROM plugin_permission_grant WHERE plugin_id = ? '
@@ -279,14 +303,6 @@ class PluginSystemDatabase {
     db.execute('DELETE FROM plugin_runtime_log WHERE plugin_id = ?', [
       pluginId,
     ]);
-  }
-
-  Future<void> updatePluginPinState(String pluginId, bool pinned) async {
-    final db = await database;
-    db.execute(
-      'UPDATE plugin_installation SET pinned = ?, updated_at = ? WHERE plugin_id = ?',
-      [pinned ? 1 : 0, DateTime.now().toIso8601String(), pluginId],
-    );
   }
 
   Future<void> updatePluginShowInTools(

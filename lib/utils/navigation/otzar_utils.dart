@@ -42,9 +42,17 @@ class OtzarUtils {
   /// בלי הרווח שלפני `/c` שבמסלול Windows: שם ה-URI הוא ארגומנט תהליך, וכאן
   /// כתובת שעוברת ב-LaunchServices ורווח בה היה נחתך.
   @visibleForTesting
-  static String macBookUri(int bookId, {int? tabId}) =>
-      'OtzarBook://book/$bookId/p/1/t/${tabId ?? Random().nextInt(1000000)}'
-      '/fs/0/start/0/end/0/c';
+  static String macBookUri(int bookId, {int? tabId, int page = 1}) =>
+      'OtzarBook://book/$bookId/p/${_page(page)}'
+      '/t/${tabId ?? Random().nextInt(1000000)}/fs/0/start/0/end/0/c';
+
+  /// מספר העמוד בקישור — מבוסס-1; ערך קטן מ-1 נחשב לעמוד הראשון.
+  static int _page(int page) => page < 1 ? 1 : page;
+
+  /// הקישור ש-Windows מעביר לתוכנה כארגומנט `BOOK=`.
+  @visibleForTesting
+  static String windowsBookLink(int bookId, int tabId, {int page = 1}) =>
+      'OtzarBook://book/$bookId/p/${_page(page)}/t/$tabId/fs/0/start/0/end/0 /c';
 
   /// סורק את הכוננים המעוגנים במק אחרי `<כונן>/books/<id>.book`.
   static Future<bool> _checkBookExistenceMac(int bookId) async {
@@ -134,9 +142,11 @@ class OtzarUtils {
     return exePath.isNotEmpty;
   }
 
-  static Future<void> launchOtzarLocal(int bookId) async {
+  /// [page] — מספר העמוד לפתיחה (מבוסס-1; ברירת מחדל: הראשון). בגרסאות ישנות של
+  /// התוכנה (לפני 18) נפתח הספר מתחילתו.
+  static Future<void> launchOtzarLocal(int bookId, {int page = 1}) async {
     if (Platform.isMacOS) {
-      if (!await launchUrlString(macBookUri(bookId))) {
+      if (!await launchUrlString(macBookUri(bookId, page: page))) {
         throw Exception('Failed to launch Otzar: no handler for OtzarBook://');
       }
       return;
@@ -147,8 +157,7 @@ class OtzarUtils {
     }
 
     final tabId = Random().nextInt(1000000); // Random tab ID
-    final String bookLink =
-        'OtzarBook://book/$bookId/p/1/t/$tabId/fs/0/start/0/end/0 /c';
+    final String bookLink = windowsBookLink(bookId, tabId, page: page);
     List<String> arguments = isVersion18OrAbove ? ['BOOK=$bookLink'] : [];
 
     final workingDir = path.dirname(exePath);
@@ -197,13 +206,18 @@ class OtzarUtils {
   }
 
   /// פותח בתוכנת אוצר החכמה כשהיא מותקנת והספר על הכונן, אחרת באתר.
-  static Future<bool> openBook(int? bookId, String link) async {
+  ///
+  /// [page] — העמוד לפתיחה בתוכנה (מבוסס-1; ברירת מחדל: הראשון). באתר נפתח הספר כולו.
+  static Future<bool> openBook(int? bookId, String link, {int page = 1}) async {
     if (bookId != null &&
         await canLaunchLocally() &&
         await checkBookExistence(bookId)) {
       // לא ממתינים: בגרסאות ישנות Process.run חוזר רק כשהתוכנה נסגרת.
       unawaited(
-        launchOtzarLocal(bookId).catchError((_) => launchOtzarWeb(link)),
+        launchOtzarLocal(
+          bookId,
+          page: page,
+        ).catchError((_) => launchOtzarWeb(link)),
       );
       return true;
     }

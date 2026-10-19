@@ -1,5 +1,4 @@
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
-import '../../models/topic.dart';
 import '../sqlite3_utils.dart';
 import '../query_loader.dart';
 import 'database.dart';
@@ -13,13 +12,6 @@ class TopicDao {
   }
 
   Future<sqlite3.Database> get database => _db.database;
-
-  Future<Topic?> getTopicByName(String name) async {
-    final db = await database;
-    final result = db.select(_queries['selectByName']!, [name]).toMapList();
-    if (result.isEmpty) return null;
-    return Topic.fromJson(result.first);
-  }
 
   Future<int> insertTopic(String name) async {
     final db = await database;

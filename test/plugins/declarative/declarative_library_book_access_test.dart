@@ -205,6 +205,40 @@ void main() {
     expect(locallyOpened, isEmpty);
   });
 
+  test('ספר חיצוני נפתח בעמוד שנתבקש, ובלעדיו — בפתיחה הרגילה', () async {
+    final external = ExternalLibraryBook(
+      title: 'ספר חיצוני',
+      id: 10,
+      link: 'https://hebrewbooks.org/10',
+      externalLibraryId: 'hb:10',
+    );
+    final externallyOpened = <ExternalLibraryBook>[];
+    final pageOpened = <(ExternalLibraryBook, int)>[];
+    final access = _access(
+      library: const [],
+      hebrewBooks: [external],
+      externallyOpened: externallyOpened,
+      pageOpened: pageOpened,
+    );
+    final identity = await _resolve(access, {
+      'external': {'provider': 'hebrewbooks', 'id': 10},
+    });
+
+    expect(
+      await access.openUnique(identity!, index: 57, searchQuery: ''),
+      isTrue,
+    );
+    expect(pageOpened, [(external, 57)]);
+    expect(externallyOpened, isEmpty);
+
+    expect(
+      await access.openUnique(identity, index: 0, searchQuery: ''),
+      isTrue,
+    );
+    expect(pageOpened, hasLength(1));
+    expect(externallyOpened, [external]);
+  });
+
   test('PluginBookIdentity מפענח ספק חיצוני מוכר בלבד', () {
     final hb = ExternalLibraryBook(
       title: 'HB',
@@ -241,6 +275,7 @@ DeclarativeLibraryBookAccess _access({
   List<bool>? sidePaneFlags,
   List<(String, Set<Object>)>? externalLoads,
   List<ExternalLibraryBook>? externallyOpened,
+  List<(ExternalLibraryBook, int)>? pageOpened,
 }) {
   return DeclarativeLibraryBookAccess(
     () async => library,
@@ -265,5 +300,11 @@ DeclarativeLibraryBookAccess _access({
       externallyOpened?.add(book);
       return true;
     },
+    externalPageOpener: pageOpened == null
+        ? null
+        : (book, page) async {
+            pageOpened.add((book, page));
+            return true;
+          },
   );
 }

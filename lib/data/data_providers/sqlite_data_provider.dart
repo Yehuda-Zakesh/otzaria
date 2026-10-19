@@ -281,33 +281,6 @@ class SqliteDataProvider {
     }
   }
 
-  /// Checks if a book exists in the database
-  Future<bool> isBookInDatabase(
-    String title, [
-    int? categoryId,
-    String? fileType,
-  ]) async {
-    if (!_isInitialized) {
-      await initialize();
-    }
-    if (!_isInitialized) return false;
-
-    try {
-      final resolvedBook = await _resolveBookRecord(
-        title,
-        categoryId: categoryId,
-        fileType: fileType,
-      );
-      return resolvedBook != null;
-    } catch (e, st) {
-      debugPrint(
-        '[SqliteDataProvider] isBookInDatabase failed for "$title": '
-        '$e\n$st',
-      );
-      return false;
-    }
-  }
-
   /// Retrieves quick preview of a book (40 lines around position) for instant display
   Future<String?> getBookQuickPreview(
     String title,

@@ -1,32 +1,51 @@
 #include "splash_window.h"
 
 #include <limits.h>
+#include <stdint.h>
 #include <unistd.h>
 
 #include <string>
 
+#include "../../native/splash/splash_timeline.h"
+
 namespace {
 
-// גודל הסמל בפיקסלים לוגיים (תואם ל-Windows/macOS).
+namespace tl = splash_timeline;
+
+// הסמל הסטטי (הפחתת תנועה, או גיבוי) בפיקסלים לוגיים (תואם ל-Windows/macOS).
 constexpr int kIconSize = 160;
-// אטימות כוללת ~70% (תואם ל-SplashIcon המקורי).
-constexpr double kIconAlpha = 0.70;
-// קצב האנימציה.
-constexpr guint kFadeIntervalMs = 15;            // ~60fps
-constexpr double kFadeInPerTick = kIconAlpha / 13.0;   // ~195ms
-constexpr double kFadeOutPerTick = kIconAlpha / 6.0;   // ~90ms
+// פריים האנימציה: בגודל הזה הספר הפתוח בפריים האחרון זהה בגודלו לסמל הסטטי.
+constexpr int kFrameSize = 177;
 // זמן תצוגה מינימלי (מונע הבזק אם החשיפה מגיעה מוקדם).
 constexpr gint64 kMinDisplayUs = 800 * 1000;  // 800ms במיקרו-שניות
 
-GtkWidget* g_splash = nullptr;
-GdkPixbuf* g_pixbuf = nullptr;
-double g_alpha = 0.0;
-bool g_closing = false;
-bool g_close_requested = false;
-gint64 g_shown_at_us = 0;
-guint g_fade_timer = 0;
+struct LoadRequest {
+  std::string path;
+  bool strip;
+  int size;   // בפיקסלים פיזיים: צד הפריים הסטטי
+  int scale;  // מקדם ה-HiDPI של GTK
+};
 
-// נתיב קובץ ההרצה (תיקייה), כדי לאתר את data/flutter_assets שלצדו.
+struct Loaded {
+  cairo_surface_t* surface;
+  int frames;
+};
+
+GtkWidget* g_splash = nullptr;
+cairo_surface_t* g_surface = nullptr;  // כל הפריימים זה מתחת לזה, מוכפלי-אלפא
+int g_frames = 0;
+int g_logical = 0;
+bool g_animate = false;
+bool g_loading = false;
+bool g_close_requested = false;
+bool g_closing = false;
+gint64 g_shown_at_us = 0;
+gint64 g_close_at_us = 0;
+guint g_tick_id = 0;
+tl::Pose g_pose = {0, 0};
+tl::Pose g_close_from = {0, 0};
+
+// נתיב קובץ ההרצה (תיקייה), כדי לאתר את data/ שלצדו.
 std::string ExecutableDir() {
   char buf[PATH_MAX];
   ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
@@ -42,32 +61,120 @@ std::string ExecutableDir() {
   return path.substr(0, pos);
 }
 
-// ציור הסמל הממורכז עם אטימות נוכחית (g_alpha) על רקע שקוף.
-gboolean OnDraw(GtkWidget* widget, cairo_t* cr, gpointer) {
-  // רקע שקוף לחלוטין.
+// "gtk-enable-animations" כבוי = הפחתת תנועה.
+bool AnimationsEnabled() {
+  GtkSettings* settings = gtk_settings_get_default();
+  if (settings == nullptr) return true;
+  gboolean enabled = TRUE;
+  g_object_get(settings, "gtk-enable-animations", &enabled, nullptr);
+  return enabled != FALSE;
+}
+
+// pixbuf → משטח cairo מוכפל-אלפא, בזיכרון בלבד (בטוח מחוץ ל-thread הראשי).
+cairo_surface_t* SurfaceFromPixbuf(GdkPixbuf* pixbuf) {
+  const int w = gdk_pixbuf_get_width(pixbuf);
+  const int h = gdk_pixbuf_get_height(pixbuf);
+  const int channels = gdk_pixbuf_get_n_channels(pixbuf);
+  const int src_stride = gdk_pixbuf_get_rowstride(pixbuf);
+  const guchar* src = gdk_pixbuf_read_pixels(pixbuf);
+  if (channels < 3) return nullptr;
+  cairo_surface_t* surface =
+      cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
+  if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+    cairo_surface_destroy(surface);
+    return nullptr;
+  }
+  cairo_surface_flush(surface);
+  unsigned char* dst = cairo_image_surface_get_data(surface);
+  const int dst_stride = cairo_image_surface_get_stride(surface);
+  for (int y = 0; y < h; ++y) {
+    const guchar* s = src + static_cast<size_t>(y) * src_stride;
+    uint32_t* d = reinterpret_cast<uint32_t*>(
+        dst + static_cast<size_t>(y) * dst_stride);
+    for (int x = 0; x < w; ++x, s += channels) {
+      const uint32_t a = channels == 4 ? s[3] : 255;
+      const uint32_t r = (s[0] * a + 127) / 255;
+      const uint32_t g = (s[1] * a + 127) / 255;
+      const uint32_t b = (s[2] * a + 127) / 255;
+      d[x] = (a << 24) | (r << 16) | (g << 8) | b;
+    }
+  }
+  cairo_surface_mark_dirty(surface);
+  return surface;
+}
+
+void FreeLoaded(gpointer data) {
+  Loaded* loaded = static_cast<Loaded*>(data);
+  if (loaded->surface != nullptr) cairo_surface_destroy(loaded->surface);
+  delete loaded;
+}
+
+void FreeRequest(gpointer data) { delete static_cast<LoadRequest*>(data); }
+
+// פענוח ב-thread של GTask: ה-thread הראשי (שמאתחל את המנוע) לא ממתין לו.
+void LoadInThread(GTask* task, gpointer, gpointer data, GCancellable*) {
+  const LoadRequest* req = static_cast<const LoadRequest*>(data);
+  GError* error = nullptr;
+  GdkPixbuf* pixbuf =
+      req->strip ? gdk_pixbuf_new_from_file(req->path.c_str(), &error)
+                 : gdk_pixbuf_new_from_file_at_scale(
+                       req->path.c_str(), req->size, req->size, TRUE, &error);
+  if (pixbuf == nullptr) {
+    g_task_return_error(task, error);
+    return;
+  }
+  const int w = gdk_pixbuf_get_width(pixbuf);
+  const int h = gdk_pixbuf_get_height(pixbuf);
+  int frames = 1;
+  if (req->strip) {
+    frames = (w > 0 && h % w == 0) ? h / w : 0;
+  }
+  cairo_surface_t* surface = frames > 0 ? SurfaceFromPixbuf(pixbuf) : nullptr;
+  g_object_unref(pixbuf);
+  if (surface == nullptr) {
+    g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                            "splash image");
+    return;
+  }
+  g_task_return_pointer(task, new Loaded{surface, frames}, FreeLoaded);
+}
+
+void StartLoad(bool strip, int scale);
+
+void DestroySplash() {
+  if (g_splash != nullptr) {
+    if (g_tick_id != 0) {
+      gtk_widget_remove_tick_callback(g_splash, g_tick_id);
+      g_tick_id = 0;
+    }
+    gtk_widget_destroy(g_splash);
+    g_splash = nullptr;
+  }
+  if (g_surface != nullptr) {
+    cairo_surface_destroy(g_surface);
+    g_surface = nullptr;
+  }
+}
+
+gboolean DestroyOnIdle(gpointer) {
+  DestroySplash();
+  return G_SOURCE_REMOVE;
+}
+
+// מצייר את הפריים הנוכחי (g_pose) על רקע שקוף.
+gboolean OnDraw(GtkWidget*, cairo_t* cr, gpointer) {
   cairo_save(cr);
   cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
   cairo_paint(cr);
   cairo_restore(cr);
-
-  if (g_pixbuf == nullptr) {
+  if (g_surface == nullptr) {
     return FALSE;
   }
-  const int w = gtk_widget_get_allocated_width(widget);
-  const int h = gtk_widget_get_allocated_height(widget);
-  const int pw = gdk_pixbuf_get_width(g_pixbuf);
-  const int ph = gdk_pixbuf_get_height(g_pixbuf);
-  if (pw <= 0 || ph <= 0) {
-    return FALSE;
-  }
-  const double scale =
-      MIN(static_cast<double>(w) / pw, static_cast<double>(h) / ph);
-  const double dw = pw * scale;
-  const double dh = ph * scale;
-  cairo_translate(cr, (w - dw) / 2.0, (h - dh) / 2.0);
-  cairo_scale(cr, scale, scale);
-  gdk_cairo_set_source_pixbuf(cr, g_pixbuf, 0, 0);
-  cairo_paint_with_alpha(cr, g_alpha);
+  cairo_rectangle(cr, 0, 0, g_logical, g_logical);
+  cairo_clip(cr);
+  cairo_set_source_surface(cr, g_surface, 0,
+                           -static_cast<double>(g_pose.frame) * g_logical);
+  cairo_paint_with_alpha(cr, g_pose.alpha / 255.0);
   return FALSE;
 }
 
@@ -81,70 +188,56 @@ void OnRealize(GtkWidget* widget, gpointer) {
   }
 }
 
-void DestroySplash() {
-  if (g_fade_timer != 0) {
-    g_source_remove(g_fade_timer);
-    g_fade_timer = 0;
+tl::Pose PoseNow(gint64 now_us) {
+  const double t = (now_us - g_shown_at_us) / 1000.0;
+  if (g_closing) {
+    return {g_close_from.frame,
+            tl::FadeOutAlpha(g_close_from.alpha,
+                             (now_us - g_close_at_us) / 1000.0)};
   }
-  if (g_splash != nullptr) {
-    gtk_widget_destroy(g_splash);
-    g_splash = nullptr;
-  }
-  if (g_pixbuf != nullptr) {
-    g_object_unref(g_pixbuf);
-    g_pixbuf = nullptr;
-  }
+  if (t < tl::kFadeInMs) return {0, tl::FadeInAlpha(t)};
+  return tl::PoseAt(t - tl::kFadeInMs, g_frames, g_animate);
 }
 
-// טיק אנימציה: fade-in עד kIconAlpha, ואז החזקה; כשהתבקשה סגירה (ועבר זמן
-// התצוגה המינימלי) — fade-out עד 0 ואז השמדה.
-gboolean FadeTick(gpointer) {
-  if (g_splash == nullptr) {
-    g_fade_timer = 0;
+// טיק לפי שעון הפריימים של GTK. מבקש ציור רק כשהפריים או האטימות השתנו.
+gboolean Tick(GtkWidget* widget, GdkFrameClock*, gpointer) {
+  const gint64 now = g_get_monotonic_time();
+  if (!g_closing && g_close_requested &&
+      now - g_shown_at_us >= kMinDisplayUs) {
+    g_closing = true;
+    g_close_at_us = now;
+    g_close_from = g_pose;
+  }
+  const tl::Pose pose = PoseNow(now);
+  if (g_closing && pose.alpha <= 0) {
+    g_tick_id = 0;
+    g_idle_add(DestroyOnIdle, nullptr);
     return G_SOURCE_REMOVE;
   }
-
-  if (g_closing) {
-    g_alpha -= kFadeOutPerTick;
-    if (g_alpha <= 0.0) {
-      DestroySplash();
-      return G_SOURCE_REMOVE;
-    }
-    gtk_widget_queue_draw(g_splash);
-    return G_SOURCE_CONTINUE;
+  if (pose.frame != g_pose.frame ||
+      static_cast<int>(pose.alpha + 0.5) !=
+          static_cast<int>(g_pose.alpha + 0.5)) {
+    g_pose = pose;
+    gtk_widget_queue_draw(widget);
   }
-
-  // עדיין לא בסגירה.
-  if (g_alpha < kIconAlpha) {
-    g_alpha += kFadeInPerTick;
-    if (g_alpha > kIconAlpha) g_alpha = kIconAlpha;
-    gtk_widget_queue_draw(g_splash);
-  }
-
-  // אם התבקשה סגירה וכבר עבר זמן התצוגה המינימלי — עוברים ל-fade-out.
-  if (g_close_requested &&
-      (g_get_monotonic_time() - g_shown_at_us) >= kMinDisplayUs) {
-    g_closing = true;
+  // סמל סטטי שסיים להופיע: אין מה לצייר עד הסגירה, ולכן לא מחזיקים את השעון.
+  const double t = (now - g_shown_at_us) / 1000.0;
+  if (!g_closing && !g_close_requested && !g_animate &&
+      t >= tl::kFadeInMs) {
+    g_tick_id = 0;
+    return G_SOURCE_REMOVE;
   }
   return G_SOURCE_CONTINUE;
 }
 
-}  // namespace
-
-void splash_window_show() {
-  if (g_splash != nullptr) {
-    return;
-  }
-
-  const std::string icon_path =
-      ExecutableDir() + "/data/flutter_assets/assets/icon/iconnew.png";
-  GError* error = nullptr;
-  g_pixbuf = gdk_pixbuf_new_from_file_at_scale(icon_path.c_str(), kIconSize,
-                                               kIconSize, TRUE, &error);
-  if (g_pixbuf == nullptr) {
-    if (error != nullptr) g_error_free(error);
-    return;  // ללא splash; האפליקציה ממשיכה.
-  }
+void ShowWindow(cairo_surface_t* surface, int frames, int logical) {
+  g_surface = surface;
+  g_frames = frames;
+  g_logical = logical;
+  // מקדם הקנה של המשטח: הציור כולו ביחידות לוגיות, חד גם ב-HiDPI.
+  const double surface_scale =
+      static_cast<double>(cairo_image_surface_get_width(surface)) / logical;
+  cairo_surface_set_device_scale(surface, surface_scale, surface_scale);
 
   GtkWidget* win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
   gtk_window_set_decorated(GTK_WINDOW(win), FALSE);
@@ -156,7 +249,7 @@ void splash_window_show() {
   gtk_window_set_focus_on_map(GTK_WINDOW(win), FALSE);
   gtk_window_set_type_hint(GTK_WINDOW(win), GDK_WINDOW_TYPE_HINT_SPLASHSCREEN);
   gtk_window_set_position(GTK_WINDOW(win), GTK_WIN_POS_CENTER);
-  gtk_window_set_default_size(GTK_WINDOW(win), kIconSize, kIconSize);
+  gtk_window_set_default_size(GTK_WINDOW(win), logical, logical);
   gtk_widget_set_app_paintable(win, TRUE);
 
   // visual עם ערוץ אלפא לשקיפות (דורש compositor).
@@ -169,22 +262,88 @@ void splash_window_show() {
   g_signal_connect(win, "draw", G_CALLBACK(OnDraw), nullptr);
   g_signal_connect(win, "realize", G_CALLBACK(OnRealize), nullptr);
 
-  g_alpha = 0.0;
+  g_pose = {0, 0};
   g_closing = false;
-  g_close_requested = false;
   g_splash = win;
-
   gtk_widget_show_all(win);
   g_shown_at_us = g_get_monotonic_time();
-  g_fade_timer = g_timeout_add(kFadeIntervalMs, FadeTick, nullptr);
+  g_tick_id = gtk_widget_add_tick_callback(win, Tick, nullptr, nullptr);
+}
+
+void OnLoaded(GObject*, GAsyncResult* result, gpointer) {
+  const LoadRequest* req = static_cast<const LoadRequest*>(
+      g_task_get_task_data(G_TASK(result)));
+  const bool strip = req->strip;
+  const int scale = req->scale;
+  GError* error = nullptr;
+  Loaded* loaded = static_cast<Loaded*>(
+      g_task_propagate_pointer(G_TASK(result), &error));
+  if (error != nullptr) g_error_free(error);
+
+  if (loaded == nullptr) {
+    // רצועה פגומה או חסרה: הסמל הסטטי, כמו בהפחתת תנועה.
+    if (strip && !g_close_requested) {
+      StartLoad(/*strip=*/false, scale);
+    } else {
+      g_loading = false;
+    }
+    return;
+  }
+  g_loading = false;
+  // החלון הראשי כבר נחשף — אין טעם להציג splash.
+  if (g_close_requested) {
+    FreeLoaded(loaded);
+    return;
+  }
+  g_animate = strip;
+  cairo_surface_t* surface = loaded->surface;
+  loaded->surface = nullptr;
+  ShowWindow(surface, loaded->frames, strip ? kFrameSize : kIconSize);
+  FreeLoaded(loaded);
+}
+
+void StartLoad(bool strip, int scale) {
+  const std::string dir = ExecutableDir();
+  LoadRequest* req = new LoadRequest;
+  req->strip = strip;
+  req->scale = scale;
+  req->size = kIconSize * scale;
+  req->path = strip ? dir + (scale >= 2 ? "/data/splash/splash_book_200.png"
+                                        : "/data/splash/splash_book_100.png")
+                    : dir + "/data/flutter_assets/assets/icon/iconnew.png";
+  g_loading = true;
+  GTask* task = g_task_new(nullptr, nullptr, OnLoaded, nullptr);
+  g_task_set_task_data(task, req, FreeRequest);
+  g_task_run_in_thread(task, LoadInThread);
+  g_object_unref(task);
+}
+
+int MonitorScale() {
+  GdkDisplay* display = gdk_display_get_default();
+  GdkMonitor* monitor =
+      display != nullptr ? gdk_display_get_primary_monitor(display) : nullptr;
+  if (monitor == nullptr && display != nullptr) {
+    monitor = gdk_display_get_monitor(display, 0);
+  }
+  const int scale =
+      monitor != nullptr ? gdk_monitor_get_scale_factor(monitor) : 1;
+  return scale > 0 ? scale : 1;
+}
+
+}  // namespace
+
+void splash_window_show() {
+  if (g_splash != nullptr || g_loading) {
+    return;
+  }
+  g_close_requested = false;
+  StartLoad(/*strip=*/AnimationsEnabled(), MonitorScale());
 }
 
 void splash_window_close() {
-  // מסמן בקשת סגירה; ה-FadeTick יעבור ל-fade-out אחרי זמן התצוגה המינימלי.
-  // אם הטיימר כבר אינו פעיל (נדיר) — סוגרים מיד.
+  // מסמן בקשת סגירה; הטיק עובר ל-fade-out אחרי זמן התצוגה המינימלי.
   g_close_requested = true;
-  if (g_splash != nullptr && g_fade_timer == 0) {
-    g_closing = true;
-    g_fade_timer = g_timeout_add(kFadeIntervalMs, FadeTick, nullptr);
+  if (g_splash != nullptr && g_tick_id == 0) {
+    g_tick_id = gtk_widget_add_tick_callback(g_splash, Tick, nullptr, nullptr);
   }
 }

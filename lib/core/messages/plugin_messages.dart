@@ -62,11 +62,6 @@ abstract class PluginMessages {
   // ===== ניהול תוספים =====
   static String loadPluginsError(Object error) => 'שגיאה בטעינת תוספים: $error';
 
-  static String pinPluginError(Object error) => 'שגיאה בהצמדת התוסף: $error';
-
-  static String unpinPluginError(Object error) =>
-      'שגיאה בהסרת הצמדת התוסף: $error';
-
   static String pinPluginToNavRailError(Object error) =>
       'שגיאה בהצמדת התוסף לסרגל הניווט: $error';
 

@@ -261,6 +261,19 @@ std::string Timestamp() {
   return buffer;
 }
 
+// התרגום לשמות מודולים נעשה רק כאן, אחרי שה-thread הראשי חודש.
+void AppendStackSection(const std::vector<ULONG_PTR>& frames,
+                        std::string* report) {
+  if (frames.empty()) {
+    *report += "Stack: unavailable\n";
+    return;
+  }
+  *report += "Stack (module+RVA):\n";
+  for (const ULONG_PTR frame : frames) {
+    *report += "  " + DescribeAddress(frame) + "\n";
+  }
+}
+
 void ReportStall(int capture_index, ULONGLONG stalled_for_ms,
                  ULONGLONG since_launch_ms,
                  const std::vector<ULONG_PTR>& frames) {
@@ -278,15 +291,7 @@ void ReportStall(int capture_index, ULONGLONG stalled_for_ms,
            static_cast<unsigned long long>(since_launch_ms), capture_index,
            kMaxCaptures);
   report += header;
-
-  if (frames.empty()) {
-    report += "Stack: unavailable\n";
-  } else {
-    report += "Stack (module+RVA):\n";
-    for (const ULONG_PTR frame : frames) {
-      report += "  " + DescribeAddress(frame) + "\n";
-    }
-  }
+  AppendStackSection(frames, &report);
   AppendToLog(report);
 }
 
@@ -318,6 +323,18 @@ void WatcherLoop() {
 }
 
 }  // namespace
+
+bool CaptureMainStack(std::vector<ULONG_PTR>* frames) {
+  return CaptureMainThreadStack(frames);
+}
+
+void AppendStack(const std::vector<ULONG_PTR>& frames, std::string* report) {
+  AppendStackSection(frames, report);
+}
+
+void AppendReport(const std::string& text) { AppendToLog(text); }
+
+std::string UtcTimestamp() { return Timestamp(); }
 
 void Start() {
   if (g_started.exchange(true)) return;

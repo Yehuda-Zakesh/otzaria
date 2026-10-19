@@ -104,6 +104,15 @@ class FakeBackend implements SemanticEngineBackend {
 
   /// כשלים להתקנות הבאות, לפי הסדר.
   final List<SemanticFailure> installFailures = [];
+
+  /// מה ההתקנות הבאות מדווחות (במקום base של v30), לפי הסדר.
+  final List<SemanticInstallSummary> installResults = [];
+
+  /// כשלים לאיחודים הבאים; [compactGate] מעכב את האיחוד הבא.
+  final List<SemanticFailure> compactFailures = [];
+  Completer<void>? compactGate;
+  final List<int?> compactVersions = [];
+  final List<SemanticCancelHandle> compactHandles = [];
   Completer<void>? searchGate;
   Completer<void>? warmUpGate;
   final List<String> calls = [];
@@ -134,6 +143,17 @@ class FakeBackend implements SemanticEngineBackend {
     installRequests.add(request);
     if (installFailures.isNotEmpty) throw installFailures.removeAt(0);
     vectorsInfoFailure = null;
+    if (installResults.isNotEmpty) {
+      final result = installResults.removeAt(0);
+      vectors = SemanticVectorsSummary(
+        present: true,
+        identityDigest: installedIdentityDigest,
+        libraryVersion: result.libraryVersion,
+        libraryReleaseTag: 'v${result.libraryVersion}-20260930165019',
+        needsCompaction: result.needsCompaction,
+      );
+      return result;
+    }
     vectors = SemanticVectorsSummary(
       present: true,
       identityDigest: installedIdentityDigest,
@@ -188,7 +208,26 @@ class FakeBackend implements SemanticEngineBackend {
     String vectorsDir, {
     int? liveLibraryVersion,
     required SemanticCancelHandle cancel,
-  }) async => calls.add('compact');
+  }) async {
+    calls.add('compact');
+    compactVersions.add(liveLibraryVersion);
+    compactHandles.add(cancel);
+    final gate = compactGate;
+    if (gate != null) {
+      compactGate = null;
+      await gate.future;
+    }
+    if (cancel.isCancelled) {
+      throw const SemanticFailure(SemanticFailureKind.cancelled);
+    }
+    if (compactFailures.isNotEmpty) throw compactFailures.removeAt(0);
+    vectors = SemanticVectorsSummary(
+      present: vectors.present,
+      identityDigest: vectors.identityDigest,
+      libraryVersion: vectors.libraryVersion,
+      libraryReleaseTag: vectors.libraryReleaseTag,
+    );
+  }
 
   @override
   Future<void> disable() async => calls.add('disable');
@@ -277,6 +316,20 @@ class FakeLocator extends SemanticVectorsReleaseLocator {
     return found != null && candidates.any((c) => c.family == found.family)
         ? found
         : null;
+  }
+
+  /// מה [findDeltaChain] מחזיר; `null` = ה-base.
+  List<SemanticVectorsRelease>? chain;
+  final List<({SemanticVectorsRelease target, int installedVersion})>
+  chainLookups = [];
+
+  @override
+  Future<List<SemanticVectorsRelease>?> findDeltaChain({
+    required SemanticVectorsRelease target,
+    required int installedVersion,
+  }) async {
+    chainLookups.add((target: target, installedVersion: installedVersion));
+    return chain;
   }
 }
 
@@ -424,3 +477,42 @@ SemanticVectorsRelease releaseV30({
   chunkingIdentity: chunkingIdentity,
   family: family,
 );
+
+/// delta של משפחת החלונות מ-[from] אל [to], בגודל הורדה [size].
+SemanticVectorsRelease deltaRelease(
+  int from,
+  int to, {
+  String identityDigest = '',
+  int? chunkingIdentity,
+  int size = 1,
+}) => SemanticVectorsRelease(
+  libraryTag: 'v$to-20260930165019',
+  releaseTag: 'vectors-windows-delta-v$to-20260930165019',
+  toLibraryVersion: to,
+  kind: 'delta',
+  fromLibraryVersion: from,
+  manifestJson: '{"kind":"delta","from":$from,"to":$to}',
+  publishedManifestSha256: 'cd' * 32,
+  files: [
+    SemanticVectorsFile(
+      name: 'otzaria-vectors-5d1e7a20-v$from-v$to.oxv.zst',
+      downloadUrl: 'https://github.test/delta/$from-$to',
+      size: size,
+      sha256: 'ef' * 32,
+      assetId: 'd$to',
+    ),
+  ],
+  segmentUncompressedSize: 5,
+  identityDigest: identityDigest,
+  chunkingIdentity: chunkingIdentity,
+  family: SemanticVectorsFamily.windows,
+);
+
+/// סט חלונות מותקן של [digest]: הסימון שלו ותיקייה שלנו.
+void markInstalledWindowsSet(Directory root, String digest) {
+  final paths = SemanticPaths(p.join(root.path, 'otzaria'));
+  File(p.join(paths.vectorsDirectory, kSemanticWindowsIdentityFileName))
+    ..createSync(recursive: true)
+    ..writeAsStringSync(digest);
+  File(p.join(paths.vectorsDirectory, kSemanticOwnerMarker)).createSync();
+}

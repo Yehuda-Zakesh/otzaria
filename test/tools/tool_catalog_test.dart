@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_state.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
@@ -13,8 +15,6 @@ InstalledPlugin _plugin(
   bool enabled = true,
   bool showInTools = true,
   bool pinnedToNavRail = false,
-  bool allowOrderBeforeBuiltIns = false,
-  bool allowOrderGranted = true,
   bool networkEnabled = false,
   bool networkAccessGranted = false,
   bool headless = false,
@@ -29,7 +29,6 @@ InstalledPlugin _plugin(
     pinned: false,
     pinnedToNavRail: pinnedToNavRail,
     showInTools: showInTools,
-    allowOrderBeforeBuiltInsGranted: allowOrderGranted,
     networkAccessGranted: networkAccessGranted,
     manifest: PluginManifest(
       schemaVersion: 1,
@@ -48,7 +47,6 @@ InstalledPlugin _plugin(
       networkAllowlist: const [],
       toolTabTitle: title ?? id,
       toolTabOrder: order,
-      allowOrderBeforeBuiltIns: allowOrderBeforeBuiltIns,
       defaultPinned: false,
       publishedDataTypes: const [],
     ),
@@ -156,16 +154,31 @@ void main() {
       expect(pluginIndex, greaterThan(lastBuiltIn));
     });
 
-    test('תוסף שאושר להקדים כלים מובנים מופיע לפניהם', () {
-      final entries = buildToolCatalog(
-        hiddenBuiltInToolIds: const {},
-        isOfflineMode: false,
-        pluginState: PluginSystemLoaded([
-          _plugin('p.first', order: 1, allowOrderBeforeBuiltIns: true),
-        ]),
-      );
-      expect(entries.first.toolId, 'p.first');
-    });
+    test(
+      'תוסף שמבקש במניפסט להקדים את הכלים המובנים מופיע אחריהם (issue #2460)',
+      () {
+        // שורה ממסד קיים: המניפסט ביקש להקדים והמשתמש אישר בהתקנה.
+        final plugin = InstalledPlugin.fromDbMap({
+          ..._plugin('p.first').toDbMap(),
+          'manifest_json': jsonEncode({
+            'id': 'p.first',
+            'name': 'p.first',
+            'version': '1.0.0',
+            'entrypoint': 'index.html',
+            'contributes': {
+              'toolTab': {'order': 1, 'allowOrderBeforeBuiltIns': true},
+            },
+          }),
+          'allow_order_before_built_ins_granted': 1,
+        });
+        final entries = buildToolCatalog(
+          hiddenBuiltInToolIds: const {},
+          isOfflineMode: false,
+          pluginState: PluginSystemLoaded([plugin]),
+        );
+        expect(entries.last.toolId, 'p.first');
+      },
+    );
 
     // המיון חייב להיות יציב: תוספים רבים חולקים את order 900 מברירת המחדל
     // של המניפסט, והסדר ביניהם נקבע כבר ב-repository.
@@ -224,19 +237,6 @@ void main() {
       final ids = entries.map((e) => e.toolId);
       expect(ids, isNot(contains('builtin.gematria')));
       expect(ids.first, 'builtin.calendar');
-    });
-
-    test('סדר מותאם אינו מקדם כלי מובנה לפני תוסף שהורשה להקדים', () {
-      final entries = buildToolCatalog(
-        hiddenBuiltInToolIds: const {},
-        isOfflineMode: false,
-        pluginState: PluginSystemLoaded([
-          _plugin('p.first', order: 1, allowOrderBeforeBuiltIns: true),
-        ]),
-        builtInToolsOrder: const ['builtin.gematria'],
-      );
-      expect(entries.first.toolId, 'p.first');
-      expect(entries[1].toolId, 'builtin.gematria');
     });
 
     test('סדר מותאם ריק משמר את סדר התצוגה המקורי', () {

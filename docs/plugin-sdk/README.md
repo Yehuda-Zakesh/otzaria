@@ -100,7 +100,6 @@ my-plugin/
     "toolTab": {
       "title": "שם התוסף",
       "order": 200,
-      "allowOrderBeforeBuiltIns": false,
       "defaultPinned": true,
       "iconName": "calendar_24_regular"
     },
@@ -160,8 +159,7 @@ my-plugin/
 | `network.enabled` | `false` | האם להצהיר על שימוש ברשת (חובה כדי להפעיל את מנגנון הרשת בתוסף) |
 | `network.allowlist` | `[]` | רשימת ה-URLs שהתוסף מצהיר שהוא צריך. ה-URL חייב להופיע כאן **וגם** להיות מאושר ע"י אוצריא בקובץ `plugin_network_allowlist.txt` שבשורש ריפו אוצריא ב-GitHub (ענף `dev`). הצהרה ב-manifest לבדה **אינה** מספיקה. |
 | `contributes.toolTab.title` | שם התוסף | כותרת הטאב. אם מגדירים אותה במפורש — חייבת להיות זהה ל-`name` (עד 14 תווים), אחרת התוסף יידחה |
-| `contributes.toolTab.order` | `900` | סדר הופעה בטאבים (מספר נמוך = קודם) |
-| `contributes.toolTab.allowOrderBeforeBuiltIns` | `false` | חריג מפורש שמאפשר לתוסף להתחרות מול הכלים המובנים ולהופיע לפניהם במסך "כלים" |
+| `contributes.toolTab.order` | `900` | סדר הופעה בין התוספים (מספר נמוך = קודם). תוספים מוצגים תמיד אחרי הכלים המובנים |
 | `contributes.toolTab.defaultPinned` | `true` | האם להצמיד אוטומטית בהתקנה |
 | `contributes.toolTab.iconName` | `null` | שם אייקון 24px שיוצג בטאב, מספריית אוצריא או מ-FluentUI, למשל `"book_24_regular"`. ראה [ICONS.md](ICONS.md) |
 | `contributes.publishedDataTypes` | `[]` | סוגי נתונים שהתוסף מפרסם |
@@ -182,8 +180,6 @@ my-plugin/
 שם שקיים בשתי הספריות נפתר לגרסת אוצריא; תחילית `fluent:` או `otzaria:` כופה ספרייה אחת. הרשימה המלאה וכלל ההכרעה: **[ICONS.md](ICONS.md)**.
 
 דוגמאות תקפות: `"calendar_24_regular"`, `"calendar_24_filled"`, `"book_open_tzurat_hadaf_24_regular"`, `"settings_24_filled"`, `"fluent:book_24_regular"`.
-
-`allowOrderBeforeBuiltIns` אינו שדה הרשאות ואינו קשור לאבטחה. זהו דגל מיקום תצוגתי בלבד: כברירת מחדל תוספים מופיעים אחרי הכלים המובנים, גם אם ה-`order` שלהם נמוך יותר. רק אם תוסף מצהיר במפורש על `allowOrderBeforeBuiltIns: true`, המערכת תאפשר לו להופיע לפני כלים מובנים בהתאם ל-`order`.
 
 ---
 
@@ -1145,7 +1141,7 @@ dart tool/plugins/package_plugin.dart <path/to/your/plugin/folder> [--force]
 
 שתי הדרכים משתמשות באותה לוגיקה (`PluginPackager` ב־[lib/plugins/services/plugin_packager.dart](../../lib/plugins/services/plugin_packager.dart)):
 
-1. **ולידציית מבנה (חוסמת)** — בודקת ש־`manifest.json` קיים, JSON תקין, גרסת סכמה, פורמט `id` ו־SemVer, קיום קובץ ה־entrypoint, ושכל ההרשאות המבוקשות נמצאות ברשימת ההרשאות הרשמית. בתוך `contributes.toolTab`, השדה `allowOrderBeforeBuiltIns` הוא דגל בוליאני אופציונלי שמגדיר חריג תצוגתי בלבד: הוא לא מעניק הרשאה, אלא רק מאפשר לתוסף להתחרות מול הכלים המובנים על מיקום במסך "כלים".
+1. **ולידציית מבנה (חוסמת)** — בודקת ש־`manifest.json` קיים, JSON תקין, גרסת סכמה, פורמט `id` ו־SemVer, קיום קובץ ה־entrypoint, ושכל ההרשאות המבוקשות נמצאות ברשימת ההרשאות הרשמית.
 
 2. **ולידציה מורחבת** — מפיקה דו"ח עם שלושה חלקים:
    - **`errors`** — חוסמות אריזה (כיום: רק חריגות מ־ולידציית המבנה).

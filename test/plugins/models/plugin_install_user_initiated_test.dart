@@ -19,7 +19,6 @@ PluginManifest _manifest() => PluginManifest(
   networkAllowlist: const [],
   toolTabTitle: 'Tab',
   toolTabOrder: 0,
-  allowOrderBeforeBuiltIns: false,
   defaultPinned: true,
   publishedDataTypes: const [],
 );
@@ -29,7 +28,6 @@ PluginInstallDecision _decide({required bool isUserInitiated}) =>
       manifest: _manifest(),
       previousVersion: '1.0.0',
       previousGrantedPermissions: const {'search.fulltext.read': true},
-      previousAllowOrderBeforeBuiltInsGranted: null,
       isOfflineMode: false,
       isUserInitiated: isUserInitiated,
     );

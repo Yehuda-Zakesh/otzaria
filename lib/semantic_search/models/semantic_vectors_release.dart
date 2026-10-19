@@ -40,6 +40,9 @@ class SemanticVectorsRelease extends Equatable {
   /// `base`, `delta` או `compacted`.
   final String kind;
 
+  /// הגרסה שה-delta ממשיך ממנה (`fromLibraryVersion`); 0 ב-base.
+  final int fromLibraryVersion;
+
   /// טקסט המניפסט כפי שפורסם — נמסר להתקנה בדיוק כך.
   final String manifestJson;
 
@@ -66,6 +69,7 @@ class SemanticVectorsRelease extends Equatable {
     required this.releaseTag,
     required this.toLibraryVersion,
     required this.kind,
+    this.fromLibraryVersion = 0,
     required this.manifestJson,
     required this.publishedManifestSha256,
     required this.files,
@@ -89,6 +93,8 @@ class SemanticVectorsRelease extends Equatable {
     },
   );
 
+  bool get isDelta => kind == 'delta';
+
   /// סך הבתים להורדה.
   int get downloadSize => files.fold(0, (sum, file) => sum + file.size);
 
@@ -103,6 +109,7 @@ class SemanticVectorsRelease extends Equatable {
     releaseTag,
     toLibraryVersion,
     kind,
+    fromLibraryVersion,
     manifestJson,
     publishedManifestSha256,
     files,

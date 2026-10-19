@@ -186,6 +186,118 @@ void main() {
       );
     });
 
+    group('isGeneratedLinuxDesktopEntry (issue #2777)', () {
+      const launcher = '/opt/otzaria/otzaria';
+      const binary = '/opt/otzaria/otzaria.bin';
+      const icon = '/opt/otzaria/data/flutter_assets/assets/icon/iconnew.png';
+
+      bool isGenerated(String content) =>
+          PluginProtocolRegistrationService.isGeneratedLinuxDesktopEntry(
+            content,
+            executables: {launcher, binary},
+            iconPath: icon,
+          );
+
+      String current({String? iconPath = icon}) =>
+          PluginProtocolRegistrationService.buildLinuxDesktopEntry(
+            executable: launcher,
+            scheme: PluginProtocolRegistrationService.scheme,
+            pluginMimeType: PluginProtocolRegistrationService.pluginMimeType,
+            iconPath: iconPath,
+          );
+
+      // מה שגרסה 0.10.4 כתבה, כשהופעלה דרך ה-launcher.
+      const releasedEntry =
+          '[Desktop Entry]\n'
+          'Version=1.0\n'
+          'Type=Application\n'
+          'Name=אוצריא\n'
+          'Exec="$binary" %u\n'
+          'Terminal=false\n'
+          'MimeType=x-scheme-handler/otzaria;application/x-otzaria-plugin;\n'
+          'Categories=Education;Utility;\n'
+          'StartupNotify=true\n'
+          'Icon=$icon\n';
+
+      test('מזהה את הקובץ שהגרסה הנוכחית כותבת, עם אייקון ובלעדיו', () {
+        expect(isGenerated(current()), isTrue);
+        expect(isGenerated(current(iconPath: null)), isTrue);
+      });
+
+      test('מזהה קובץ שכתבה גרסה משוחררת', () {
+        expect(isGenerated(releasedEntry), isTrue);
+      });
+
+      test('קובץ שהמשתמש ערך אינו נחשב שלנו', () {
+        expect(
+          isGenerated(
+            releasedEntry.replaceFirst('Name=אוצריא\n', 'Name=Otzaria\n'),
+          ),
+          isFalse,
+        );
+        expect(isGenerated('${current()}NoDisplay=true\n'), isFalse);
+        expect(
+          isGenerated(current().replaceAll(launcher, '/home/u/bin/otzaria')),
+          isFalse,
+        );
+        expect(isGenerated(current().replaceAll('\n', '\r\n')), isFalse);
+      });
+    });
+
+    group('hasSystemLinuxDesktopEntry (issue #2777)', () {
+      late Directory root;
+
+      setUp(() => root = Directory.systemTemp.createTempSync('otz_xdg_'));
+      tearDown(() => root.deleteSync(recursive: true));
+
+      String dataDir(String name, {bool withEntry = false}) {
+        final dir = Directory('${root.path}/$name/applications')
+          ..createSync(recursive: true);
+        if (withEntry) {
+          File('${dir.path}/otzaria.desktop').writeAsStringSync('');
+        }
+        return '${root.path}/$name';
+      }
+
+      bool hasEntry(String dirs) =>
+          PluginProtocolRegistrationService.hasSystemLinuxDesktopEntry(
+            dirs,
+            userDesktopFile: '${root.path}/home/applications/otzaria.desktop',
+          );
+
+      test('מוצא את הקובץ של החבילה באחת התיקיות', () {
+        final empty = dataDir('local');
+        final system = dataDir('usr', withEntry: true);
+
+        expect(hasEntry('$empty:$system'), isTrue);
+        expect(hasEntry(empty), isFalse);
+      });
+
+      test('הקובץ של המשתמש עצמו אינו נחשב קובץ מערכת', () {
+        expect(hasEntry(dataDir('home', withEntry: true)), isFalse);
+      });
+    });
+
+    test('writeIfChanged כותב רק כשהתוכן שונה', () async {
+      final dir = Directory.systemTemp.createTempSync('otz_write_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File('${dir.path}/otzaria-plugin.xml');
+
+      expect(
+        await PluginProtocolRegistrationService.writeIfChanged(file, 'a'),
+        isTrue,
+      );
+      expect(
+        await PluginProtocolRegistrationService.writeIfChanged(file, 'a'),
+        isFalse,
+      );
+      expect(
+        await PluginProtocolRegistrationService.writeIfChanged(file, 'b'),
+        isTrue,
+      );
+      expect(file.readAsStringSync(), 'b');
+    });
+
     test('buildLinuxMimeXml מייצר תיאור MIME עם glob תקין', () {
       final xml = PluginProtocolRegistrationService.buildLinuxMimeXml(
         mimeType: 'application/x-otzaria-plugin',
@@ -250,6 +362,28 @@ void main() {
               in PluginProtocolRegistrationService.buildOfficeTrustedProtocolKeys()) {
             CURRENT_USER.open('$root\\$subkey').close();
           }
+
+          // הפעלה שנייה אינה כותבת ערכים שכבר נכונים.
+          final command =
+              '$root\\Software\\Classes\\otzaria\\shell\\open\\command';
+          DateTime? lastWrite() {
+            final key = CURRENT_USER.open(command);
+            try {
+              return key.info.lastWriteTime;
+            } finally {
+              key.close();
+            }
+          }
+
+          final before = lastWrite();
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          await Isolate.run(
+            () => PluginProtocolRegistrationService.writeWindowsRegistration(
+              exePath,
+              root: '$root\\',
+            ),
+          );
+          expect(lastWrite(), before);
         } finally {
           CURRENT_USER.removeSubkey(root);
         }

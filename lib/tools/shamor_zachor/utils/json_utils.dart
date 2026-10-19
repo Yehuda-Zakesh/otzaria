@@ -15,15 +15,6 @@ class JsonUtils {
     return 0;
   }
 
-  /// Safely read a numeric value; accepts numeric strings as well.
-  static num asNum(dynamic value) {
-    if (value is num) return value;
-    if (value is String) {
-      return num.tryParse(value) ?? 0;
-    }
-    return 0;
-  }
-
   /// Safely convert a dynamic map into a string-keyed map.
   static Map<String, dynamic> asMap(dynamic value) {
     if (value is Map<String, dynamic>) {

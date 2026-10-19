@@ -235,6 +235,37 @@ void main() {
       );
     });
 
+    test(
+      'המסייע אורז base בלבד: delta אינו נארז ואין פנייה לתגי delta',
+      () async {
+        final github = _GitHub();
+        final requested = <String>[];
+        final client = github.client();
+        final components = await resolveSemanticComponents(
+          libraryTag: _tag,
+          modelIdentityJson: _identityJson(),
+          clientFactory: () => MockClient((request) async {
+            requested.add(request.url.toString());
+            return client.get(request.url);
+          }),
+          apiBase: _api,
+        );
+        final vectors = components.firstWhere(
+          (c) => '${c['id']}'.startsWith('semantic-vectors-'),
+        );
+        expect(jsonEncode(vectors), contains(_manifestName));
+        expect(requested.where((u) => u.contains('delta')), isEmpty);
+
+        github.manifest = jsonEncode(
+          jsonDecode(_vectorsManifest())
+            ..['kind'] = 'delta'
+            ..['fromLibraryVersion'] = 29,
+        );
+        await expectLater(github.resolve(), throwsA(anything));
+        client.close();
+      },
+    );
+
     test('וקטורים של מודל אחר — מושמטים', () async {
       final github = _GitHub()
         ..manifest = _vectorsManifest(familyId: 'other/model@1');

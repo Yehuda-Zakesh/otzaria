@@ -891,6 +891,14 @@ class TextBookSearchViewState extends State<TextBookSearchView>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final hiddenMarks = context.select((TextBookBloc bloc) {
+      final state = bloc.state;
+      final profile = state is TextBookLoaded ? state.bodyDisplayProfile : null;
+      return (
+        nikud: profile?.removeNikud ?? false,
+        teamim: profile?.removeTeamim ?? false,
+      );
+    });
 
     // יצירת רשימה מקובצת - כותרת מופיעה רק כשהיא משתנה
     final List<_GroupedResultItem> items = [];
@@ -958,7 +966,11 @@ class TextBookSearchViewState extends State<TextBookSearchView>
               return BlocBuilder<SettingsBloc, SettingsState>(
                 builder: (context, settingsState) {
                   final snippet = withHolyNamesSetting(
-                    result.snippet,
+                    utils.removeMarks(
+                      result.snippet,
+                      nikud: hiddenMarks.nikud,
+                      teamim: hiddenMarks.teamim,
+                    ),
                     settingsState,
                   );
                   final style = InBookSnippetStyle(context, settingsState);

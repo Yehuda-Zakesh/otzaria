@@ -59,8 +59,6 @@ class FakePluginRegistryRepository extends Mock
   Future<void> savePlugin(InstalledPlugin plugin) async {}
   @override
   Future<void> detachDevelopmentPlugin(String pluginId) async {}
-  @override
-  Future<void> updatePinState(String id, bool pinned) async {}
 }
 
 class _RealHttpOverrides extends HttpOverrides {}
@@ -133,14 +131,9 @@ void main() {
         tempDir.path,
         preValidatedManifest: manifest,
         grantedPermissions: const {'reader.open': false},
-        allowOrderBeforeBuiltInsGranted: false,
       );
 
       expect(fakeRepo.recordedGrants, {'reader.open': false});
-      expect(
-        fakeRepo.savedPlugin!.allowOrderBeforeBuiltInsGranted,
-        isFalse,
-      );
     });
 
     test(

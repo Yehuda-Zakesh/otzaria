@@ -58,6 +58,17 @@ IDI_OTZPLUGIN_FILE_ICON ICON                    "resources\\otzplugin_file_icon.
 
 /////////////////////////////////////////////////////////////////////////////
 //
+// RCDATA
+//
+
+// פריימי פתיחת הספר של ה-splash (splash_window.cpp), רצועה לכל דלי DPI.
+IDR_SPLASH_BOOK_100     RCDATA                  "..\\..\\native\\splash\\splash_book_100.png"
+IDR_SPLASH_BOOK_150     RCDATA                  "..\\..\\native\\splash\\splash_book_150.png"
+IDR_SPLASH_BOOK_200     RCDATA                  "..\\..\\native\\splash\\splash_book_200.png"
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
 // Version
 //
 

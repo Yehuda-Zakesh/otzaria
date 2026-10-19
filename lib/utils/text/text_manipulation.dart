@@ -239,6 +239,13 @@ String removeNikudOnly(String s) {
   return String.fromCharCodes(units, 0, n);
 }
 
+/// מסיר את מה שהמנוע מסיר מהטקסט הרגיל: ניקוד וטעמים, בלי מקף, פסק, סוף פסוק ונ' הפוכה.
+String removeAttachedMarks(String s) => s.replaceAll(_attachedMarks, '');
+
+final RegExp _attachedMarks = RegExp(
+  r'[\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]',
+);
+
 /// מסיר ניקוד ו/או טעמים לפי שני הדגלים — הכניסה האחידה של כל המסלולים
 /// (תצוגה, העתקה, ייצוא). שניהם יחד = [removeVolwels], כדי לשמור על
 /// ההתנהגות המוכרת של "הסר הכול".

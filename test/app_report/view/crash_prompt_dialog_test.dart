@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_settings_screens/flutter_settings_screens.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -64,10 +66,11 @@ void main() {
   Future<void> pumpDialog(
     WidgetTester tester, {
     CrashSignature? sig = signature,
+    CrashCandidate? custom,
   }) async {
     service = FakeAppReportService();
     savedModes.clear();
-    final c = candidate(sig: sig);
+    final c = custom ?? candidate(sig: sig);
     await tester.pumpWidget(
       MaterialApp(
         navigatorKey: navigatorKey,
@@ -82,9 +85,10 @@ void main() {
                   saveMode: (mode) async => savedModes.add(mode),
                   createBloc: () => AppReportBloc(
                     trigger: AppReportTrigger.crashPrompt,
-                    initialType: AppReportType.crash,
+                    initialType: CrashReportDecision.reportTypeFor(c),
                     initialTitle: CrashReportDecision.titleFor(c),
                     signature: c.signature,
+                    details: c.details ?? '',
                     service: service,
                     collector: FakeAppReportCollector(),
                     redactor: AppReportRedactor(environment: const {}),
@@ -127,6 +131,114 @@ void main() {
     expect(find.byType(CrashPromptDialog), findsNothing);
     expect(find.text(ReportMessages.appReportSent(42)), findsOneWidget);
     expect(savedModes, isEmpty);
+  });
+
+  group('תקיעה', () {
+    const hangSignature = CrashSignature(
+      exceptionType: 'AppHang',
+      frames: ['otzaria.exe+0x1234'],
+    );
+    const hang = CrashCandidate.hang(
+      signature: hangSignature,
+      hangDuration: Duration(milliseconds: 7400),
+      details: 'main thread stack',
+    );
+
+    testSnack('נוסח תקיעה, ונשלח כבעיית ביצועים עם משך בכותרת', (
+      tester,
+    ) async {
+      await pumpDialog(tester, custom: hang);
+      expect(find.text(CrashPromptDialog.hangTitle), findsOneWidget);
+      // תקיעה בזמן ריצה: עכשיו, עם המשך שנמדד.
+      expect(find.textContaining('בהפעלה הקודמת'), findsNothing);
+      expect(
+        find.textContaining('התוכנה הפסיקה להגיב למשך 7 שניות.'),
+        findsOneWidget,
+      );
+      expect(find.text(CrashPromptDialog.title), findsNothing);
+      expect(
+        find.text('מה עשית לפני שהתוכנה נתקעה? (לא חובה)'),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('crash-prompt-description')),
+        'גללתי',
+      );
+      await tapKey(tester, 'crash-prompt-send');
+
+      final report = service.sent.single;
+      expect(report.trigger, AppReportTrigger.crashPrompt);
+      expect(report.type, AppReportType.performance);
+      expect(report.title, 'התוכנה נתקעה (7 שניות)');
+      expect(report.description, 'גללתי');
+      expect(report.diagnostics?['hangDetails'], 'main thread stack');
+      expect(report.signature, hangSignature);
+    });
+
+    testSnack('מחסנית ANR נראית בתצוגה המקדימה ונשלחת רק בהסכמה לאבחון', (
+      tester,
+    ) async {
+      await pumpDialog(tester, custom: hang);
+      await tapKey(tester, 'app-report-toggle-preview');
+      expect(find.textContaining('main thread stack'), findsOneWidget);
+      await tapKey(tester, 'app-report-include-diagnostics');
+      await tapKey(tester, 'app-report-include-error-log');
+      await tapKey(tester, 'crash-prompt-send');
+      final report = service.sent.single;
+      expect(report.description, isEmpty);
+      expect(report.diagnostics, isNull);
+      expect(report.errorLog, isNull);
+      expect(
+        report.toApiPayload().toString(),
+        isNot(contains('main thread stack')),
+      );
+    });
+
+    testSnack('ANR / תקיעה מההפעלה הקודמת: נוסח של הפעלה קודמת', (
+      tester,
+    ) async {
+      await pumpDialog(
+        tester,
+        custom: const CrashCandidate.hang(
+          signature: hangSignature,
+          details: 'Android ANR',
+          occurredInPreviousRun: true,
+        ),
+      );
+      expect(find.text(CrashPromptDialog.hangTitle), findsOneWidget);
+      expect(
+        find.textContaining('בהפעלה הקודמת התוכנה הפסיקה להגיב.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('למשך'), findsNothing);
+    });
+
+    testWidgets('הצעה אינה נפתחת מעל הצעה פתוחה', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(navigatorKey: navigatorKey, home: const SizedBox()),
+      );
+      final gate = Completer<void>();
+      var shows = 0;
+      Future<void> show(BuildContext _, CrashCandidate _) {
+        shows++;
+        return gate.future;
+      }
+
+      final first = showCrashPromptOnNavigator(hang, show: show);
+      expect(await showCrashPromptOnNavigator(hang, show: show), isFalse);
+      gate.complete();
+      expect(await first, isTrue);
+      expect(await showCrashPromptOnNavigator(hang, show: show), isTrue);
+      expect(shows, 2);
+    });
+
+    testSnack('אל תשלח: הודעת התקיעה', (tester) async {
+      await pumpDialog(tester, custom: hang);
+      await tapKey(tester, 'crash-prompt-dismiss');
+      expect(service.sent, isEmpty);
+      expect(find.text(ReportMessages.appReportHangDismissed), findsOneWidget);
+    });
   });
 
   testSnack('בלי חתימה — הכותרת הכללית', (tester) async {

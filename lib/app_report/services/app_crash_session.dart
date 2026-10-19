@@ -30,15 +30,30 @@ abstract class AppCrashSession {
     return candidate;
   }
 
+  /// מועמד לתקיעה שהשתחררה בהפעלה הנוכחית, לפי רשומת `App hang` האחרונה.
+  static Future<CrashCandidate?> detectRecoveredHang({
+    required Duration duration,
+    UncleanExitDetector? detector,
+  }) async {
+    if (!isSupported) return null;
+    return (detector ??
+            UncleanExitDetector(processStartedAt: processStartTime()))
+        .detectRecoveredHang(duration: duration);
+  }
+
   /// תחילת התהליך לפי ציר העלייה, ולא רגע הבדיקה: רשומות שהתהליך הנוכחי
   /// כתב לפני החשיפה (`Slow startup`) אינן ראיה לקריסה של ההפעלה הקודמת.
   @visibleForTesting
   static DateTime processStartTime({
     StartupTimeline? timeline,
     DateTime? now,
-  }) => (now ?? DateTime.now()).subtract(
-    Duration(milliseconds: (timeline ?? StartupTimeline.instance).elapsedMs),
-  );
+  }) {
+    final active = timeline ?? StartupTimeline.instance;
+    return active.startedAt ??
+        (now ?? DateTime.now()).subtract(
+          Duration(milliseconds: active.elapsedMs),
+        );
+  }
 
   /// מוחק את הנעילה ביציאה מסודרת. סינכרוני — מסלול הסגירה מסתיים ב-`exit(0)`.
   static void markCleanExitSync() {

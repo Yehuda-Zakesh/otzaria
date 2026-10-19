@@ -145,13 +145,6 @@ class LinkDao {
         .replaceFirst(sourceLineJoin, 'CROSS JOIN line sl');
   }
 
-  Future<Link?> selectLinkById(int id) async {
-    final db = await database;
-    final result = db.select(_queries['selectLinkById']!, [id]).toMapList();
-    if (result.isEmpty) return null;
-    return _mapToLink(result.first);
-  }
-
   Future<List<Map<String, dynamic>>> selectCommentatorsByBook(
     int bookId,
   ) async {
@@ -256,46 +249,5 @@ class LinkDao {
       connectionTypeId,
     ]);
     return db.lastInsertRowId;
-  }
-
-  Future<Link?> selectLinkByDetails(
-    int sourceBookId,
-    int targetBookId,
-    int sourceLineId,
-    int targetLineId,
-  ) async {
-    final db = await database;
-    final result = db
-        .select(
-          '''
-      SELECT id FROM link
-      WHERE sourceBookId = ? AND targetBookId = ? AND sourceLineId = ? AND targetLineId = ?
-    ''',
-          [sourceBookId, targetBookId, sourceLineId, targetLineId],
-        )
-        .toMapList();
-
-    if (result.isEmpty) return null;
-    final linkId = result.first['id'] as int;
-    return await selectLinkById(linkId);
-  }
-
-  Future<int> delete(int id) async {
-    final db = await database;
-    db.execute(_queries['delete']!, [id]);
-    return db.updatedRows;
-  }
-
-  Link _mapToLink(Map<String, dynamic> map) {
-    return Link(
-      id: map['id'] as int,
-      sourceBookId: map['sourceBookId'] as int,
-      targetBookId: map['targetBookId'] as int,
-      sourceLineId: map['sourceLineId'] as int,
-      targetLineId: map['targetLineId'] as int,
-      connectionType: ConnectionType.fromString(
-        map['connectionType'] as String,
-      ),
-    );
   }
 }

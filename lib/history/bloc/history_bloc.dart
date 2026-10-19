@@ -166,27 +166,26 @@ class HistoryBloc extends Bloc<HistoryEvent, HistoryState> {
 
   StreamSubscription<void>? _remoteChanges;
 
-  /// לוכד את הכרטיסיה הפעילה במיקומה הנוכחי.
-  ///
-  /// ⚠️ בלי לכידה בסגירה הספר שנקרא עכשיו אינו נרשם כלל: הלכידה שבפתיחתו
-  /// רצה לפני שה-bloc שלו נטען, ומחזירה null, ואין אחריה לכידה נוספת.
-  Future<void> _captureCurrentTab() async {
-    final tab = currentTab?.call();
+  /// מוסיף את רשומות [tab] לממתינים לשמירה.
+  Future<void> _capture(OpenedTab? tab) async {
     if (tab == null) return;
     for (final bookmark in await _bookmarksFromTab(tab)) {
       _pendingSnapshots[bookmark.historyKey] = bookmark;
     }
   }
 
-  /// שומר את כל ה-snapshots הממתינים לפני סגירת האפליקציה.
-  Future<void> _flushPendingSnapshots() async {
+  /// שומר את כל ה-snapshots הממתינים, כולל הכרטיסיה הפעילה במיקומה
+  /// הנוכחי, ומחזיר את ההיסטוריה שנשמרה — או null כשלא היה מה לשמור.
+  ///
+  /// ⚠️ בלי לכידה בסגירה הספר שנקרא עכשיו אינו נרשם כלל: הלכידה שבפתיחתו
+  /// רצה לפני שה-bloc שלו נטען, ומחזירה null, ואין אחריה לכידה נוספת.
+  Future<List<Bookmark>?> _flushPendingSnapshots() async {
     _debounce?.cancel();
-    await _captureCurrentTab();
-    if (_pendingSnapshots.isNotEmpty) {
-      final snapshots = _pendingSnapshots.values.toList();
-      _pendingSnapshots.clear();
-      await _updateAndSaveHistory(snapshots);
-    }
+    await _capture(currentTab?.call());
+    if (_pendingSnapshots.isEmpty) return null;
+    final snapshots = _pendingSnapshots.values.toList();
+    _pendingSnapshots.clear();
+    return _updateAndSaveHistory(snapshots);
   }
 
   @override
@@ -329,9 +328,7 @@ class HistoryBloc extends Bloc<HistoryEvent, HistoryState> {
     Emitter<HistoryState> emit,
   ) async {
     _debounce?.cancel();
-    for (final bookmark in await _bookmarksFromTab(event.tab)) {
-      _pendingSnapshots[bookmark.historyKey] = bookmark;
-    }
+    await _capture(event.tab);
     _debounce = Timer(const Duration(milliseconds: 1500), () {
       if (_pendingSnapshots.isNotEmpty) {
         add(BulkAddHistory(List.from(_pendingSnapshots.values)));
@@ -344,14 +341,8 @@ class HistoryBloc extends Bloc<HistoryEvent, HistoryState> {
     FlushHistory event,
     Emitter<HistoryState> emit,
   ) async {
-    _debounce?.cancel();
-    await _captureCurrentTab();
-    if (_pendingSnapshots.isNotEmpty) {
-      final snapshots = _pendingSnapshots.values.toList();
-      _pendingSnapshots.clear();
-      final updatedHistory = await _updateAndSaveHistory(snapshots);
-      emit(HistoryLoaded(updatedHistory));
-    }
+    final updatedHistory = await _flushPendingSnapshots();
+    if (updatedHistory != null) emit(HistoryLoaded(updatedHistory));
   }
 
   Future<void> _onLoadHistory(

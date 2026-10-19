@@ -705,8 +705,7 @@ void main() {
       ]);
     });
 
-    test('פולט בדיוק את המפתחות של הכותב הקנוני LinkData.toJson', () {
-      // המקור: lib/migration/generator/link_processor.dart
+    test('פולט בדיוק את המפתחות של פורמט links.json', () {
       const canonicalKeys = {
         'heRef_2',
         'line_index_1',

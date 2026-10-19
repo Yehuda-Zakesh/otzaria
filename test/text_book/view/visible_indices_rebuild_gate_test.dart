@@ -452,7 +452,6 @@ TextBookLoaded _loaded() => TextBookLoaded(
   fontSize: 22,
   showLeftPane: true,
   showSplitView: true,
-  showTzuratHadafView: true,
   showPageShapeView: true,
   activeCommentators: const ['רש"י'],
   commentatorGroups: const [],

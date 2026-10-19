@@ -200,193 +200,214 @@ class _LinkHoverPreviewContentState extends State<LinkHoverPreviewContent> {
         final colorScheme = Theme.of(context).colorScheme;
         final profile = _profileFor(settingsState);
         final fontSize = previewFontSize(settingsState, widget.maxFontSize);
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            FutureBuilder<String>(
-              future: link.displayReference,
-              builder: (context, snapshot) {
-                var title = snapshot.data ?? link.fallbackDisplayReference;
-                if (profile.replaceHolyNames) {
-                  title = utils.replaceHolyNames(
-                    title,
-                    style: profile.holyNameStyle,
-                  );
-                }
-                final titleText = Text(
-                  title,
-                  maxLines: compact ? 1 : null,
-                  overflow: compact ? TextOverflow.ellipsis : null,
-                  style: TextStyle(
-                    fontSize: compact ? 11 : fontSize - 2,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: AppFonts.renderFontFamily(
-                      settingsState.commentatorsFontFamily,
-                    ),
+        final title = FutureBuilder<String>(
+          future: link.displayReference,
+          builder: (context, snapshot) {
+            var title = snapshot.data ?? link.fallbackDisplayReference;
+            if (profile.replaceHolyNames) {
+              title = utils.replaceHolyNames(
+                title,
+                style: profile.holyNameStyle,
+              );
+            }
+            final titleText = Text(
+              title,
+              maxLines: compact ? 1 : null,
+              overflow: compact ? TextOverflow.ellipsis : null,
+              style: TextStyle(
+                fontSize: compact ? 11 : fontSize - 2,
+                fontWeight: FontWeight.bold,
+                fontFamily: AppFonts.renderFontFamily(
+                  settingsState.commentatorsFontFamily,
+                ),
+                color: colorScheme.primary,
+              ),
+            );
+            if (onOpen == null) return titleText;
+            return InkWell(
+              onTap: onOpen,
+              child: Row(
+                children: [
+                  Expanded(child: titleText),
+                  const SizedBox(width: 6),
+                  Icon(
+                    FluentIcons.open_24_regular,
+                    size: compact ? 13 : 16,
                     color: colorScheme.primary,
                   ),
-                );
-                if (onOpen == null) return titleText;
-                return InkWell(
-                  onTap: onOpen,
-                  child: Row(
-                    children: [
-                      Expanded(child: titleText),
-                      const SizedBox(width: 6),
-                      Icon(
-                        FluentIcons.open_24_regular,
-                        size: compact ? 13 : 16,
-                        color: colorScheme.primary,
-                      ),
-                    ],
+                ],
+              ),
+            );
+          },
+        );
+        return LayoutBuilder(
+          builder: (context, constraints) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (constraints.hasBoundedHeight && maxContentLines == null)
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: constraints.maxHeight / 2,
                   ),
-                );
-              },
-            ),
-            Divider(height: compact ? 8 : 16),
-            FutureBuilder<String>(
-              future: link.content,
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Text(
-                    'שגיאה בטעינת התוכן',
-                    style: TextStyle(
-                      color: colorScheme.error,
-                      fontSize: fontSize - 2,
-                    ),
-                  );
-                }
-                if (!snapshot.hasData) {
-                  final placeholderHeight = maxContentLines != null
-                      ? fontSize * settingsState.lineHeight * maxContentLines!
-                      : 72.0;
-                  return SizedBox(
-                    height: placeholderHeight,
-                    child: const Center(
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                  );
-                }
-
-                // ה-HTML הגולמי עובר ל-SmartTextWidget כדי שגוף ההערות המוטמעות
-                // יוסר ומעברי השורה יישמרו; הטקסט הנקי משמש רק לבדיקה ולמדידה.
-                final rawContent = snapshot.data!;
-                final cleanContent =
-                    TextRendererService.stripHtml(
-                          stripInlineNotes(rawContent),
-                        )
-                        .replaceAll('&nbsp;', ' ')
-                        .replaceAll(RegExp(r'[^\S\r\n]+'), ' ')
-                        .trim();
-                if (cleanContent.isEmpty) {
-                  return Text(
-                    'אין תוכן זמין',
-                    style: TextStyle(
-                      color: colorScheme.onSurfaceVariant,
-                      fontSize: fontSize - 2,
-                    ),
-                  );
-                }
-
-                final content = SmartTextWidget(
-                  text: rawContent,
-                  settings: RenderSettings.fromProfile(
-                    profile,
-                    fontSize: fontSize,
-                    fontFamily: settingsState.commentatorsFontFamily,
-                    fontWeight: settingsState.commentatorsFontBold
-                        ? FontWeight.bold
-                        : null,
-                    lineHeight: settingsState.lineHeight,
-                    justifyText: true,
-                  ),
-                );
-                if (maxContentLines == null) return content;
-                if (_expanded) {
-                  return ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: _expandedHeight,
-                    ),
-                    child: SingleChildScrollView(child: content),
-                  );
-                }
-                final lineHeight = settingsState.lineHeight;
-                return LayoutBuilder(
-                  builder: (context, constraints) {
-                    // מדידה על הטקסט כפי שירונדר (בלי ניקוד אם צריך) כדי
-                    // להחליט אם התוכן נגזר ולהציג "…".
-                    final measureText = applyTextDisplayProfile(
-                      cleanContent,
-                      profile,
-                    );
-                    // התוכן יורש את סגנון ברירת המחדל (למשל letterSpacing)
-                    // — גם המדידה, אחרת היא שוברת שורות אחרת ממנו.
-                    final measureStyle = DefaultTextStyle.of(context).style
-                        .merge(
-                          TextStyle(
-                            fontSize: fontSize,
-                            fontFamily: AppFonts.renderFontFamily(
-                              settingsState.commentatorsFontFamily,
-                            ),
-                            height: lineHeight,
-                            fontWeight: settingsState.commentatorsFontBold
-                                ? FontWeight.bold
-                                : null,
-                          ),
-                        );
-                    final measureSpan = TextSpan(
-                      text: measureText,
-                      style: measureStyle,
-                    );
-                    final painter = TextPainter(
-                      text: measureSpan,
-                      strutStyle: exactLineHeightStrut(
-                        measureStyle,
-                        measureSpan,
-                      ),
-                      textDirection: TextDirection.rtl,
-                      textScaler: MediaQuery.textScalerOf(context),
-                      maxLines: maxContentLines,
-                    )..layout(maxWidth: constraints.maxWidth);
-                    // הפריסה מעגלת כל שורה לפיקסל שלם, ולכן הגובה והחיתוך
-                    // נמדדים בשורות הפרוסות ולא ב-fontSize×height.
-                    final truncated = painter.didExceedMaxLines;
-                    final maxHeight =
-                        painter.preferredLineHeight * maxContentLines!;
-                    painter.dispose();
-
-                    final clipped = ClipRect(
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(maxHeight: maxHeight),
-                        child: content,
-                      ),
-                    );
-                    if (!truncated) return clipped;
-                    return Stack(
-                      children: [
-                        clipped,
-                        Positioned(
-                          bottom: 0,
-                          left: 0,
-                          child: _ExpandContentButton(
-                            fontSize: fontSize,
-                            fontFamily: settingsState.commentatorsFontFamily,
-                            lineHeight: lineHeight,
-                            onPressed: () => _expand(context),
+                  child: SingleChildScrollView(primary: false, child: title),
+                )
+              else
+                title,
+              Divider(height: compact ? 8 : 16),
+              Flexible(
+                child: FutureBuilder<String>(
+                  future: link.content,
+                  builder: (context, snapshot) {
+                    if (snapshot.hasError) {
+                      return Text(
+                        'שגיאה בטעינת התוכן',
+                        style: TextStyle(
+                          color: colorScheme.error,
+                          fontSize: fontSize - 2,
+                        ),
+                      );
+                    }
+                    if (!snapshot.hasData) {
+                      final placeholderHeight = maxContentLines != null
+                          ? fontSize *
+                                settingsState.lineHeight *
+                                maxContentLines!
+                          : 72.0;
+                      return SizedBox(
+                        height: placeholderHeight,
+                        child: const Center(
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           ),
                         ),
-                      ],
+                      );
+                    }
+
+                    // ה-HTML הגולמי עובר ל-SmartTextWidget כדי שגוף ההערות המוטמעות
+                    // יוסר ומעברי השורה יישמרו; הטקסט הנקי משמש רק לבדיקה ולמדידה.
+                    final rawContent = snapshot.data!;
+                    final cleanContent =
+                        TextRendererService.stripHtml(
+                              stripInlineNotes(rawContent),
+                            )
+                            .replaceAll('&nbsp;', ' ')
+                            .replaceAll(RegExp(r'[^\S\r\n]+'), ' ')
+                            .trim();
+                    if (cleanContent.isEmpty) {
+                      return Text(
+                        'אין תוכן זמין',
+                        style: TextStyle(
+                          color: colorScheme.onSurfaceVariant,
+                          fontSize: fontSize - 2,
+                        ),
+                      );
+                    }
+
+                    final content = SmartTextWidget(
+                      text: rawContent,
+                      settings: RenderSettings.fromProfile(
+                        profile,
+                        fontSize: fontSize,
+                        fontFamily: settingsState.commentatorsFontFamily,
+                        fontWeight: settingsState.commentatorsFontBold
+                            ? FontWeight.bold
+                            : null,
+                        lineHeight: settingsState.lineHeight,
+                        justifyText: true,
+                      ),
+                    );
+                    if (maxContentLines == null) {
+                      return SingleChildScrollView(
+                        primary: false,
+                        child: content,
+                      );
+                    }
+                    if (_expanded) {
+                      return ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: _expandedHeight,
+                        ),
+                        child: SingleChildScrollView(child: content),
+                      );
+                    }
+                    final lineHeight = settingsState.lineHeight;
+                    return LayoutBuilder(
+                      builder: (context, constraints) {
+                        // מדידה על הטקסט כפי שירונדר (בלי ניקוד אם צריך) כדי
+                        // להחליט אם התוכן נגזר ולהציג "…".
+                        final measureText = applyTextDisplayProfile(
+                          cleanContent,
+                          profile,
+                        );
+                        // התוכן יורש את סגנון ברירת המחדל (למשל letterSpacing)
+                        // — גם המדידה, אחרת היא שוברת שורות אחרת ממנו.
+                        final measureStyle = DefaultTextStyle.of(context).style
+                            .merge(
+                              TextStyle(
+                                fontSize: fontSize,
+                                fontFamily: AppFonts.renderFontFamily(
+                                  settingsState.commentatorsFontFamily,
+                                ),
+                                height: lineHeight,
+                                fontWeight: settingsState.commentatorsFontBold
+                                    ? FontWeight.bold
+                                    : null,
+                              ),
+                            );
+                        final measureSpan = TextSpan(
+                          text: measureText,
+                          style: measureStyle,
+                        );
+                        final painter = TextPainter(
+                          text: measureSpan,
+                          strutStyle: exactLineHeightStrut(
+                            measureStyle,
+                            measureSpan,
+                          ),
+                          textDirection: TextDirection.rtl,
+                          textScaler: MediaQuery.textScalerOf(context),
+                          maxLines: maxContentLines,
+                        )..layout(maxWidth: constraints.maxWidth);
+                        // הפריסה מעגלת כל שורה לפיקסל שלם, ולכן הגובה והחיתוך
+                        // נמדדים בשורות הפרוסות ולא ב-fontSize×height.
+                        final truncated = painter.didExceedMaxLines;
+                        final maxHeight =
+                            painter.preferredLineHeight * maxContentLines!;
+                        painter.dispose();
+
+                        final clipped = ClipRect(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(maxHeight: maxHeight),
+                            child: content,
+                          ),
+                        );
+                        if (!truncated) return clipped;
+                        return Stack(
+                          children: [
+                            clipped,
+                            Positioned(
+                              bottom: 0,
+                              left: 0,
+                              child: _ExpandContentButton(
+                                fontSize: fontSize,
+                                fontFamily:
+                                    settingsState.commentatorsFontFamily,
+                                lineHeight: lineHeight,
+                                onPressed: () => _expand(context),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     );
                   },
-                );
-              },
-            ),
-          ],
+                ),
+              ),
+            ],
+          ),
         );
       },
     );

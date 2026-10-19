@@ -59,11 +59,8 @@ class ToolCatalogEntry {
     );
   }
 
-  /// קבוצת המיון של הכלי.
-  int get sortGroupPriority {
-    if (plugin == null) return 1;
-    return plugin!.allowsOrderBeforeBuiltIns ? 0 : 2;
-  }
+  /// קבוצת המיון: כלים מובנים תמיד לפני תוספים.
+  int get sortGroupPriority => isPlugin ? 1 : 0;
 }
 
 /// ממיין רשומות לפי קבוצה וסדר תוך שמירת סדרן היחסי של רשומות זהות.

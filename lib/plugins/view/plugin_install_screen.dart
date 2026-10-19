@@ -22,21 +22,13 @@ class PluginInstallScreen extends StatefulWidget {
   /// גרסה מותקנת קודמת — null אם זו התקנה ראשונה.
   final String? previousVersion;
 
-  /// בחירה קודמת של המשתמש לגבי הקדמת התוסף לפני כלים מובנים.
-  /// `null` = אין החלטה קודמת (התקנה ראשונה או תוסף ישן לפני הפיצ'ר).
-  final bool? previousAllowOrderBeforeBuiltInsGranted;
-
   /// החלטות ההרשאה השמורות של הגרסה המותקנת. בעדכון מוצגות רק הרשאות
   /// שאינן במפה — אלה שהמשתמש טרם החליט לגביהן.
   final Map<String, bool> previousGrantedPermissions;
   final PluginInstallReportContext? reportContext;
 
   /// כאשר מסופק, נקרא במקום שליחת ConfirmPluginInstall לבלוק (למשל בתוסף פיתוח).
-  final void Function(
-    Map<String, bool> grantedPermissions,
-    bool allowOrderBeforeBuiltInsGranted,
-  )?
-  onConfirm;
+  final void Function(Map<String, bool> grantedPermissions)? onConfirm;
 
   /// כאשר מסופק, נקרא במקום שליחת CancelPluginInstall לבלוק.
   final VoidCallback? onCancel;
@@ -49,7 +41,6 @@ class PluginInstallScreen extends StatefulWidget {
     required this.manifest,
     required this.tempDirPath,
     this.previousVersion,
-    this.previousAllowOrderBeforeBuiltInsGranted,
     this.previousGrantedPermissions = const {},
     this.reportContext,
     this.onConfirm,
@@ -70,7 +61,6 @@ class _PluginInstallScreenState extends State<PluginInstallScreen> {
 
   /// מצב toggle לכל הרשאה, לפי ברירת המחדל המשותפת למסכי ההרשאות.
   late Map<String, bool> _permissionToggles;
-  late bool _allowOrderBeforeBuiltInsGranted;
 
   List<String> get _orderedPermissions => _decision.orderedPermissions;
   List<String> get _newPermissions => _decision.newPermissions;
@@ -83,16 +73,11 @@ class _PluginInstallScreenState extends State<PluginInstallScreen> {
       manifest: widget.manifest,
       previousVersion: widget.previousVersion,
       previousGrantedPermissions: widget.previousGrantedPermissions,
-      previousAllowOrderBeforeBuiltInsGranted:
-          widget.previousAllowOrderBeforeBuiltInsGranted,
       isOfflineMode: widget.isOfflineMode,
       // המסך נבנה רק אחרי שהוחלט לפתוח דיאלוג; ההכרעה כאן היא מה להציג.
       isUserInitiated: true,
     );
     _permissionToggles = Map<String, bool>.of(_decision.permissionToggles);
-    _allowOrderBeforeBuiltInsGranted =
-        widget.previousAllowOrderBeforeBuiltInsGranted ??
-        widget.manifest.allowOrderBeforeBuiltIns;
   }
 
   bool _isTemporarilyUnavailable(String permission) =>
@@ -115,10 +100,6 @@ class _PluginInstallScreenState extends State<PluginInstallScreen> {
       widget.manifest.startup?.keepAlive == true &&
       _showsPermission(pluginBackgroundKeepAlivePermission);
 
-  /// שאלת המיקום נשאלת רק כשאין עליה החלטה קודמת.
-  bool get _requestsOrderBeforeBuiltIns =>
-      _decision.requestsOrderBeforeBuiltIns;
-
   /// עדכון שאינו דורש שום החלטה — מוצג כאישור עדכון בלבד.
   /// במסלול הרגיל המארח כלל אינו פותח את המסך במצב הזה (issue #1410);
   /// נשאר עבור עדכון תוסף פיתוח, שאין לו החלטות הרשאה שמורות.
@@ -126,17 +107,13 @@ class _PluginInstallScreenState extends State<PluginInstallScreen> {
 
   void _onInstall() {
     if (widget.onConfirm != null) {
-      widget.onConfirm!(
-        Map.unmodifiable(_permissionToggles),
-        _allowOrderBeforeBuiltInsGranted,
-      );
+      widget.onConfirm!(Map.unmodifiable(_permissionToggles));
     } else {
       context.read<PluginSystemBloc>().add(
         ConfirmPluginInstall(
           widget.tempDirPath,
           widget.manifest,
           Map.unmodifiable(_permissionToggles),
-          _allowOrderBeforeBuiltInsGranted,
           reportContext: widget.reportContext,
           previousVersion: widget.previousVersion,
         ),
@@ -258,34 +235,6 @@ class _PluginInstallScreenState extends State<PluginInstallScreen> {
 
           if (_requestsKeepAlive) ...[
             _KeepAliveBanner(colorScheme: colorScheme),
-            const SizedBox(height: 16),
-          ],
-
-          if (_requestsOrderBeforeBuiltIns) ...[
-            SettingsCard(
-              title: 'מיקום במסך כלים',
-              subtitle: 'התוסף מבקש להופיע לפני הכלים המובנים במסך "כלים".',
-              children: [
-                SettingsActionTile.switchTile(
-                  icon: _allowOrderBeforeBuiltInsGranted
-                      ? FluentIcons.arrow_sort_up_24_regular
-                      : FluentIcons.arrow_sort_24_regular,
-                  iconColor: _allowOrderBeforeBuiltInsGranted
-                      ? colorScheme.primary
-                      : colorScheme.onSurfaceVariant,
-                  title: 'אפשר לתוסף להופיע לפני הכלים המובנים',
-                  subtitle:
-                      'אם תכבה את האפשרות, התוסף עדיין יותקן כרגיל, אבל '
-                      'יופיע רק אחרי הכלים המובנים גם אם המניפסט שלו ביקש אחרת.',
-                  value: _allowOrderBeforeBuiltInsGranted,
-                  onChanged: (value) {
-                    setState(() {
-                      _allowOrderBeforeBuiltInsGranted = value;
-                    });
-                  },
-                ),
-              ],
-            ),
             const SizedBox(height: 16),
           ],
 

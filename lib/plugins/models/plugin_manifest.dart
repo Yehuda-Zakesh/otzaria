@@ -39,12 +39,6 @@ class PluginManifest {
   final List<String> networkAllowlist;
   final String toolTabTitle;
   final int toolTabOrder;
-
-  /// האם התוסף רשאי להופיע לפני הכלים המובנים במסך "כלים".
-  ///
-  /// ברירת המחדל היא `false`, כך שגם אם התוסף מגדיר `order` נמוך, הוא עדיין
-  /// ימוין אחרי הכלים המובנים. רק תוסף שמצהיר במפורש על יכולת זו יקדים אותם.
-  final bool allowOrderBeforeBuiltIns;
   final bool defaultPinned;
 
   /// שם אייקון 24px עבור לשונית הכלים, למשל `'book_24_regular'`.
@@ -87,7 +81,6 @@ class PluginManifest {
     required this.networkAllowlist,
     required this.toolTabTitle,
     required this.toolTabOrder,
-    this.allowOrderBeforeBuiltIns = false,
     required this.defaultPinned,
     this.toolTabIconName,
     required this.publishedDataTypes,
@@ -136,8 +129,6 @@ class PluginManifest {
           [],
       toolTabTitle: toolTab['title'] as String? ?? json['name'] as String,
       toolTabOrder: toolTab['order'] as int? ?? 900,
-      allowOrderBeforeBuiltIns:
-          toolTab['allowOrderBeforeBuiltIns'] as bool? ?? false,
       defaultPinned: toolTab['defaultPinned'] as bool? ?? true,
       toolTabIconName: toolTab['iconName'] as String?,
       publishedDataTypes:
@@ -182,7 +173,6 @@ class PluginManifest {
         'toolTab': {
           'title': toolTabTitle,
           'order': toolTabOrder,
-          'allowOrderBeforeBuiltIns': allowOrderBeforeBuiltIns,
           'defaultPinned': defaultPinned,
           if (toolTabIconName != null) 'iconName': toolTabIconName,
         },

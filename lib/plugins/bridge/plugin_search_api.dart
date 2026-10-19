@@ -7,6 +7,8 @@ import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/search/search_query_builder.dart';
 import 'package:otzaria/search/utils/facet_helper.dart';
 import 'package:otzaria/services/commentary_service.dart';
+import 'package:otzaria/utils/text/text_manipulation.dart'
+    show removeAttachedMarks;
 import 'package:otzaria_search_engine/otzaria_search_engine.dart' as engine;
 
 /// תרגום פרמטרי `search.query` של ה-Plugin SDK לחוזה [SearchRepository],
@@ -309,11 +311,13 @@ class PluginSearchApi {
   /// `filePath` של האינדקס — הוא שמאפשר להחזיר `id`/`source`, מה ש-
   /// `search.fullText` הישן לא ידע לעשות.
   /// [textRestricted] — ספר עם הגבלת מו"ל: הטקסט מושמט והשורה מסומנת.
+  /// [vocalizedSearch] — חיפוש מנוקד: הטקסט נמסר עם הניקוד, כמו שהמנוע מחזיר.
   static Map<String, dynamic> resultToJson(
     engine.SearchResult result,
     Book? book, {
     Map<String, Book> booksByPath = const {},
     bool textRestricted = false,
+    bool vocalizedSearch = false,
   }) {
     // אינדקס שאינו מסונכרן ממפה את מפתח המסמך לספר אחר; עדיף להחזיר לתוסף
     // זהות ריקה מאשר לייחס לתוצאה את ה-id של ספר זר.
@@ -334,7 +338,11 @@ class PluginSearchApi {
       if (resolved != null)
         'categoryPath': FacetHelper.resolveCategoryPath(resolved),
       'reference': result.reference,
-      'text': textRestricted ? '' : result.text,
+      'text': textRestricted
+          ? ''
+          : vocalizedSearch
+          ? result.text
+          : removeAttachedMarks(result.text),
       if (textRestricted) 'error': 'forbidden',
       'textStatus': result.textStatus.name,
       'continuesToNextLine': result.continuesToNextLine,

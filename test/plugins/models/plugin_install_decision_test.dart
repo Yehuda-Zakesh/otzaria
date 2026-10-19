@@ -5,47 +5,38 @@ import 'package:otzaria/plugins/models/plugin_install_decision.dart';
 import 'package:otzaria/plugins/models/plugin_manifest.dart';
 import 'package:otzaria/plugins/models/plugin_valid_permissions.dart';
 
-PluginManifest _manifest({
-  List<String> permissions = const [],
-  bool allowOrderBeforeBuiltIns = false,
-}) => PluginManifest(
-  schemaVersion: 1,
-  id: 'test.plugin',
-  name: 'תוסף בדיקה',
-  version: '2.0.0',
-  description: 'תיאור תוסף',
-  author: 'בודק',
-  homepage: 'https://test.com',
-  entrypoint: 'index.html',
-  minAppVersion: '1.0.0',
-  sdkVersion: '1.0.0',
-  permissions: permissions,
-  networkEnabled: false,
-  networkAllowlist: const [],
-  toolTabTitle: 'Tab',
-  toolTabOrder: 0,
-  allowOrderBeforeBuiltIns: allowOrderBeforeBuiltIns,
-  defaultPinned: true,
-  publishedDataTypes: const [],
-);
+PluginManifest _manifest({List<String> permissions = const []}) =>
+    PluginManifest(
+      schemaVersion: 1,
+      id: 'test.plugin',
+      name: 'תוסף בדיקה',
+      version: '2.0.0',
+      description: 'תיאור תוסף',
+      author: 'בודק',
+      homepage: 'https://test.com',
+      entrypoint: 'index.html',
+      minAppVersion: '1.0.0',
+      sdkVersion: '1.0.0',
+      permissions: permissions,
+      networkEnabled: false,
+      networkAllowlist: const [],
+      toolTabTitle: 'Tab',
+      toolTabOrder: 0,
+      defaultPinned: true,
+      publishedDataTypes: const [],
+    );
 
 PluginInstallDecision _decide({
   List<String> permissions = const [],
   String? previousVersion = '1.0.0',
   Map<String, bool> previousGranted = const {},
-  bool? previousAllowOrder,
-  bool allowOrderBeforeBuiltIns = false,
   bool isOfflineMode = false,
   // הבדיקות כאן עוסקות בהכרעת ההרשאות; מי יזם את ההתקנה נבדק בקובץ נפרד.
   bool isUserInitiated = true,
 }) => resolvePluginInstallDecision(
-  manifest: _manifest(
-    permissions: permissions,
-    allowOrderBeforeBuiltIns: allowOrderBeforeBuiltIns,
-  ),
+  manifest: _manifest(permissions: permissions),
   previousVersion: previousVersion,
   previousGrantedPermissions: previousGranted,
-  previousAllowOrderBeforeBuiltInsGranted: previousAllowOrder,
   isOfflineMode: isOfflineMode,
   isUserInitiated: isUserInitiated,
 );
@@ -102,13 +93,6 @@ void main() {
         decision.temporarilyUnavailablePermissions,
         contains(pluginNetworkAccessPermission),
       );
-      expect(decision.requiresUserDecision, isTrue);
-    });
-
-    test('שאלת ההקדמה שטרם נענתה — שואלים', () {
-      final decision = _decide(allowOrderBeforeBuiltIns: true);
-
-      expect(decision.requestsOrderBeforeBuiltIns, isTrue);
       expect(decision.requiresUserDecision, isTrue);
     });
 

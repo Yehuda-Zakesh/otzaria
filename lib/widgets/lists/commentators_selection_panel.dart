@@ -404,7 +404,7 @@ class _CommentatorsSelectionPanelState
             // Expanded ולא Flexible: חצי-חצי קבוע, כדי שהקו המפריד יישאר
             // במרכז ולא ינוע לפי רוחב התוכן של כל ציר.
             Expanded(
-              child: _buildChipGroup(
+              child: compactFilterChips(
                 key: commentatorEraChipsGroupKey,
                 items: _eraChipItems(),
                 selected: _selectedTopics,
@@ -426,7 +426,7 @@ class _CommentatorsSelectionPanelState
                 endIndent: AppTokens.spaceXS,
               ),
               Expanded(
-                child: _buildChipGroup(
+                child: compactFilterChips(
                   key: commentatorTypeChipsGroupKey,
                   items: types,
                   selected: widget.selectedTypeChips.toList(),
@@ -437,47 +437,6 @@ class _CommentatorsSelectionPanelState
               ),
             ],
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildChipGroup({
-    required Key key,
-    required List<String> items,
-    required List<String> selected,
-    required String Function(String item) labelBuilder,
-    required ValueChanged<List<String>> onSelectionChanged,
-  }) {
-    return KeyedSubtree(
-      key: key,
-      child: FilterChipsSelector<String>(
-        items: items,
-        selectedItems: selected,
-        labelBuilder: labelBuilder,
-        wrapAlignment: WrapAlignment.center,
-        wrapSpacing: AppTokens.spaceXS,
-        runSpacing: AppTokens.spaceXS,
-        padding: const EdgeInsets.symmetric(vertical: AppTokens.spaceXS),
-        onSelectionChanged: onSelectionChanged,
-        chipBuilder: (context, item, isSelected) => Chip(
-          label: Text(labelBuilder(item)),
-          backgroundColor: isSelected
-              ? Theme.of(context).colorScheme.secondary
-              : null,
-          labelStyle: TextStyle(
-            color: isSelected
-                ? Theme.of(context).colorScheme.onSecondary
-                : null,
-            fontSize: 10,
-          ),
-          labelPadding: EdgeInsets.zero,
-          padding: const EdgeInsets.symmetric(
-            horizontal: 6,
-            vertical: 2,
-          ),
-          visualDensity: VisualDensity.compact,
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
       ),
     );

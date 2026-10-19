@@ -36,7 +36,6 @@ InstalledPlugin _plugin(String id) => InstalledPlugin(
     networkAllowlist: const [],
     toolTabTitle: id,
     toolTabOrder: 900,
-    allowOrderBeforeBuiltIns: false,
     defaultPinned: false,
     publishedDataTypes: const [],
   ),

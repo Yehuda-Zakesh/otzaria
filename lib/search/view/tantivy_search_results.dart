@@ -22,6 +22,7 @@ import 'package:otzaria/search/utils/cross_line_result.dart';
 import 'package:otzaria/search/utils/result_text_status.dart';
 import 'package:otzaria/search/utils/index_freshness_warner.dart';
 import 'package:otzaria/search/models/external_search_status.dart';
+import 'package:otzaria/search/utils/search_result_book_display.dart';
 import 'package:otzaria/search/utils/search_result_opener.dart';
 import 'package:otzaria/search/utils/snippet_builder.dart';
 import 'package:otzaria/search/view/external_search_results_section.dart';
@@ -69,6 +70,8 @@ class _TantivySearchResultsState extends State<TantivySearchResults> {
   static const double _loadMoreThreshold = 200;
   final ScrollController _scrollController = ScrollController();
   final Map<String, List<InlineSpan>> _snippetCache = {};
+  final Map<String, SearchResultBookDisplay> _bookDisplays = {};
+  final Set<String> _bookDisplayLoads = {};
   bool _isAutoLoadInFlight = false;
 
   /// חתימת החיפוש האחרון (שאילתה + קטגוריות) שעבורו כבר גללנו לראש הרשימה.
@@ -89,6 +92,45 @@ class _TantivySearchResultsState extends State<TantivySearchResults> {
 
   /// מפתחות לכרטיסי התוצאות — לגלילת התוצאה שנבחרה בחיצים אל תחום הנראה.
   final Map<int, GlobalKey> _resultCardKeys = {};
+
+  /// הגדרות התצוגה של ספר התוצאה; עד שנטענו — הכלליות.
+  SearchResultBookDisplay _bookDisplayFor(
+    SearchResult result, {
+    required bool perBookSettingsEnabled,
+  }) {
+    final key = '$perBookSettingsEnabled|${result.filePath}';
+    final display = _bookDisplays[key];
+    if (display != null) return display;
+    if (_bookDisplayLoads.add(key)) {
+      unawaited(_loadBookDisplay(key, result, perBookSettingsEnabled));
+    }
+    return SearchResultBookDisplay.general;
+  }
+
+  Future<void> _loadBookDisplay(
+    String key,
+    SearchResult result,
+    bool perBookSettingsEnabled,
+  ) async {
+    SearchResultBookDisplay display;
+    try {
+      final book = (await widget.tab.searchBloc.resolveBookForIndexedPath(
+        result.filePath,
+        indexedTitle: result.title,
+      )).book;
+      display = book == null
+          ? SearchResultBookDisplay.general
+          : await SearchResultBookDisplay.load(
+              book,
+              perBookSettingsEnabled: perBookSettingsEnabled,
+            );
+    } catch (error) {
+      debugPrint('Search result display settings: $error');
+      display = SearchResultBookDisplay.general;
+    }
+    if (!mounted) return;
+    setState(() => _bookDisplays[key] = display);
+  }
 
   Widget _buildInformativeEmptyState({
     required IconData icon,
@@ -885,16 +927,26 @@ class _TantivySearchResultsState extends State<TantivySearchResults> {
               final previewEnabled =
                   widget.showPreviewPane && settingsState.searchShowPreview;
               String titleText = result.reference;
-              String rawHtml = result.text;
-              // Debug info removed for production
               if (settingsState.replaceHolyNames) {
                 titleText = utils.replaceHolyNames(
                   titleText,
                   style: settingsState.holyNameStyle,
                 );
+              }
+              // ניקוד, טעמים ושמות קודש כמו בספר; הסרת פיסוק אינה חלה על ה-HTML של המנוע.
+              final profile = _bookDisplayFor(
+                result,
+                perBookSettingsEnabled: settingsState.enablePerBookSettings,
+              ).profile(settingsState.textDisplayPolicy);
+              var rawHtml = utils.removeMarks(
+                result.text,
+                nikud: profile.removeNikud,
+                teamim: profile.removeTeamim,
+              );
+              if (profile.replaceHolyNames) {
                 rawHtml = utils.replaceHolyNames(
                   rawHtml,
-                  style: settingsState.holyNameStyle,
+                  style: profile.holyNameStyle,
                 );
               }
 

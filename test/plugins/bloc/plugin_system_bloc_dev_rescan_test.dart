@@ -79,7 +79,6 @@ class _RecordingDevLoader implements PluginDevLoaderService {
     String directoryPath, {
     PluginManifest? preValidatedManifest,
     Map<String, bool>? grantedPermissions,
-    bool? allowOrderBeforeBuiltInsGranted,
   }) async {
     loaded.add(directoryPath);
   }

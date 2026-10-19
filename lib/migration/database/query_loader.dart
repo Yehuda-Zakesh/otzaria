@@ -26,7 +26,6 @@ class QueryLoader {
     if (_initialized) return;
 
     final queryFiles = [
-      'AcronymQueries.sq',
       'AuthorQueries.sq',
       'BookQueries.sq',
       'CategoryQueries.sq',

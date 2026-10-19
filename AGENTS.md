@@ -238,9 +238,13 @@ is not cosmetic; marking it trusted is.
 
 When Dart-side marks show nothing, use the native stall detector in
 `windows/runner/startup_watchdog.cpp`. It suspends the main thread, unwinds it without dbghelp, and
-appends `=== Startup stall` with module+RVA frames to `errors.txt`. It stops itself at reveal and
+appends `=== Startup heartbeat delay` with module+RVA frames to `errors.txt`. It stops itself at reveal and
 is silent on a healthy launch. That is how #1192 was found after three rounds of Dart instrumentation
 missed it.
+
+After reveal, `windows/runner/hang_monitor.cpp` polls `IsHungAppWindow` once a second (no WM_TIMER,
+which floods starve) and writes `=== App hang` / `=== App hang recovered`; Dart offers a report
+under the crash-report setting (`lib/app_report/services/app_hang_report.dart`).
 
 ## Developer diagnostics (measuring the real app)
 

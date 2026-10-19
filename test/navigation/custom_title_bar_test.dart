@@ -38,6 +38,8 @@ import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
+import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
+import 'package:otzaria/workspaces/bloc/workspace_state.dart';
 import '../helpers/memory_settings_cache.dart';
 
 class _NewTabRegistryRepo extends Fake implements PluginRegistryRepository {
@@ -94,6 +96,62 @@ void main() {
       final moves = tabsBloc.addedEvents.whereType<MoveTab>().length;
       expect(moves, 1);
     }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+  }
+
+  for (final split in [false, true]) {
+    testWidgets(
+      'לחיצה ארוכה במגע על ה-X פותחת את תפריט הכרטיסיה'
+      '${split ? ' — חצי של כרטיסיה מפוצלת' : ''} (issue #2518)',
+      (tester) async {
+        // כרטיסיה עם מיקום: ה-tooltip של הכותרת עוטף את כל הכרטיסיה, כולל ה-X.
+        final OpenedTab tab = split
+            ? CombinedTab(
+                rightTab: _makeTextTab('ימין', currentTitle: 'פרק א'),
+                leftTab: _makeTextTab('שמאל', currentTitle: 'פרק ב'),
+              )
+            : _makeTextTab('ספר א', currentTitle: 'פרק א');
+        final tabsBloc = _TestTabsBloc(
+          TabsState(tabs: [tab], currentTabIndex: 0),
+        );
+        final navigationBloc = _TestNavigationBloc(
+          const NavigationState(currentScreen: Screen.reading),
+        );
+        final settingsBloc = _TestSettingsBloc(SettingsState.initial());
+        final workspaceBloc = _TestWorkspaceBloc();
+        addTearDown(() async {
+          tab.dispose();
+          await tabsBloc.close();
+          await navigationBloc.close();
+          await settingsBloc.close();
+          await workspaceBloc.close();
+        });
+        await _setSurfaceSize(tester, const Size(1200, 800));
+        await _pumpTitleBar(
+          tester,
+          tabsBloc: tabsBloc,
+          navigationBloc: navigationBloc,
+          settingsBloc: settingsBloc,
+          workspaceBloc: workspaceBloc,
+        );
+
+        final closeButton = split
+            ? find.byTooltip('סגור חלונית').first
+            : find.byIcon(FluentIcons.dismiss_24_regular);
+        final gesture = await tester.startGesture(
+          tester.getCenter(closeButton),
+          kind: PointerDeviceKind.touch,
+        );
+        await tester.pump(
+          kLongPressTimeout + const Duration(milliseconds: 100),
+        );
+        await gesture.up();
+        await tester.pumpAndSettle();
+
+        expect(find.text('סגור הכל'), findsOneWidget);
+        expect(tabsBloc.addedEvents.whereType<RemoveTab>(), isEmpty);
+      },
+      variant: TargetPlatformVariant.only(TargetPlatform.windows),
+    );
   }
 
   setUp(() async {
@@ -2673,6 +2731,7 @@ Future<void> _pumpTitleBar(
   required NavigationBloc navigationBloc,
   required SettingsBloc settingsBloc,
   HistoryBloc? historyBloc,
+  WorkspaceBloc? workspaceBloc,
 }) async {
   await tester.pumpWidget(
     // CustomTitleBar שולף את החלון מ-[AppWindowScope] (maximize בלחיצה
@@ -2688,6 +2747,8 @@ Future<void> _pumpTitleBar(
           BlocProvider<SettingsBloc>.value(value: settingsBloc),
           if (historyBloc != null)
             BlocProvider<HistoryBloc>.value(value: historyBloc),
+          if (workspaceBloc != null)
+            BlocProvider<WorkspaceBloc>.value(value: workspaceBloc),
         ],
         child: MaterialApp(
           home: Scaffold(
@@ -2825,6 +2886,14 @@ class _TestSettingsBloc extends Bloc<SettingsEvent, SettingsState>
   }
 
   void emitState(SettingsState state) => emit(state);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _TestWorkspaceBloc extends Cubit<WorkspaceState>
+    implements WorkspaceBloc {
+  _TestWorkspaceBloc() : super(WorkspaceState.initial());
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

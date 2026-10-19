@@ -23,6 +23,8 @@ typedef DeclarativeBookOpen =
     });
 typedef DeclarativeExternalBookOpen =
     Future<bool> Function(ExternalLibraryBook book);
+typedef DeclarativeExternalPageOpen =
+    Future<bool> Function(ExternalLibraryBook book, int page);
 
 class DeclarativeLibraryBookAccess
     implements DeclarativeBookResolver, DeclarativeBookOpener {
@@ -31,11 +33,16 @@ class DeclarativeLibraryBookAccess
   final DeclarativeBookOpen _openBook;
   final DeclarativeExternalBookOpen externalBookOpener;
 
+  /// פתיחה בעמוד מסוים (מבוסס-1) לספר חיצוני שהספק יודע לפתוח בעמוד. כשאינו מוגדר,
+  /// או כשלא התבקש עמוד (`index` אפס), נפתח הספר דרך [externalBookOpener].
+  final DeclarativeExternalPageOpen? externalPageOpener;
+
   DeclarativeLibraryBookAccess(
     this._libraryBooks,
     this._externalBooks,
     this._openBook, {
     required this.externalBookOpener,
+    this.externalPageOpener,
   });
 
   factory DeclarativeLibraryBookAccess.otzaria(
@@ -65,6 +72,10 @@ class DeclarativeLibraryBookAccess
           PluginBookIdentity.externalOf(book)?.provider == 'otzar'
           ? OtzarUtils.openBook(book.id, book.link)
           : OtzarUtils.launchOtzarWeb(book.link),
+      externalPageOpener: (book, page) =>
+          PluginBookIdentity.externalOf(book)?.provider == 'otzar'
+          ? OtzarUtils.openBook(book.id, book.link, page: page)
+          : OtzarUtils.launchOtzarWeb(book.link),
     );
   }
 
@@ -91,6 +102,9 @@ class DeclarativeLibraryBookAccess
     final book = (await findUniqueBooks([identity])).single;
     if (book == null) return false;
     if (book is ExternalLibraryBook) {
+      // בספר חיצוני `index` הוא מספר העמוד (מבוסס-1), כבספר PDF; אפס — לא התבקש עמוד.
+      final pageOpener = externalPageOpener;
+      if (index > 0 && pageOpener != null) return pageOpener(book, index);
       return externalBookOpener(book);
     }
     _openBook(

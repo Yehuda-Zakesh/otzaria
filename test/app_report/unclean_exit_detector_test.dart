@@ -126,7 +126,19 @@ void main() {
     expect(candidate.signature!.exceptionType, 'StateError');
     expect(candidate.signature!.frames, ['A.b (package:otzaria/a.dart)']);
     expect(candidate.hasMinidump, isFalse);
-    expect(candidate.previousSession.pid, 1000);
+    expect(candidate.previousSession!.pid, 1000);
+  });
+
+  test('תחילת התהליך נשמרת גם אחרי שציר הזמן נעצר בחשיפה', () {
+    final beforeStart = DateTime.now();
+    final timeline = StartupTimeline(sink: (_) {})..start();
+    timeline.finishAtReveal();
+    // תקיעה שהשתחררה דקות אחרי החשיפה נבדקת מול תחילת התהליך.
+    final start = AppCrashSession.processStartTime(
+      timeline: timeline,
+      now: beforeStart.add(const Duration(minutes: 10)),
+    );
+    expect(start.difference(beforeStart).inSeconds, 0);
   });
 
   test(

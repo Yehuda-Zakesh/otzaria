@@ -6,26 +6,7 @@ enum ConnectionType {
   targum,
   reference,
   source,
-  other;
-
-  /// Creates a ConnectionType from a string value.
-  ///
-  /// The string is compared in a case-insensitive manner.
-  /// Returns [ConnectionType.other] if the value is not recognized.
-  static ConnectionType fromString(String value) {
-    switch (value.trim().toUpperCase()) {
-      case 'COMMENTARY':
-        return ConnectionType.commentary;
-      case 'TARGUM':
-        return ConnectionType.targum;
-      case 'REFERENCE':
-        return ConnectionType.reference;
-      case 'SOURCE':
-        return ConnectionType.source;
-      default:
-        return ConnectionType.other;
-    }
-  }
+  other,
 }
 
 /// Link between two texts (commentary, reference, etc.)

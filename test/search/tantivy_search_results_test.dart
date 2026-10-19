@@ -455,6 +455,74 @@ void main() {
       expect(staleText, ['שורה שהשתנתה & נוספה']);
     });
 
+    group('ניקוד וטעמים בתקציר לפי הגדרות התצוגה', () {
+      Future<String> shownSnippet(
+        WidgetTester tester,
+        SettingsState settings,
+      ) async {
+        searchBloc.emitState(
+          searchBloc.state.copyWith(
+            totalResults: 1,
+            results: [
+              SearchResult(
+                id: BigInt.one,
+                title: 'ספר',
+                reference: 'סימן',
+                text: 'בְּרֵאשִׁ֖ית <font color=red>בָּרָ֣א</font>',
+                segment: BigInt.zero,
+                isPdf: false,
+                filePath: 'id:1',
+                mergedCount: 1,
+                merged: const [],
+                textStatus: TextStatus.ok,
+                continuesToNextLine: false,
+              ),
+            ],
+          ),
+        );
+        final bloc = MockSettingsBloc();
+        addTearDown(bloc.close);
+        whenListen(
+          bloc,
+          const Stream<SettingsState>.empty(),
+          initialState: settings,
+        );
+        await tester.pumpWidget(buildWidget(overrideSettingsBloc: bloc));
+        await tester.pump();
+        return tester
+            .widgetList<RichText>(find.byType(RichText))
+            .map((widget) => _allTextFromInlineSpan(widget.text))
+            .singleWhere((text) => text.contains('ית'));
+      }
+
+      testWidgets('ניקוד וטעמים מוצגים', (tester) async {
+        expect(
+          await shownSnippet(tester, SettingsState.initial()),
+          'בְּרֵאשִׁ֖ית בָּרָ֣א',
+        );
+      });
+
+      testWidgets('הסתרת טעמים משאירה את הניקוד', (tester) async {
+        expect(
+          await shownSnippet(
+            tester,
+            SettingsState.initial().copyWith(showTeamim: false),
+          ),
+          'בְּרֵאשִׁית בָּרָא',
+        );
+      });
+
+      testWidgets('הסתרת ניקוד מסירה גם את הטעמים', (tester) async {
+        expect(
+          await shownSnippet(
+            tester,
+            SettingsState.initial().copyWith(defaultRemoveNikud: true),
+          ),
+          'בראשית ברא',
+        );
+      });
+    });
+
     group('טקסט שהשתנה או אינו זמין', () {
       SearchResult result(int i, String text, TextStatus status) =>
           SearchResult(

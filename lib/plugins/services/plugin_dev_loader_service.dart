@@ -77,7 +77,6 @@ class PluginDevLoaderService {
     String directoryPath, {
     PluginManifest? preValidatedManifest,
     Map<String, bool>? grantedPermissions,
-    bool? allowOrderBeforeBuiltInsGranted,
   }) async {
     final dir = Directory(directoryPath);
     if (!dir.existsSync()) {
@@ -127,10 +126,6 @@ class PluginDevLoaderService {
       enabled: existingPlugin?.enabled ?? true,
       pinned: existingPlugin?.pinned ?? manifest.defaultPinned,
       pinnedToNavRail: existingPlugin?.pinnedToNavRail ?? false,
-      allowOrderBeforeBuiltInsGranted:
-          allowOrderBeforeBuiltInsGranted ??
-          existingPlugin?.allowOrderBeforeBuiltInsGranted ??
-          manifest.allowOrderBeforeBuiltIns,
       manifest: manifest,
       installedAt: existingPlugin?.installedAt ?? DateTime.now(),
       updatedAt: DateTime.now(),
@@ -204,7 +199,6 @@ class PluginDevLoaderService {
     String baseUrl, {
     PluginManifest? preValidatedManifest,
     Map<String, bool>? grantedPermissions,
-    bool? allowOrderBeforeBuiltInsGranted,
   }) async {
     final normalizedUrl = baseUrl.replaceAll(RegExp(r'/+$'), '');
     final manifest =
@@ -231,10 +225,6 @@ class PluginDevLoaderService {
       enabled: existingPlugin?.enabled ?? true,
       pinned: existingPlugin?.pinned ?? manifest.defaultPinned,
       pinnedToNavRail: existingPlugin?.pinnedToNavRail ?? false,
-      allowOrderBeforeBuiltInsGranted:
-          allowOrderBeforeBuiltInsGranted ??
-          existingPlugin?.allowOrderBeforeBuiltInsGranted ??
-          manifest.allowOrderBeforeBuiltIns,
       manifest: manifest,
       installedAt: existingPlugin?.installedAt ?? DateTime.now(),
       updatedAt: DateTime.now(),

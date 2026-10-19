@@ -449,8 +449,7 @@ class Link {
     return null;
   }
 
-  /// מסדר את הקישור לחמשת המפתחות של פורמט `links.json`, בדיוק כפי שהכותב
-  /// הקנוני של הפורמט פולט אותם (`LinkData.toJson` שב-`link_processor.dart`).
+  /// מסדר את הקישור לחמשת המפתחות של פורמט `links.json`.
   ///
   /// אינו ההופכי של [Link.fromJson]: הקורא סלחני וקולט גם `category_id_2`,
   /// `file_type_2`, `start` ו-`end`, אך אלה אינם חלק מהפורמט ואף כותב אינו

@@ -89,7 +89,6 @@ class ConfirmPluginInstall extends PluginSystemEvent {
 
   /// מיפוי הרשאה → האם הוענקה. הרשאות עם ערך false יישמרו כחסומות.
   final Map<String, bool> grantedPermissions;
-  final bool allowOrderBeforeBuiltInsGranted;
   final PluginInstallReportContext? reportContext;
 
   /// גרסה מותקנת קודמת — null אם זו התקנה ראשונה. נושא את ההבחנה מדיאלוג
@@ -99,8 +98,7 @@ class ConfirmPluginInstall extends PluginSystemEvent {
   const ConfirmPluginInstall(
     this.tempDirPath,
     this.manifest,
-    this.grantedPermissions,
-    this.allowOrderBeforeBuiltInsGranted, {
+    this.grantedPermissions, {
     this.reportContext,
     this.previousVersion,
   });
@@ -112,7 +110,6 @@ class ConfirmPluginInstall extends PluginSystemEvent {
     tempDirPath,
     manifest,
     grantedPermissions,
-    allowOrderBeforeBuiltInsGranted,
     reportContext?.token,
     reportContext?.callbackUrl,
     previousVersion,
@@ -178,22 +175,6 @@ class SetPluginPermissionRequested extends PluginSystemEvent {
 
   @override
   List<Object?> get props => [pluginId, permission, granted];
-}
-
-class PinPluginRequested extends PluginSystemEvent {
-  final String pluginId;
-  const PinPluginRequested(this.pluginId);
-
-  @override
-  List<Object?> get props => [pluginId];
-}
-
-class UnpinPluginRequested extends PluginSystemEvent {
-  final String pluginId;
-  const UnpinPluginRequested(this.pluginId);
-
-  @override
-  List<Object?> get props => [pluginId];
 }
 
 class PinPluginToNavRailRequested extends PluginSystemEvent {
@@ -283,7 +264,6 @@ class ConfirmDevPluginInstall extends PluginSystemEvent {
   final String sourcePath;
   final String sourceType;
   final Map<String, bool> grantedPermissions;
-  final bool allowOrderBeforeBuiltInsGranted;
 
   /// גרסה מותקנת קודמת — null אם זו התקנה ראשונה.
   final String? previousVersion;
@@ -293,7 +273,6 @@ class ConfirmDevPluginInstall extends PluginSystemEvent {
     required this.sourcePath,
     required this.sourceType,
     required this.grantedPermissions,
-    required this.allowOrderBeforeBuiltInsGranted,
     this.previousVersion,
   });
 
@@ -305,7 +284,6 @@ class ConfirmDevPluginInstall extends PluginSystemEvent {
     sourcePath,
     sourceType,
     grantedPermissions,
-    allowOrderBeforeBuiltInsGranted,
     previousVersion,
   ];
 }

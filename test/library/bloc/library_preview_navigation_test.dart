@@ -192,6 +192,34 @@ void main() {
       );
     });
 
+    for (final (name, home) in [
+      ('"בית" בשורש', true),
+      ('ניקוי החיפוש', false),
+    ]) {
+      test(
+        '$name אחרי חיפוש מנקה את הספר מתוצאות החיפוש (issue #957)',
+        () async {
+          bloc.emit(
+            bloc.state.copyWith(
+              currentCategory: library,
+              searchQuery: 'תניא',
+              searchResults: [firstChasidutBook],
+              previewBook: firstChasidutBook,
+            ),
+          );
+
+          // הרצפים של _handleNavigateHome ושל onClear בשדה החיפוש.
+          if (home) bloc.add(NavigateToCategory(library));
+          bloc.add(const UpdateSearchQuery(''));
+          bloc.add(const SearchBooks());
+          await Future<void>.delayed(Duration.zero);
+
+          expect(bloc.state.previewBook, isNull);
+          expect(bloc.state.previewCategory, library);
+        },
+      );
+    }
+
     test('NavigateToCategory לקטגוריה הפתוחה שומר את התצוגה המקדימה', () async {
       bloc.emit(
         bloc.state.copyWith(

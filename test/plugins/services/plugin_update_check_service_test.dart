@@ -37,7 +37,6 @@ InstalledPlugin buildPlugin({
     networkAllowlist: const [],
     toolTabTitle: pluginId,
     toolTabOrder: 900,
-    allowOrderBeforeBuiltIns: false,
     defaultPinned: false,
     publishedDataTypes: const [],
   ),

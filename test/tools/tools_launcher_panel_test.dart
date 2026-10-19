@@ -53,7 +53,6 @@ ToolCatalogEntry _pluginEntry(
   String label, {
   String? name,
   String sourceType = 'packaged',
-  bool allowOrderBeforeBuiltIns = false,
   bool networkEnabled = false,
 }) => ToolCatalogEntry(
   toolId: pluginId,
@@ -70,7 +69,6 @@ ToolCatalogEntry _pluginEntry(
     pinned: false,
     pinnedToNavRail: false,
     showInTools: true,
-    allowOrderBeforeBuiltInsGranted: allowOrderBeforeBuiltIns,
     networkAccessGranted: networkEnabled,
     sourceType: sourceType,
     devRootPath: sourceType == 'development' ? '/dev/$pluginId' : null,
@@ -90,7 +88,6 @@ ToolCatalogEntry _pluginEntry(
       networkAllowlist: const [],
       toolTabTitle: label,
       toolTabOrder: 900,
-      allowOrderBeforeBuiltIns: allowOrderBeforeBuiltIns,
       defaultPinned: false,
       publishedDataTypes: const [],
     ),
@@ -401,11 +398,7 @@ void main() {
   group('groupToolEntries', () {
     test('שומר את סדר הקטלוג ומחלק רק במעבר בין סוגי רשומות', () {
       final groups = groupToolEntries([
-        _pluginEntry(
-          'com.example.leading',
-          'תוסף מקדים',
-          allowOrderBeforeBuiltIns: true,
-        ),
+        _pluginEntry('com.example.leading', 'תוסף מקדים'),
         _entry('builtin.calendar', 'לוח שנה'),
         _entry('builtin.gematria', 'גימטריה'),
         _pluginEntry('com.example.x', 'תוסף'),
@@ -452,25 +445,6 @@ void main() {
     test('רשימה ריקה — אין קבוצות', () {
       expect(groupToolEntries(const []), isEmpty);
     });
-
-    // בלי הפיצול הזה, קבוצה מאוחדת הייתה מייצרת פעולות הזזה פעילות בין תוספים
-    // שאסור לסדר ביניהם — ולכן פעולה שאינה עושה דבר.
-    test('שתי קבוצות תוספים עוקבות אינן מתמזגות', () {
-      final groups = groupToolEntries([
-        _pluginEntry(
-          'com.example.leading',
-          'תוסף מקדים',
-          allowOrderBeforeBuiltIns: true,
-        ),
-        _pluginEntry('com.example.regular', 'תוסף רגיל'),
-      ]);
-      expect(groups, hasLength(2));
-      expect(groups.map((g) => g.label), [
-        kPluginsGroupLabel,
-        kPluginsGroupLabel,
-      ]);
-      expect(groups.first.entries.single.toolId, 'com.example.leading');
-    });
   });
 
   // ניווט המקלדת ממופה לאינדקס ברשימה השטוחה, ולכן היא חייבת להיות בסדר
@@ -487,37 +461,6 @@ void main() {
         'builtin.calendar',
         'com.example.x',
       ]);
-    });
-
-    test('תוסף מורשה מוצג לפני מובנים וניווט המקלדת שומר את סדר הרינדור', () {
-      final leadingPlugin = _pluginEntry(
-        'com.example.leading',
-        'תוסף מקדים',
-        allowOrderBeforeBuiltIns: true,
-      ).plugin!;
-      final regularPlugin = _pluginEntry(
-        'com.example.regular',
-        'תוסף רגיל',
-      ).plugin!;
-      final catalog = buildToolCatalog(
-        hiddenBuiltInToolIds: const {},
-        isOfflineMode: false,
-        pluginState: PluginSystemLoaded([leadingPlugin, regularPlugin]),
-      );
-      final rendered = [
-        for (final group in groupToolEntries(catalog)) ...group.entries,
-      ];
-
-      expect(catalog.first.toolId, leadingPlugin.pluginId);
-      expect(groupToolEntries(catalog).first.label, kPluginsGroupLabel);
-      expect(
-        rendered.map((entry) => entry.toolId),
-        catalog.map((entry) => entry.toolId),
-      );
-      expect(
-        orderedToolEntries(catalog).map((entry) => entry.toolId),
-        rendered.map((entry) => entry.toolId),
-      );
     });
 
     test('שומר על אורך הרשימה', () {
@@ -2167,11 +2110,6 @@ void main() {
     final builtInB = _entry('builtin.gematria', 'גימטריה');
     final pluginA = _pluginEntry('com.example.a', 'תוסף א');
     final pluginB = _pluginEntry('com.example.b', 'תוסף ב');
-    final leadingPlugin = _pluginEntry(
-      'com.example.lead',
-      'תוסף מקדים',
-      allowOrderBeforeBuiltIns: true,
-    );
 
     test('שני כלים מובנים — מותר', () {
       expect(canReorderBetween(builtInA, builtInB), isTrue);
@@ -2184,10 +2122,6 @@ void main() {
     test('כלי מובנה ותוסף — אסור', () {
       expect(canReorderBetween(builtInA, pluginA), isFalse);
       expect(canReorderBetween(pluginA, builtInA), isFalse);
-    });
-
-    test('תוסף מקדים ותוסף רגיל בקבוצות שונות — אסור', () {
-      expect(canReorderBetween(leadingPlugin, pluginA), isFalse);
     });
 
     test('אותה רשומה — אסור', () {

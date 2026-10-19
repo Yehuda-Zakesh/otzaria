@@ -273,43 +273,6 @@ void main() {
     );
 
     test(
-      'prepareInstall parses allowOrderBeforeBuiltIns from manifest',
-      () async {
-        final archivePath = p.join(tempDir.path, 'plugin_allow_before.zip');
-        final archive = Archive()
-          ..addFile(
-            ArchiveFile.string(
-              'manifest.json',
-              jsonEncode({
-                'schemaVersion': 1,
-                'id': 'test.allow.before.builtins',
-                'version': '1.0.0',
-                'name': 'Leading Plugin',
-                'entrypoint': 'index.html',
-                'contributes': {
-                  'toolTab': {
-                    'title': 'Leading Plugin',
-                    'order': 5,
-                    'allowOrderBeforeBuiltIns': true,
-                  },
-                },
-              }),
-            ),
-          )
-          ..addFile(ArchiveFile.string('index.html', '<html></html>'));
-
-        final zipData = ZipEncoder().encode(archive);
-        expect(zipData, isNotNull);
-        File(archivePath).writeAsBytesSync(zipData);
-
-        final preparedInstall = await installer.prepareInstall(archivePath);
-
-        expect(preparedInstall.manifest.allowOrderBeforeBuiltIns, isTrue);
-        await Directory(preparedInstall.tempDirPath).delete(recursive: true);
-      },
-    );
-
-    test(
       'prepareInstall tolerates installed pre-release version without crashing',
       () async {
         repository.plugin = InstalledPlugin(
@@ -399,96 +362,6 @@ void main() {
       await Directory(prepared.tempDirPath).delete(recursive: true);
     });
 
-    test('prepareInstall reports no previous order decision when the old '
-        'manifest never asked for it', () async {
-      const pluginId = 'test.order.first.request';
-      repository.plugin = InstalledPlugin(
-        pluginId: pluginId,
-        name: 'Order First',
-        version: '1.0.0',
-        installPath: tempDir.path,
-        entrypointPath: 'index.html',
-        enabled: true,
-        pinned: false,
-        manifest: _buildInstalledManifest(
-          id: pluginId,
-          version: '1.0.0',
-          name: 'Order First',
-        ),
-        installedAt: DateTime(2024),
-        updatedAt: DateTime(2024),
-      );
-
-      final archivePath = _writeArchive(tempDir, 'order_first.zip', {
-        'schemaVersion': 1,
-        'id': pluginId,
-        'version': '1.0.1',
-        'name': 'Order First',
-        'entrypoint': 'index.html',
-        'contributes': {
-          'toolTab': {
-            'title': 'Order First',
-            'allowOrderBeforeBuiltIns': true,
-          },
-        },
-      });
-
-      final prepared = await installer.prepareInstall(archivePath);
-
-      expect(
-        prepared.previousAllowOrderBeforeBuiltInsGranted,
-        isNull,
-        reason:
-            'InstalledPlugin stores false when the manifest never asked — '
-            'a first-time request must not look like a past refusal',
-      );
-      await Directory(prepared.tempDirPath).delete(recursive: true);
-    });
-
-    test(
-      'prepareInstall keeps a real past refusal of the order request',
-      () async {
-        const pluginId = 'test.order.refused';
-        repository.plugin = InstalledPlugin(
-          pluginId: pluginId,
-          name: 'Order Refused',
-          version: '1.0.0',
-          installPath: tempDir.path,
-          entrypointPath: 'index.html',
-          enabled: true,
-          pinned: false,
-          allowOrderBeforeBuiltInsGranted: false,
-          manifest: _buildInstalledManifest(
-            id: pluginId,
-            version: '1.0.0',
-            name: 'Order Refused',
-            allowOrderBeforeBuiltIns: true,
-          ),
-          installedAt: DateTime(2024),
-          updatedAt: DateTime(2024),
-        );
-
-        final archivePath = _writeArchive(tempDir, 'order_refused.zip', {
-          'schemaVersion': 1,
-          'id': pluginId,
-          'version': '1.0.1',
-          'name': 'Order Refused',
-          'entrypoint': 'index.html',
-          'contributes': {
-            'toolTab': {
-              'title': 'Order Refused',
-              'allowOrderBeforeBuiltIns': true,
-            },
-          },
-        });
-
-        final prepared = await installer.prepareInstall(archivePath);
-
-        expect(prepared.previousAllowOrderBeforeBuiltInsGranted, isFalse);
-        await Directory(prepared.tempDirPath).delete(recursive: true);
-      },
-    );
-
     test('finalizeInstall stores the explicit permission decisions', () async {
       const pluginId = 'test.explicit.grants';
       final stagedDir = Directory.systemTemp.createTempSync(
@@ -508,7 +381,6 @@ void main() {
       await installer.finalizeInstall(
         stagedDir.path,
         manifest,
-        allowOrderBeforeBuiltInsGranted: false,
         grantedPermissions: const {
           'app.startup_contributions': false,
           'reader.open': true,
@@ -538,7 +410,6 @@ void main() {
         installer.finalizeInstall(
           stagedDir.path,
           manifest,
-          allowOrderBeforeBuiltInsGranted: false,
           grantedPermissions: const {},
         ),
         throwsArgumentError,
@@ -589,7 +460,6 @@ void main() {
         installer.finalizeInstall(
           stagedDir.path,
           newManifest,
-          allowOrderBeforeBuiltInsGranted: false,
           grantedPermissions: const {'app.startup_contributions': false},
         ),
         throwsStateError,
@@ -646,7 +516,6 @@ void main() {
       await installer.finalizeInstall(
         sourceDir.path,
         newManifest,
-        allowOrderBeforeBuiltInsGranted: false,
         grantedPermissions: const {},
       );
 
@@ -707,7 +576,6 @@ void main() {
       await installer.finalizeInstall(
         stagedDir.path,
         newManifest,
-        allowOrderBeforeBuiltInsGranted: true,
         grantedPermissions: const {},
       );
 
@@ -770,7 +638,6 @@ void main() {
         await installer.finalizeInstall(
           stagedDir.path,
           newManifest,
-          allowOrderBeforeBuiltInsGranted: false,
           grantedPermissions: const {},
         );
 
@@ -815,7 +682,6 @@ void main() {
       await installer.finalizeInstall(
         stagedDir.path,
         newManifest,
-        allowOrderBeforeBuiltInsGranted: false,
         grantedPermissions: const {},
       );
 
@@ -862,7 +728,6 @@ void main() {
       await installer.finalizeInstall(
         stagedDir.path,
         newManifest,
-        allowOrderBeforeBuiltInsGranted: false,
         grantedPermissions: const {},
       );
 
@@ -874,68 +739,6 @@ void main() {
             'manually-ordered block, not before it',
       );
     });
-
-    test(
-      'finalizeInstall stores allowOrderBeforeBuiltInsGranted from the install screen',
-      () async {
-        const pluginId = 'test.leading.plugin';
-
-        final stagedDir = Directory.systemTemp.createTempSync(
-          'otzaria_install_staging_',
-        );
-        File(p.join(stagedDir.path, 'manifest.json')).writeAsStringSync(
-          jsonEncode({
-            'schemaVersion': 1,
-            'id': pluginId,
-            'version': '1.0.0',
-            'name': 'Leading Plugin',
-            'entrypoint': 'index.html',
-            'contributes': {
-              'toolTab': {
-                'title': 'Leading Plugin',
-                'order': 5,
-                'allowOrderBeforeBuiltIns': true,
-              },
-            },
-          }),
-        );
-        File(p.join(stagedDir.path, 'index.html')).writeAsStringSync('<html/>');
-
-        final newManifest = PluginManifest.fromJson({
-          'schemaVersion': 1,
-          'id': pluginId,
-          'version': '1.0.0',
-          'name': 'Leading Plugin',
-          'entrypoint': 'index.html',
-          'contributes': {
-            'toolTab': {
-              'title': 'Leading Plugin',
-              'order': 5,
-              'allowOrderBeforeBuiltIns': true,
-            },
-          },
-        });
-
-        await installer.finalizeInstall(
-          stagedDir.path,
-          newManifest,
-          allowOrderBeforeBuiltInsGranted: false,
-          grantedPermissions: const {},
-        );
-
-        expect(
-          repository.savedPlugins.single.allowOrderBeforeBuiltInsGranted,
-          isFalse,
-        );
-        expect(
-          repository.savedPlugins.single.allowsOrderBeforeBuiltIns,
-          isFalse,
-          reason:
-              'when the user disables the feature at install time, the '
-              'plugin must not be able to use it later',
-        );
-      },
-    );
   });
 }
 
@@ -958,7 +761,6 @@ PluginManifest _buildInstalledManifest({
   required String version,
   required String name,
   List<String> permissions = const [],
-  bool allowOrderBeforeBuiltIns = false,
 }) {
   return PluginManifest(
     schemaVersion: 1,
@@ -976,7 +778,6 @@ PluginManifest _buildInstalledManifest({
     networkAllowlist: const [],
     toolTabTitle: name,
     toolTabOrder: 900,
-    allowOrderBeforeBuiltIns: allowOrderBeforeBuiltIns,
     defaultPinned: false,
     publishedDataTypes: const [],
   );
