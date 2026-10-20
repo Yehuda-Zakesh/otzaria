@@ -80,6 +80,46 @@ void main() {
       ]);
     });
 
+    test('מקבל את הקשרי המפרש רק כשהם נבחרים במפורש', () {
+      final item = registry.registerPayload('lookup', {
+        'id': 'commentary',
+        'title': 'חפש במאגר',
+        'type': 'submenu',
+        'contexts': ['reader-commentary', 'reader-commentary-selection'],
+        'children': [
+          {
+            'id': 'search',
+            'title': 'חפש',
+            'contexts': ['reader-commentary-selection'],
+          },
+          {'id': 'locate', 'title': 'אתר'},
+        ],
+      });
+      expect(item.contexts, [
+        'reader-commentary',
+        'reader-commentary-selection',
+      ]);
+      expect(item.children.first.contexts, ['reader-commentary-selection']);
+      expect(item.children.last.contexts, [
+        'reader-commentary',
+        'reader-commentary-selection',
+      ]);
+      final legacy = registry.registerPayload('legacy', {
+        'id': 'selection',
+        'title': 'פעולה על סימון',
+      });
+      expect(legacy.contexts, isNot(contains('reader-commentary-selection')));
+    });
+
+    test('מקבל את הקשרי ה-PDF', () {
+      final item = registry.registerPayload('lookup', {
+        'id': 'pdf',
+        'title': 'חפש במאגר',
+        'contexts': ['reader-pdf', 'reader-pdf-selection'],
+      });
+      expect(item.contexts, ['reader-pdf', 'reader-pdf-selection']);
+    });
+
     group('action — פעולת host דקלרטיבית', () {
       Map<String, dynamic> actionItem({
         Map<String, dynamic> extra = const {},

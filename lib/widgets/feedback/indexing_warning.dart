@@ -26,12 +26,14 @@ IndexingWarningMode? resolveIndexingWarningMode({
   required IndexingState state,
   required bool providerInitialized,
   required bool inProgressDismissed,
+  bool indexingDeferred = false,
 }) {
   if (providerInitialized &&
       TantivyDataProvider.instance.indexedFilePaths.isEmpty) {
     return IndexingWarningMode.missing;
   }
-  if (state is IndexingInProgress && !inProgressDismissed) {
+  if ((state is IndexingInProgress || indexingDeferred) &&
+      !inProgressDismissed) {
     return IndexingWarningMode.inProgress;
   }
   return null;
@@ -117,19 +119,25 @@ class IndexingWarningContainer extends StatelessWidget {
     return ValueListenableBuilder<bool>(
       valueListenable: TantivyDataProvider.instance.isInitialized,
       builder: (context, providerInitialized, _) {
-        return BlocBuilder<IndexingBloc, IndexingState>(
-          builder: (context, state) {
-            final mode = resolveIndexingWarningMode(
-              state: state,
-              providerInitialized: providerInitialized,
-              inProgressDismissed: inProgressDismissed,
-            );
-            if (mode == null) return const SizedBox.shrink();
-            return IndexingWarning(
-              mode: mode,
-              onDismiss: mode == IndexingWarningMode.inProgress
-                  ? onDismiss
-                  : null,
+        return ValueListenableBuilder<bool>(
+          valueListenable: TantivyDataProvider.instance.isIndexingDeferred,
+          builder: (context, indexingDeferred, _) {
+            return BlocBuilder<IndexingBloc, IndexingState>(
+              builder: (context, state) {
+                final mode = resolveIndexingWarningMode(
+                  state: state,
+                  providerInitialized: providerInitialized,
+                  inProgressDismissed: inProgressDismissed,
+                  indexingDeferred: indexingDeferred,
+                );
+                if (mode == null) return const SizedBox.shrink();
+                return IndexingWarning(
+                  mode: mode,
+                  onDismiss: mode == IndexingWarningMode.inProgress
+                      ? onDismiss
+                      : null,
+                );
+              },
             );
           },
         );

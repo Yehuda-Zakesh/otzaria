@@ -120,7 +120,6 @@ import 'package:otzaria/plugins/services/plugin_print_service.dart';
 import 'package:otzaria/printing/view/printing_screen.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 import 'package:otzaria/plugins/models/plugin_network_allowlist.dart';
-import 'package:otzaria/plugins/services/plugin_network_access_resolver.dart';
 import 'package:otzaria/plugins/services/plugin_network_gate.dart';
 import 'package:otzaria/plugins/services/plugin_file_download_service.dart';
 import 'package:otzaria/plugins/services/plugin_install_report_service.dart';
@@ -136,6 +135,7 @@ import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/plugins/services/plugin_fs_service.dart';
 import 'package:otzaria/plugins/services/plugin_file_server.dart';
+import 'package:otzaria/plugins/services/plugin_remote_file_cache.dart';
 import 'package:otzaria/plugins/services/plugin_condition_evaluator.dart';
 import 'package:otzaria/plugins/services/plugin_settings_access_policy.dart';
 import 'package:otzaria/plugins/services/plugin_shortcut_registry.dart';
@@ -546,6 +546,12 @@ class PluginBridgeDependencies {
   })?
   printPluginPage;
 
+  /// פותח את מסך ההדפסה של אוצריא על קובץ PDF שהוענק לתוסף (`ui.printFile`)
+  /// ומחזיר אם המשתמש הדפיס או ייצא. אופציונלי — ברירת המחדל מציגה את
+  /// [PrintingScreen] כדיאלוג; קיים להזרקה בבדיקות.
+  final Future<bool> Function(File file, {required String jobName})?
+  printPluginFile;
+
   /// פותח את מסך ההדפסה של אוצריא על טווח שורות בספר (`reader.printRange`)
   /// ומחזיר אם המשתמש הדפיס או ייצא. אופציונלי — ברירת המחדל מציגה את
   /// [PrintingScreen] כדיאלוג; קיים להזרקה בבדיקות.
@@ -611,6 +617,7 @@ class PluginBridgeDependencies {
     this.onBackgroundInstanceDone,
     this.dispatchEventToPlugin,
     this.printPluginPage,
+    this.printPluginFile,
     this.printBookRange,
     this.capturePluginPagePdf,
     this.hasUserActivation,
@@ -691,6 +698,7 @@ class PluginBridgeAdapter {
     PluginFsService? fsService,
     PluginShortcutService? shortcutService,
     PluginFileServer? fileServer,
+    PluginRemoteFileCache? remoteFileCache,
     PluginHighlightRegistry? highlightRegistry,
     PluginReportService? reportService,
     PluginBookCorrectionService? bookCorrectionService,
@@ -705,6 +713,7 @@ class PluginBridgeAdapter {
        _pluginFsService = fsService,
        _pluginShortcutService = shortcutService,
        _fileServer = fileServer ?? PluginFileServer.instance,
+       _remoteFiles = remoteFileCache ?? PluginRemoteFileCache.instance,
        _searchFieldSessions =
            searchFieldSessions ?? PluginSearchFieldSessionService.instance {
     _stopFolderRevocationListener = PluginUserFolderGrants.onRevoke(
@@ -716,6 +725,9 @@ class PluginBridgeAdapter {
   // שרת הקבצים הפנימי שמגיש קבצים אישיים ל-WebView (מופע יחיד לכל האפליקציה
   // כברירת מחדל; ניתן להזרקה לבדיקות).
   final PluginFileServer _fileServer;
+
+  // מטמון הקבצים ש-`network.fetchFile` הוריד.
+  final PluginRemoteFileCache _remoteFiles;
 
   // שירות הורדת קבצים — מופע יחיד לכל adapter, נוצר עם השימוש הראשון
   // ומשוחרר ב-dispose (אחרת כל הורדה תדליף client ורישום ב-registry).
@@ -4418,6 +4430,8 @@ class PluginBridgeAdapter {
           );
           return {'printed': printed};
         });
+      case 'printFile':
+        return await _printGrantedPdf(args);
       case 'exportPdf':
         final capture =
             _dependencies.capturePluginPagePdf ?? _defaultCapturePagePdf;
@@ -4505,6 +4519,87 @@ class PluginBridgeAdapter {
   /// דיאלוג הדפסה/שמירה פתוח כרגע עבור המופע הזה. שער חד-בו-זמנית: בלעדיו
   /// לולאה בתוסף מערימה דיאלוגים מודאליים עד שהחלון אינו שמיש.
   bool _userDialogOpen = false;
+
+  /// `ui.printFile` — מסך ההדפסה של אוצריא (טווח עמודים, תצוגה מקדימה, עימוד
+  /// ואז דיאלוג ההדפסה של המערכת) על PDF שהוענק לתוסף: token של
+  /// `fs.pickUserFile`, `fs.openFolderFile` או `network.fetchFile`. התוסף אינו
+  /// מקבל את התוכן.
+  ///
+  /// מחוות המשתמש נדרשת, כמו ב-`reader.printRange`, אף ש"הדפס" הסופי נלחץ
+  /// בתוך דיאלוג של האפליקציה שהמשתמש יכול לסגור: המסך מודאלי וחוסם את החלון
+  /// הראשי כולו (`barrierDismissible: false`), ובלי השער תוסף ברקע היה מקפיץ
+  /// אותו מיוזמתו, בטעינת הדף או בלולאה.
+  Future<Map<String, dynamic>> _printGrantedPdf(
+    Map<String, dynamic> args,
+  ) async {
+    final token = args['token'];
+    if (token is! String || token.isEmpty) {
+      throw Exception('error.invalid_params: token required');
+    }
+    final rawJobName = args['jobName'];
+    if (rawJobName != null && rawJobName is! String) {
+      throw Exception('error.invalid_params: jobName must be a string');
+    }
+    final canonical = await _resolveGrantedFilePath(token);
+    if (!_remoteFiles.ownsCanonical(canonical, pluginId: plugin.pluginId) &&
+        await _pluginRepo.getPermission(
+              plugin.pluginId,
+              'fs.user_files.read',
+            ) !=
+            true) {
+      throw Exception(
+        'error.permission_denied: fs.user_files.read is required',
+      );
+    }
+    // סיומת `.pdf` אינה מבטיחה PDF (דף שגיאה של שרת נשמר גם הוא בשם הזה), ומסך
+    // ההדפסה על קובץ כזה נפתח בלי תצוגה אבל עם כפתור "הדפס" פעיל.
+    if (p.extension(canonical).toLowerCase() != '.pdf' ||
+        !await _startsLikePdf(canonical)) {
+      throw Exception('error.unsupported: printFile supports PDF files only');
+    }
+    final jobName = _printJobName(
+      rawJobName as String?,
+      fallback: p.basename(canonical),
+    );
+    final show = _dependencies.printPluginFile ?? _defaultPrintPluginFile;
+    return await _runUserGatedDialog(() async {
+      final printed = await show(File(canonical), jobName: jobName);
+      return {'printed': printed};
+    });
+  }
+
+  /// האם `%PDF-` מופיע ב-1024 הבייטים הראשונים — כפי שקוראי PDF דורשים.
+  Future<bool> _startsLikePdf(String path) async {
+    try {
+      final file = await File(path).open();
+      try {
+        return latin1
+            .decode(await file.read(1024), allowInvalid: true)
+            .contains('%PDF-');
+      } finally {
+        await file.close();
+      }
+    } on FileSystemException {
+      // בלי הנתיב: הגשר מחזיר לתוסף את הודעת החריגה כמות שהיא.
+      throw Exception('error.unavailable: the file could not be read');
+    }
+  }
+
+  static const int _maxJobNameLength = 120;
+
+  /// שם עבודת ההדפסה שהתוסף ביקש: בלי תווי בקרה, עד [_maxJobNameLength]
+  /// תווים (לפי תווים שלמים, לא חצאי זוגות surrogate). הוא מוצג בכותרת המסך
+  /// ומשמש שם עבודה ושם קובץ מוצע בייצוא.
+  String _printJobName(String? raw, {required String fallback}) {
+    final cleaned = (raw ?? '')
+        .replaceAll(RegExp(r'[\u0000-\u001F\u007F-\u009F]'), '')
+        .trim();
+    if (cleaned.isEmpty) return fallback;
+    final runes = cleaned.runes;
+    return runes.length <= _maxJobNameLength
+        ? cleaned
+        : String.fromCharCodes(runes.take(_maxJobNameLength)).trim();
+  }
 
   /// מריץ פעולה שפותחת דיאלוג מערכת — רק בתוך חלון הפעולה של המשתמש, ורק
   /// אחת בכל רגע. מונע מתוסף לפתוח דיאלוגים או לכתוב קבצים מיוזמתו.
@@ -4608,6 +4703,51 @@ class PluginBridgeAdapter {
         tableOfContents: toc,
         activeCommentators: activeCommentators,
         availableCommentators: availableCommentators,
+      ),
+    );
+    return printed ?? false;
+  }
+
+  /// מסך ההדפסה של הקורא על קובץ PDF, כדיאלוג מעל החלון הראשי
+  /// (`ui.printFile`) — אותה הגדרה כמו `_handlePrintPress` בקורא ה-PDF:
+  /// [PrintingScreen] עם `createPdfOverride`, בלי טווח שורות או מפרשים.
+  ///
+  /// הקובץ נקרא פעם אחת לפני הפתיחה, כך ש-`fs.revokeFile`, פינוי המטמון או
+  /// הסרת התוסף בזמן שהדיאלוג פתוח אינם מוחקים אותו מתחת למסך.
+  ///
+  /// קורא ה-PDF מנתק את ה-`PdfViewer` שלו כל עוד המסך פתוח (pdfrx מנהל worker
+  /// יחיד), ופה אין ניתוק דומה. הניתוק נכתב כשהתצוגה המקדימה הייתה `PdfViewer`
+  /// ופתחה מסמכים במקביל, והתקיעה תוקנה אחר כך בשורש (פתיחה בזיכרון, `await`
+  /// ל-`dispose`, הסדרת כל פעולות ה-pdfrx בתוך המסך). שאר הכניסות למסך רצות
+  /// כשיש `PdfViewer` חי ואינן מנתקות אותו: הדפסה מקורא טקסט (טאב PDF ברקע
+  /// נשמר ב-keep-alive) והדפסת מפרשים מתוך טאב PDF פעיל. ובקריאה מתוסף הטאב
+  /// הפעיל הוא טאב התוסף, כך שאין `PdfViewer` גלוי שמרנדר.
+  Future<bool> _defaultPrintPluginFile(
+    File file, {
+    required String jobName,
+  }) async {
+    final context = navigatorKey.currentContext;
+    if (context == null || !context.mounted) {
+      throw Exception('error.unavailable: No window to show the print screen');
+    }
+    final Uint8List bytes;
+    try {
+      bytes = await file.readAsBytes();
+    } on FileSystemException {
+      // בלי הנתיב: הגשר מחזיר לתוסף את הודעת החריגה כמות שהיא.
+      throw Exception('error.unavailable: the file could not be read');
+    }
+    if (!context.mounted) {
+      throw Exception('error.unavailable: No window to show the print screen');
+    }
+    final printed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PrintingScreen(
+        data: Future.value(''),
+        // במסלול ה-PDF בלבד: תווית להצגה, לשם עבודת ההדפסה ולשם הקובץ בייצוא.
+        bookId: jobName,
+        createPdfOverride: (_) async => bytes,
       ),
     );
     return printed ?? false;
@@ -4905,7 +5045,16 @@ class PluginBridgeAdapter {
           throw Exception('error.invalid_params: token required');
         }
         _fileServer.revoke(token);
+        // קובץ שהורד ל-`network.fetchFile` נמחק עם ביטול ה-token שלו.
+        final revoked = await _loadUserFileGrant(token);
         await _removeUserFileGrant(token);
+        if (revoked != null &&
+            _remoteFiles.ownsCanonical(
+              revoked.path,
+              pluginId: plugin.pluginId,
+            )) {
+          await _remoteFiles.delete(revoked.path);
+        }
         return true;
       default:
         throw Exception('error.unknown_method: Unknown action in fs: $action');
@@ -5458,11 +5607,31 @@ class PluginBridgeAdapter {
     }
   }
 
+  /// מסדר את הכתיבות לרשימת ה-grants. כל כתיבה קוראת את כל המפה ושומרת אותה
+  /// מחדש, ולכן שתי כתיבות מקבילות (למשל `Promise.all` של כמה
+  /// `network.fetchFile`) היו דורסות זו את ה-grant של זו. התור משותף לכל
+  /// המופעים של אותו תוסף, כי ה-KV משותף להם.
+  static final Map<String, Future<void>> _grantWriteQueues = {};
+
+  Future<T> _serializeGrantWrites<T>(Future<T> Function() action) {
+    final previous = _grantWriteQueues[plugin.pluginId] ?? Future<void>.value();
+    final run = previous.then((_) => action());
+    final tail = run.then<void>((_) {}, onError: (_) {});
+    _grantWriteQueues[plugin.pluginId] = tail;
+    // תור שהתרוקן אינו נשמר, כדי שהמפה לא תצבור תוספים.
+    tail.whenComplete(() {
+      if (identical(_grantWriteQueues[plugin.pluginId], tail)) {
+        _grantWriteQueues.remove(plugin.pluginId);
+      }
+    });
+    return run;
+  }
+
   Future<void> _saveUserFileGrant(
     String token,
     String path, {
     required bool writable,
-  }) async {
+  }) => _serializeGrantWrites(() async {
     final grants = await _readUserFileGrants();
     grants[token] = {'path': path, 'access': writable ? 'readwrite' : 'read'};
     await _pluginRepo.setKV(
@@ -5471,7 +5640,7 @@ class PluginBridgeAdapter {
       _userFileGrantsKey,
       jsonEncode(grants),
     );
-  }
+  });
 
   /// קורא grant, כולל הפורמט הישן.
   ///
@@ -5491,17 +5660,18 @@ class PluginBridgeAdapter {
     return null;
   }
 
-  Future<void> _removeUserFileGrant(String token) async {
-    final grants = await _readUserFileGrants();
-    if (grants.remove(token) != null) {
-      await _pluginRepo.setKV(
-        plugin.pluginId,
-        '_internal',
-        _userFileGrantsKey,
-        jsonEncode(grants),
-      );
-    }
-  }
+  Future<void> _removeUserFileGrant(String token) =>
+      _serializeGrantWrites(() async {
+        final grants = await _readUserFileGrants();
+        if (grants.remove(token) != null) {
+          await _pluginRepo.setKV(
+            plugin.pluginId,
+            '_internal',
+            _userFileGrantsKey,
+            jsonEncode(grants),
+          );
+        }
+      });
 
   /// רושם את [canonical] כקובץ משתמש מאושר, או משתמש שוב ב-token שכבר קיים
   /// לאותו נתיב.
@@ -7131,7 +7301,7 @@ class PluginBridgeAdapter {
   }
 
   /// מה נתמך **בפועל** בהקשר הקריאה הנוכחי. הדגשות מצוירות רק בטור הטקסט
-  /// הראשי (תצוגה משולבת וצורת הדף), ואין הדגשות/בחירה/תפריט הקשר ב-PDF.
+  /// הראשי (תצוגה משולבת וצורת הדף), ואין ב-PDF הדגשות ובחירה דרך ה-API.
   Map<String, dynamic> _getHighlightCapabilities() {
     final pane = _dependencies.tabsBloc.state.readingPane;
     if (pane is TextBookTab) {
@@ -7141,7 +7311,7 @@ class PluginBridgeAdapter {
         'surface': pageShape ? 'pageShape' : 'combined',
         'highlights': true,
         'selection': true,
-        'contextMenu': const ['mainText'],
+        'contextMenu': const ['mainText', 'commentary'],
       };
     }
     if (pane is PdfBookTab) {
@@ -7149,7 +7319,7 @@ class PluginBridgeAdapter {
         'surface': 'pdf',
         'highlights': false,
         'selection': false,
-        'contextMenu': const <String>[],
+        'contextMenu': const ['pdf', 'commentary'],
       };
     }
     return {
@@ -7547,8 +7717,7 @@ class PluginBridgeAdapter {
           final result = await _downloadService.downloadToPath(
             uri,
             destPath,
-            isAllowed: (candidate) => PluginNetworkAccessResolver.instance
-                .isUriAllowedForPlugin(candidate, plugin.manifest),
+            isAllowed: _isDownloadHopAllowed,
             isRedirectAllowed: isGithubReleaseRedirectAllowed,
             resume: resume,
           );
@@ -7559,16 +7728,125 @@ class PluginBridgeAdapter {
         final result = await _downloadService.downloadToDownloads(
           uri,
           filename: filename,
-          isAllowed: (candidate) => PluginNetworkAccessResolver.instance
-              .isUriAllowedForPlugin(candidate, plugin.manifest),
+          isAllowed: _isDownloadHopAllowed,
           isRedirectAllowed: isGithubReleaseRedirectAllowed,
         );
         return {'path': result.path, 'filename': result.filename};
+
+      case 'fetchFile':
+        return await _fetchRemoteFile(args);
 
       default:
         throw Exception(
           'error.unknown_method: Unknown action in network: $action',
         );
+    }
+  }
+
+  /// `network.fetchFile` — מוריד קובץ מ-URL מותר למטמון זמני פרטי של התוסף
+  /// ומחזיר אותו כ-token של קובץ משתמש לקריאה בלבד, כמו `fs.pickUserFile`:
+  /// `fs.resolveFileUrl`, `fs.revokeFile` ו-`<iframe>` עובדים עליו כרגיל.
+  /// התוסף אינו מקבל נתיב דיסק והקובץ אינו נכנס לתיקיית המשתמש.
+  Future<Map<String, dynamic>> _fetchRemoteFile(
+    Map<String, dynamic> args,
+  ) async {
+    final generation = _remoteFiles.generationForPlugin(plugin.pluginId);
+    final uri = await _requireAllowedNetworkUri(args);
+    final timeoutMs = args['timeoutMs'];
+    final maxTimeoutMs = PluginRemoteFileCache.maxTimeout.inMilliseconds;
+    if (timeoutMs != null &&
+        (timeoutMs is! int || timeoutMs <= 0 || timeoutMs > maxTimeoutMs)) {
+      throw Exception(
+        'error.invalid_params: timeoutMs must be a positive integer '
+        'up to $maxTimeoutMs',
+      );
+    }
+    final maxBytes = args['maxBytes'];
+    if (maxBytes != null &&
+        (maxBytes is! int ||
+            maxBytes <= 0 ||
+            maxBytes > PluginRemoteFileCache.maxBytesLimit)) {
+      throw Exception(
+        'error.invalid_params: maxBytes must be a positive integer '
+        'up to ${PluginRemoteFileCache.maxBytesLimit}',
+      );
+    }
+
+    if (generation != _remoteFiles.generationForPlugin(plugin.pluginId)) {
+      throw Exception('error.unavailable: remote file download revoked');
+    }
+    final PluginRemoteFile file;
+    try {
+      file = await _remoteFiles.fetch(
+        plugin.pluginId,
+        uri,
+        downloader: _downloadService,
+        isAllowed: _isDownloadHopAllowed,
+        isRedirectAllowed: isGithubReleaseRedirectAllowed,
+        maxBytes: maxBytes ?? PluginRemoteFileCache.defaultMaxBytes,
+        timeout: timeoutMs == null
+            ? PluginRemoteFileCache.defaultTimeout
+            : Duration(milliseconds: timeoutMs),
+      );
+    } on FileSystemException {
+      // הודעת החריגה כוללת נתיב מוחלט (תיקיית ה-temp, שם המשתמש), והגשר
+      // מחזיר לתוסף את הודעת כל חריגה שאינה מקודדת.
+      throw Exception('error.internal: failed to write the downloaded file');
+    }
+    if (generation != _remoteFiles.generationForPlugin(plugin.pluginId)) {
+      await _remoteFiles.delete(file.path);
+      throw Exception('error.unavailable: remote file download revoked');
+    }
+    final canonical = canonicalizeNearestExisting(file.path) ?? file.path;
+    final registration = await _fileServer.register(
+      pluginId: plugin.pluginId,
+      canonicalPath: canonical,
+    );
+    await _dropEvictedRemoteGrants();
+    await _saveUserFileGrant(registration.token, canonical, writable: false);
+    if (generation != _remoteFiles.generationForPlugin(plugin.pluginId)) {
+      _fileServer.revoke(registration.token);
+      await _removeUserFileGrant(registration.token);
+      await _remoteFiles.delete(canonical);
+      throw Exception('error.unavailable: remote file download revoked');
+    }
+    return {
+      'token': registration.token,
+      'url': registration.url,
+      'name': file.name,
+      'size': file.size,
+      'mime': PluginFileServer.contentTypeForPath(canonical).mimeType,
+    };
+  }
+
+  /// בדיקת היעד בכל קפיצה של הורדה, כולל redirect: אותה הכרעה כמו ל-URL
+  /// ההתחלתי, כולל הרשאת `network.localhost` ליעדי loopback. התאמה למניפסט
+  /// בלבד הייתה מאפשרת לשרת מותר להפנות ל-127.0.0.1 תוסף שאין לו הרשאה כזו.
+  Future<bool> _isDownloadHopAllowed(Uri candidate) =>
+      isPluginNetworkAccessAllowed(
+        uri: candidate,
+        pluginId: plugin.pluginId,
+        manifest: plugin.manifest,
+        registry: _pluginRepo,
+      );
+
+  /// מסיר מה-KV grants של קבצים שהמטמון כבר מחק (פינוי מכסה או הפעלה חדשה),
+  /// כדי שלא יצטברו, ומבטל את הרישום שלהם בשרת הקבצים.
+  Future<void> _dropEvictedRemoteGrants() async {
+    for (final MapEntry(key: token, :value)
+        in (await _readUserFileGrants()).entries) {
+      final path = switch (value) {
+        {'path': final String path} => path,
+        _ => null,
+      };
+      // הנתיב ב-grant כבר קנוני, ולכן בדיקת השייכות לשורש המטמון לקסיקלית
+      // וזולה; רק קובץ של המטמון נבדק בדיסק.
+      if (path != null &&
+          _remoteFiles.ownsCanonical(path) &&
+          !File(path).existsSync()) {
+        _fileServer.revoke(token);
+        await _removeUserFileGrant(token);
+      }
     }
   }
 

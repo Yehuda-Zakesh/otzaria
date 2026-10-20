@@ -2377,6 +2377,11 @@ class _PrintingScreenState extends State<PrintingScreen> {
                                                     ),
                                                     AppMenuEntry(
                                                       value: HolyNameDisplay
+                                                          .daletDalet,
+                                                      label: 'ידוד',
+                                                    ),
+                                                    AppMenuEntry(
+                                                      value: HolyNameDisplay
                                                           .hehApostrophe,
                                                       label: "ה'",
                                                     ),

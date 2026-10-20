@@ -402,18 +402,32 @@ class _SearchDialogState extends State<SearchDialog> {
               ],
               const SizedBox(height: 24),
             ] else ...[
-              SizedBox(
-                width: double.infinity,
-                child: ActionButton.recommended(
-                  text: context.settingsText('בנה אינדקס'),
-                  icon: FluentIcons.play_24_regular,
-                  onPressed: () async {
-                    final indexingBloc = context.read<IndexingBloc>();
-                    // העץ המלא: העץ של LibraryBloc מסונן מהסתרות.
-                    final library = await DataRepository.instance.library;
-                    indexingBloc.add(StartIndexing(library));
-                  },
-                ),
+              // אינדוקס בזמן העדכון היה קורא ממסד שהעדכון סוגר ומחליף.
+              ValueListenableBuilder<bool>(
+                valueListenable:
+                    TantivyDataProvider.instance.isIndexingDeferred,
+                builder: (context, deferred, _) => deferred
+                    ? Text(
+                        context.settingsText(
+                          'האינדקס ייבנה אוטומטית בסיום עדכון הספרייה.',
+                        ),
+                        style: TextStyle(color: cs.onSurfaceVariant),
+                        textAlign: TextAlign.center,
+                      )
+                    : SizedBox(
+                        width: double.infinity,
+                        child: ActionButton.recommended(
+                          text: context.settingsText('בנה אינדקס'),
+                          icon: FluentIcons.play_24_regular,
+                          onPressed: () async {
+                            final indexingBloc = context.read<IndexingBloc>();
+                            // העץ המלא: העץ של LibraryBloc מסונן מהסתרות.
+                            final library =
+                                await DataRepository.instance.library;
+                            indexingBloc.add(StartIndexing(library));
+                          },
+                        ),
+                      ),
               ),
               const SizedBox(height: 8),
             ],

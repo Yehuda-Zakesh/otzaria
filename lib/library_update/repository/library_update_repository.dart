@@ -15,6 +15,8 @@ import 'package:otzaria/utils/file/download_space.dart';
 import 'package:otzaria/utils/file/zstd_stream_extractor.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
+import 'package:otzaria/empty_library/services/library_space_estimate.dart'
+    show comparableVolumeId;
 import 'package:seforim_library_updater/seforim_library_updater.dart';
 
 import '../services/library_access_gate.dart';
@@ -193,6 +195,7 @@ class LibraryUpdateRepository implements LibraryUpdateService {
   final Future<DiskSpaceInfo> Function(String dirPath) diskSpaceProvider;
   final Future<PatchApplier> Function() applierProvider;
   final Future<void> Function() sqliteTempDirectoryInitializer;
+  final bool isAndroid;
 
   LibraryUpdateRepository({
     required this.discovery,
@@ -211,7 +214,9 @@ class LibraryUpdateRepository implements LibraryUpdateService {
     Future<DiskSpaceInfo> Function(String dirPath)? diskSpaceProvider,
     Future<PatchApplier> Function()? applierProvider,
     Future<void> Function()? sqliteTempDirectoryInitializer,
-  }) : dbPathProvider = dbPathProvider ?? DatabaseConstants.getDatabasePath,
+    bool? isAndroid,
+  }) : isAndroid = isAndroid ?? Platform.isAndroid,
+       dbPathProvider = dbPathProvider ?? DatabaseConstants.getDatabasePath,
        dataRootProvider = dataRootProvider ?? AppPaths.getDataRootPath,
        nowTimestamp = nowTimestamp ?? (() => DateTime.now().toIso8601String()),
        fullDbExtractor = fullDbExtractor ?? _defaultFullDbExtractor,
@@ -632,8 +637,7 @@ class LibraryUpdateRepository implements LibraryUpdateService {
     final dbInfo = await diskSpaceProvider(dbDir);
     String gb(int bytes) => (bytes / (1 << 30)).toStringAsFixed(1);
 
-    final sameVolume =
-        cacheInfo.volumeId != null && cacheInfo.volumeId == dbInfo.volumeId;
+    final sameVolume = _sameVolume(cacheDir.path, cacheInfo, dbDir, dbInfo);
     if (sameVolume) {
       final needed = cacheNeeded + walNeeded;
       if (cacheInfo.freeBytes >= 0 && cacheInfo.freeBytes < needed) {
@@ -656,6 +660,17 @@ class LibraryUpdateRepository implements LibraryUpdateService {
         'ליד הספרייה, פנוי ${gb(dbInfo.freeBytes)}GB',
       );
     }
+  }
+
+  bool _sameVolume(
+    String a,
+    DiskSpaceInfo aInfo,
+    String b,
+    DiskSpaceInfo bInfo,
+  ) {
+    final aId = comparableVolumeId(a, aInfo.volumeId, isAndroid: isAndroid);
+    return aId != null &&
+        aId == comparableVolumeId(b, bInfo.volumeId, isAndroid: isAndroid);
   }
 
   int _resumablePatchBytes(File partial, PatchFileEntry patchFile) {
@@ -703,7 +718,7 @@ class LibraryUpdateRepository implements LibraryUpdateService {
     final newDbPath = '$dbPath.new';
     final resumeToken =
         '${asset.downloadUrl}|${asset.size}|${asset.id ?? ''}|${asset.updatedAt ?? ''}';
-    await _ensureDiskSpaceForFullDownload(
+    await ensureDiskSpaceForFullDownload(
       archivePath: archivePath,
       archiveNeeded: await additionalDownloadBytes(
         destPath: archivePath,
@@ -792,7 +807,8 @@ class LibraryUpdateRepository implements LibraryUpdateService {
 
   /// זורק [LibraryUpdateDiskSpaceException] אם אין מקום להורדה ולחילוץ.
   /// מקום פנוי לא-ידוע (freeBytes==-1) אינו חוסם — עדיף לנסות מלחסום בטעות.
-  Future<void> _ensureDiskSpaceForFullDownload({
+  @visibleForTesting
+  Future<void> ensureDiskSpaceForFullDownload({
     required String archivePath,
     required int archiveNeeded,
     required String dbDir,
@@ -801,9 +817,12 @@ class LibraryUpdateRepository implements LibraryUpdateService {
     final extractInfo = await diskSpaceProvider(dbDir);
     String gb(int bytes) => (bytes / (1 << 30)).toStringAsFixed(1);
 
-    final sameVolume =
-        archiveInfo.volumeId != null &&
-        archiveInfo.volumeId == extractInfo.volumeId;
+    final sameVolume = _sameVolume(
+      p.dirname(archivePath),
+      archiveInfo,
+      dbDir,
+      extractInfo,
+    );
     if (sameVolume) {
       final needed = archiveNeeded + _extractedDbSizeEstimate;
       if (archiveInfo.freeBytes >= 0 && archiveInfo.freeBytes < needed) {

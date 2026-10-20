@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/app_report/repository/error_log_blocks.dart';
 import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/core/diagnostics/developer_diagnostics.dart';
 import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/core/info/app_info_service.dart';
 import 'package:otzaria/core/info/error_log_reader.dart';
@@ -36,7 +37,8 @@ class AppReportCollector {
   AppReportCollector({
     AppReportRedactor? redactor,
     this._appInfoLoader,
-    this._openTabCounts,
+    this._currentContext,
+    this._includeCurrentContext = true,
     this._errorLogPath,
     this._shutdownLogPath,
     DateTime Function()? clock,
@@ -53,7 +55,14 @@ class AppReportCollector {
 
   final AppReportRedactor _redactor;
   final Future<Map<String, dynamic>> Function()? _appInfoLoader;
-  final Future<Map<String, int>> Function()? _openTabCounts;
+  final Map<String, Object?> Function()? _currentContext;
+
+  /// `false` בדיווח על קריסה מהפעלה קודמת: החלון הנוכחי אינו מה שהיה פתוח בה.
+  final bool _includeCurrentContext;
+
+  @visibleForTesting
+  bool get includesCurrentContext => _includeCurrentContext;
+
   final String? _errorLogPath;
   final String? _shutdownLogPath;
   final DateTime Function() _clock;
@@ -70,9 +79,11 @@ class AppReportCollector {
     );
   }
 
-  /// מפת האבחון: מידע התוכנה, מערכת, מצב הרשת, ציר העלייה וספירת כרטיסיות.
+  /// מפת האבחון: מידע התוכנה, מערכת, מצב הרשת, ציר העלייה ומה שהחלון מציג.
   Future<Map<String, dynamic>> collectDiagnostics() async {
-    final tabCounts = _openTabCounts;
+    final currentContext = _includeCurrentContext
+        ? _currentContext ?? DeveloperDiagnostics.instance.contextProvider
+        : null;
     final diagnostics = <String, dynamic>{
       'collectedAt': _clock().toUtc().toIso8601String(),
       'appInfo': await _guard('appInfo', _loadAppInfo),
@@ -87,10 +98,10 @@ class AppReportCollector {
               .toList(),
         },
       ),
-      if (tabCounts != null)
-        'openTabs': await _guard(
-          'openTabs',
-          () async => Map<String, dynamic>.from(await tabCounts()),
+      if (currentContext != null)
+        'context': await _guard(
+          'context',
+          () async => Map<String, dynamic>.from(currentContext()),
         ),
     };
     return _redact(diagnostics);

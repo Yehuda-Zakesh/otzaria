@@ -321,6 +321,35 @@ void main() {
     });
   });
 
+  group('combined view title alignment', () {
+    testWidgets('the title is centered like in a regular tab', (tester) async {
+      await pumpWithTitle(
+        tester,
+        bookTitle: 'ספר בדיקה',
+        currentTitle: 'ספר בדיקה, פרק א',
+        isInCombinedView: true,
+      );
+
+      expect(tester.takeException(), isNull);
+      final row = tester.widget<Row>(
+        find.ancestor(of: find.text('פרק א'), matching: find.byType(Row)).first,
+      );
+      expect(row.mainAxisAlignment, MainAxisAlignment.center);
+    });
+
+    testWidgets('a title without a location is centered too', (tester) async {
+      await pumpWithTitle(
+        tester,
+        bookTitle: 'ספר בדיקה',
+        currentTitle: '',
+        isInCombinedView: true,
+      );
+
+      final title = tester.widget<Text>(find.text('ספר בדיקה').first);
+      expect(title.textAlign, TextAlign.center);
+    });
+  });
+
   group('מקור הכותרת הארוכה: פסקת גוף שסומנה כ-heading ב-Word', () {
     test('פסקה בסגנון heading 3 הופכת לערך תוכן עניינים באורך מלא', () {
       // בדיוק המבנה של הקובץ שדווח: styleId מספרי ("3") שהוגדר ב-styles.xml

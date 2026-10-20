@@ -52,6 +52,7 @@ class DeclarativeToolbarTemplateCompiler {
       'order',
       'binding',
       'action',
+      'openPlugin',
       'childrenBinding',
       'when',
     }, 'toolbarItems[$index]');
@@ -106,11 +107,43 @@ class DeclarativeToolbarTemplateCompiler {
       'binding.visibleOutput',
     );
 
+    final openPlugin = json['openPlugin'];
+    if (openPlugin != null && openPlugin is! bool) {
+      throw const DeclarativeProgramException(
+        'declarative.invalid_toolbar_item',
+        'openPlugin must be a bool',
+      );
+    }
+    if (openPlugin == true && type != 'button') {
+      throw const DeclarativeProgramException(
+        'declarative.invalid_toolbar_item',
+        'openPlugin is only allowed on a button',
+      );
+    }
+
     if (type != 'menu') {
       if (type == 'button' && json['childrenBinding'] != null) {
         throw const DeclarativeProgramException(
           'declarative.invalid_toolbar_item',
           'A button cannot declare childrenBinding',
+        );
+      }
+      // כפתור שפותח את דף התוסף: binding קובע מתי הוא מוצג, והלחיצה
+      // נמסרת לדף (כמו openPlugin בכפתור רגיל) — בלי פעולת host.
+      if (openPlugin == true) {
+        if (json['action'] != null) {
+          throw const DeclarativeProgramException(
+            'declarative.invalid_toolbar_item',
+            'A button cannot declare both action and openPlugin',
+          );
+        }
+        return CompiledDeclarativeToolbarTemplate(
+          baseItem: baseItem,
+          programId: programId,
+          visibleOutput: visibleOutput,
+          actionTemplate: null,
+          childrenBinding: null,
+          openPlugin: true,
         );
       }
       final action = _requiredMap(

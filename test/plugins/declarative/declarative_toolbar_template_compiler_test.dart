@@ -93,6 +93,48 @@ void main() {
     expect(registry.getAll(), hasLength(1));
   });
 
+  test('כפתור קשור עם openPlugin: בלי action, והלחיצה פותחת את דף התוסף', () {
+    final button = Map<String, dynamic>.from(_templates().first)
+      ..remove('action')
+      ..['openPlugin'] = true;
+
+    final compiled = _compiler().compileAll('test.plugin', [button]).single;
+    expect(compiled.openPlugin, isTrue);
+    expect(compiled.actionTemplate, isNull);
+    expect(compiled.childrenBinding, isNull);
+    expect(compiled.visibleOutput, 'defaultEdition');
+
+    // כפתור רגיל עם פעולה — openPlugin כבוי
+    expect(
+      _compiler().compileAll('test.plugin', _templates()).first.openPlugin,
+      isFalse,
+    );
+  });
+
+  test('openPlugin בכפתור קשור: סותר את action, רק בכפתור, ורק בוליאני', () {
+    final both = Map<String, dynamic>.from(_templates().first)
+      ..['openPlugin'] = true;
+    expect(
+      () => _compiler().compileAll('test.plugin', [both]),
+      _throwsProgramError('declarative.invalid_toolbar_item'),
+    );
+
+    final menu = Map<String, dynamic>.from(_templates().last)
+      ..['openPlugin'] = true;
+    expect(
+      () => _compiler().compileAll('test.plugin', [menu]),
+      _throwsProgramError('declarative.invalid_toolbar_item'),
+    );
+
+    final notBool = Map<String, dynamic>.from(_templates().first)
+      ..remove('action')
+      ..['openPlugin'] = 'yes';
+    expect(
+      () => _compiler().compileAll('test.plugin', [notBool]),
+      _throwsProgramError('declarative.invalid_toolbar_item'),
+    );
+  });
+
   test('שדה toolbar דקלרטיבי לא מוכר נדחה', () {
     final templates = _templates();
     templates.first['script'] = 'run()';

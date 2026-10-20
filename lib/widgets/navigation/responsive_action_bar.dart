@@ -23,6 +23,7 @@ enum ToolbarActionId {
   viewMode,
   openCommentatorsTab,
   parallelEdition,
+  companionBook,
   // כרטיסיות מפרשים (טקסט ו-PDF)
   expandAll,
   bookmarkAdd,
@@ -55,6 +56,7 @@ const List<ToolbarActionId> toolbarOverflowOrder = [
   ToolbarActionId.viewMode,
   ToolbarActionId.openCommentatorsTab,
   ToolbarActionId.parallelEdition,
+  ToolbarActionId.companionBook,
   // כרטיסיות מפרשים
   ToolbarActionId.expandAll,
   ToolbarActionId.bookmarkAdd,

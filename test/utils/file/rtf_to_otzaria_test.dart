@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/utils/file/document_conversion_exceptions.dart';
 import 'package:otzaria/utils/file/rtf_to_otzaria.dart';
+import 'package:otzaria/text_book/utils/inline_notes_utils.dart';
 
 /// RTF הוא זרם בייטים, לא טקסט Unicode — הבנייה כאן היא ברמת הבייט כדי
 /// שבדיקות דפי-הקוד ישקפו את מה שקורה בקובץ אמיתי.
@@ -365,9 +366,149 @@ void main() {
       expect(out, contains('<sup class="footnote-marker">2</sup>'));
     });
 
+    for (final marker in ['*', '40']) {
+      test('חזקה בקבוצה קודמת נשמרת לצד סימן $marker', () {
+        final out = _convert(
+          _doc(
+            ' x${r'{\super 2}{\super '}$marker'
+            '${r'{\footnote \pard\plain {\super '}$marker} note}}'
+            r'\par',
+          ),
+        );
+        expect(
+          out,
+          '<h1>ספר</h1>\nx<sup>2</sup>'
+          '<sup class="footnote-marker">$marker</sup>'
+          '<i class="footnote">note</i>',
+        );
+        expect(stripInlineNotesForSearch(out), '<h1>ספר</h1>\nx<sup>2</sup>');
+      });
+    }
+
+    test('סימן מוסתר אינו מוחק חזקה גלויה קודמת', () {
+      final out = _convert(
+        _doc(
+          r' x{\super 2}{\v\super *{\footnote \pard\super * note}}after\par',
+        ),
+      );
+      expect(out, '<h1>ספר</h1>\nx<sup>2</sup>after');
+    });
+
+    test('חזקה וסימן באותה קבוצה מופרדים לפי ההד בגוף ההערה', () {
+      final out = _convert(
+        _doc(
+          r' x{\b\super 2*{\footnote \pard\plain {\super *} note}}\par',
+        ),
+      );
+      expect(
+        out,
+        '<h1>ספר</h1>\nx<b><sup>2</sup></b>'
+        '<sup class="footnote-marker">*</sup><i class="footnote">note</i>',
+      );
+    });
+
+    test('קבוצות עטיפה ושינוי עיצוב אינם מאבדים את גבול הסימן', () {
+      final out = _convert(
+        _doc(
+          r' x{\super 2}{\super {\b 4}{{\footnote {\super 40} note}}0}\par',
+        ),
+      );
+      expect(
+        out,
+        '<h1>ספר</h1>\nx<sup>2</sup>'
+        '<sup class="footnote-marker">40</sup><i class="footnote">note</i>',
+      );
+    });
+
+    for (final tail in [
+      r'}0 years\par',
+      r'}{\super 0 years}\par',
+      r'}\par 0 years\par',
+      r'\par 0 years}\par',
+      r'\nosupersub 0 years}\par',
+    ]) {
+      test('המשך סימן אינו זולג מחוץ להקשר שלו: $tail', () {
+        final out = _convert(
+          _doc(
+            r' x{\super 4{\footnote {\super 40} note}' + tail,
+          ),
+        );
+        expect(out, contains('0 years'));
+        expect(out, contains('<sup class="footnote-marker">40</sup>'));
+      });
+    }
+
+    test('סימן של הערה ריקה או ללא הד תואם נשאר תוכן', () {
+      expect(
+        _convert(_doc(r' x{\super 2{\footnote }}\par')),
+        '<h1>ספר</h1>\nx<sup>2</sup>',
+      );
+      expect(
+        _convert(_doc(r' x{\super 2{\footnote note}}\par')),
+        '<h1>ספר</h1>\nx<sup>2</sup>'
+        '<sup class="footnote-marker">1</sup><i class="footnote">note</i>',
+      );
+    });
+
+    test('קבוצה ללא סימן אינה מאמצת חזקה מקבוצה קודמת גם כשההד זהה', () {
+      final out = _convert(
+        _doc(
+          r' x{\super 2}{\super {\footnote {\super 2} note}}\par',
+        ),
+      );
+      expect(
+        out,
+        '<h1>ספר</h1>\nx<sup>2</sup>'
+        '<sup class="footnote-marker">1</sup><i class="footnote"><sup>2</sup> note</i>',
+      );
+    });
+
+    test('מועמד שאינו תואם להד נשמר בעיצובו', () {
+      final out = _convert(
+        _doc(
+          r' x{\b\super 2{\footnote {\super *} note}}\par',
+        ),
+      );
+      expect(
+        out,
+        '<h1>ספר</h1>\nx<b><sup>2</sup></b>'
+        '<sup class="footnote-marker">1</sup><i class="footnote"><sup>*</sup> note</i>',
+      );
+    });
+
+    test('קבוצת הערה קטועה ללא גוף משמרת את המועמד', () {
+      expect(
+        _convert(r'{\rtf1\ansi x{\super 2{\footnote '),
+        '<h1>ספר</h1>\nx<sup>2</sup>',
+      );
+    });
+
     test('הערה ריקה אינה מייצרת סימון', () {
       final out = _convert(_doc(r'טקסט{\footnote }\par'));
       expect(out, '<h1>ספר</h1>\nטקסט');
+    });
+
+    // בר-אילן מפצל סימן דו-ספרתי סביב ההערה וחוזר עליו בראש גופה.
+    test('סימן מילולי אינו מוכפל וגוף ההערה אינו עילי (issue #2685)', () {
+      final out = _convert(
+        _doc(
+          r'{א}{\super 1{\footnote \rtlpar {\super 1} {{\b ראשונה}} רגיל}}'
+          r'{ ב}{\super 4{\footnote \rtlpar {\super 40} {{\b ארבעים}}}0}'
+          r'{ ג x}{\super 2}{\super\chftn{\footnote {\super\chftn}וורד}}'
+          r'{ ד}{\b\super *{\footnote \pard\plain {\super *} כוכבית}}\par',
+        ),
+      );
+      expect(
+        out,
+        '<h1>ספר</h1>\n'
+        'א<sup class="footnote-marker">1</sup>'
+        '<i class="footnote"><b>ראשונה</b> רגיל</i>'
+        ' ב<sup class="footnote-marker">40</sup>'
+        '<i class="footnote"><b>ארבעים</b></i>'
+        ' ג x<sup>2</sup><sup class="footnote-marker">1</sup>'
+        '<i class="footnote">וורד</i>'
+        ' ד<sup class="footnote-marker">*</sup><i class="footnote">כוכבית</i>',
+      );
     });
   });
 

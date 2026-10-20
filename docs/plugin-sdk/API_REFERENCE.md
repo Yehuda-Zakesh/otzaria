@@ -175,6 +175,7 @@ if (response.success) {
 | `library.setProviderBooks` | 0.9.98 |
 | `network.fetchStream` | 0.9.97 |
 | `network.download` | 0.9.93 |
+| `network.fetchFile` | 0.9.99 |
 | `search.fullText` | 0.9.89 |
 | `search.query` | 0.9.97 |
 | `search.getOptions` | 0.9.97 |
@@ -248,6 +249,7 @@ if (response.success) {
 | `ui.showWarning` | 0.9.89 |
 | `ui.pickFolder` | 0.9.93 |
 | `ui.print` | 0.9.97 |
+| `ui.printFile` | 0.9.99 |
 | `ui.exportPdf` | 0.9.97 |
 | `ui.setUnsavedChanges` | 0.9.97 |
 | `fs.extractZip` | 0.9.93 |
@@ -1400,6 +1402,68 @@ if (folder.success && folder.data.path) {
 `error.forbidden` (URL לא ברשימת ההיתר, או `destPath` מחוץ לתיקייה מאושרת),
 `error.invalid_params` (URL חסר/לא תקין), `error.internal` (כשל הורדה).
 
+### `network.fetchFile`
+**הרשאה:** `network.access` (או `network.localhost` ליעד מקומי) · **מגרסה:** 0.9.99
+
+מורידה קובץ מ-URL מותר **בלי לשמור אותו בתיקיית המשתמש**: הקובץ נשמר במטמון
+זמני פרטי של התוסף, והתוסף מקבל עליו `token` לקריאה בלבד, מאותו סוג ש-
+[`fs.pickUserFile`](#fspickuserfile) מחזיר. לכן כל מה שעובד על token כזה עובד
+גם כאן — `<iframe>`/PDF.js על ה-`url`, [`fs.resolveFileUrl`](#fsresolvefileurl),
+[`fs.readTextFile`](#fsreadtextfile), [`ui.printFile`](#uiprintfile) ו-
+[`fs.revokeFile`](#fsrevokefile). התוסף אינו מקבל נתיב דיסק.
+
+> **הרשאות:** `network.fetchFile`, `<iframe>` על ה-`url` ו-`ui.printFile` דורשים
+> רק את הרשאת הרשת. `fs.resolveFileUrl`, `fs.readTextFile` ו-`fs.revokeFile`
+> דורשים, כמו תמיד, גם את `fs.user_files.read` (הצהרה במניפסט והענקה); תוסף
+> שאינו מצהיר עליה אינו יכול לשחרר קובץ בעצמו, והמטמון מתפנה לפי המכסה, אחרי
+> יממה או בהסרת התוסף (ראו להלן).
+
+פרמטרים: `url` (חובה; אותה בדיקת הרשאה, allowlist ו-redirects כמו
+`network.download` — גם יעד redirect בודק את הרשאת הרשת המתאימה לו, כך שהפניה
+מאתר מותר ל-`127.0.0.1` נחסמת בלי `network.localhost`), `maxBytes` (תקרת גודל לקובץ; ברירת מחדל 50MB, מקסימום
+100MB) ו-`timeoutMs` (חסם זמן להורדה כולה; ברירת מחדל 120,000, מקסימום
+600,000). קובץ שחורג מהתקרה — כבר לפי `Content-Length`, ואם הוא חסר תוך כדי
+ההורדה — נמחק ומוחזרת `error.too_large`; הורדה שנכשלה באמצע אינה משאירה
+קובץ חלקי.
+
+```javascript
+const { data } = await Otzaria.call('network.fetchFile', {
+  url: 'https://example.org/books/sample.pdf',
+  maxBytes: 30 * 1024 * 1024  // אופציונלי
+});
+// { token, url, name: "sample.pdf", size: 1048576, mime: "application/pdf" }
+document.querySelector('iframe').src = data.url;
+```
+
+רינדור PDF בתוך `<iframe>` עובד רק ב-Windows/macOS; ב-Android/Linux יש לרנדר
+עם PDF.js (שמבצע `fetch` מה-`url`).
+
+הערות:
+- **הקובץ נשאר במטמון זמני פרטי עד שמשהו מוחק אותו.** אוצריא אינה מנקה את
+  המטמון ביציאה, וה-`token` נשמר בין הפעלות; הקובץ נמחק רק ב-`fs.revokeFile`
+  (קראו לו כשסיימתם), בפינוי מהמכסה (עד 256MB או 128 קבצים לכל תוסף, הוותיקים קודם),
+  בהסרה, בכיבוי, באיפוס נתונים או בשלילת ההרשאה `fs.user_files.read`
+  מהתוסף, או בניקוי של הורדה ראשונה אחרי הפעלה של אוצריא אם הקובץ ותיק מיממה.
+  עד אז הוא נשאר בדיסק, וגם `fs.resolveFileUrl` ממשיך לעבוד אחרי הפעלה מחדש.
+  **אל תניחו שה-`token` שורד:** אחרי כל אחד מהמחיקות האלה
+  `fs.resolveFileUrl` מחזיר `error.not_found` — הורידו שוב.
+- עד שלוש הורדות במקביל לתוסף; הורדה נוספת מוחזרת ב-`error.too_many_requests`.
+  אותה שגיאה מוחזרת אם המטמון מלא וקבצים נעולים מונעים פינוי; הקובץ החדש נמחק.
+- שם הקובץ נגזר מה-URL ומנוקה: עד 60 תווים (הסיומת נשמרת), בלי נקודות ורווחים
+  בסוף, ושם התקן שמור של ווינדוס (`CON`, `NUL`…) מקבל קו תחתון בהתחלה.
+- **סוג התוכן נקבע לפי סיומת השם, לא לפי תוכן הקובץ.** `mime` הוא מה ששרת
+  הקבצים של אוצריא מגיש ל-`<iframe>`, והוא נגזר מהסיומת בלבד. תשובה מסוג
+  `application/pdf` שה-URL שלה אינו מסתיים ב-`.pdf` נשמרת עם הסיומת; סוג אחר
+  בלי סיומת מוגש כ-`application/octet-stream`, וקובץ שסיומתו אינה מתאימה לתוכנו
+  (למשל דף שגיאה של שרת שנשמר כ-`.pdf`) מוגש לפי הסיומת. בדקו את התוכן בעצמכם
+  אם הוא חשוב לכם.
+
+שגיאות אפשריות: `error.permission_denied`, `error.forbidden` (URL או redirect
+לא ברשימת ההיתר), `error.invalid_params` (`url` חסר/לא תקין, `maxBytes` או
+`timeoutMs` שאינם שלמים חיוביים או מעל התקרה), `error.too_large`,
+`error.timeout`, `error.too_many_requests`, `error.internal` (כשל הורדה, כולל
+סטטוס HTTP שאינו 2xx, או כשל בכתיבת הקובץ).
+
 ---
 
 ## search.* - חיפוש
@@ -2160,20 +2224,20 @@ await Otzaria.call('reader.scrollToSection', { sectionIndex: 42 });
 
 מה נתמך **בפועל** בהקשר הקריאה הנוכחי, כדי שתוסף לא ינסה פעולה שאינה
 קיימת במשטח שבו המשתמש נמצא. הדגשות מצוירות רק בטור הטקסט הראשי — לא
-בחלוניות המפרשים — ו-PDF אינו תומך בהדגשות, בבחירת טקסט ובפריטי תפריט הקשר.
+בחלוניות המפרשים — ו-PDF אינו תומך בהדגשות וב-`reader.getSelection`.
 
 | שדה | משמעות |
 |-----|--------|
 | `surface` | `'combined'` \| `'pageShape'` \| `'pdf'` \| `null` |
 | `highlights` | האם `reader.setHighlight` ייראה במשטח הזה |
 | `selection` | האם `reader.getSelection` יכול להחזיר בחירה |
-| `contextMenu` | האזורים שבהם פריטי `reader.addContextMenuItem` מוצגים |
+| `contextMenu` | האזורים במשטח הנוכחי שבהם פריטי `reader.addContextMenuItem` מוצגים: `mainText` בספר טקסט, `commentary` (מ-0.9.99), ו-`pdf` בספר PDF (מ-0.9.99) |
 
 ```javascript
 const { data } = await Otzaria.call('reader.getHighlightCapabilities');
 if (data.highlights) { /* ... */ }
 // { surface: 'combined', highlights: true, selection: true,
-//   contextMenu: ['mainText'] }
+//   contextMenu: ['mainText', 'commentary'] }
 ```
 
 ### `reader.findTextOccurrences`
@@ -3147,6 +3211,45 @@ const res = await Otzaria.call('ui.print', {
 > הנייר שהמשתמש יבחר שם — הדף לא נפרס מחדש. בקשו גודל רק כשהתוסף באמת תלוי
 > בו; אחרת השאירו את השדה ריק ותנו למשתמש לשלוט.
 
+### `ui.printFile`
+**הרשאה:** `fs.user_files.read` לקובץ אישי; קובץ של `network.fetchFile` אינו דורש אותה · **מגרסה:** 0.9.99
+
+מדפיסה קובץ PDF שהוענק לתוסף — `token` של [`fs.pickUserFile`](#fspickuserfile),
+[`fs.openFolderFile`](#fsopenfolderfile) או [`network.fetchFile`](#networkfetchfile).
+`ui.print` מדפיסה את דף התוסף עצמו, ו-`iframe.contentWindow.print()` נכשל
+ב-`SecurityError` כי ה-PDF בא מ-origin אחר; זו הדרך להדפיס את הקובץ.
+
+אוצריא פותחת עליו את מסך ההדפסה שלה — אותו מסך שכפתור ההדפסה בקורא ה-PDF
+פותח: בחירת טווח עמודים, תצוגה מקדימה, כיוון וגודל דף, כמה עמודים בגיליון,
+ובסוף דיאלוג ההדפסה של המערכת (במצב סייפר — בחירת המדפסת שלו). המשתמש יכול גם
+לייצא את הטווח לקובץ PDF. התוסף אינו מקבל את התוכן, ואינו יכול לקבוע את
+הטווח או את העימוד — הם בידי המשתמש.
+
+הקריאה ממתינה לסגירת המסך ללא פסק הזמן הכללי של 30 שניות. מחזירה
+`{ printed: true }` אם המשתמש הדפיס או ייצא, ו-`{ printed: false }` אם סגר את
+המסך או ביטל. `jobName` אופציונלי (ברירת מחדל: שם הקובץ); הוא שם עבודת
+ההדפסה ושם הקובץ המוצע בייצוא, ומוצג בכותרת המסך.
+
+```javascript
+printButton.onclick = async () => {
+  const res = await Otzaria.call('ui.printFile', { token, jobName: 'הגהה' });
+  // res.data = { printed: true } — הודפס/יוצא; { printed: false } — בוטל
+};
+```
+
+הערות:
+- **דורשת מחוות משתמש ודיאלוג אחד בכל רגע**, כמו [`ui.print`](#uiprint) וכמו
+  [`reader.printRange`](#readerprintrange) (ראו ההערה בסוף הפרק). המסך הוא
+  דיאלוג מודאלי של האפליקציה שחוסם את החלון הראשי, ולכן הוא נפתח רק מלחיצה של
+  המשתמש, גם אם "הדפס" הסופי נלחץ בתוכו.
+- רק קובץ PDF: סיומת `.pdf` ו-`%PDF-` ב-1024 הבייטים הראשונים (דף שגיאה של שרת
+  שנשמר בשם `.pdf` אינו עובר); אחרת `error.unsupported`. `token` לא מוכר,
+  של תוסף אחר או של קובץ שנמחק — `error.not_found`. כשאין חלון ראשי שאפשר
+  להציג בו את המסך או שאי אפשר לקרוא את הקובץ — `error.unavailable`.
+- `jobName` חייב להיות מחרוזת (אחרת `error.invalid_params`); תווי בקרה מוסרים
+  ממנו והוא נחתך ל-120 תווים.
+- התצוגה המקדימה מציגה עד 60 עמודים; ההדפסה והייצוא כוללים את כל הטווח.
+
 ### `ui.exportPdf`
 **הרשאה:** (אין — דיאלוג „שמור בשם” של המערכת הוא שער ההסכמה)
 
@@ -3215,7 +3318,7 @@ async function save() {
 }
 ```
 
-> **`ui.print` ו-`ui.exportPdf` דורשות פעולת משתמש מפורשת.** אוצריא בודקת ישירות ב-WebView
+> **`ui.print`, `ui.printFile` ו-`ui.exportPdf` דורשות פעולת משתמש מפורשת.** אוצריא בודקת ישירות ב-WebView
 > אם קיימת הפעלת-משתמש חולפת (`navigator.userActivation`), ולכן אין דרך
 > לזייף אותה מתוך התוסף. קריאה מטעינת הדף, מטיימר, או אחרי שרשרת `await`
 > ארוכה — מוחזרת ב-`error.forbidden`. קראו להן ישירות מתוך מטפל לחיצה.
@@ -3411,7 +3514,10 @@ const { data } = await Otzaria.call('fs.stat', { path: 'cache/index.json' });
 >
 > **PDF/בינארי גדול:** הקובץ מוגש דרך שרת `localhost` פנימי (`http://127.0.0.1`)
 > עם תמיכת `Range`. הבייטים **אינם** עוברים דרך גשר ה-JS. מציבים את ה-`url`
-> שמתקבל ב-`<iframe>`/PDF.js (או `fetch`). שימו לב: רינדור PDF ב-`<iframe>`
+> שמתקבל ב-`<iframe>`/PDF.js (או `fetch`). שרת הקבצים מתיר הטמעה ב-`<iframe>`
+> רק מדף תוסף (`file://` או `otzaria-plugin://`, דרך `frame-ancestors`), מגרסה 0.9.99; בגרסאות
+> קודמות הוא שלח `X-Frame-Options: SAMEORIGIN` וה-`<iframe>` נחסם — שם יש
+> לטעון עם `fetch` ← `Blob` ← `iframe src=blob:`. שימו לב: רינדור PDF ב-`<iframe>`
 > מובנה עובד רק ב-Windows/macOS — לתאימות מלאה (Android/Linux) יש לרנדר עם
 > PDF.js, ש-`fetch` מה-`url` בעצמו.
 
@@ -5056,7 +5162,7 @@ async function scheduleReminder(title, body, dateTime) {
 
 קיצור עם `command` מפעיל את מנוע התוסף ושולח לו אירוע `app.command`;
 קיצור עם `contextMenuItemId` מפעיל את פעולת תפריט ההקשר בדיוק כמו לחיצה
-ימנית עליה (דורש טקסט מסומן בספר).
+ימנית עליה (דורש טקסט מסומן בטקסט הראשי של הספר — לא במפרש ולא ב-PDF).
 
 ### תכניות Host ללא WebView
 
@@ -5277,6 +5383,14 @@ async function scheduleReminder(title, body, dateTime) {
   4096 תווים) ואינו `null`. מפתח שתנאי `when` קורא מתעדכן מיד — כך לחיצה
   יכולה להציג/להסתיר פקדים באופן מיידי (פלטי תכניות, לעומת זאת, מחושבים
   מחדש רק בהחלפת ספר).
+- מ־`minAppVersion: 0.9.99`, כפתור יכול להצהיר `openPlugin: true` במקום `action`.
+  הוא מוצג לפי `binding`,
+  כמו כל פקד קשור, ולחיצה עליו פותחת את דף התוסף ומוסרת לו
+  `reader.toolbar_item_clicked` עם המיקום הנוכחי (`currentBook`,
+  `currentIndex`) — כמו בכפתור רגיל עם `openPlugin`. כך, למשל, כפתור שמוצג רק
+  בספרים מסוימים ופותח את התוסף במקום שבו הלומד נמצא. `openPlugin` סותר את
+  `action`, ומותר רק ב־`"type": "button"`. עצם הצהרת השדה בפקד קשור, גם כ־`false`,
+  דורשת גרסה 0.9.99 לפחות; `openPlugin` בפקד רגיל נשאר נתמך מגרסה 0.9.96.
 - תפריט משתמש ב־`childrenBinding.itemsOutput` וב־`itemTemplate`; בתוך התבנית
   זמינה ההפניה `$item`.
 - לחצן מפוצל (`"type": "split"`) מצהיר על שניהם: `action` לפעולה הראשית
@@ -6075,7 +6189,7 @@ await Otzaria.call('reader.addContextMenuItem', {
   הטקסט המסומן ולפעול עליו בדף שלו.
 - `type` יכול להיות `item`,‏ `submenu`,‏ `color-row` או `separator`
 - תת־תפריט מקבל `children`; שורת צבעים מקבלת `colors` עם `id`,‏ `color`,‏ `label`,‏ `selected` ו־`icon` אופציונלי. כאשר `icon` קיים הוא מוצג במקום גוש הצבע ומתאים לפעולות קומפקטיות כמו מחק
-- `contexts` הוא מערך ויכול להכיל את `reader-selection`, את `reader-page-shape-selection`, או את שניהם באותו פריט. מ-`0.9.97` נתמך גם `reader-highlight` (ראו למטה), ומ־`0.9.99` נתמך `reader-book` ללא סימון. ערכי `contexts` חייבים להיות חוקיים וייחודיים. פריט שלא מגדיר `contexts` מופיע בשני הקשרי הבחירה (כהתנהגות הרישום המקורית).
+- `contexts` הוא מערך ויכול להכיל את `reader-selection`, את `reader-page-shape-selection`, או את שניהם באותו פריט. מ-`0.9.97` נתמך גם `reader-highlight` (ראו למטה), ומ־`0.9.99` נתמכים גם `reader-book` (ללא סימון) וארבעת הקשרי המפרשים וה־PDF (ראו למטה). ערכי `contexts` חייבים להיות חוקיים וייחודיים. פריט שלא מגדיר `contexts` מופיע בשני הקשרי הבחירה (כהתנהגות הרישום המקורית).
 - ילד שלא מגדיר `contexts` יורש את המערך של אביו. ילד שמגדיר `contexts` במפורש מוצג רק בהקשרים שלו, ללא איחוד אוטומטי עם הקשר האב; ההקשרים המפורשים חייבים להיות תת־קבוצה של הקשרי האב.
 - אפשר להגדיר `onClickEvent` או `onColorClickEvent` כאירוע מותאם אישית
 
@@ -6085,6 +6199,82 @@ await Otzaria.call('reader.addContextMenuItem', {
 `reader.beginCorrectionSession`; אין לבחור לשונית לפי כותרת הספר או לפי הלשונית
 הפעילה לאחר פתיחת התוסף. השדה יכול להיעדר בתצוגה מקדימה שאינה מחוברת ללשונית.
 אפשר לרשום `contexts: ['reader-book']` להצגת פעולה בלחיצה ימנית ללא סימון, בשני קוראי הטקסט: הקורא הרגיל וקורא צורת הדף. ה־payload כולל את זהות הספר ואת `sectionIndex` ו־`currentIndex` של הפסקה שנלחצה. בשדה `selection`, הערך `text` הוא מחרוזת ריקה, `start` ו־`end` הם `null`, ואין `sourceRange`. ברירות המחדל של פריט ללא `contexts` נשארות שני הקשרי הבחירה; ילדים ללא `contexts` יורשים את הקשרי האב גם עבור `reader-book`.
+
+**מפרשים ו־PDF — `reader-commentary`, `reader-pdf` וגרסאות `-selection` (מ־`0.9.99`):**
+
+| הקשר | היכן מופיע הפריט |
+|------|------------------|
+| `reader-commentary` | לחיצה ימנית על מפרש, ללא סימון |
+| `reader-commentary-selection` | לחיצה ימנית על מפרש עם טקסט מסומן בו |
+| `reader-pdf` | לחיצה ימנית על עמוד PDF, ללא סימון |
+| `reader-pdf-selection` | לחיצה ימנית על עמוד PDF עם טקסט מסומן |
+
+"מפרש" הוא רשימת המפרשים של התצוגה הרגילה (גם בחלונית הצד), עמודות המפרשים
+של צורת הדף וחלונית המפרשים של ספר PDF — לא לשונית הקישורים. ההקשרים אינם
+נכללים בברירת המחדל: פריט שלא מגדיר `contexts` ממשיך להופיע רק בטקסט הראשי.
+`reader-highlight` אינו פעיל במפרשים וב־PDF, וקיצור מקלדת עם
+`contextMenuItemId` פועל על בחירה בטקסט הראשי בלבד. (`reader-pdf` כאן אינו
+ההקשר באותו שם של `reader.addToolbarItem`, שמשמעו כל ספר PDF.)
+
+**ב־payload של מפרש, המפרש הוא הספר הנוכחי:** `currentBook`, `bookTitle`,
+`bookId` ו־`id` מתארים את ספר המפרש; `sectionIndex`/`currentIndex` הם השורה
+בתוכו (מבוסס־0), ו־`currentRef` הוא כתובת המפרש. כך פריט ופעולה דקלרטיבית
+(`action`) שנכתבו לטקסט הראשי עובדים גם על מפרש בלי שינוי. `bookUid` חסר
+כשאין לספר המפרש `id` (למשל ספר משתמש). הספר הנקרא נמסר ב־`selection.mainBook`:
+
+| שדה | בספר טקסט | בספר PDF |
+|-----|-----------|----------|
+| זהות (`id`, `bookId`, `bookUid`, `type`, `source`) | הספר הנקרא | ה־PDF |
+| `currentRef` | המיקום הנוכחי בספר | כתובת העמוד הנוכחי |
+| `sectionIndex` | השורה שאליה המפרש מקושר (מבוסס־0); חסר בעמודת צורת הדף | העמוד הנוכחי (מבוסס־1) |
+| `pageNumber` | — | העמוד הנוכחי (מבוסס־1) |
+
+**ב־payload של עמוד PDF** מספר העמוד שנלחץ (או עמוד תחילת הסימון) נמסר
+ב־`pageNumber`, וכמו ב־`reader.getCurrentState` גם ב־`sectionIndex`/`currentIndex`
+(מבוסס־1). `currentRef` הוא כותרת העמוד מתוכן העניינים של ה־PDF, או "עמוד N".
+
+אין `sourceRange` במפרשים וב־PDF. הטקסט כפוף למגבלות ההעתקה: בספר מוגן הוא
+נחתך כמו בטקסט הראשי, ובמסמך PDF שאוסר העתקה — או בבחירה החוצה כמה מפרשים
+מעבר למגבלה — הלחיצה נמסרת עם `selectedText` ריק. ב־PDF שעמודי הסימון שלו
+עוד לא נטענו הטקסט נקרא בזמן הלחיצה, ולכן פריט עם `showWhen` אינו מוצג במצב
+כזה.
+
+```javascript
+await Otzaria.call('reader.addContextMenuItem', {
+  id: 'search',
+  title: 'חפש במאגר שלי',
+  contexts: [
+    'reader-selection',
+    'reader-page-shape-selection',
+    'reader-commentary-selection',
+    'reader-pdf-selection'
+  ],
+  onClickEvent: 'myPlugin.search'
+});
+
+Otzaria.on('myPlugin.search', ({ selectedText, currentBook, selection }) => {
+  // currentBook — הספר שבו סומן הטקסט: הספר הנקרא, המפרש או ה-PDF
+  // selection.mainBook — הספר הנקרא, רק כשהלחיצה הייתה על מפרש
+  // selection.pageNumber — רק בעמוד PDF
+});
+```
+
+בגרסאות שלפני `0.9.99` הפריט כולו נדחה עם `error.unsupported_context`, גם כשהוא
+כולל לצדם הקשרים מוכרים. תוסף שתומך בגרסאות קודמות רושם שוב בלי ההקשרים
+החדשים:
+
+```javascript
+const legacy = ['reader-selection', 'reader-page-shape-selection'];
+const item = { id: 'search', title: 'חפש', onClickEvent: 'myPlugin.search' };
+try {
+  await Otzaria.call('reader.addContextMenuItem', {
+    ...item, contexts: [...legacy, 'reader-commentary-selection']
+  });
+} catch (error) {
+  if (!String(error?.code ?? error).includes('unsupported_context')) throw error;
+  await Otzaria.call('reader.addContextMenuItem', { ...item, contexts: legacy });
+}
+```
 
 **בחירה חוצת־פסקאות — `selection.sections` (מ-`0.9.97`):**
 כשהבחירה משתרעת על כמה פסקאות, ה־`selection` שנמסר לאירועי הלחיצה של

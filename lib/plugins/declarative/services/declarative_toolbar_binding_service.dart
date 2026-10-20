@@ -128,6 +128,7 @@ class DeclarativeToolbarBindingService {
         icon: base.icon,
         contexts: base.contexts,
         hostAction: primaryAction,
+        openPlugin: template.openPlugin,
         placement: base.placement,
         order: base.order,
       );

@@ -520,13 +520,8 @@ class TextBookRepository {
     return sorted();
   }
 
-  /// מחזיר את "המפרשים הנוספים" על הקטע שבו יושבת שורת המקור [sourceLineIndex]
-  /// בספר [sourceBookTitle] — כלומר שאר המפרשים על אותו עמוד/סוגיה, פרט לספר
-  /// המפרש הפתוח כרגע ([currentBookTitle]). כל [Link] מוחזר בפורמט זהה לקישור
-  /// מפרש רגיל, כך שהתצוגה המקדימה והניווט פועלים דרך התשתית הקיימת.
-  ///
-  /// מיועד לפיצ'ר תפריט ההקשר בספרי מפרש: בהינתן שורה במפרש, הקישור ההפוך
-  /// (SOURCE) כבר נותן את שורת המקור; מכאן נאספים שאר מפרשי אותו קטע.
+  /// מפרשים נוספים על קטע המקור; [requireExactLine] מוותר על קישורי הקטע
+  /// כשאין למפרש קישור לשורת המקור המדויקת.
   Future<List<Link>> getSiblingCommentaries({
     required String sourceBookTitle,
     required int? sourceCategoryId,
@@ -535,6 +530,7 @@ class TextBookRepository {
     required int? currentCategoryId,
     BookSource sourceBookSource = BookSource.official,
     BookSource currentBookSource = BookSource.official,
+    bool requireExactLine = false,
   }) async {
     // מפרשים ממסדים אחרים על אותה שורת מקור, דרך `external_link`.
     final external = [
@@ -581,7 +577,10 @@ class TextBookRepository {
       excludeBookId: currentBook?.id ?? -1,
     );
 
-    final links = rows.map((row) {
+    final matchedRows = requireExactLine
+        ? rows.where((row) => row['exactTargetLineIndex'] != null)
+        : rows;
+    final links = matchedRows.map((row) {
       final exact = row['exactTargetLineIndex'] as int?;
       final minIdx = row['minTargetLineIndex'] as int;
       final maxIdx = row['maxTargetLineIndex'] as int;

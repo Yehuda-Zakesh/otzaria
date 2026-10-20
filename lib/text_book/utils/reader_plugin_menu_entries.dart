@@ -131,19 +131,15 @@ Map<String, dynamic> buildReaderBookPayload({
   required TextBookLoaded state,
   required int paragraphIndex,
   String? tabId,
-}) => {
-  ...PluginBookIdentity.toJsonWithUid(state.book),
-  'tabId': ?tabId,
-  'bookTitle': state.book.title,
-  'currentBook': state.book.title,
-  'currentBookId': state.book.title,
-  'sectionIndex': paragraphIndex,
-  'currentIndex': paragraphIndex,
-  'currentRef': state.currentTitle,
-  'text': '',
-  'start': null,
-  'end': null,
-};
+}) => pluginMenuPayload(
+  identity: {
+    ...PluginBookIdentity.toJsonWithUid(state.book),
+    'tabId': ?tabId,
+  },
+  bookTitle: state.book.title,
+  sectionIndex: paragraphIndex,
+  currentRef: state.currentTitle,
+);
 
 /// Plugin entries for the `reader-highlight` context: a right click on
 /// highlighted text with no active selection. Empty unless the click at

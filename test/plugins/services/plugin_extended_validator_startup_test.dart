@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/plugins/models/plugin_manifest.dart';
 import 'package:otzaria/plugins/services/plugin_extended_validator.dart';
+import 'package:otzaria/plugins/services/plugin_packager.dart';
 import 'package:path/path.dart' as p;
 
 Map<String, dynamic> _manifest({
@@ -1217,6 +1218,94 @@ void main() {
     );
 
     expect(report.errors, isEmpty);
+  });
+
+  group('openPlugin בפקד קשור', () {
+    Map<String, dynamic> manifest(bool openPlugin, String minAppVersion) {
+      final item = _declarativeToolbarItems().first
+        ..['openPlugin'] = openPlugin;
+      if (openPlugin) item.remove('action');
+      return _manifest(
+        minAppVersion: minAppVersion,
+        permissions: const [
+          'app.startup_contributions',
+          'reader.toolbar',
+          'reader.open',
+        ],
+        startup: {
+          'programs': [_toolbarProgram()],
+          'toolbarItems': [item],
+        },
+      );
+    }
+
+    for (final openPlugin in [true, false]) {
+      for (final version in ['0.9.96', '0.9.98', '0.9.99']) {
+        test('$openPlugin בגרסה $version: ולידציה ואריזה', () async {
+          final report = _run(tempDir, manifest(openPlugin, version));
+          final output = File(p.join(tempDir.path, 'plugin.otzplugin'));
+          final packaging = PluginPackager.packDirectory(
+            directoryPath: p.join(tempDir.path, 'plugin'),
+            outputPath: output.path,
+          );
+          if (version == '0.9.99') {
+            expect(report.errors, isEmpty);
+            expect((await packaging).validation.errors, isEmpty);
+            expect(output.existsSync(), isTrue);
+          } else {
+            await expectLater(
+              packaging,
+              throwsA(
+                isA<PluginPackagerException>().having(
+                  (error) => error.message,
+                  'message',
+                  allOf(contains('openPlugin'), contains('0.9.99')),
+                ),
+              ),
+            );
+            expect(
+              report.errors,
+              contains(allOf(contains('openPlugin'), contains('0.9.99'))),
+            );
+            expect(output.existsSync(), isFalse);
+          }
+        });
+      }
+    }
+
+    test('openPlugin רגיל נשאר תקין בגרסה 0.9.96', () {
+      expect(
+        _run(
+          tempDir,
+          _manifest(
+            startup: {
+              'toolbarItems': [
+                {
+                  'id': 'open',
+                  'title': 'פתח תוסף',
+                  'icon': 'apps_24_regular',
+                  'openPlugin': true,
+                },
+              ],
+            },
+          ),
+        ).errors,
+        isEmpty,
+      );
+    });
+
+    test('openPlugin קשור עדיין נחסם בתוסף ללא ממשק', () {
+      final json = manifest(true, '0.9.99')..['headless'] = true;
+      json['permissions'] = [
+        ...json['permissions'] as List,
+        'app.run_on_startup',
+      ];
+      (json['contributes'] as Map).remove('toolTab');
+      expect(
+        _run(tempDir, json).errors,
+        contains(allOf(contains('headless'), contains('openPlugin'))),
+      );
+    });
   });
 
   test('פקד Host דקלרטיבי ללא reader.toolbar נדחה בהתקנה', () {

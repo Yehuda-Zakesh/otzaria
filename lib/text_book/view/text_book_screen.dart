@@ -32,6 +32,7 @@ import 'package:otzaria/bookmarks/utils/section_bookmark.dart';
 import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/settings/settings_exports.dart' hide UpdateFontSize;
 import 'package:otzaria/tabs/models/text_tab.dart';
+import 'package:otzaria/text_book/companion/companion_books.dart';
 import 'package:otzaria/widgets/navigation/reader_nav_center.dart';
 import 'package:otzaria/tabs/models/commentators_tab.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
@@ -106,6 +107,7 @@ import 'package:otzaria/tools/shamor_zachor/models/book_model.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 import 'package:otzaria/widgets/misc/app_selection_area.dart';
+import 'package:otzaria/widgets/misc/ctrl_wheel_zoom.dart';
 import 'package:otzaria/widgets/misc/rtl_icon.dart';
 import 'package:otzaria/settings/services/nikud_display_service.dart';
 import 'package:otzaria/utils/link_helpers.dart';
@@ -1510,7 +1512,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
           AppTopBarItem(widget: _buildPageShapeSettingsButton(context, state)),
       ],
       center: widget.isInCombinedView
-          ? _buildTitle(state)
+          ? _buildTitle(state, textAlign: TextAlign.center)
           : ReaderNavCenter(
               title: _buildTitle(state, textAlign: TextAlign.center),
               prevMajorTooltip: 'הדף/פרק הקודם',
@@ -1726,6 +1728,10 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
       // ראשית, ומהדורות נוספות (היברובוקס מקומיות) בחץ שלצידה.
       if (_parallelEditions.isNotEmpty)
         _buildParallelEditionsAction(context, state),
+
+      // 1b) The companion book beside this one (Biur Halacha for Mishnah
+      // Berurah). Hidden while this book shares its tab with another book.
+      ?_buildCompanionBookAction(context, state),
 
       // 2) View Mode Dropdown (מאחד את Split View ו-Page Shape View)
       ActionButtonData(
@@ -2609,6 +2615,58 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
 
   /// לחצן המהדורה המקבילה: הפעולה הראשית היא המהדורה הראשונה (המובנית
   /// כשקיימת), וחץ עם רשימת כל המהדורות מוצג רק כשיש יותר מאחת.
+  ActionButtonData? _buildCompanionBookAction(
+    BuildContext context,
+    TextBookLoaded state,
+  ) {
+    final title = companionTitleOf(state.book);
+    if (title == null) return null;
+    final open = context.select<TabsBloc, TextBookTab?>(
+      (bloc) => openCompanionPane(bloc.state.tabs, widget.tab),
+    );
+    final isOwnTab = context.select<TabsBloc, bool>(
+      (bloc) => bloc.state.tabs.any((tab) => identical(tab, widget.tab)),
+    );
+    if (open == null && !isOwnTab) return null;
+
+    final tooltip = open != null ? 'הסתר את $title' : 'הצג את $title לצד הספר';
+    void toggle() => unawaited(_toggleCompanionBook(open));
+    return ActionButtonData(
+      widget: BarButton.icon(
+        tooltip: tooltip,
+        icon: FluentIcons.split_vertical_24_regular,
+        label: title,
+        selected: open != null,
+        compact: context.read<SettingsBloc>().state.compactMenuMode,
+        onPressed: toggle,
+      ),
+      icon: FluentIcons.split_vertical_24_regular,
+      tooltip: tooltip,
+      actionId: ToolbarActionId.companionBook,
+      // The label makes it wider than an icon button.
+      toolbarWidth: 132,
+      onPressed: toggle,
+    );
+  }
+
+  /// Opens or closes the companion pane, and keeps the choice for the next
+  /// time the book is opened.
+  Future<void> _toggleCompanionBook(TextBookTab? open) async {
+    final tabsBloc = context.read<TabsBloc>();
+    if (open != null) {
+      tabsBloc.add(ClosePane(open));
+      await setShowCompanionBookByDefault(false);
+      return;
+    }
+    final companion = await createCompanionTab(widget.tab);
+    if (companion == null || !mounted) return;
+    tabsBloc
+      ..add(OpenTabInSidePane(companion, splitRatio: kPrimaryPaneShare))
+      // Reading goes on in this book; the companion follows it.
+      ..add(SetActivePane(widget.tab));
+    await setShowCompanionBookByDefault(true);
+  }
+
   ActionButtonData _buildParallelEditionsAction(
     BuildContext context,
     TextBookLoaded state,
@@ -2723,7 +2781,10 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
         host: _searchHost,
         child: _NavPanelTourTargetBuilder(child: _buildLeftPaneContent(state)),
       ),
-      mainContent: _buildHTMLViewer(state),
+      mainContent: CtrlWheelZoom(
+        onZoom: _zoomFromWheel,
+        child: _buildHTMLViewer(state),
+      ),
       isResizable: true,
       minPaneWidth: 200,
       maxPaneWidth: 600,
@@ -2741,6 +2802,12 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
       },
       autoHandleResponsiveVisibility: false,
     );
+  }
+
+  void _zoomFromWheel(bool zoomIn) {
+    final state = context.read<TextBookBloc>().state;
+    if (state is! TextBookLoaded) return;
+    unawaited(_stepFontSize(context, state, larger: zoomIn));
   }
 
   Widget _buildHTMLViewer(TextBookLoaded state) {

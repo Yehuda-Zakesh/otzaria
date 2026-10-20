@@ -58,3 +58,21 @@ List<String> _sourcesForPrefix(String prefix) {
       ],
   ];
 }
+
+/// הוראת `frame-ancestors` לקובץ שמוגש משרת הקבצים ל-[pluginId]: רק דף של
+/// התוסף רשאי להטמיע אותו ב-`<iframe>`. תחליף ל-`X-Frame-Options: SAMEORIGIN`,
+/// שחוסם גם את דף התוסף (origin אחר מהשרת).
+///
+/// דף שמוגש מ-`file://` אינו מקבל origin משלו, ו-CSP אינו יכול להבחין בין
+/// נתיבים — לכן בפלטפורמות האלה גם דף `file://` של תוסף אחר עובר את הבדיקה.
+/// זה לא פותח את הקובץ: ההטמעה נשארת cross-origin, ו-URL הקובץ כולל token
+/// סודי של התוסף.
+///
+/// [assetSchemeOnly] מחליף את זיהוי הפלטפורמה (`pluginAssetSchemeEnabled`),
+/// לבדיקות.
+String pluginFrameAncestorsDirective(
+  String pluginId, {
+  bool? assetSchemeOnly,
+}) =>
+    'frame-ancestors $pluginAssetScheme://${pluginAssetHost(pluginId)}'
+    '${(assetSchemeOnly ?? pluginAssetSchemeEnabled) ? '' : ' file:'}';

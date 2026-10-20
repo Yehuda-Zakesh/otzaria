@@ -23,6 +23,7 @@ import 'package:otzaria/attached_libraries/bloc/attached_libraries_bloc.dart';
 import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/attached_libraries/repository/attached_libraries_repository.dart';
 import 'package:otzaria/attached_libraries/repository/external_link_repository.dart';
+import 'package:otzaria/app_report/repository/app_report_collector.dart';
 import 'package:otzaria/app_report/services/android_anr_source.dart';
 import 'package:otzaria/app_report/services/app_crash_session.dart';
 import 'package:otzaria/app_report/services/app_report_service.dart';
@@ -1130,6 +1131,7 @@ Future<void> _runDeferredCrashCheck() async {
     if (candidate == null) return;
     await CrashReportFlow(
       showPrompt: showCrashPromptOnNavigator,
+      collector: AppReportCollector(includeCurrentContext: false),
     ).handle(candidate);
   } catch (error, stackTrace) {
     _logNonFatalInitializationError('Crash report check', error, stackTrace);
@@ -1152,6 +1154,7 @@ Future<void> _runDeferredAnrCheck() async {
     if (anr == null) return;
     await CrashReportFlow(
       showPrompt: showCrashPromptOnNavigator,
+      collector: AppReportCollector(includeCurrentContext: false),
     ).handle(
       CrashCandidate.hang(
         signature: anr.signature,

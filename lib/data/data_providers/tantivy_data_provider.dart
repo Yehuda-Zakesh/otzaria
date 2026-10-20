@@ -55,6 +55,9 @@ class TantivyDataProvider {
   /// Indicates whether the indexing process is currently running
   ValueNotifier<bool> isIndexing = ValueNotifier(false);
 
+  /// ספרים חסרים באינדקס, והאינדוקס שלהם ממתין לסיום עדכון הספרייה בעלייה.
+  final ValueNotifier<bool> isIndexingDeferred = ValueNotifier(false);
+
   /// המנוע רץ על אינדקס זמני כי פתיחת אינדקס הדיסק נכשלה. במצב זה אסור
   /// לאנדקס — הכתיבות היו הולכות לתיקייה זמנית שנזרקת בהפעלה הבאה.
   bool isTempFallback = false;

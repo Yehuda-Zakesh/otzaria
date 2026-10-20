@@ -33,6 +33,8 @@ import 'package:otzaria/models/books.dart';
 import 'package:otzaria/pdf_book/utils/pdf_color_filter.dart';
 import 'package:otzaria/pdf_book/utils/pdf_font_fallback.dart';
 import 'package:otzaria/pdf_book/utils/pdf_links_window.dart';
+import 'package:otzaria/pdf_book/utils/pdf_plugin_menu_entries.dart';
+import 'package:otzaria/plugins/utils/plugin_context_menu_entries.dart';
 import 'package:otzaria/pdf_book/utils/pdf_scroll_physics_provider.dart';
 import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/book_common/view/book_source_dialog.dart';
@@ -1453,7 +1455,7 @@ class _PdfBookScreenState extends State<PdfBookScreen>
 
   List<AppContextMenuEntry> _buildPdfContextMenuEntries(
     BuildContext menuContext,
-    Offset _,
+    Offset tapPosition,
   ) {
     final (commentators: relevantCommentators, links: relevantLinks) =
         _getRelevantContent();
@@ -1526,7 +1528,68 @@ class _PdfBookScreenState extends State<PdfBookScreen>
       onCopySelection: _copyPdfTextSelection,
       onAddBookmark: () => _handleBookmarkPress(menuContext),
       onAddNote: () => _handleAddNotePress(menuContext),
+    )..addAll(
+      _pdfPluginEntries(
+        menuContext,
+        tapPosition,
+        hasSelection: hasTextSelection,
+        loadedText: selectedText,
+      ),
     );
+  }
+
+  List<AppContextMenuEntry> _pdfPluginEntries(
+    BuildContext menuContext,
+    Offset tapPosition, {
+    required bool hasSelection,
+    required String? loadedText,
+  }) {
+    if (!hasPluginContextMenuItems) return const [];
+    final controller = widget.tab.pdfViewerController;
+    final pageNumber = _menuPageNumber(tapPosition, hasSelection: hasSelection);
+    return buildPdfPluginMenuEntries(
+      book: widget.tab.book,
+      pageNumber: pageNumber,
+      currentRef: pdfPageRef(widget.tab, pageNumber),
+      hasSelection: hasSelection,
+      loadedText: loadedText,
+      readSelectedText: () =>
+          controller.textSelectionDelegate.getSelectedText(),
+      copyAllowed: _isPdfCopyAllowed(),
+      menuContext: menuContext,
+    );
+  }
+
+  /// העמוד שעליו נפתח התפריט: עמוד תחילת הבחירה, אחרת העמוד שמתחת לסמן —
+  /// בתצוגת ספר שני עמודים גלויים, והנוכחי אינו בהכרח זה שנלחץ.
+  int _menuPageNumber(Offset globalPosition, {required bool hasSelection}) {
+    final current = _pageNumberNotifier.value ?? widget.tab.pageNumber;
+    final controller = widget.tab.pdfViewerController;
+    if (!controller.isReady) return current;
+    try {
+      final selectionPage = hasSelection
+          ? controller
+                .textSelectionDelegate
+                .textSelectionPointRange
+                ?.start
+                .text
+                .pageNumber
+          : null;
+      if (selectionPage != null) return selectionPage;
+      final local = controller.globalToLocal(globalPosition);
+      if (local == null) return current;
+      return controller
+              .getPdfPageHitTestResult(
+                local,
+                useDocumentLayoutCoordinates: false,
+              )
+              ?.page
+              .pageNumber ??
+          current;
+    } catch (_) {
+      // חריגה כאן הייתה מפילה את תפריט ההקשר כולו, גם בלי פריט תוסף מוצג.
+      return current;
+    }
   }
 
   /// העתקת הטקסט המסומן דרך pdfrx — אותו מסלול שמפעיל Ctrl+C, והוא זה

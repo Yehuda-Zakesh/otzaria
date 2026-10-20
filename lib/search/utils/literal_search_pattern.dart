@@ -90,32 +90,36 @@ String? _partialPhrase(String q, String source) {
   return altPhrase == null ? phrase : '(?:$phrase|$altPhrase)';
 }
 
-/// תבנית המנוע ל-[query], שבה כל מופע של מילת "יקוק" מתאים גם לשם הוי"ה
-/// שבתוכן המקורי — כל מופע בנפרד, לפי אותו זיהוי של החיפוש הכללי.
+/// תבנית המנוע ל-[query], שבה כל מופע של מילת "יקוק" (או "ידוד") מתאים גם
+/// לשם הוי"ה שבתוכן המקורי — כל מופע בנפרד, לפי אותו זיהוי של החיפוש הכללי.
 String? _literalSource(String query) {
-  final source = engine.generateLiteralHighlightPattern(query: query);
-  if (source == null || !query.contains(utils.holyNamePlaceholder)) {
-    return source;
+  var source = engine.generateLiteralHighlightPattern(query: query);
+  for (final placeholderWord in utils.holyNamePlaceholders) {
+    if (source == null) return null;
+    source = _withHolyNameFor(query, source, placeholderWord);
   }
+  return source;
+}
+
+/// [source] שבה כל מופע של [placeholderWord] שהוא מילה בפני עצמה מתאים גם
+/// לשם הוי"ה.
+String _withHolyNameFor(String query, String source, String placeholderWord) {
+  if (!query.contains(placeholderWord)) return source;
   // מיקומי המקור משמרים את המיפוי גם כשהטוקנייזר משמיט כתיב שבסוגריים.
   final expandableOffsets = {
     for (final span in engine.queryWordSpans(query: query))
       if (utils.holyNameForPlaceholderWord(span.word) != null)
-        for (final match in utils.holyNamePlaceholder.allMatches(
+        for (final match in placeholderWord.allMatches(
           query.substring(span.start, span.end),
         ))
           span.start + match.start,
   };
   final isPlaceholderWord = [
-    for (final match in utils.holyNamePlaceholder.allMatches(query))
+    for (final match in placeholderWord.allMatches(query))
       expandableOffsets.contains(match.start),
   ];
-  final placeholder = _wordPhrase(utils.holyNamePlaceholder);
-  final name = _wordPhrase(
-    utils.holyNameForPlaceholderWord(
-      utils.holyNamePlaceholder,
-    )!,
-  );
+  final placeholder = _wordPhrase(placeholderWord);
+  final name = _wordPhrase(utils.holyNameForPlaceholderWord(placeholderWord)!);
   final parts = placeholder == null
       ? const <String>[]
       : source.split(placeholder);

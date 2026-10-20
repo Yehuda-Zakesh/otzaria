@@ -43,6 +43,7 @@ import 'package:otzaria/tabs/view/split_pane_view.dart';
 import 'package:otzaria/search/view/tantivy_full_text_search.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
+import 'package:otzaria/text_book/companion/companion_book_sync.dart';
 import 'package:otzaria/text_book/view/text_book_screen.dart';
 import 'package:otzaria/text_book/view/commentators_tab_screen.dart';
 import 'package:otzaria/pdf_book/view/pdf_commentators_tab_screen.dart';
@@ -544,6 +545,17 @@ class _ReadingScreenState extends State<ReadingScreen>
     final isSplit = tab is CombinedTab;
     // רק חלוניות PDF מתחלקות בתקציב מטמון התמונות.
     final pdfPanes = leafPanes(tab).whereType<PdfBookTab>().length;
+    return CompanionBookSyncScope(
+      tab: tab,
+      child: _buildPaneTree(tab, isSplit: isSplit, pdfPanes: pdfPanes),
+    );
+  }
+
+  Widget _buildPaneTree(
+    OpenedTab tab, {
+    required bool isSplit,
+    required int pdfPanes,
+  }) {
     return PaneDropTarget(
       tab: tab,
       onDrop: (dragged, side) {

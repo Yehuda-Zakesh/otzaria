@@ -31,7 +31,7 @@ const Map<String, ({int version, String fingerprint})> _pinned = {
   'ooxml': (version: 15, fingerprint: 'd810aa9cf47cbdef'),
   'word-xml': (version: 1015, fingerprint: 'd810aa9cf47cbdef'),
   'odt': (version: 7, fingerprint: 'e7114c864beedc1d'),
-  'rtf': (version: 6, fingerprint: 'cfa322a43935a572'),
+  'rtf': (version: 8, fingerprint: 'cfa322a43935a572'),
   'legacy-word': (version: 9, fingerprint: 'e39829bc7e2dd94f'),
   'epub': (version: 16, fingerprint: 'a999c6001cd8c4f4'),
   'markdown': (version: 8, fingerprint: 'e0ac8348b37de4b8'),

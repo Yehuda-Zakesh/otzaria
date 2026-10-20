@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:otzaria/plugins/services/plugin_asset_scheme.dart';
+import 'package:otzaria/plugins/services/plugin_content_security_policy.dart';
+import 'package:otzaria/plugins/services/plugin_remote_file_cache.dart';
 import 'package:path/path.dart' as p;
 
 /// רשומת קובץ אישי שהמשתמש אישר לתוסף, כפי שהיא מוחזקת בזיכרון השרת.
@@ -87,7 +89,8 @@ class PluginFileServer {
   PluginFileServer({
     this.maxUploadBytes = defaultMaxUploadBytes,
     this.uploadTtl = defaultUploadTtl,
-  });
+    PluginRemoteFileCache? remoteFileCache,
+  }) : _remoteFiles = remoteFileCache ?? PluginRemoteFileCache.instance;
 
   static final PluginFileServer instance = PluginFileServer();
 
@@ -99,6 +102,9 @@ class PluginFileServer {
   Future<void>? _starting;
   final Map<String, PluginFileGrant> _grants = {};
   final Map<String, _UploadSession> _uploads = {};
+
+  /// מטמון `network.fetchFile`, שהקבצים בו מוגשים כאן ונמחקים עם התוסף.
+  final PluginRemoteFileCache _remoteFiles;
   final Random _random = Random.secure();
 
   /// גדול מכל DOCX סביר, וקטן מלגרום ללחץ זיכרון או למלא את הדיסק בטעות.
@@ -361,9 +367,10 @@ class PluginFileServer {
 
   void revoke(String token) => _grants.remove(token);
 
-  /// מנקה הכול עבור תוסף: grants והעלאות פעילות.
+  /// מנקה הכול עבור תוסף: grants, העלאות פעילות והקבצים ש-`network.fetchFile`
+  /// הוריד אליו למטמון.
   ///
-  /// מיועד להסרה/כיבוי של תוסף. **אינו נקרא מ-`PluginBridgeAdapter.dispose`
+  /// מיועד להסרה, כיבוי או איפוס של תוסף. **אינו נקרא מ-`PluginBridgeAdapter.dispose`
   /// בכוונה:** ה-dispose הוא של מופע, ואותו תוסף יכול להחזיק מופע נוסף חי
   /// (טאב + רקע) שהיה מאבד את ההעלאה שלו.
   ///
@@ -377,6 +384,7 @@ class PluginFileServer {
   /// ל-[finishCommit]. אחרי הפעלה מחדש של האפליקציה אין sessions בזיכרון,
   /// ולכן שאריות `.part` נמחקות כ-orphan (ראו [orphanMinAge]).
   Future<void> revokeAllForPlugin(String pluginId) async {
+    final remoteCleanup = _remoteFiles.deleteForPlugin(pluginId);
     _grants.removeWhere((_, grant) => grant.pluginId == pluginId);
     final tokens = _uploads.entries
         .where((e) => e.value.pluginId == pluginId)
@@ -386,6 +394,7 @@ class PluginFileServer {
       final session = _uploads.remove(token);
       if (session != null) await _deleteQuietly(session.tempFile);
     }
+    await remoteCleanup;
   }
 
   Future<Directory> _uploadDir() async {
@@ -515,18 +524,22 @@ class PluginFileServer {
 
       final length = await file.length();
       response.headers.set('Accept-Ranges', 'bytes');
-      final contentType = _contentTypeForPath(grant.canonicalPath);
+      final contentType = contentTypeForPath(grant.canonicalPath);
       response.headers.contentType = contentType;
       response.headers.set('X-Content-Type-Options', 'nosniff');
-      // תוסף שמנווט למסמך כזה יוצא מה-CSP של הדף שלו; בלי סקריפט ורשת הוא
-      // אינו יכול להוציא דרכו נתונים.
-      if (_activeDocumentTypes.contains(contentType.mimeType)) {
-        response.headers.set(
-          'Content-Security-Policy',
+      // Dart שולח כברירת מחדל X-Frame-Options: SAMEORIGIN, וזה חוסם גם את דף
+      // התוסף (file:// או otzaria-plugin://, תמיד origin אחר מהשרת). את ההטמעה
+      // מגבילה frame-ancestors לדפי התוסף שהקובץ הוענק לו.
+      response.headers.removeAll('x-frame-options');
+      final policy = [
+        // תוסף שמנווט למסמך כזה יוצא מה-CSP של הדף שלו; בלי סקריפט ורשת הוא
+        // אינו יכול להוציא דרכו נתונים.
+        if (_activeDocumentTypes.contains(contentType.mimeType))
           "sandbox; default-src 'none'; img-src data: blob:; "
               "media-src data: blob:; font-src data:; style-src 'unsafe-inline'",
-        );
-      }
+        pluginFrameAncestorsDirective(grant.pluginId),
+      ];
+      response.headers.set('Content-Security-Policy', policy.join('; '));
 
       final rangeHeader = request.headers.value('range');
       if (rangeHeader == null) {
@@ -688,7 +701,8 @@ class PluginFileServer {
     return _ByteRange(start, end);
   }
 
-  ContentType _contentTypeForPath(String path) {
+  /// סוג התוכן שבו מוגש קובץ, לפי הסיומת בלבד.
+  static ContentType contentTypeForPath(String path) {
     switch (p.extension(path).toLowerCase()) {
       case '.pdf':
         return ContentType('application', 'pdf');

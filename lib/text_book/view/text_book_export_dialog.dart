@@ -51,6 +51,7 @@ Future<TextBookExportChoice?> showTextBookExportDialog(
               entries: const [
                 AppMenuEntry(value: HolyNameDisplay.asIs, label: 'ככתבו'),
                 AppMenuEntry(value: HolyNameDisplay.kufKuf, label: 'יקוק'),
+                AppMenuEntry(value: HolyNameDisplay.daletDalet, label: 'ידוד'),
                 AppMenuEntry(value: HolyNameDisplay.hehApostrophe, label: "ה'"),
                 AppMenuEntry(value: HolyNameDisplay.doubleYod, label: 'יי'),
               ],

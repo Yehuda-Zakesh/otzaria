@@ -88,9 +88,34 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
     if (route != null &&
         !route.isFirst &&
         route.popDisposition == RoutePopDisposition.doNotPop) {
-      return KeyEventResult.handled;
+      // תו שמסומן handled לא נכנס לשדה ב-Windows; חוסמים רק קיצורים.
+      return ShortcutHelper.shouldIgnoreWhileEditing(event) ||
+              _typesCharacterWithModifiers(event) ||
+              _isMacControlEditingEvent(event)
+          ? KeyEventResult.ignored
+          : KeyEventResult.handled;
     }
     return _handleKeyEvent(event, context.read<SettingsBloc>().state.shortcuts);
+  }
+
+  /// AltGr (Ctrl+Alt ב-Windows) או Option במק שמייצרים תו לשדה, כמו ₪ או ניקוד.
+  static bool _typesCharacterWithModifiers(KeyEvent event) =>
+      event.character != null &&
+      ShortcutHelper.isEditingText &&
+      !ShortcutHelper.isPlainCtrlOrCmdPressed &&
+      !HardwareKeyboard.instance.isMetaPressed;
+
+  // Cocoa מממש Ctrl+D/H רק אחרי שה-framework מחזיר ignored.
+  static bool _isMacControlEditingEvent(KeyEvent event) {
+    final keyboard = HardwareKeyboard.instance;
+    return ShortcutHelper.usesMacModifiers &&
+        ShortcutHelper.isEditingText &&
+        keyboard.isControlPressed &&
+        !keyboard.isMetaPressed &&
+        !keyboard.isAltPressed &&
+        !keyboard.isShiftPressed &&
+        (event.logicalKey == LogicalKeyboardKey.keyD ||
+            event.logicalKey == LogicalKeyboardKey.keyH);
   }
 
   /// בעריכת טקסט השדה קודם, והקיצור הדינמי נבדק רק ב-late handler.
@@ -380,11 +405,7 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
       return KeyEventResult.handled;
     }
 
-    // ⚠️ **אינו** מוגדר ל-`isReadingScreen`, בשונה משאר קיצורי הכרטיסיות.
-    //
-    // "שחזר את מה שסגרתי" תקף מכל מסך: משתמש שסגר חלון וחזר למסך הספרייה
-    // לחץ `Ctrl+Shift+T` ושום דבר לא קרה — הקיצור נחסם בדיוק בתרחיש
-    // שבשבילו הוא נוסף. שחזור כרטיסיה מנווט למסך הקריאה, כי שם היא נמצאת.
+    // שחזור כרטיסייה או חלון זמין מכל מסך ומחזיר למסך העיון.
     if (ShortcutHelper.matchesShortcut(event, restoreClosedTabShortcut)) {
       // כמו בדפדפן: קודם כרטיסיה שנסגרה, ורק אם אין כזו — חלון שנסגר.
       // הסדר חשוב, כי הכרטיסיה היא הפעולה השכיחה בהרבה.

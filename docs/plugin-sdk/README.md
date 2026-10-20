@@ -333,6 +333,7 @@ Otzaria.on('plugin.suspended', stop);   // עצירת timers / polling / WebSock
 |--------|-------|----------|-------|
 | `network.fetchStream` | `network.access` או `network.localhost` | `{ url, method?, headers?, body?, timeoutMs? }` | `AsyncIterable` של metadata ומקטעי UTF-8 |
 | `network.download` | כנ״ל | `{ url, filename?, destPath?, resume? }` | נתיב הקובץ שנשמר |
+| `network.fetchFile` | כנ״ל | `{ url, maxBytes?, timeoutMs? }` | `{ token, url, name, size, mime }` — קובץ במטמון זמני, כמו `fs.pickUserFile` |
 
 ### search.*
 
@@ -782,10 +783,11 @@ Otzaria.on('plugin.boot', async (payload) => {
 ### Timeout
 - כברירת מחדל, קריאת `Otzaria.call()` נחתכת אחרי **30 שניות** ומחזירה
   `error.timeout`.
-- **תשעה מסלולים מוחרגים** ומנהלים חסם זמן משלהם — הם עשויים להמתין ללא
-  הגבלה מצד ה-RPC: `search.query`,‏ `network.fetchStream`,‏
-  `network.download`,‏ `fs.extractZip`,‏ `library.refreshUserBooks`,‏
-  `fs.commitUserFileWrite`,‏ `ui.print`,‏ `ui.exportPdf` ו-`feedback.report`.
+- **מסלולים מוחרגים** ומנהלים חסם זמן משלהם — הם עשויים להמתין ללא
+  הגבלה מצד ה-RPC, ובהם: `search.query`,‏ `network.fetchStream`,‏
+  `network.download`,‏ `network.fetchFile`,‏ `fs.extractZip`,‏
+  `library.refreshUserBooks`,‏ `fs.commitUserFileWrite`,‏ `ui.print`,‏
+  `ui.printFile`,‏ `ui.exportPdf` ו-`feedback.report`.
 - **אל תעטפו אותם ב-timeout עצמי של 30 שניות.** `feedback.report` וכל פעולה
   שממתינה לדיאלוג ממתינות למשתמש; ביטול מצד התוסף יקטע פעולה שהמשתמש
   באמצע אישורה, ובמקרה של דיווח — אחרי שכבר נשלח.
@@ -829,7 +831,7 @@ Otzaria.on('plugin.boot', async (payload) => {
 - ה-`network.allowlist` במניפסט הוא **תנאי חובה אך לא תנאי מספיק** — בלי הצהרה במניפסט ה-URL ייחסם, וגם עם הצהרה הוא ייחסם אם אינו מופיע במקור אמון רשמי של אוצריא.
 - אם תוסף מבקש גישה ל-URL שאינו ב-allowlist הגלובלי, יש לפנות למתחזקי אוצריא בבקשה להוסיף אותו.
 
-**שירותים מקומיים (localhost):** גישה ל-`localhost` / `127.0.0.1` / `::1` (למשל מודל שפה מקומי כמו Ollama / LM Studio) משתמשת בהרשאה הנפרדת **`network.localhost`** — לא `network.access`. מסלול זה **אינו** דורש את שכבה 3 (allowlist גלובלי / PR לאוצריא); די בשלושה: `network.enabled: true`, הצהרת היעד ב-`network.allowlist` של התוסף (מותר host חשוף כמו `"127.0.0.1"` שמתיר כל פורט, או URL מלא שנועל לפורט מסוים), ואישור המשתמש להרשאת `network.localhost`. הקריאות חייבות לעבור דרך `network.fetchStream` (לא `fetch()` ישיר מה-WebView — הוא נחסם ב-CORS מול שרת מקומי שדוחה `Origin: null`).
+**שירותים מקומיים (localhost):** גישה ל-`localhost` / `127.0.0.1` / `::1` (למשל מודל שפה מקומי כמו Ollama / LM Studio) משתמשת בהרשאה הנפרדת **`network.localhost`** — לא `network.access`. מסלול זה **אינו** דורש את שכבה 3 (allowlist גלובלי / PR לאוצריא); די בשלושה: `network.enabled: true`, הצהרת היעד ב-`network.allowlist` של התוסף (מותר host חשוף כמו `"127.0.0.1"` שמתיר כל פורט, או URL מלא שנועל לפורט מסוים), ואישור המשתמש להרשאת `network.localhost`. הקריאות חייבות לעבור דרך `network.fetchStream` (או `network.download` / `network.fetchFile` לקבצים) (לא `fetch()` ישיר מה-WebView — הוא נחסם ב-CORS מול שרת מקומי שדוחה `Origin: null`).
 
 ### window.open
 חסום לחלוטין מטעמי אבטחה.

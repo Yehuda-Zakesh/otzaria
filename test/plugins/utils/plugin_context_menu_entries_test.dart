@@ -84,6 +84,53 @@ void main() {
     }
   });
 
+  group('resolveSelectedText', () {
+    const item = PluginContextMenuItem(
+      id: 'search',
+      label: 'חפש',
+      showWhenContainsAny: ['ברא'],
+      action: {
+        'type': 'storage.set',
+        'args': {
+          'key': 'last',
+          'value': {r'$selection': 'selectedText'},
+        },
+      },
+    );
+
+    Future<Map<String, dynamic>> click(
+      PluginSelectedTextResolver resolve,
+    ) async {
+      final sent = <Map<String, dynamic>>[];
+      final entry = buildPluginContextMenuEntries(
+        records: const [('plugin', item)],
+        selection: const {'text': 'בראשית ברא', 'bookTitle': 'בראשית'},
+        selectionActionDispatcher: (_, _, payload) async => sent.add(payload),
+        resolveSelectedText: resolve,
+      ).single;
+      entry.onTap!();
+      await Future<void>.delayed(Duration.zero);
+      return sent.single;
+    }
+
+    test('הטקסט נקרא בלחיצה; ההצגה נקבעת לפי ה-payload של התפריט', () async {
+      var reads = 0;
+      final payload = await click(() async {
+        reads++;
+        return 'שלום';
+      });
+      expect(reads, 1);
+      expect(payload['selectedText'], 'שלום');
+      expect(payload['currentBook'], 'בראשית');
+    });
+
+    test('כשל בקריאת הטקסט מוסר את הלחיצה בלי הטקסט', () async {
+      final payload = await click(() async => throw StateError('closed'));
+      expect(payload['selectedText'], isEmpty);
+      expect(payload['currentBook'], 'בראשית');
+    });
+  });
+
   test('פריט עם action מבוצע דרך מבצע פעולות הסימון בלבד', () async {
     const item = PluginContextMenuItem(
       id: 'save',

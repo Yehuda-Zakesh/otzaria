@@ -294,10 +294,13 @@ class CreateCombinedTab extends TabsEvent {
 class OpenTabInSidePane extends TabsEvent {
   final OpenedTab tab;
 
-  const OpenTabInSidePane(this.tab);
+  /// The current tab's share of the width.
+  final double splitRatio;
+
+  const OpenTabInSidePane(this.tab, {this.splitRatio = 0.5});
 
   @override
-  List<Object?> get props => [tab];
+  List<Object?> get props => [tab, splitRatio];
 }
 
 /// פירוק טאב מפוצל לשתי כרטיסיות עצמאיות.

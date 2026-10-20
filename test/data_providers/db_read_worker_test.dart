@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/data/data_providers/book_text_reader.dart';
 import 'package:otzaria/data/data_providers/database_library_provider.dart';
 import 'package:otzaria/data/data_providers/db_read_worker.dart';
@@ -314,6 +315,41 @@ void main() {
       await DbReadWorker.batched('linkContent', linkArgs(dbPath, 'אין', 1)),
       {'fallback': true},
     );
+  });
+
+  test('כשל ב-worker נרשם ב-errors.txt פעם אחת לכל סוג, עם stack', () async {
+    final dbPath = await seedDb('seforim');
+    AppPaths.debugOverrideDataRootPath(path.join(tempDir.path, 'data'));
+    DbReadWorker.logFailuresInDebug = true;
+    DbReadWorker.resetLoggedFailuresForTesting();
+    addTearDown(() {
+      DbReadWorker.logFailuresInDebug = false;
+      DbReadWorker.resetLoggedFailuresForTesting();
+      AppPaths.debugOverrideDataRootPath(null);
+    });
+    final badCommentators = {'dbPath': dbPath, 'bookId': 'x'};
+    final badLink = {...linkArgs(dbPath, 'מפרש', 1), 'index2': 'x'};
+
+    for (var i = 0; i < 2; i++) {
+      await expectLater(
+        DbReadWorker.request('commentatorsByBook', badCommentators),
+        throwsStateError,
+      );
+      await expectLater(
+        DbReadWorker.batched('linkContent', badLink),
+        throwsStateError,
+      );
+    }
+
+    final log = await ErrorLogFile.resolveFile().readAsString();
+    expect('DB read worker failure'.allMatches(log), hasLength(2));
+    expect(log, contains('Method: commentatorsByBook'));
+    expect(log, contains('Connection: db_read_worker'));
+    expect(log, contains('Method: linkContent'));
+    expect(log, contains('Connection: one-shot isolate'));
+    expect(log, contains('Database: $dbPath'));
+    expect(log, contains('bookId=x'));
+    expect('Stack:'.allMatches(log), hasLength(2));
   });
 
   test('בקשות של אותו סבב נשלחות ל-worker כהודעה אחת', () async {

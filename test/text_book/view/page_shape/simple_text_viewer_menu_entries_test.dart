@@ -8,6 +8,7 @@ import 'package:otzaria/models/links.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_event.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_state.dart';
+import 'package:otzaria/plugins/services/context_menu_registry.dart';
 import 'package:otzaria/services/target_line_links_service.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
@@ -18,9 +19,11 @@ import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/text_book/view/page_shape/simple_text_viewer.dart';
 import 'package:otzaria/widgets/misc/app_context_menu.dart';
+import 'package:otzaria/widgets/misc/app_popup_menu.dart';
 
 import '../../../test_helpers/context_menu_description.dart';
 import '../../../test_helpers/memory_cache_provider.dart';
+import '../../../test_helpers/plugin_menu_click_recorder.dart';
 
 /// Pins every entry of the page shape view's context menus, so that sharing
 /// their code with the combined view cannot change them unnoticed.
@@ -38,6 +41,8 @@ void main() {
     TextBook? book,
     List<String> availableCommentators = const [],
     bool isMainText = true,
+    PluginMenuClickRecorder? recorder,
+    void Function(List<AppContextMenuEntry> entries)? onMenu,
   }) async {
     await tester.binding.setSurfaceSize(const Size(900, 700));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -63,15 +68,17 @@ void main() {
             BlocProvider<PersonalNotesBloc>.value(value: notesBloc),
             BlocProvider<SettingsBloc>.value(value: settingsBloc),
           ],
-          child: Scaffold(
-            body: SimpleTextViewer(
-              content: const ['שורה א'],
-              fontSize: 18,
-              openBookCallback: (_) {},
-              isMainText: isMainText,
-              bookTitle: isMainText ? null : 'רש"י על ספר בדיקה',
-              onOpenCommentatorsPane: () {},
-              onOpenCommentatorsPaneWithFilter: () {},
+          child: (recorder?.wrap ?? (Widget child) => child)(
+            Scaffold(
+              body: SimpleTextViewer(
+                content: const ['שורה א'],
+                fontSize: 18,
+                openBookCallback: (_) {},
+                isMainText: isMainText,
+                bookTitle: isMainText ? null : 'רש"י על ספר בדיקה',
+                onOpenCommentatorsPane: () {},
+                onOpenCommentatorsPaneWithFilter: () {},
+              ),
             ),
           ),
         ),
@@ -82,12 +89,12 @@ void main() {
     final regionFinder = find.byType(AppContextMenuRegion).first;
     List<String> build() {
       final region = tester.widget<AppContextMenuRegion>(regionFinder);
-      return describeContextMenu(
-        region.menuBuilder(
-          tester.element(regionFinder),
-          tester.getCenter(regionFinder),
-        ),
+      final entries = region.menuBuilder(
+        tester.element(regionFinder),
+        tester.getCenter(regionFinder),
       );
+      onMenu?.call(entries);
+      return describeContextMenu(entries);
     }
 
     // The first build starts loading the paragraph's commentators and links.
@@ -178,6 +185,35 @@ void main() {
       '  כמו בתצוגה (disabled)',
       'העתק את כל הפסקה',
     ]);
+  });
+
+  testWidgets('a commentary column gives reader-commentary items its line', (
+    tester,
+  ) async {
+    final recorder = PluginMenuClickRecorder('test.commentary')
+      ..register('place', 'פעולה על המפרש', ['reader-commentary']);
+    ContextMenuRegistry.instance.registerPayload('test.legacy', {
+      'id': 'legacy',
+      'title': 'פעולה על הטקסט',
+    });
+    addTearDown(() => ContextMenuRegistry.instance.removeAll('test.legacy'));
+
+    late List<AppContextMenuEntry> entries;
+    final menu = await menuFor(
+      tester,
+      isMainText: false,
+      recorder: recorder,
+      onMenu: (e) => entries = e,
+    );
+    expect(menu.sublist(menu.length - 2), ['---', 'פעולה על המפרש']);
+    expect(menu, isNot(contains('פעולה על הטקסט')));
+
+    final payload = await recorder.click(tester, entries.last);
+    expect(payload['currentBook'], 'רש"י על ספר בדיקה');
+    expect(payload['currentIndex'], 0);
+    final mainBook = (payload['selection'] as Map)['mainBook'] as Map;
+    expect(mainBook['bookTitle'], 'ספר בדיקה');
+    expect(mainBook.containsKey('sectionIndex'), isFalse);
   });
 }
 

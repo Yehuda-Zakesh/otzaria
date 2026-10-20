@@ -495,6 +495,8 @@ class _IdleIndex extends Fake implements TantivyDataProvider {
   @override
   final ValueNotifier<bool> isIndexing = ValueNotifier(false);
   @override
+  final ValueNotifier<bool> isIndexingDeferred = ValueNotifier(false);
+  @override
   final Set<String> indexedFilePaths = {};
 }
 

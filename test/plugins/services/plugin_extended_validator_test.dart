@@ -325,6 +325,7 @@ void main() {
         'feedback.report',
         'feedback.hasReporterEmail',
         'ui.print',
+        'ui.printFile',
         'ui.exportPdf',
         'ui.setUnsavedChanges',
       };

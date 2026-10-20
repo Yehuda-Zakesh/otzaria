@@ -745,6 +745,160 @@ void main() {
     );
   });
 
+  group('downloadToDirectory', () {
+    final url = Uri.parse('https://example.org/files/sample.pdf');
+
+    Future<PluginFileDownloadResult> download(
+      PluginFileDownloadService service, {
+      Uri? uri,
+      int maxBytes = 1024,
+      Future<bool> Function(Uri)? isAllowed,
+      bool Function()? expired,
+    }) => service.downloadToDirectory(
+      uri ?? url,
+      Directory(p.join(tempDir.path, 'entry')),
+      isAllowed: isAllowed ?? allowAll,
+      maxBytes: maxBytes,
+      expired: expired,
+    );
+
+    test('שומר בתיקייה שנוצרה, בשם מה-URL ובלי קובץ חלקי', () async {
+      final result = await download(serviceReturning([1, 2, 3]));
+
+      expect(result.filename, 'sample.pdf');
+      expect(p.dirname(result.path), p.join(tempDir.path, 'entry'));
+      expect(await File(result.path).readAsBytes(), [1, 2, 3]);
+      expect(Directory(p.dirname(result.path)).listSync(), hasLength(1));
+    });
+
+    test('תשובת PDF בלי סיומת מקבלת .pdf', () async {
+      final service = PluginFileDownloadService(
+        client: MockClient(
+          (_) async => http.Response.bytes(
+            [1],
+            200,
+            headers: {'content-type': 'application/pdf; charset=binary'},
+          ),
+        ),
+      );
+
+      final result = await download(
+        service,
+        uri: Uri.parse('https://example.org/get?id=7'),
+      );
+
+      expect(result.filename, 'get.pdf');
+    });
+
+    test('שמות שאינם בטוחים ליצירה מנוקים, והקובץ נשאר בתיקייה', () async {
+      final longName = '${'א' * 300}.pdf';
+      final emoji = String.fromCharCodes([0x1F600, 0x1F600, 0x1F600]);
+      final emojiName = '${'a' * 55}$emoji.pdf';
+      final cases = {
+        'https://example.org/a/..': 'download',
+        'https://example.org/a/%2E%2E': 'download',
+        'https://example.org/name.': 'name',
+        'https://example.org/CON.pdf': '_CON.pdf',
+        'https://example.org/nul': '_nul',
+        'https://example.org/a%2F..%2Fescape.pdf': 'escape.pdf',
+        // שם הקובץ החלקי שמור: אחרת ההורדה הייתה נראית לעולם כרצה.
+        'https://example.org/.otzaria-partial': '_.otzaria-partial',
+        // חיתוך בתוך זוג surrogate היה יוצר שם לא תקין.
+        'https://example.org/${Uri.encodeComponent(emojiName)}':
+            '${'a' * 55}${String.fromCharCode(0x1F600)}.pdf',
+        'https://example.org/${Uri.encodeComponent(longName)}':
+            '${'א' * 56}.pdf',
+      };
+      for (final MapEntry(key: url, value: expected) in cases.entries) {
+        final dir = Directory(p.join(tempDir.path, 'names', '${url.hashCode}'));
+        final result = await serviceReturning([1]).downloadToDirectory(
+          Uri.parse(url),
+          dir,
+          isAllowed: allowAll,
+          maxBytes: 1024,
+        );
+
+        expect(result.filename, expected, reason: url);
+        expect(p.dirname(result.path), dir.path, reason: url);
+        expect(dir.listSync(), hasLength(1), reason: url);
+      }
+    });
+
+    test('Content-Length מעל התקרה נדחה לפני שנכתב קובץ', () async {
+      await expectLater(
+        download(serviceReturning(List.filled(2048, 0)), maxBytes: 1024),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('error.too_large'),
+          ),
+        ),
+      );
+      expect(Directory(p.join(tempDir.path, 'entry')).existsSync(), isFalse);
+    });
+
+    test('גוף שחורג בלי Content-Length נקטע ונמחק', () async {
+      final client = MockClient.streaming((request, _) async {
+        Stream<List<int>> body() async* {
+          for (var i = 0; i < 4; i++) {
+            yield List.filled(400, 0);
+          }
+        }
+
+        return http.StreamedResponse(body(), 200);
+      });
+
+      await expectLater(
+        download(PluginFileDownloadService(client: client), maxBytes: 1024),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('error.too_large'),
+          ),
+        ),
+      );
+      expect(
+        Directory(p.join(tempDir.path, 'entry')).listSync(),
+        isEmpty,
+        reason: 'הקובץ החלקי נמחק',
+      );
+    });
+
+    test('redirect ליעד שאינו מותר נחסם', () async {
+      final client = MockClient((request) async {
+        return http.Response(
+          '',
+          302,
+          headers: {'location': 'https://evil.test/a'},
+        );
+      });
+
+      await expectLater(
+        download(
+          PluginFileDownloadService(client: client),
+          isAllowed: (uri) async => uri.host == 'example.org',
+        ),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('error.forbidden'),
+          ),
+        ),
+      );
+    });
+
+    test('expired נבדק בכל מקטע וקוטע בהורדה', () async {
+      await expectLater(
+        download(serviceReturning([1, 2, 3]), expired: () => true),
+        throwsA(isA<TimeoutException>()),
+      );
+      expect(Directory(p.join(tempDir.path, 'entry')).listSync(), isEmpty);
+    });
+  });
+
   test('dispose מסיר את ה-closer מ-HttpClientRegistry', () async {
     final service = serviceReturning([1]);
     final before = HttpClientRegistry.registeredCount;

@@ -32,7 +32,8 @@ enum HolyNameDisplay {
   asIs,
   kufKuf,
   hehApostrophe,
-  doubleYod;
+  doubleYod,
+  daletDalet;
 
   /// null = הצגה ככתבו (אין החלפה).
   HolyNameStyle? get style => switch (this) {
@@ -40,6 +41,7 @@ enum HolyNameDisplay {
     HolyNameDisplay.kufKuf => HolyNameStyle.kufKuf,
     HolyNameDisplay.hehApostrophe => HolyNameStyle.hehApostrophe,
     HolyNameDisplay.doubleYod => HolyNameStyle.doubleYod,
+    HolyNameDisplay.daletDalet => HolyNameStyle.daletDalet,
   };
 
   static HolyNameDisplay fromLegacy({
@@ -51,6 +53,7 @@ enum HolyNameDisplay {
       HolyNameStyle.kufKuf => HolyNameDisplay.kufKuf,
       HolyNameStyle.hehApostrophe => HolyNameDisplay.hehApostrophe,
       HolyNameStyle.doubleYod => HolyNameDisplay.doubleYod,
+      HolyNameStyle.daletDalet => HolyNameDisplay.daletDalet,
     };
   }
 
@@ -59,6 +62,7 @@ enum HolyNameDisplay {
     'kufKuf' => HolyNameDisplay.kufKuf,
     'hehApostrophe' => HolyNameDisplay.hehApostrophe,
     'doubleYod' => HolyNameDisplay.doubleYod,
+    'daletDalet' => HolyNameDisplay.daletDalet,
     _ => null,
   };
 }

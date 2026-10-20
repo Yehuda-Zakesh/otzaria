@@ -1,5 +1,7 @@
 import 'package:bloc_test/bloc_test.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -129,6 +131,98 @@ void main() {
       SettingsState.initial().copyWith(fontSize: 30),
     );
     await tester.pump();
+    await tester.pump();
+
+    verify(() => bloc.add(const UpdateFontSize(30))).called(1);
+  });
+
+  /// The book screen at [fontSize], with a mock bloc that records events.
+  Future<_MockTextBookBloc> pumpViewer(
+    WidgetTester tester, {
+    required double fontSize,
+  }) async {
+    final book = TextBook(title: 'ספר בדיקה');
+    final bloc = _MockTextBookBloc();
+    whenListen(
+      bloc,
+      const Stream<TextBookState>.empty(),
+      initialState: _loadedState(book, fontSize: fontSize),
+    );
+    final tab = TextBookTab(book: book, index: 0, blocOverride: bloc);
+    final tabsBloc = _TestTabsBloc(TabsState(tabs: [tab], currentTabIndex: 0));
+    final settingsBloc = _TestSettingsBloc(SettingsState.initial());
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      await bloc.close();
+      await tabsBloc.close();
+      await settingsBloc.close();
+      tab.dispose();
+    });
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          Provider<FocusRepository>.value(value: focusRepository),
+          ChangeNotifierProvider<ShamorZachorDataProvider>.value(
+            value: shamorZachorDataProvider,
+          ),
+          ChangeNotifierProvider<ShamorZachorProgressProvider>.value(
+            value: shamorZachorProgressProvider,
+          ),
+        ],
+        child: MultiBlocProvider(
+          providers: [
+            BlocProvider<TextBookBloc>.value(value: bloc),
+            BlocProvider<TabsBloc>.value(value: tabsBloc),
+            BlocProvider<SettingsBloc>.value(value: settingsBloc),
+            BlocProvider<BookmarkBloc>.value(value: bookmarkBloc),
+            BlocProvider<PersonalNotesBloc>.value(value: personalNotesBloc),
+            BlocProvider<TourCubit>.value(value: tourCubit),
+          ],
+          child: MaterialApp(
+            home: TextBookViewerBloc(
+              tab: tab,
+              isInCombinedView: false,
+              openBookCallback: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    return bloc;
+  }
+
+  testWidgets('Ctrl + wheel over the text steps the font size (#2705)', (
+    tester,
+  ) async {
+    final bloc = await pumpViewer(tester, fontSize: 18);
+    final text = tester.getCenter(find.byType(CombinedView).first);
+    final mouse = TestPointer(1, PointerDeviceKind.mouse)..hover(text);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendEventToBinding(mouse.scroll(const Offset(0, -100)));
+    await tester.pump();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+
+    verify(() => bloc.add(const UpdateFontSize(21))).called(1);
+  });
+
+  testWidgets('a precision touchpad pinch scales the font size (#2705)', (
+    tester,
+  ) async {
+    final bloc = await pumpViewer(tester, fontSize: 20);
+    final text = tester.getCenter(find.byType(CombinedView).first);
+    final pad = TestPointer(2, PointerDeviceKind.trackpad);
+
+    await tester.sendEventToBinding(pad.panZoomStart(text));
+    for (final scale in [1.1, 1.2, 1.3, 1.4, 1.5]) {
+      await tester.sendEventToBinding(pad.panZoomUpdate(text, scale: scale));
+      await tester.pump();
+    }
+    await tester.sendEventToBinding(pad.panZoomEnd());
     await tester.pump();
 
     verify(() => bloc.add(const UpdateFontSize(30))).called(1);

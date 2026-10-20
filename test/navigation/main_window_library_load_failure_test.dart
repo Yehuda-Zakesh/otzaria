@@ -12,6 +12,7 @@ import 'package:otzaria/core/windowing/app_window_controller.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
+import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';
 import 'package:otzaria/history/bloc/history_event.dart';
@@ -91,6 +92,29 @@ void main() {
     ).called(1);
   });
 
+  testWidgets('סוף רצף העלייה מכבה את סימון ההמתנה כשהאינדוקס מתחיל (#2646)', (
+    tester,
+  ) async {
+    final deferred = TantivyDataProvider.instance.isIndexingDeferred;
+    addTearDown(() => deferred.value = false);
+    final indexingStates = StreamController<IndexingState>.broadcast();
+    addTearDown(indexingStates.close);
+    final harness = await _pumpMainWindow(
+      tester,
+      Future.value(Library(categories: [])),
+      indexingStates: indexingStates.stream,
+    );
+    deferred.value = true;
+    harness.libraryChanges.add(harness.initialState.copyWith(isLoading: false));
+    await tester.pump();
+    await tester.pump();
+    expect(deferred.value, isTrue);
+
+    indexingStates.add(const IndexingInProgress(booksProcessed: 0));
+    await tester.pump();
+    expect(deferred.value, isFalse);
+  });
+
   testWidgets('רענון ספרייה שנכשל אינו מפיל שגיאה לא מטופלת', (tester) async {
     final catalog = Completer<Library>();
     final harness = await _pumpMainWindow(
@@ -126,6 +150,7 @@ Future<_Harness> _pumpMainWindow(
   WidgetTester tester,
   Future<Library> catalog, {
   bool isLoading = true,
+  Stream<IndexingState> indexingStates = const Stream.empty(),
 }) async {
   await Settings.init(cacheProvider: MemoryCacheProvider());
   final oldSecondary = WindowRole.isSecondary;
@@ -153,7 +178,7 @@ Future<_Harness> _pumpMainWindow(
   final indexing = _IndexingBloc();
   whenListen(
     indexing,
-    const Stream<IndexingState>.empty(),
+    indexingStates,
     initialState: IndexingInitial(),
   );
   final history = _HistoryBloc();

@@ -14,10 +14,27 @@ import '../support/search_engine_test_init.dart';
 /// שם הוי"ה בכתיב escapes, כדי שלא ייכתב בקוד המקור.
 const _name = 'יהוה';
 const _placeholder = 'יקוק';
+const _dalet = 'ידוד';
 
 /// פורום אוצריא, נושא 981: "יקוק" שהועתק מהתצוגה לא מצא את השם עצמו.
 Future<void> main() async {
   final engineReady = await tryInitSearchEngine();
+
+  // בלי מנוע החיפוש: זיהוי מילת השם לבדה.
+  group('holyNameForPlaceholderWord', () {
+    test('"יקוק" ו"ידוד" — עם ניקוד ואותיות שימוש', () {
+      expect(holyNameForPlaceholderWord(_placeholder), _name);
+      expect(holyNameForPlaceholderWord(_dalet), _name);
+      expect(holyNameForPlaceholderWord('וּבַידוָד'), 'וּבַיהוָה');
+      expect(holyNameForPlaceholderWord('לַֽיקֹוָֽק'), 'לַֽיהֹוָֽה');
+    });
+
+    test('צורה מעורבת אינה מילת השם', () {
+      expect(holyNameForPlaceholderWord('יקוד'), isNull);
+      expect(holyNameForPlaceholderWord('ידוק'), isNull);
+      expect(holyNameForPlaceholderWord('אבגידוד'), isNull);
+    });
+  });
 
   group('withHolyNameAlternatives', () {
     test('מוסיף את השם כחלופה למילת "יקוק", עם אותיות השימוש שלפניה', () {
@@ -39,6 +56,19 @@ Future<void> main() async {
         1: ['יחיד'],
       });
       expect(withHolyNameAlternatives('$_placeholder אחד', once), once);
+    });
+
+    test('גם "ידוד" (התצוגה החלופית) מוסיף את השם כחלופה', () {
+      expect(withHolyNameAlternatives('$_dalet אלהינו', const {}), {
+        0: [_name],
+      });
+      expect(withHolyNameAlternatives('יודו ל$_dalet חסדו', const {}), {
+        1: ['ל$_name'],
+      });
+    });
+
+    test('צורה מעורבת ("יקוד") אינה מילת השם', () {
+      expect(withHolyNameAlternatives('יקוד אחד', const {}), isEmpty);
     });
 
     test('שאילתה בלי "יקוק" כמילה שלמה חוזרת כמות שהיא', () {
@@ -209,6 +239,25 @@ Future<void> main() async {
         expect(pattern.regExp.hasMatch('שירו ל$_placeholder אלהינו'), isTrue);
         expect(pattern.regExp.hasMatch('שירו אלהינו'), isFalse);
       }
+    });
+
+    test('החיפוש הליטרלי בספר מוצא את השם כשהוקלד "ידוד"', () {
+      for (final wholeWord in [true, false]) {
+        final pattern = buildLiteralPattern(
+          'ל$_dalet אלהינו',
+          wholeWord: wholeWord,
+        )!;
+        expect(pattern.regExp.hasMatch('שירו ל$_name אלהינו'), isTrue);
+        expect(pattern.regExp.hasMatch('שירו ל$_dalet אלהינו'), isTrue);
+        expect(pattern.regExp.hasMatch('שירו אלהינו'), isFalse);
+      }
+    });
+
+    test('"יקוק" ו"ידוד" באותה שאילתה — כל אחד מורחב בנפרד', () {
+      final pattern = buildLiteralPattern('$_placeholder אחד $_dalet')!;
+      expect(pattern.regExp.hasMatch('$_name אחד $_name'), isTrue);
+      expect(pattern.regExp.hasMatch('$_placeholder אחד $_dalet'), isTrue);
+      expect(pattern.regExp.hasMatch('$_dalet אחד $_placeholder'), isFalse);
     });
 
     test('בחיפוש בספר כל מופע של "יקוק" מוחלף בנפרד', () {

@@ -134,7 +134,7 @@ class _AppReportDialogState extends State<AppReportDialog> {
         },
         builder: (context, state) {
           if (state is AppReportEditing) _syncControllers(state);
-          return Dialog(
+          final dialog = Dialog(
             clipBehavior: Clip.antiAlias,
             child: ConstrainedBox(
               constraints: BoxConstraints(
@@ -169,6 +169,16 @@ class _AppReportDialogState extends State<AppReportDialog> {
                 ],
               ),
             ),
+          );
+          // טקסט או צילום שצורף חוסמים סגירה עקיפה (קיצור ניווט, חזרה); הכפתורים סוגרים ב-pop.
+          return PopScope(
+            canPop:
+                state is! AppReportEditing ||
+                (state.title + state.description + state.steps)
+                        .trim()
+                        .isEmpty &&
+                    state.images.isEmpty,
+            child: dialog,
           );
         },
       ),

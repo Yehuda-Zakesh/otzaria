@@ -444,6 +444,7 @@ class _TextDisplaySettingsCardState extends State<TextDisplaySettingsCard> {
           HolyNameDisplay.kufKuf => t('יקוק'),
           HolyNameDisplay.hehApostrophe => t("ה'"),
           HolyNameDisplay.doubleYod => t('יי'),
+          HolyNameDisplay.daletDalet => t('ידוד'),
         }}',
       if (patch.anchorMarkers case final v?)
         '${t('ציוני המפרשים')}: ${visibility(v)}',

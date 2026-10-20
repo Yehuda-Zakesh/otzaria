@@ -145,6 +145,7 @@ const Map<String, String> apiCallToPermissionHint = {
   // `network.localhost` במקום `network.access`.
   'network.fetchStream': 'network.access',
   'network.download': 'network.access',
+  'network.fetchFile': 'network.access',
 };
 
 /// קריאות API שאינן דורשות הרשאת manifest — הגבול נאכף במקום אחר. הצהרה
@@ -154,6 +155,7 @@ const Set<String> apiCallsWithoutPermission = {
   'feedback.hasReporterEmail',
   'network.fetchStream',
   'network.download',
+  'network.fetchFile',
   'fs.extractZip',
   'fs.deleteFile',
   'fs.deleteFolder',
@@ -166,6 +168,7 @@ const Set<String> apiCallsWithoutPermission = {
   'fs.stat',
   'plugin.backgroundDone',
   'ui.print',
+  'ui.printFile',
   'ui.exportPdf',
   'ui.setUnsavedChanges',
 };

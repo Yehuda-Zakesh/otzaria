@@ -269,7 +269,7 @@ var json2 = File.ReadAllText(path);   // רק ה-JSON, בלי newline נגרר
 | מקטע | שדות |
 |--------|--------|
 | `app` | `version`, `buildNumber`, `fullVersion` (`version+build` — הפורמט שבו נשמר `previousVersion`), `installedAt` + `installedAtSource`, `updatedAt`, `previousVersion`, `installType` (`portable`/`allUsers`/`perUser`), `accountType` (`administrator`/`standard`/`unknown`), `elevated`, `platform`, `operatingSystem`, `dataRootPath`, `name`, `packageName` |
-| `library` | `version` (מ-`schema_meta.db_version`), `lastUpdatedAt`, `totalBooks`, `personalBooks`, `officialBooks`, `pdfBooks`, `path`, `indexPath`, `databasePath`, `databaseExists`, `databaseSizeBytes` |
+| `library` | `version` (מ-`schema_meta.db_version`), `lastUpdatedAt`, `totalBooks`, `personalBooks`, `officialBooks`, `pdfBooks`, `path`, `indexPath`, `databasePath`, `databaseExists`, `databaseSizeBytes`, `freeSpaceBytes` (מקום פנוי בכונן הספרייה) |
 | `folders` | `configuredCount`, `existingCount`, `totalFiles`, `totalSizeBytes`, `fileLimit`, `supportedExtensions[]`, `folders[]` |
 | `plugins` | `webViewVersion` (WebView2 — Windows בלבד), `installedCount`, `enabledCount`, `installed[]` עם `id`, `name`, `version`, `enabled`, `source`, `installedAt`, `updatedAt` |
 | `errors` | `totalEntries`, `returnedEntries`, `files[]`, `recent[]` |

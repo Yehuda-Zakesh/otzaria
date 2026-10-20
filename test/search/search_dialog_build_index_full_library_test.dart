@@ -37,6 +37,80 @@ class _MockNavigationBloc extends MockBloc<NavigationEvent, NavigationState>
 class _MockLibraryBloc extends MockBloc<LibraryEvent, LibraryState>
     implements LibraryBloc {}
 
+const _deferredText = 'האינדקס ייבנה אוטומטית בסיום עדכון הספרייה.';
+
+/// פותח את דיאלוג החיפוש במצב "אין אינדקס" ומחזיר את ה-IndexingBloc המדומה.
+Future<_MockIndexingBloc> _pumpMissingIndexDialog(
+  WidgetTester tester, {
+  required Library fullLibrary,
+  required Library visibleLibrary,
+}) async {
+  final previousLibrary = DataRepository.instance.cachedLibraryFutureForTesting;
+  DataRepository.instance.library = Future.value(fullLibrary);
+  final provider = TantivyDataProvider.instance;
+  final previousInitialized = provider.isInitialized.value;
+  final previousPaths = {...provider.indexedFilePaths};
+  provider.indexedFilePaths.clear();
+  provider.isInitialized.value = true;
+
+  final historyBloc = _MockHistoryBloc();
+  final indexingBloc = _MockIndexingBloc();
+  final navigationBloc = _MockNavigationBloc();
+  final libraryBloc = _MockLibraryBloc();
+  whenListen(
+    historyBloc,
+    const Stream<HistoryState>.empty(),
+    initialState: HistoryLoaded([]),
+  );
+  whenListen(
+    indexingBloc,
+    const Stream<IndexingState>.empty(),
+    initialState: IndexingInitial(),
+  );
+  whenListen(
+    navigationBloc,
+    const Stream<NavigationState>.empty(),
+    initialState: const NavigationState(currentScreen: Screen.search),
+  );
+  whenListen(
+    libraryBloc,
+    const Stream<LibraryState>.empty(),
+    initialState: LibraryState(library: visibleLibrary),
+  );
+  addTearDown(() async {
+    provider.isInitialized.value = previousInitialized;
+    provider.isIndexingDeferred.value = false;
+    provider.indexedFilePaths.addAll(previousPaths);
+    if (previousLibrary != null) {
+      DataRepository.instance.library = previousLibrary;
+    } else {
+      DataRepository.instance.invalidateLibraryCache();
+    }
+    await tester.binding.setSurfaceSize(null);
+    await historyBloc.close();
+    await indexingBloc.close();
+    await navigationBloc.close();
+    await libraryBloc.close();
+  });
+
+  await tester.binding.setSurfaceSize(const Size(1400, 900));
+  await tester.pumpWidget(
+    MaterialApp(
+      home: MultiBlocProvider(
+        providers: [
+          BlocProvider<HistoryBloc>.value(value: historyBloc),
+          BlocProvider<IndexingBloc>.value(value: indexingBloc),
+          BlocProvider<NavigationBloc>.value(value: navigationBloc),
+          BlocProvider<LibraryBloc>.value(value: libraryBloc),
+        ],
+        child: const Scaffold(body: SearchDialog()),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+  return indexingBloc;
+}
+
 Future<void> main() async {
   final engineReady = await tryInitSearchEngine();
 
@@ -58,69 +132,11 @@ Future<void> main() async {
       ]);
     final visibleLibrary = Library(categories: [])
       ..books.add(TextBook(id: 1, title: 'גלוי'));
-    final previousLibrary =
-        DataRepository.instance.cachedLibraryFutureForTesting;
-    DataRepository.instance.library = Future.value(fullLibrary);
-    final provider = TantivyDataProvider.instance;
-    final previousInitialized = provider.isInitialized.value;
-    final previousPaths = {...provider.indexedFilePaths};
-    provider.indexedFilePaths.clear();
-    provider.isInitialized.value = true;
-
-    final historyBloc = _MockHistoryBloc();
-    final indexingBloc = _MockIndexingBloc();
-    final navigationBloc = _MockNavigationBloc();
-    final libraryBloc = _MockLibraryBloc();
-    whenListen(
-      historyBloc,
-      const Stream<HistoryState>.empty(),
-      initialState: HistoryLoaded([]),
+    final indexingBloc = await _pumpMissingIndexDialog(
+      tester,
+      fullLibrary: fullLibrary,
+      visibleLibrary: visibleLibrary,
     );
-    whenListen(
-      indexingBloc,
-      const Stream<IndexingState>.empty(),
-      initialState: IndexingInitial(),
-    );
-    whenListen(
-      navigationBloc,
-      const Stream<NavigationState>.empty(),
-      initialState: const NavigationState(currentScreen: Screen.search),
-    );
-    whenListen(
-      libraryBloc,
-      const Stream<LibraryState>.empty(),
-      initialState: LibraryState(library: visibleLibrary),
-    );
-    addTearDown(() async {
-      provider.isInitialized.value = previousInitialized;
-      provider.indexedFilePaths.addAll(previousPaths);
-      if (previousLibrary != null) {
-        DataRepository.instance.library = previousLibrary;
-      } else {
-        DataRepository.instance.invalidateLibraryCache();
-      }
-      await tester.binding.setSurfaceSize(null);
-      await historyBloc.close();
-      await indexingBloc.close();
-      await navigationBloc.close();
-      await libraryBloc.close();
-    });
-
-    await tester.binding.setSurfaceSize(const Size(1400, 900));
-    await tester.pumpWidget(
-      MaterialApp(
-        home: MultiBlocProvider(
-          providers: [
-            BlocProvider<HistoryBloc>.value(value: historyBloc),
-            BlocProvider<IndexingBloc>.value(value: indexingBloc),
-            BlocProvider<NavigationBloc>.value(value: navigationBloc),
-            BlocProvider<LibraryBloc>.value(value: libraryBloc),
-          ],
-          child: const Scaffold(body: SearchDialog()),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
 
     await tester.tap(find.text('בנה אינדקס'));
     await tester.pumpAndSettle();
@@ -128,5 +144,27 @@ Future<void> main() async {
     final added = verify(() => indexingBloc.add(captureAny())).captured;
     final start = added.whereType<StartIndexing>().single;
     expect(start.library, same(fullLibrary));
+  }, skip: !engineReady);
+
+  // עדכון הספרייה סוגר ומחליף את המסד שהאינדוקס היה קורא ממנו.
+  testWidgets('בזמן שהאינדוקס ממתין לעדכון הספרייה אין כפתור "בנה אינדקס"', (
+    tester,
+  ) async {
+    final library = Library(categories: [])
+      ..books.add(TextBook(id: 1, title: 'ספר'));
+    TantivyDataProvider.instance.isIndexingDeferred.value = true;
+    await _pumpMissingIndexDialog(
+      tester,
+      fullLibrary: library,
+      visibleLibrary: library,
+    );
+
+    expect(find.text('בנה אינדקס'), findsNothing);
+    expect(find.text(_deferredText), findsOneWidget);
+
+    TantivyDataProvider.instance.isIndexingDeferred.value = false;
+    await tester.pumpAndSettle();
+    expect(find.text('בנה אינדקס'), findsOneWidget);
+    expect(find.text(_deferredText), findsNothing);
   }, skip: !engineReady);
 }

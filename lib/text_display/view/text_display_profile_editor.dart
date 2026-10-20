@@ -64,6 +64,7 @@ class TextDisplayProfileEditor extends StatelessWidget {
         entries: [
           AppMenuEntry(value: HolyNameDisplay.asIs, label: t('ככתבו')),
           AppMenuEntry(value: HolyNameDisplay.kufKuf, label: t('יקוק')),
+          AppMenuEntry(value: HolyNameDisplay.daletDalet, label: t('ידוד')),
           AppMenuEntry(value: HolyNameDisplay.hehApostrophe, label: t("ה'")),
           AppMenuEntry(value: HolyNameDisplay.doubleYod, label: t('יי')),
         ],

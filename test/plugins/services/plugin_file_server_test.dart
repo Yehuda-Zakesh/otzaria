@@ -2,7 +2,15 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/plugins/services/plugin_content_security_policy.dart';
 import 'package:otzaria/plugins/services/plugin_file_server.dart';
+import 'package:otzaria/plugins/services/plugin_remote_file_cache.dart';
+
+/// ה-frame-ancestors שמצופה לתוסף p1 בפלטפורמה הנוכחית: במק רק הסכימה הייעודית,
+/// ובשאר גם דפי file://.
+final _p1Ancestors = Platform.isMacOS
+    ? 'frame-ancestors otzaria-plugin://p1'
+    : 'frame-ancestors otzaria-plugin://p1 file:';
 
 void main() {
   late Directory tempDir;
@@ -268,26 +276,92 @@ void main() {
     await response.drain();
   });
 
-  test('HTML ו-SVG מוגשים בלי סקריפט ובלי רשת; PDF בלי CSP', () async {
-    for (final name in ['page.html', 'image.svg']) {
-      final file = await writeFile(name, '<script></script>');
+  test(
+    'HTML ו-SVG מוגשים בלי סקריפט ובלי רשת; PDF רק עם frame-ancestors',
+    () async {
+      for (final name in ['page.html', 'image.svg']) {
+        final file = await writeFile(name, '<script></script>');
+        final reg = await server.register(
+          pluginId: 'p1',
+          canonicalPath: file.path,
+        );
+        final response = await get(reg.url);
+        final csp = response.headers.value('content-security-policy');
+        expect(csp, startsWith('sandbox;'), reason: name);
+        expect(csp, contains("default-src 'none'"), reason: name);
+        expect(csp, endsWith('; $_p1Ancestors'));
+        expect(response.headers.value('x-content-type-options'), 'nosniff');
+        await response.drain();
+      }
+
+      final pdf = await writeFile('book.pdf', '%PDF-1.4 fake');
       final reg = await server.register(
         pluginId: 'p1',
-        canonicalPath: file.path,
+        canonicalPath: pdf.path,
       );
       final response = await get(reg.url);
-      final csp = response.headers.value('content-security-policy');
-      expect(csp, startsWith('sandbox;'), reason: name);
-      expect(csp, contains("default-src 'none'"), reason: name);
-      expect(response.headers.value('x-content-type-options'), 'nosniff');
+      expect(
+        response.headers.value('content-security-policy'),
+        _p1Ancestors,
+      );
       await response.drain();
+    },
+  );
+
+  test(
+    'קובץ שהוענק מותר להטמעה רק בדף של התוסף: בלי X-Frame-Options',
+    () async {
+      final pdf = await writeFile('book.pdf', '%PDF-1.4 fake');
+      final reg = await server.register(
+        pluginId: 'p1',
+        canonicalPath: pdf.path,
+      );
+
+      final response = await get(reg.url);
+      // Dart מוסיף SAMEORIGIN כברירת מחדל, וזה חוסם גם את דף התוסף.
+      expect(response.headers.value('x-frame-options'), isNull);
+      final csp = response.headers.value('content-security-policy')!;
+      expect(csp, _p1Ancestors);
+      // תוסף אחר אינו ברשימה, ואין wildcard.
+      expect(csp, isNot(contains('p2')));
+      expect(csp, isNot(contains('*')));
+      await response.drain();
+    },
+  );
+
+  test('frame-ancestors: סכימה ייעודית במק, ובשאר גם file:', () {
+    expect(
+      pluginFrameAncestorsDirective('p1', assetSchemeOnly: true),
+      'frame-ancestors otzaria-plugin://p1',
+    );
+    expect(
+      pluginFrameAncestorsDirective('p1', assetSchemeOnly: false),
+      'frame-ancestors otzaria-plugin://p1 file:',
+    );
+    expect(
+      pluginFrameAncestorsDirective('My.Plugin_2', assetSchemeOnly: false),
+      'frame-ancestors otzaria-plugin://my.plugin-2 file:',
+    );
+  });
+
+  test('revokeAllForPlugin מוחק גם את קבצי המטמון של התוסף בלבד', () async {
+    final cache = PluginRemoteFileCache(
+      root: Directory('${tempDir.path}/cache'),
+    );
+    final scoped = PluginFileServer(remoteFileCache: cache);
+    addTearDown(scoped.close);
+    final dirs = {
+      for (final id in ['p1', 'p2'])
+        id: Directory('${cache.root.path}/$id/dl')..createSync(recursive: true),
+    };
+    for (final dir in dirs.values) {
+      File('${dir.path}/a.pdf').writeAsStringSync('x');
     }
 
-    final pdf = await writeFile('book.pdf', '%PDF-1.4 fake');
-    final reg = await server.register(pluginId: 'p1', canonicalPath: pdf.path);
-    final response = await get(reg.url);
-    expect(response.headers.value('content-security-policy'), isNull);
-    await response.drain();
+    await scoped.revokeAllForPlugin('p1');
+
+    expect(dirs['p1']!.existsSync(), isFalse);
+    expect(dirs['p2']!.existsSync(), isTrue);
   });
 
   test('isServerUri מזהה את ה-origin של השרת ושולל פורט אחר', () async {

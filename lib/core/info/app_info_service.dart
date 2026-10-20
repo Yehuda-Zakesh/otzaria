@@ -16,6 +16,7 @@ import 'package:otzaria/models/books.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/services/data_collection_service.dart';
 import 'package:otzaria/update/app_release_version.dart';
+import 'package:otzaria/utils/file/disk_free_space.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 /// דוח המידע שמוחזר לקישור `otzaria://info/...`.
@@ -193,6 +194,7 @@ class AppInfoService {
       'databasePath': databasePath,
       'databaseExists': databaseExists,
       'databaseSizeBytes': stat?.size,
+      'freeSpaceBytes': await libraryFreeSpaceBytes(libraryPath),
       'totalBooks': books?.length,
       'personalBooks': personalBooks,
       'officialBooks': (books == null || personalBooks == null)
@@ -200,6 +202,16 @@ class AppInfoService {
           : books.length - personalBooks,
       'pdfBooks': books?.whereType<PdfBook>().length,
     };
+  }
+
+  /// המקום הפנוי בכונן של [libraryPath], או null כשאינו ידוע.
+  @visibleForTesting
+  static Future<int?> libraryFreeSpaceBytes(
+    String libraryPath, {
+    Future<DiskSpaceInfo> Function(String path) diskSpace = getDiskSpaceInfo,
+  }) async {
+    final freeBytes = (await diskSpace(libraryPath)).freeBytes;
+    return freeBytes < 0 ? null : freeBytes;
   }
 
   static Future<List<Book>?> _loadBooks() async {

@@ -327,4 +327,17 @@ void main() {
       'never',
     );
   });
+
+  test('קריסה מהפעלה קודמת: הדוח בלי הקשר החלון; תקיעה נוכחית: איתו', () {
+    expect(
+      CrashPromptDialog.collectorFor(candidate()).includesCurrentContext,
+      isFalse,
+    );
+    expect(
+      CrashPromptDialog.collectorFor(
+        const CrashCandidate.hang(signature: signature),
+      ).includesCurrentContext,
+      isTrue,
+    );
+  });
 }

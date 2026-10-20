@@ -239,11 +239,13 @@ void main() {
       expect(PluginBridgeHandler.hasOwnTimeout('search.query'), isTrue);
       expect(PluginBridgeHandler.hasOwnTimeout('network.fetchStream'), isTrue);
       expect(PluginBridgeHandler.hasOwnTimeout('network.download'), isTrue);
+      expect(PluginBridgeHandler.hasOwnTimeout('network.fetchFile'), isTrue);
       expect(PluginBridgeHandler.hasOwnTimeout('fs.extractZip'), isTrue);
       // ממתין לדיאלוג אישור — timeout גנרי היה מדווח כשל אחרי שליחה בפועל.
       expect(PluginBridgeHandler.hasOwnTimeout('feedback.report'), isTrue);
       // דיאלוג ההדפסה של המערכת ממתין לבחירת מדפסת ללא הגבלת זמן.
       expect(PluginBridgeHandler.hasOwnTimeout('ui.print'), isTrue);
+      expect(PluginBridgeHandler.hasOwnTimeout('ui.printFile'), isTrue);
       expect(PluginBridgeHandler.hasOwnTimeout('ui.exportPdf'), isTrue);
     });
 
@@ -1138,6 +1140,7 @@ void main() {
     const enforcedInAdapter = {
       'network.fetchStream',
       'network.download',
+      'network.fetchFile',
     };
 
     PluginBridgeHandler buildHandler() => PluginBridgeHandler(

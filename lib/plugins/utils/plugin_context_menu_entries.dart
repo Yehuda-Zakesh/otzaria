@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
 import 'package:otzaria/plugins/models/plugin_context_menu_item.dart';
@@ -32,12 +34,64 @@ PluginSelectionActionDispatcher? pluginSelectionActionDispatcherOf(
   }
 }
 
+/// הטקסט המסומן כפי שיימסר בלחיצה, כשהוא ידוע רק אסינכרונית: הגבלת העתקה
+/// שנקראת מהמסד, או בחירת PDF שעמודיה לא נטענו.
+typedef PluginSelectedTextResolver = Future<String> Function();
+
+/// האם יש פריטי תוספים כלשהם — לפני חישוב payload שאין מי שיקבל.
+bool get hasPluginContextMenuItems =>
+    ContextMenuRegistry.instance.getAll().isNotEmpty;
+
+/// שדות הספר והמקום שבכל payload של לחיצה בתפריט ההקשר.
+Map<String, dynamic> pluginMenuPayload({
+  required Map<String, dynamic> identity,
+  required String bookTitle,
+  required int sectionIndex,
+  required String? currentRef,
+  String text = '',
+}) => {
+  ...identity,
+  'bookTitle': bookTitle,
+  'currentBook': bookTitle,
+  'currentBookId': bookTitle,
+  'sectionIndex': sectionIndex,
+  'currentIndex': sectionIndex,
+  'currentRef': currentRef,
+  'text': text,
+  'start': null,
+  'end': null,
+};
+
+/// פריטי התוספים של [context] כקבוצה בסוף תפריט: קו מפריד ואחריו הפריטים,
+/// או רשימה ריקה כשאין פריט מתאים.
+List<AppContextMenuEntry> buildPluginContextMenuSection({
+  required String context,
+  required Map<String, dynamic> selection,
+  required BuildContext menuContext,
+  PluginSelectedTextResolver? resolveSelectedText,
+  List<(String pluginId, PluginContextMenuItem item)>? records,
+  PluginSelectionActionDispatcher? selectionActionDispatcher,
+}) {
+  final entries = buildPluginContextMenuEntries(
+    records: records ?? ContextMenuRegistry.instance.getAll(),
+    selection: selection,
+    context: context,
+    selectionActionDispatcher:
+        selectionActionDispatcher ??
+        pluginSelectionActionDispatcherOf(menuContext),
+    resolveSelectedText: resolveSelectedText,
+  );
+  if (entries.isEmpty) return const [];
+  return [const AppContextMenuEntry.divider(), ...entries];
+}
+
 List<AppContextMenuEntry> buildPluginContextMenuEntries({
   required List<(String pluginId, PluginContextMenuItem item)> records,
   required Map<String, dynamic> selection,
   String context = 'reader-selection',
   PluginRuntimeDispatcher? dispatcher,
   PluginSelectionActionDispatcher? selectionActionDispatcher,
+  PluginSelectedTextResolver? resolveSelectedText,
 }) {
   final runtime = dispatcher ?? PluginRuntimeDispatcher.instance;
   final selectedText = _selectedTextOf(selection);
@@ -64,6 +118,7 @@ List<AppContextMenuEntry> buildPluginContextMenuEntries({
         context: context,
         dispatcher: runtime,
         selectionActionDispatcher: selectionActionDispatcher,
+        resolveSelectedText: resolveSelectedText,
       );
       if (entry.isDivider && entries.isNotEmpty && entries.last.isDivider) {
         continue;
@@ -84,8 +139,20 @@ AppContextMenuEntry _buildEntry({
   required String context,
   required PluginRuntimeDispatcher dispatcher,
   PluginSelectionActionDispatcher? selectionActionDispatcher,
+  PluginSelectedTextResolver? resolveSelectedText,
 }) {
   if (item.type == 'separator') return const AppContextMenuEntry.divider();
+  void withSelection(void Function(Map<String, dynamic> selection) send) {
+    final resolve = resolveSelectedText;
+    if (resolve == null) return send(selection);
+    // טקסט שלא נקרא אינו היתר: התוסף מקבל את הלחיצה בלי הטקסט.
+    unawaited(
+      resolve()
+          .then((text) => text, onError: (_) => '')
+          .then((text) => send({...selection, 'text': text})),
+    );
+  }
+
   if (item.type == 'color-row') {
     return AppContextMenuEntry.colorRow([
       for (final color in item.colors)
@@ -95,17 +162,19 @@ AppContextMenuEntry _buildEntry({
           label: color.label,
           icon: pluginIconFromName(color.icon),
           selected: color.selected,
-          onTap: () => dispatcher.dispatchEventToPlugin(
-            pluginId,
-            item.onColorClickEvent ?? 'contextMenu.colorClicked',
-            {
-              'itemId': item.id,
-              'colorId': color.id,
-              'color': color.color,
-              'selection': selection,
-            },
-            preferBackground: true,
-            instanceId: _targetInstanceId(dispatcher, pluginId, item),
+          onTap: () => withSelection(
+            (selection) => dispatcher.dispatchEventToPlugin(
+              pluginId,
+              item.onColorClickEvent ?? 'contextMenu.colorClicked',
+              {
+                'itemId': item.id,
+                'colorId': color.id,
+                'color': color.color,
+                'selection': selection,
+              },
+              preferBackground: true,
+              instanceId: _targetInstanceId(dispatcher, pluginId, item),
+            ),
           ),
         ),
     ]);
@@ -125,6 +194,7 @@ AppContextMenuEntry _buildEntry({
               context: context,
               dispatcher: dispatcher,
               selectionActionDispatcher: selectionActionDispatcher,
+              resolveSelectedText: resolveSelectedText,
             ),
       ],
     );
@@ -134,21 +204,25 @@ AppContextMenuEntry _buildEntry({
     return AppContextMenuEntry(
       label: item.label,
       icon: pluginIconFromName(item.icon),
-      onTap: () => selectionActionDispatcher?.call(
-        pluginId,
-        action,
-        _clickPayload(item: item, selection: selection),
+      onTap: () => withSelection(
+        (selection) => selectionActionDispatcher?.call(
+          pluginId,
+          action,
+          _clickPayload(item: item, selection: selection),
+        ),
       ),
     );
   }
   return AppContextMenuEntry(
     label: item.label,
     icon: pluginIconFromName(item.icon),
-    onTap: () => dispatchPluginContextMenuItemClick(
-      dispatcher: dispatcher,
-      pluginId: pluginId,
-      item: item,
-      selection: selection,
+    onTap: () => withSelection(
+      (selection) => dispatchPluginContextMenuItemClick(
+        dispatcher: dispatcher,
+        pluginId: pluginId,
+        item: item,
+        selection: selection,
+      ),
     ),
   );
 }

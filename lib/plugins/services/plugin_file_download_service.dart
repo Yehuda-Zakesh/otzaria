@@ -31,6 +31,11 @@ class PluginFileDownloadService {
   final http.Client _client;
   late final FutureOr<void> Function() _closer = _client.close;
 
+  /// שם הקובץ שנכתב אליו [downloadToDirectory] עד שההורדה מסתיימת, ואז הוא
+  /// מקבל את שמו הסופי. השם קבוע ושם סופי אינו יכול להיות זהה לו, כך שנוכחותו
+  /// בתיקייה מעידה בוודאות על הורדה שרצה.
+  static const String partialFileName = '.otzaria-partial';
+
   /// מספר ה-redirects המרבי שיתבצע לפני שתיזרק שגיאה.
   static const int _maxRedirects = 5;
 
@@ -289,6 +294,71 @@ class PluginFileDownloadService {
     return PluginFileDownloadResult(outFile.path, p.basename(outFile.path));
   }
 
+  /// מורידה את [downloadUri] אל [dir] בלי לעבור את [maxBytes] — ל-
+  /// `network.fetchFile`, שמחזיק את הקובץ במטמון זמני ולא בתיקיית המשתמש.
+  ///
+  /// אכיפת ה-allowlist וה-redirects זהה ל-[downloadToDownloads]. חריגה מהגודל
+  /// נעצרת כבר לפי `Content-Length`, ואם הוא חסר — תוך כדי הזרימה, ואז זורקת
+  /// `error.too_large`. [expired] נבדק בכל מקטע; כשהוא מחזיר `true` ההורדה
+  /// נקטעת ב-[TimeoutException]. כשל מוחק את הקובץ החלקי.
+  ///
+  /// שם הקובץ נגזר מה-URL ומנוקה ל-[_storedFileName]; תשובת PDF בלי סיומת
+  /// `.pdf` מקבלת אותה, כי שרת הקבצים קובע את סוג התוכן לפי הסיומת בלבד.
+  Future<PluginFileDownloadResult> downloadToDirectory(
+    Uri downloadUri,
+    Directory dir, {
+    required Future<bool> Function(Uri) isAllowed,
+    bool Function(Uri previous, Uri target)? isRedirectAllowed,
+    required int maxBytes,
+    bool Function()? expired,
+    Future<void>? abortTrigger,
+  }) async {
+    final response = await _fetchFollowingAllowedRedirects(
+      downloadUri,
+      isAllowed,
+      isRedirectAllowed,
+      abortTrigger: abortTrigger,
+    );
+    final tooLarge = Exception('error.too_large: file exceeds $maxBytes bytes');
+    final declared = response.contentLength;
+    if (declared != null && declared > maxBytes) {
+      await _abandonBody(response);
+      throw tooLarge;
+    }
+
+    var name = _sanitizeFilename(_filenameFromUri(downloadUri));
+    final mime = response.headers['content-type']?.split(';').first.trim();
+    if (mime?.toLowerCase() == 'application/pdf' &&
+        p.extension(name).toLowerCase() != '.pdf') {
+      name = '$name.pdf';
+    }
+    name = _storedFileName(name);
+    await dir.create(recursive: true);
+    final partial = File(p.join(dir.path, partialFileName));
+    var received = 0;
+    final sink = partial.openWrite();
+    try {
+      await sink.addStream(
+        response.stream.timeout(_stallTimeout).map((chunk) {
+          received += chunk.length;
+          if (received > maxBytes) throw tooLarge;
+          if (expired?.call() ?? false) throw TimeoutException(null);
+          return chunk;
+        }),
+      );
+      await sink.flush();
+      await sink.close();
+    } catch (_) {
+      try {
+        await sink.close();
+      } catch (_) {}
+      if (await partial.exists()) await partial.delete();
+      rethrow;
+    }
+    final outFile = await partial.rename(p.join(dir.path, name));
+    return PluginFileDownloadResult(outFile.path, name);
+  }
+
   /// מבצעת GET תוך מעקב ידני אחרי redirects, כשכל יעד נבדק מול [isAllowed]
   /// ועבור יעדי redirect גם מול [isRedirectAllowed] (בהינתן ה-hop הקודם).
   /// מחזירה את התשובה הסופית (2xx). מנקזת תשובות-ביניים כדי לשחרר sockets.
@@ -299,6 +369,7 @@ class PluginFileDownloadService {
     bool Function(Uri previous, Uri target)? isRedirectAllowed, {
     int rangeStart = 0,
     String? ifRange,
+    Future<void>? abortTrigger,
   }) async {
     var current = initialUri;
     Uri? previous;
@@ -315,7 +386,11 @@ class PluginFileDownloadService {
         );
       }
 
-      final request = http.Request('GET', current)..followRedirects = false;
+      final request = http.AbortableRequest(
+        'GET',
+        current,
+        abortTrigger: abortTrigger,
+      )..followRedirects = false;
       request.headers['Accept-Encoding'] = 'identity';
       if (rangeStart > 0) {
         request.headers['Range'] = 'bytes=$rangeStart-';
@@ -457,6 +532,44 @@ class PluginFileDownloadService {
     final base = p.basename(name.trim());
     final cleaned = base.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_');
     return cleaned.isEmpty ? 'download' : cleaned;
+  }
+
+  /// שמות התקנים השמורים של ווינדוס (גם עם סיומת, כמו `CON.pdf`): פתיחתם
+  /// כותבת להתקן ולא לקובץ.
+  static final _reservedDeviceName = RegExp(
+    r'^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$',
+    caseSensitive: false,
+  );
+
+  /// אורך שם הקובץ המרבי שנשמר, בתווים. מגבלת מערכות הקבצים היא 255 בתים
+  /// (לינוקס) או תווים (ווינדוס), ותו אחד תופס עד ארבעה בתים: 60 תווים נכנסים
+  /// בכל מקרה.
+  static const int _maxStoredNameLength = 60;
+
+  /// מנקה את [sanitized] (פלט [_sanitizeFilename]) לשם שאפשר ליצור בכל מערכת
+  /// קבצים: בלי נקודות ורווחים בסוף (ווינדוס מוחקת אותם, ו-`..` היה מצביע
+  /// על תיקיית האב), בלי שם התקן שמור או שם הקובץ החלקי, ובאורך מוגבל שמשמר
+  /// את הסיומת. החיתוך לפי תווים שלמים: חיתוך באמצע זוג surrogate היה יוצר שם
+  /// לא תקין שיצירתו נכשלת.
+  String _storedFileName(String sanitized) {
+    var name = sanitized;
+    final runes = name.runes.toList();
+    if (runes.length > _maxStoredNameLength) {
+      final ext = p.extension(name);
+      final keptExt = ext.length <= 16 ? ext : '';
+      name =
+          String.fromCharCodes(
+            runes.take(_maxStoredNameLength - keptExt.runes.length),
+          ) +
+          keptExt;
+    }
+    name = name.replaceFirst(RegExp(r'[. ]+$'), '');
+    if (name.isEmpty) name = 'download';
+    if (_reservedDeviceName.hasMatch(name) ||
+        name.toLowerCase() == partialFileName) {
+      name = '_$name';
+    }
+    return name;
   }
 
   /// מחזירה קובץ ב-[dir] בשם [name], ואם הוא כבר קיים מוסיפה ` (n)` לפני

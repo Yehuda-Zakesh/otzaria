@@ -57,11 +57,31 @@ void main() {
         ),
         HolyNameDisplay.doubleYod,
       );
+      expect(
+        HolyNameDisplay.fromLegacy(
+          replaceHolyNames: true,
+          style: HolyNameStyle.daletDalet,
+        ),
+        HolyNameDisplay.daletDalet,
+      );
     });
 
     test('יי נשמר ונטען ב-JSON', () {
       expect(HolyNameDisplay.fromJson('doubleYod'), HolyNameDisplay.doubleYod);
       expect(HolyNameDisplay.doubleYod.style, HolyNameStyle.doubleYod);
+    });
+
+    test('ידוד: סגנון ההחלפה, ו-JSON הלוך ושוב', () {
+      expect(HolyNameDisplay.daletDalet.style, HolyNameStyle.daletDalet);
+      expect(
+        HolyNameDisplay.fromJson('daletDalet'),
+        HolyNameDisplay.daletDalet,
+      );
+      const p = TextDisplayProfile(holyName: HolyNameDisplay.daletDalet);
+      expect(p.replaceHolyNames, isTrue);
+      expect(p.holyNameStyle, HolyNameStyle.daletDalet);
+      const patch = TextDisplayPatch(holyName: HolyNameDisplay.daletDalet);
+      expect(TextDisplayPatch.fromJson(patch.toJson()), patch);
     });
   });
 

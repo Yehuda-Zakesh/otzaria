@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:isolate';
 
-import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
+import 'package:flutter/foundation.dart'
+    show debugPrint, kDebugMode, visibleForTesting;
+import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/data/data_providers/book_database_resolver.dart';
 import 'package:otzaria/data/data_providers/book_text_reader.dart';
 import 'package:otzaria/data/data_providers/database_library_provider.dart'
@@ -190,8 +192,8 @@ Future<List<Map<String, Object?>>> _readBatchOnFreshConnection(
         results.add({
           'result': await _officialLinkContent(repo, resolvedBooks[key], args),
         });
-      } catch (error) {
-        results.add({'error': error.toString()});
+      } catch (error, stackTrace) {
+        results.add({'error': error.toString(), 'stack': '$stackTrace'});
       }
     }
     return results;
@@ -326,10 +328,11 @@ class DbReadWorker {
     if (_suspendedForExternalWrite || _closedUntilReopen) {
       throw const DbReadWorkerSuspended();
     }
+    final slot = method == 'bookText' || method == 'bookTextBytes'
+        ? _books
+        : _ranges;
     try {
-      final service = await _instanceOrSpawn(
-        method == 'bookText' || method == 'bookTextBytes' ? _books : _ranges,
-      );
+      final service = await _instanceOrSpawn(slot);
       // השהיה/סגירה שהגיעה בזמן ה-spawn: אסור לשלוח, אחרת ה-worker יפתח את הקובץ.
       if (_suspendedForExternalWrite ||
           _closedUntilReopen ||
@@ -354,9 +357,59 @@ class DbReadWorker {
           );
       if (generation != _generation) throw const DbReadWorkerSuspended();
       return result;
+    } on _WorkerReadError catch (error) {
+      if (generation != _generation) throw const DbReadWorkerSuspended();
+      _logReadFailure(method, args, slot.name, error);
+      rethrow;
     } catch (_) {
       if (generation != _generation) throw const DbReadWorkerSuspended();
       rethrow;
+    }
+  }
+
+  static final Set<String> _loggedFailures = {};
+
+  /// סוגי כשל שנרשמו ב-errors.txt בתהליך הזה; תקרה, כי כשל חוזר בכל לחיצה.
+  static const _maxLoggedFailures = 20;
+
+  /// בבדיקות ובהרצת פיתוח לא נרשם, כדי לא לכתוב ל-errors.txt של המפתח.
+  @visibleForTesting
+  static bool logFailuresInDebug = false;
+
+  @visibleForTesting
+  static void resetLoggedFailuresForTesting() => _loggedFailures.clear();
+
+  /// הקוראים מציגים הודעה כללית או רשימה ריקה, ולכן השגיאה עצמה נרשמת כאן.
+  static void _logReadFailure(
+    String method,
+    Map<String, Object?> args,
+    String connection,
+    _WorkerReadError error,
+  ) {
+    if (kDebugMode && !logFailuresInDebug) return;
+    final kind = '$method|${error.message.split('\n').first}';
+    if (_loggedFailures.length >= _maxLoggedFailures ||
+        !_loggedFailures.add(kind)) {
+      return;
+    }
+    try {
+      ErrorLogFile.append(
+        title: 'DB read worker failure',
+        error: error.message,
+        stackTrace: error.stack,
+        details: {
+          'Method': method,
+          'Connection': connection,
+          'Database': args['dbPath']?.toString(),
+          'Args': [
+            for (final MapEntry(:key, :value) in args.entries)
+              if (key != 'dbPath' && (value is num || value is String))
+                '$key=$value',
+          ].join(', '),
+        },
+      );
+    } catch (_) {
+      // כשל בכתיבת הלוג אינו משנה את תשובת הקריאה.
     }
   }
 
@@ -465,7 +518,14 @@ class DbReadWorker {
         if (result['suspended'] == true) {
           completer.completeError(const DbReadWorkerSuspended());
         } else if (result.containsKey('error')) {
-          completer.completeError(StateError(result['error'].toString()));
+          final error = _WorkerReadError.from(result);
+          _logReadFailure(
+            items[i].method,
+            items[i].args,
+            'one-shot isolate',
+            error,
+          );
+          completer.completeError(error);
         } else {
           completer.complete(result['result']);
         }
@@ -610,7 +670,7 @@ class DbReadWorker {
     if (message['suspended'] == true) {
       completer.completeError(const DbReadWorkerSuspended());
     } else if (message.containsKey('error')) {
-      completer.completeError(StateError(message['error'].toString()));
+      completer.completeError(_WorkerReadError.from(message));
     } else {
       completer.complete(message['result']);
     }
@@ -652,6 +712,22 @@ class DbReadWorker {
     _isolate?.kill(priority: Isolate.immediate);
     if (identical(_slot.instance, this)) _slot.instance = null;
   }
+}
+
+/// שגיאה שה-worker החזיר, עם ה-stack מה-isolate שבו נזרקה.
+class _WorkerReadError extends StateError {
+  _WorkerReadError(super.message, this.stack);
+
+  factory _WorkerReadError.from(Map<dynamic, dynamic> result) =>
+      _WorkerReadError(
+        result['error'].toString(),
+        switch (result['stack']) {
+          final String stack => StackTrace.fromString(stack),
+          _ => null,
+        },
+      );
+
+  final StackTrace? stack;
 }
 
 class _WorkerSlot {
@@ -895,8 +971,8 @@ void _workerMain(_Bootstrap bootstrap) {
       return {'result': await dispatch(method, args)};
     } on _Suspended {
       return const {'suspended': true};
-    } catch (e) {
-      return {'error': e.toString()};
+    } catch (e, stackTrace) {
+      return {'error': e.toString(), 'stack': '$stackTrace'};
     }
   }
 

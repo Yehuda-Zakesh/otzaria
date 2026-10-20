@@ -134,6 +134,7 @@ class PluginBridgeHandler {
       method == 'search.query' ||
       method == 'network.fetchStream' ||
       method == 'network.download' ||
+      method == 'network.fetchFile' ||
       method == 'fs.extractZip' ||
       // כמו extractZip: תיקייה גדולה שנעה בין כרכי דיסק שונים נופלת להעתקה
       // רקורסיבית (ראה PluginFsService.moveEntry), שיכולה לארוך זמן.
@@ -150,6 +151,7 @@ class PluginBridgeHandler {
       method == 'fs.pickUserFolder' ||
       // דיאלוג ההדפסה של המערכת ממתין לבחירת מדפסת ללא הגבלת זמן.
       method == 'ui.print' ||
+      method == 'ui.printFile' ||
       method == 'ui.exportPdf' ||
       method == 'reader.printRange' ||
       method == 'feedback.report' ||
@@ -435,6 +437,8 @@ class PluginBridgeHandler {
     'ui.pickFolder': pluginFolderAccessPermission,
     // דיאלוג ההדפסה של המערכת הוא שער ההסכמה, והתוכן הוא דף התוסף עצמו.
     'ui.print': noManifestPermission,
+    // כמו ui.print: דיאלוג ההדפסה הוא שער ההסכמה, והקובץ הוענק לתוסף כבר.
+    'ui.printFile': noManifestPermission,
     // דיאלוג „שמור בשם” הוא שער ההסכמה; הנתיב אינו מגיע מה-JS.
     'ui.exportPdf': noManifestPermission,
     // דגל בלבד — ההשפעה היחידה היא דיאלוג אישור לפני סגירת הכרטיסיה.
@@ -485,6 +489,7 @@ class PluginBridgeHandler {
     // היעד, יחד עם רשימת ההיתר של המניפסט.
     'network.fetchStream': noManifestPermission,
     'network.download': noManifestPermission,
+    'network.fetchFile': noManifestPermission,
     // extractZip/deleteFile/deleteFolder/moveEntry מגודרות בכך שהנתיב חייב
     // להיות בתוך תיקייה שהמשתמש בחר דרך ui.pickFolder — ההסכמה שם היא גבול
     // האבטחה.

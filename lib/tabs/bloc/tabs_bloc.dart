@@ -22,6 +22,7 @@ import 'package:otzaria/plugins/services/plugin_text_reader_registry.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
+import 'package:otzaria/text_book/companion/companion_books.dart';
 import 'package:otzaria/search/models/search_configuration.dart'
     show SearchMode;
 import 'package:otzaria/text_book/utils/reading_segment_navigation.dart'
@@ -46,6 +47,9 @@ class _ClosedTabEntry {
 class TabsBloc extends Bloc<TabsEvent, TabsState> {
   final TabsRepository _repository;
   final Duration _disposeDelay;
+
+  /// Wraps a newly opened tab with its companion pane, when it has one.
+  final Future<OpenedTab> Function(OpenedTab tab) _withCompanion;
   final List<_ClosedTabEntry> _recentlyClosedTabs = <_ClosedTabEntry>[];
 
   /// הכרטיסיות שנסגרו לאחרונה, מהאחרונה שנסגרה ואילך. הרשימה אינה חלק
@@ -204,6 +208,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
   TabsBloc({
     required this._repository,
     this._disposeDelay = const Duration(milliseconds: 350),
+    this._withCompanion = withCompanionPane,
   }) : super(TabsState.initial()) {
     on<LoadTabs>(_onLoadTabs, transformer: sequential());
     on<RemapBookPaths>(_onRemapBookPaths, transformer: sequential());
@@ -403,11 +408,12 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
 
   Future<void> _onAddTab(AddTab event, Emitter<TabsState> emit) async {
     debugPrint('DEBUG: הוספת טאב חדש - ${event.tab.title}');
+    final tab = await _withCompanion(event.tab);
     final newTabs = List<OpenedTab>.from(state.tabs);
     final newIndex = event.insertAdjacent
         ? min(state.currentTabIndex + 1, newTabs.length)
         : newTabs.length;
-    newTabs.insert(newIndex, event.tab);
+    newTabs.insert(newIndex, tab);
 
     // ברקע נשארים על הטאב הנוכחי; ההוספה היא אחריו או בסוף, ולכן האינדקס
     // שלו אינו זז. בלי טאב פתוח אין "נוכחי" להישאר עליו.
@@ -417,6 +423,10 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
       state.copyWith(
         tabs: newTabs,
         currentTabIndex: currentIndex,
+        // The book the user opened stays the active pane beside its companion.
+        activePane: identical(tab, event.tab) || keepCurrent
+            ? const ActivePaneUpdate.unchanged()
+            : ActivePaneUpdate.set(event.tab),
       ),
     );
     _scheduleSave(newTabs, currentIndex);
@@ -1509,6 +1519,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
     final combinedTab = CombinedTab(
       rightTab: current,
       leftTab: event.tab,
+      splitRatio: event.splitRatio,
       isPinned: current.isPinned,
     );
     final newTabs = List<OpenedTab>.from(state.tabs)..[index] = combinedTab;

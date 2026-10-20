@@ -176,7 +176,7 @@ void main() {
       expect(data['surface'], 'combined');
       expect(data['highlights'], isTrue);
       expect(data['selection'], isTrue);
-      expect(data['contextMenu'], ['mainText']);
+      expect(data['contextMenu'], ['mainText', 'commentary']);
     });
 
     test('צורת הדף מדווחת surface נפרד', () async {
@@ -195,7 +195,7 @@ void main() {
       expect(data['highlights'], isTrue);
     });
 
-    test('ב-PDF אין הדגשות, בחירה ותפריט הקשר', () async {
+    test('ב-PDF אין הדגשות ובחירה, ותפריט ההקשר בעמוד ובמפרשים', () async {
       tabsBloc.currentState = TabsState(
         tabs: [
           PdfBookTab(
@@ -215,7 +215,7 @@ void main() {
       expect(data['surface'], 'pdf');
       expect(data['highlights'], isFalse);
       expect(data['selection'], isFalse);
-      expect(data['contextMenu'], isEmpty);
+      expect(data['contextMenu'], ['pdf', 'commentary']);
     });
 
     test('ללא חלונית קריאה — surface null והכל כבוי', () async {

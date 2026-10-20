@@ -80,6 +80,8 @@ import 'package:otzaria/plugins/services/plugin_highlight_reveal_service.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 import 'package:otzaria/plugins/models/plugin_book_identity.dart';
 import 'package:otzaria/text_book/view/selection/selection_sync_controller.dart';
+import 'package:otzaria/book_common/utils/commentary_plugin_menu_entries.dart';
+import 'package:otzaria/plugins/utils/plugin_context_menu_entries.dart';
 import 'package:otzaria/text_book/utils/commentators_context_menu.dart';
 import 'package:otzaria/text_book/utils/note_inline_render.dart';
 import 'package:otzaria/text_book/utils/inline_notes_utils.dart'
@@ -2023,9 +2025,57 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
           ),
         );
       }
+      entries.addAll(
+        _commentaryPluginEntries(state, index, sourceText, menuContext),
+      );
     }
 
     return _normalizeEntries(entries);
+  }
+
+  /// פריטי התוספים בהקשרי המפרש, לשורה [index] בעמודת המפרש.
+  List<AppContextMenuEntry> _commentaryPluginEntries(
+    TextBookLoaded state,
+    int index,
+    String? selectedText,
+    BuildContext menuContext,
+  ) {
+    final title = widget.bookTitle;
+    final book =
+        widget.reportBook ?? (title == null ? null : TextBook(title: title));
+    if (!hasPluginContextMenuItems ||
+        book == null ||
+        index < 0 ||
+        index >= widget.content.length) {
+      return const [];
+    }
+    final ref = widget.labelForIndex?.call(index);
+    // נקבע עכשיו: עד הלחיצה הבחירה כבר עשויה להתאפס.
+    final segmentCount = selectionSegmentCount(
+      start: _selectionLineStart,
+      end: _selectionLineEnd,
+      text: selectedText ?? '',
+    );
+    return buildCommentaryPluginMenuEntries(
+      target: (
+        book: book,
+        sectionIndex: index,
+        currentRef: ref == null || ref.isEmpty ? null : ref,
+      ),
+      // עמודת המפרש נגללת לצד הספר כולו, ושורה בה אינה ממופה לשורה ראשית אחת.
+      mainBook: (
+        book: state.book,
+        currentRef: state.currentTitle,
+        sectionIndex: null,
+        pageNumber: null,
+      ),
+      selectedText: selectedText,
+      copyGuard: () async => (
+        protection: await _textProtection(state),
+        segmentCount: segmentCount,
+      ),
+      menuContext: menuContext,
+    );
   }
 
   /// השורה כפי שהיא מוצגת לבחירה: עם ציוני המפרשים של הטור.

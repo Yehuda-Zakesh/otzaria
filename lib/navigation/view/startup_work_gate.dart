@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:otzaria/indexing/bloc/indexing_state.dart';
 import 'package:otzaria/library/bloc/library_state.dart';
 import 'package:otzaria/library_update/bloc/library_update_bloc.dart';
 
@@ -117,18 +118,63 @@ Future<void> resolveStartupIndexingNonFatal({
 }
 
 /// בזמן סיור החיפוש צריך לקבל אינדקס לפני שהעדכונים המושהים מתחילים.
+/// [onFinished] רץ בסוף הרצף גם כשאחד השלבים נכשל.
 Future<void> runStartupIndexingSequence({
   required bool tourActive,
   required Future<void> Function() resolveIndexing,
   required Future<void> Function() waitForIndexing,
   required Future<void> Function() runUpdates,
+  VoidCallback? onFinished,
 }) async {
-  if (tourActive) {
-    await resolveIndexing();
-    await waitForIndexing();
+  try {
+    if (tourActive) {
+      await resolveIndexing();
+      await waitForIndexing();
+    }
+    await runUpdates();
+    if (!tourActive) await resolveIndexing();
+  } finally {
+    onFinished?.call();
   }
-  await runUpdates();
-  if (!tourActive) await resolveIndexing();
+}
+
+/// מחזיק את הסימון "האינדוקס ממתין לעדכון הספרייה" עד שהאינדוקס מתחיל
+/// בפועל, כדי שאזהרת האינדקס החלקי לא תיעלם לפני שמצב ההתקדמות מוצג.
+class StartupIndexingDeferral {
+  StartupIndexingDeferral(
+    this.flag, {
+    this.startTimeout = const Duration(seconds: 30),
+  });
+
+  final ValueNotifier<bool> flag;
+
+  /// גיבוי למסלול שבו האינדוקס לא מתחיל — הסימון לא נשאר דלוק לתמיד.
+  final Duration startTimeout;
+
+  StreamSubscription<IndexingState>? _subscription;
+  Timer? _timer;
+
+  /// מכבה את הסימון כשה-bloc יוצא מ-[IndexingInitial], או אחרי [startTimeout].
+  void releaseWhenStarted(IndexingState current, Stream<IndexingState> states) {
+    if (!flag.value || current is! IndexingInitial) return clear();
+    _cancelWait();
+    _subscription = states.listen((state) {
+      if (state is! IndexingInitial) clear();
+    }, onDone: clear);
+    _timer = Timer(startTimeout, clear);
+  }
+
+  void clear() {
+    _cancelWait();
+    flag.value = false;
+  }
+
+  void _cancelWait() {
+    _timer?.cancel();
+    _timer = null;
+    unawaited(_subscription?.cancel());
+    _subscription = null;
+  }
 }
 
 /// מתחיל את סנכרון הרקע פעם אחת לאחר פתיחת [gate].

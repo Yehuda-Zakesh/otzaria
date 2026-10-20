@@ -189,6 +189,56 @@ void main() {
     expect(toolbar.getAll(), isEmpty);
   });
 
+  test('כפתור קשור עם openPlugin: מוצג לפי הפלט, ופותח את דף התוסף', () async {
+    final runner = _RunQueue();
+    final programs = DeclarativeProgramRepository(runProgram: runner.call);
+    final toolbar = PluginToolbarRegistry.forTesting();
+    final binding = DeclarativeToolbarBindingService(
+      programRepository: programs,
+      toolbarRegistry: toolbar,
+    );
+    addTearDown(binding.dispose);
+    final plugin = _plugin();
+    programs.syncPlugin(
+      plugin: plugin,
+      programs: [_program()],
+      grantedPermissions: const {},
+    );
+    final button = Map<String, dynamic>.from(_templateJson().first)
+      ..remove('action')
+      ..['openPlugin'] = true;
+    binding.syncPlugin(
+      plugin: plugin,
+      templates: DeclarativeToolbarTemplateCompiler(
+        declaredPermissions: const {'reader.toolbar'},
+        programs: {'book-links': _program()},
+      ).compileAll('test.declarative.plugin', [button]),
+      grantedPermissions: const {},
+    );
+
+    final shown = programs.runTrigger(
+      trigger: 'reader.activeBookChanged',
+      context: const {},
+      contextSignature: 'book-1',
+    );
+    runner.completeNext(_outputs());
+    await shown;
+    final item = toolbar.getAll().single.$2;
+    expect(item.openPlugin, isTrue);
+    expect(item.hostAction, isNull);
+    expect(item.type, 'button');
+
+    // ספר שהתכנית לא החזירה לו פלט — הכפתור אינו מוצג
+    final hidden = programs.runTrigger(
+      trigger: 'reader.activeBookChanged',
+      context: const {},
+      contextSignature: 'book-2',
+    );
+    runner.completeNext(_outputs()..['defaultEdition'] = null);
+    await hidden;
+    expect(toolbar.getAll(), isEmpty);
+  });
+
   test('פלט חלקי אינו מפרסם פקד יחיד', () async {
     final runner = _RunQueue();
     final programs = DeclarativeProgramRepository(runProgram: runner.call);

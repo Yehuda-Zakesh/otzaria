@@ -860,7 +860,7 @@ popover.addEventListener('click', function(e) {
 
 ### 2. אייקון בתפריט הקשר (לחצן ימין במסך עיון)
 
-תפריט ההקשר מוצג **במסכי טקסט בלבד** (CombinedView ו-PageShape). מסך PDF אינו תומך בפריטי תוסף בתפריט ההקשר כרגע.
+פריט תוסף מוצג בתפריט ההקשר של הטקסט הראשי (CombinedView ו-PageShape), ומ-0.9.99 גם במפרשים ובעמודי PDF — כשהפריט מגדיר את ההקשרים שלהם ב-`contexts`. ראו [API_REFERENCE.md § reader.addContextMenuItem](API_REFERENCE.md#readeraddcontextmenuitem).
 
 כאשר מוסיפים פריט לתפריט ההקשר עם `reader.addContextMenuItem`, ניתן לציין שדה `icon`:
 

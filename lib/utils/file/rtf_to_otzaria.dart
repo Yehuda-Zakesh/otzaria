@@ -11,17 +11,7 @@ import 'package:otzaria/utils/text/otzaria_markup.dart';
 
 /// גרסת ממיר ה-RTF. **חובה להעלות בכל שינוי שמשפיע על הפלט** — הגרסה חלק
 /// ממפתח-התוקף של המטמון.
-/// v2: דף-הקוד נגזר מ-`\fcharset` של הגופן, `\par` בתוך תא/הערה הוא מפריד
-/// שורה, ו-`\bin` מדולג כמטען בינארי.
-/// v3: תווים מיוחדים (`\emdash`, `\bullet`…) אינם נמחקים, טקסט מוסתר (`\v`)
-/// מדולג, צבע ומרקר מטבלת הצבעים, וריאנטי קו תחתי וקו חוצה כפול, יישור
-/// לוגי לפי `\rtlpar`, תיבות-טקסט (`\shptxt`) ומאפייני תא בטבלה.
-/// v4: יעד נפלט רק בסגירת הקבוצה שפתחה אותו — קבוצה מקוננת ייצרה תיבת-טקסט
-/// נפרדת לכל שורה. מסגרת מצוירת רק לפי `fLine`, ויישור בפסקה RTL מדולג.
-/// v5: בית גבוה גולמי עובר דרך דף-הקוד המוצהר (עברית שנשמרה בלי `\'hh`
-/// הפכה ללטינית), `\tab`/`\~` אינם קוטעים את ה-run המעוצב, ורקע תא לבן
-/// אינו נכתב.
-const int kRtfConverterVersion = 6;
+const int kRtfConverterVersion = 8;
 
 /// רווח קשיח. `\tab` ו-`\~` מייצגים רווחים שהמסמך דורש שיישמרו, ורווח
 /// רגיל היה נבלע ברינדור ה-HTML.
@@ -113,6 +103,7 @@ int? _codepageForCharset(int charset) => _charsetCodepages[charset];
 /// מצב העיצוב. RTF יורש מצב אל תוך קבוצות מקוננות, ולכן הוא נשמר במחסנית
 /// ומשוחזר ביציאה מכל `}`.
 class _RtfState {
+  int groupTextStart;
   bool bold;
   bool italic;
   bool underline;
@@ -139,6 +130,7 @@ class _RtfState {
   _Destination destination;
 
   _RtfState({
+    this.groupTextStart = 0,
     this.bold = false,
     this.italic = false,
     this.underline = false,
@@ -162,6 +154,7 @@ class _RtfState {
   });
 
   _RtfState clone() => _RtfState(
+    groupTextStart: groupTextStart,
     bold: bold,
     italic: italic,
     underline: underline,
@@ -240,6 +233,7 @@ class _RtfParser {
 
   /// ה-run הנצבר: טקסט ותגי העיצוב שתחתיהם נכתב.
   final StringBuffer _pendingText = StringBuffer();
+  int _textPosition = 0;
   String _pendingOpen = '';
   String _pendingClose = '';
   _Destination _pendingDestination = _Destination.body;
@@ -289,6 +283,12 @@ class _RtfParser {
   int _footnoteNumber = 1;
   final StringBuffer _footnote = StringBuffer();
 
+  /// סימן הערה מילולי (בלי `\chftn`) והמשכו אחרי הקבוצה (`4{\footnote…}0`).
+  String _footnoteMark = '';
+  ({String open, String close}) _footnoteMarkTags = (open: '', close: '');
+  int _footnoteMarkDepth = 0;
+  String _footnoteMarkRest = '';
+
   /// הבייטים ההקסדצימליים של תמונה שנצברת (`\pict`). האורך נמנה בנפרד, כי
   /// בלי הטמעה הבייטים עצמם אינם נצברים.
   final StringBuffer _pictureHex = StringBuffer();
@@ -304,7 +304,7 @@ class _RtfParser {
     _parse();
     // קבוצה שלא נסגרה (קובץ קטוע): מה שנצבר בה היה נמחק בשקט.
     _flushRun();
-    if (_footnote.isNotEmpty) _emitFootnote();
+    if (_footnote.isNotEmpty || _footnoteMark.isNotEmpty) _emitFootnote();
     // שורה שה-`\row` שלה חסר (קובץ קטוע, או `\cell` בלי `\trowd`) — התאים
     // שנצברו בה היו נעלמים בשקט.
     if (_paragraph.isNotEmpty || _pendingText.isNotEmpty) {
@@ -324,6 +324,7 @@ class _RtfParser {
       switch (char) {
         case '{':
           _stack.add(_state.clone());
+          _state.groupTextStart = _textPosition;
           i++;
         case '}':
           _closeGroup();
@@ -357,6 +358,7 @@ class _RtfParser {
   }
 
   void _closeGroup() {
+    if (_stack.length <= _footnoteMarkDepth) _footnoteMarkRest = '';
     final destination = _state.destination;
     final enclosing = _stack.isEmpty
         ? _Destination.body
@@ -549,8 +551,40 @@ class _RtfParser {
       case 'stylesheet':
         _state.destination = _Destination.styleSheet;
       case 'footnote':
+        var markGroup = _stack.length - 1;
+        while (markGroup > 0 &&
+            _stack[markGroup].groupTextStart == _textPosition &&
+            _stack[markGroup - 1].verticalAlign == 'super') {
+          markGroup--;
+        }
+        final isMark =
+            !_state.hidden &&
+            _state.verticalAlign == 'super' &&
+            _pendingOpen.endsWith('<sup>') &&
+            _pendingDestination == _Destination.body &&
+            markGroup >= 0;
+        _footnoteMark = '';
+        _footnoteMarkRest = '';
+        if (isMark) {
+          final text = _pendingText.toString();
+          final start =
+              (_stack[markGroup].groupTextStart - _textPosition + text.length)
+                  .clamp(0, text.length);
+          _footnoteMark = text.substring(start);
+          _footnoteMarkTags = (open: _pendingOpen, close: _pendingClose);
+          _footnoteMarkDepth = markGroup;
+          _pendingText.clear();
+          _pendingText.write(text.substring(0, start));
+          _flushRun();
+        }
         _state.destination = _Destination.footnote;
         _footnote.clear();
+        // גוף ההערה אינו יורש את עיצוב הסימן; הסתרה נשמרת.
+        final hidden = _state.hidden;
+        _state.resetCharacterFormatting();
+        _state.hidden = hidden;
+      case 'chftn':
+        _flushRun();
       // טקסט של אובייקט צף (תיבת-טקסט). הוא יושב בתוך `\*\shpinst` הנבלעת,
       // ובלי ההחזרה המפורשת הזו כל תוכן התיבות במסמך נעלם.
       case 'shptxt':
@@ -872,6 +906,15 @@ class _RtfParser {
     if (text.isEmpty) return;
     // טקסט מוסתר אינו נכתב, אך גם אינו מפסיק את ה-run הנצבר.
     if (_state.hidden) return;
+    final rest = _footnoteMarkRest;
+    if (rest.isNotEmpty && _state.destination == _Destination.body) {
+      final inMark =
+          _stack.length >= _footnoteMarkDepth &&
+          _state.verticalAlign == 'super' &&
+          rest.startsWith(text);
+      _footnoteMarkRest = inMark ? rest.substring(text.length) : '';
+      if (inMark) return;
+    }
     if (_state.destination == _Destination.colorTable) {
       // הרשומות בטבלת הצבעים מופרדות ב-`;` — התו היחיד שיש לו משמעות שם.
       for (final char in text.split('')) {
@@ -889,6 +932,7 @@ class _RtfParser {
     _pendingClose = tags.close;
     _pendingDestination = _state.destination;
     _pendingText.write(text);
+    _textPosition += text.length;
   }
 
   void _flushRun() {
@@ -942,6 +986,7 @@ class _RtfParser {
   /// בכל יעד אחר הפריקה מתבצעת כרגיל — `\par` בתוך `\listtext`/`\pict` פירושו
   /// שהקבוצה לא נסגרה (קובץ קטוע), ובלי הפריקה שאר המסמך נמחק בשקט.
   void _endParagraph() {
+    _footnoteMarkRest = '';
     if (_state.destination == _Destination.footnote ||
         _state.destination == _Destination.textBox ||
         (_state.destination == _Destination.body && _inTable)) {
@@ -1055,10 +1100,35 @@ class _RtfParser {
   }
 
   void _emitFootnote() {
-    final body = _trimBreaks(_footnote.toString());
+    var body = _trimBreaks(_footnote.toString());
+    final candidate = _footnoteMark;
+    var prefix = candidate;
+    var mark = '';
     _footnote.clear();
-    if (body.isEmpty) return;
-    _paragraph.write(otzariaFootnote('${_footnoteNumber++}', body));
+    _footnoteMark = '';
+    final echo = RegExp(r'^<sup>\s*(\S+?)\s*</sup>\s*').firstMatch(body);
+    if (candidate.isNotEmpty && echo != null) {
+      final fullMark = echo[1]!;
+      final trimmed = candidate.trimRight();
+      if (trimmed.endsWith(fullMark)) {
+        prefix = trimmed.substring(0, trimmed.length - fullMark.length);
+        mark = fullMark;
+      } else if (fullMark.startsWith(trimmed) && trimmed.isNotEmpty) {
+        prefix = '';
+        mark = fullMark;
+        _footnoteMarkRest = fullMark.substring(trimmed.length);
+      }
+      if (mark.isNotEmpty) body = body.substring(echo.end);
+    }
+    if (prefix.isNotEmpty) {
+      _paragraph.write(
+        '${_footnoteMarkTags.open}$prefix${_footnoteMarkTags.close}',
+      );
+    }
+    if (body.isEmpty && mark.isEmpty) return;
+    _paragraph.write(
+      otzariaFootnote(mark.isEmpty ? '${_footnoteNumber++}' : mark, body),
+    );
   }
 
   /// תיבת-טקסט צפה — אותה מסגרת שממיר ה-Word מייצר, כדי שהקורא יזהה אותה

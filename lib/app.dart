@@ -6,9 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:otzaria/theme/theme_exports.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/core/startup_timeline.dart';
+import 'package:otzaria/core/diagnostics/app_context_snapshot.dart';
 import 'package:otzaria/core/diagnostics/developer_diagnostics.dart';
 import 'package:otzaria/core/diagnostics/frame_stats_overlay.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
+import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/core/windowing/dock_progress_listener.dart';
 import 'package:otzaria/core/windowing/mac_menu_bar.dart';
@@ -135,13 +137,9 @@ class App extends StatelessWidget {
   }
 }
 
-Map<String, Object?> _diagnosticsContext(BuildContext context) {
-  final tabs = context.read<TabsBloc>().state;
-  final current = tabs.currentTab;
-  return {
-    'screen': context.read<NavigationBloc>().state.currentScreen.name,
-    'tabs': tabs.tabs.length,
-    'currentTab': current?.runtimeType.toString(),
-    'currentTitle': current?.title,
-  };
-}
+Map<String, Object?> _diagnosticsContext(BuildContext context) =>
+    describeAppContext(
+      screen: context.read<NavigationBloc>().state.currentScreen,
+      tabs: context.read<TabsBloc>().state,
+      pluginState: context.read<PluginSystemBloc>().state,
+    );

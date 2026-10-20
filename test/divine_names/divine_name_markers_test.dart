@@ -349,6 +349,10 @@ void main() {
         render(hvyhNikud, spans, holyNameStyle: HolyNameStyle.doubleYod),
         'יְיָ',
       );
+      expect(
+        render(hvyhNikud, spans, holyNameStyle: HolyNameStyle.daletDalet),
+        'יְדוָד',
+      );
     });
 
     test('שם הוי"ה כיי — הדגשת חיפוש בתוך הסמן נשמרת', () {

@@ -9,6 +9,7 @@ import 'package:otzaria/book_common/selection/commentary_copy_guard.dart';
 import 'package:otzaria/book_common/selection/selected_text_restore.dart';
 import 'package:otzaria/book_common/utils/commentary_search_results.dart';
 import 'package:otzaria/book_common/utils/commentary_flat_items.dart';
+import 'package:otzaria/book_common/utils/commentary_plugin_menu_entries.dart';
 import 'package:otzaria/theme/app_fonts.dart';
 import 'package:otzaria/theme/app_theme_data.dart';
 import 'package:flutter/material.dart';
@@ -25,6 +26,9 @@ import 'package:otzaria/data/data_providers/database_library_provider.dart';
 import 'package:otzaria/data/data_providers/library_provider_manager.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/book_protection/repository/book_protection_repository.dart';
+import 'package:otzaria/book_protection/utils/copy_guard.dart';
+import 'package:otzaria/pdf_book/utils/pdf_plugin_menu_entries.dart';
+import 'package:otzaria/plugins/utils/plugin_context_menu_entries.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/models/link_types.dart';
 import 'package:otzaria/book_common/selection/selection_hit_test.dart';
@@ -1051,8 +1055,22 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
   /// העתקת טקסט מעוצב (HTML) ללוח
   Future<void> _copyFormattedText() => _copySelection(context, null);
 
-  /// מעתיק את הבחירה; בחירה החוצה כמה מפרשים (או "בחר הכול") כפופה להגבלה
-  /// המחמירה של המפרשים שבה.
+  /// הגבלת ההעתקה של הבחירה: בחירה החוצה כמה מפרשים (או "בחר הכול") כפופה
+  /// להגבלה המחמירה של המפרשים שבה.
+  Future<CommentaryCopyGuard> _selectionCopyGuard(
+    List<Link> selectedLinks,
+  ) {
+    final selectAll = _commentarySelectionDelegate.hasCurrentFullSelection;
+    return buildCommentaryCopyGuard(
+      selectAll ? _orderedLinks : selectedLinks,
+      selectAll: selectAll,
+      selectionOf: (link) => CommentarySelectionTracker.selectionIn(
+        _itemKeys[_getLinkKey(link)]!,
+      ),
+      renderSettings: RenderSettings.fromProfile(widget.displayProfile),
+    );
+  }
+
   Future<void> _copySelection(
     BuildContext menuContext,
     Link? fallbackLink, {
@@ -1064,15 +1082,7 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
       _orderedLinks,
       _getLinkKey,
     );
-    final selectAll = _commentarySelectionDelegate.hasCurrentFullSelection;
-    final guard = await buildCommentaryCopyGuard(
-      selectAll ? _orderedLinks : selectedLinks,
-      selectAll: selectAll,
-      selectionOf: (link) => CommentarySelectionTracker.selectionIn(
-        _itemKeys[_getLinkKey(link)]!,
-      ),
-      renderSettings: RenderSettings.fromProfile(widget.displayProfile),
-    );
+    final guard = await _selectionCopyGuard(selectedLinks);
     if (!menuContext.mounted) return;
     await ContextMenuUtils.copyFormattedText(
       context: menuContext,
@@ -1113,6 +1123,43 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
       onCopySelected: () => _copySelection(menuCtx, link),
       onCopySelectedWithoutNikud: () =>
           _copySelection(menuCtx, link, removeNikud: true),
+    )..addAll(_pluginEntries(menuCtx, link));
+  }
+
+  /// פריטי התוספים בהקשרי המפרש, על הספר הנקרא — ה-PDF בעמוד הנוכחי. עם
+  /// סימון — על המפרש המסומן, כמו בהעתקה.
+  List<AppContextMenuEntry> _pluginEntries(BuildContext menuCtx, Link link) {
+    if (!hasPluginContextMenuItems) return const [];
+    final tab = widget.tab;
+    final text = _restoreLineBreaks(_currentSelectedText) ?? '';
+    final selectedLinks = selectedItemLinks(
+      _itemKeys,
+      _orderedLinks,
+      _getLinkKey,
+    );
+    final target = text.trim().isEmpty
+        ? link
+        : _lastSelectedLink ?? selectedLinks.firstOrNull ?? link;
+    return buildCommentaryPluginMenuEntries(
+      target: commentaryTargetForLink(target),
+      mainBook: (
+        book: tab.book,
+        currentRef: pdfPageRef(tab, tab.pageNumber),
+        sectionIndex: tab.pageNumber,
+        pageNumber: tab.pageNumber,
+      ),
+      selectedText: text,
+      copyGuard: () async {
+        if (selectedLinks.isNotEmpty ||
+            _commentarySelectionDelegate.hasCurrentFullSelection) {
+          return _selectionCopyGuard(selectedLinks);
+        }
+        return (
+          protection: await BookProtectionRepository.instance.forLink(target),
+          segmentCount: countTextSegments(text),
+        );
+      },
+      menuContext: menuCtx,
     );
   }
 

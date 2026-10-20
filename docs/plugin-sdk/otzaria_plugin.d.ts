@@ -422,6 +422,14 @@ export interface NetworkFetchParams {
   timeoutMs?: number;
 }
 
+export interface NetworkFetchFileParams {
+  url: string;
+  /** ברירת מחדל 50MB; מקסימום 100MB. חריגה: `error.too_large`. */
+  maxBytes?: number;
+  /** ברירת מחדל 120,000; מקסימום 600,000 מילישניות. */
+  timeoutMs?: number;
+}
+
 export type NetworkFetchStreamChunk =
   | {
       sequence: number;
@@ -646,8 +654,9 @@ export interface HighlightCapabilities {
   highlights: boolean;
   /** בחירת טקסט אינה נתמכת ב-PDF. */
   selection: boolean;
-  /** האזורים שבהם פריטי תפריט הקשר של תוספים מוצגים. */
-  contextMenu: string[];
+  /** האזורים שבמשטח הנוכחי שבהם פריטי תפריט הקשר של תוספים מוצגים:
+   * `mainText` בספר טקסט, ומ־0.9.99 גם `commentary`, ו־`pdf` בספר PDF. */
+  contextMenu: Array<'mainText' | 'commentary' | 'pdf'>;
 }
 
 /**
@@ -1053,6 +1062,33 @@ export interface ReaderSelection {
   /** `reader-highlight` context only: the plugin highlights found under the
    * click position. Act only on your own ids. From 0.9.97. */
   clickedHighlights?: ClickedHighlightRef[];
+  /** `reader-commentary*` contexts only: the book being read, while the
+   * top-level fields describe the commentary. From 0.9.99. */
+  mainBook?: CommentaryMainBook;
+  /** `reader-pdf*` contexts only (a PDF page, not its commentary pane): the
+   * 1-based page that was clicked, or where the selection starts; also given
+   * as `sectionIndex`/`currentIndex`. From 0.9.99. */
+  pageNumber?: number;
+  /** Identity of the book the text belongs to (see `BookIdentity`). */
+  id?: number | null;
+  type?: BookType | null;
+  source?: 'library' | 'user' | 'external' | 'attached' | null;
+  external?: { provider: 'hebrewbooks' | 'otzar'; id: number | string };
+}
+
+/** The book a right-clicked commentary belongs to. From 0.9.99. */
+export interface CommentaryMainBook extends BookIdentity {
+  bookId: string;
+  bookTitle: string;
+  bookUid: string;
+  /** The current position in the book being read. */
+  currentRef: string | null;
+  /** Text book: the 0-based line the commentary is linked to (commentary
+   * list only; absent in a page-shape column). PDF: the 1-based current
+   * page, also given as `pageNumber`. */
+  sectionIndex?: number;
+  /** PDF only: the 1-based current page. */
+  pageNumber?: number;
 }
 
 /** One section of a multi-paragraph selection (same shape as a verified
@@ -1325,7 +1361,20 @@ export type ContextMenuContext =
   | 'reader-page-shape-selection'
   /** Right-click on a plugin highlight, with or without an active selection.
    * The click payload carries `selection.clickedHighlights`. From 0.9.97. */
-  | 'reader-highlight';
+  | 'reader-highlight'
+  /** Right-click on a commentary (commentary list, page-shape column or the
+   * PDF commentary pane) without a selection. Opt-in: an item without
+   * `contexts` does not appear. The commentary is the current book; see
+   * `ReaderSelection.mainBook`. From 0.9.99. */
+  | 'reader-commentary'
+  /** Like `reader-commentary`, with selected text in the commentary.
+   * From 0.9.99. */
+  | 'reader-commentary-selection'
+  /** Right-click on a PDF page without a selection. Opt-in; see
+   * `ReaderSelection.pageNumber`. From 0.9.99. */
+  | 'reader-pdf'
+  /** Like `reader-pdf`, with selected text on the page. From 0.9.99. */
+  | 'reader-pdf-selection';
 
 export interface ContextMenuColor {
   id: string;
@@ -1826,6 +1875,24 @@ export interface UserFileHandle {
 }
 
 /**
+ * תוצאת `network.fetchFile` — קובץ במטמון זמני, token לקריאה בלבד. בניגוד ל-
+ * `UserFileHandle`, הקובץ עלול להימחק (מכסה, יממה, הסרת התוסף), ולכן אין להניח
+ * שה-token שורד: אחרי `error.not_found` מורידים שוב.
+ * `fs.resolveFileUrl`, `fs.readTextFile` ו-`fs.revokeFile` על token כזה דורשים
+ * גם את `fs.user_files.read`.
+ */
+export interface RemoteFileHandle {
+  /** מזהה אטום לקובץ במטמון. */
+  token: string;
+  /** URL מ-loopback, תקף לריצה הנוכחית בלבד (הפורט מתחלף). */
+  url: string;
+  name: string;
+  size: number;
+  /** סוג התוכן ששרת הקבצים מגיש, לפי סיומת השם ולא לפי תוכן הקובץ. */
+  mime: string;
+}
+
+/**
  * תוצאת `fs.pickUserFile`. בביטול חוזר `{ cancelled: true }` בלבד, ולכן זהו
  * union ולא אובייקט עם שדות אופציונליים.
  */
@@ -2231,6 +2298,7 @@ export type OtzariaMethod =
   | 'ui.showWarning'
   | 'ui.pickFolder'
   | 'ui.print'
+  | 'ui.printFile'
   | 'ui.exportPdf'
   | 'ui.setUnsavedChanges'
   | 'fs.extractZip'
@@ -2287,6 +2355,7 @@ export type OtzariaMethod =
   | 'database.batchQuery'
   | 'network.fetchStream'
   | 'network.download'
+  | 'network.fetchFile'
   | 'fs.pickUserFile'
   | 'fs.resolveFileUrl'
   | 'fs.readTextFile'
@@ -2428,6 +2497,24 @@ export interface OtzariaGlobal {
     method: 'search.endFieldSession',
     payload: { sessionId: string; submit?: boolean }
   ): Promise<OtzariaResponse<boolean>>;
+
+  /** מוריד קובץ מ-URL מותר למטמון זמני פרטי, בלי לשמור בתיקיית המשתמש. */
+  call(
+    method: 'network.fetchFile',
+    payload: NetworkFetchFileParams
+  ): Promise<OtzariaResponse<RemoteFileHandle>>;
+
+  /**
+   * Opens Otzaria's print screen (page range, preview, layout, then the system
+   * print dialog) on a PDF the plugin was granted (a file token). Needs a user
+   * gesture; waits for the screen to close without the generic 30-second RPC
+   * timeout. Personal files require fs.user_files.read; network.fetchFile tokens
+   * do not. `printed` is true when the user printed or exported.
+   */
+  call(
+    method: 'ui.printFile',
+    payload: { token: string; jobName?: string }
+  ): Promise<OtzariaResponse<{ printed: boolean }>>;
 
   call(
     method: 'feedback.submitBookCorrection',

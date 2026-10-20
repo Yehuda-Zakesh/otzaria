@@ -18,6 +18,7 @@ import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 import 'package:otzaria/book_protection/repository/book_protection_repository.dart';
 import 'package:otzaria/book_protection/utils/copy_guard.dart';
 import 'package:otzaria/models/links.dart';
+import 'package:otzaria/plugins/utils/plugin_context_menu_entries.dart';
 import 'package:otzaria/models/link_types.dart';
 import 'package:otzaria/services/target_line_links_service.dart';
 import 'package:otzaria/tabs/models/tab.dart';
@@ -40,6 +41,7 @@ import 'package:otzaria/text_display/models/text_display_slot.dart';
 export 'package:otzaria/book_common/utils/commentary_search_utils.dart'
     show CommentarySearchSnippet;
 import 'package:otzaria/book_common/utils/category_settings_utils.dart';
+import 'package:otzaria/book_common/utils/commentary_plugin_menu_entries.dart';
 import 'package:otzaria/text_book/utils/commentary_title_visibility.dart';
 import 'package:otzaria/book_common/utils/commentary_type_filter.dart';
 import 'package:otzaria/book_common/utils/commentator_group_builder.dart';
@@ -2650,7 +2652,7 @@ class _CommentaryLinkItemState extends State<_CommentaryLinkItem> {
     if (!menuContext.mounted) return;
     await ContextMenuUtils.copyFormattedText(
       context: menuContext,
-      savedSelectedText: (widget.restoreLineBreaks ?? (s) => s)(savedText),
+      savedSelectedText: _restoreLineBreaks(savedText),
       fontSize: widget.fontSize,
       link: link,
       removeNikud: removeNikud,
@@ -2658,6 +2660,41 @@ class _CommentaryLinkItemState extends State<_CommentaryLinkItem> {
       segmentCount: guard?.segmentCount,
     );
   }
+
+  /// פריטי התוספים בהקשרי המפרש. עם סימון — על המפרש המסומן, כמו בהעתקה.
+  List<AppContextMenuEntry> _pluginEntries(
+    BuildContext menuContext,
+    String? selectedText,
+  ) {
+    if (!hasPluginContextMenuItems) return const [];
+    final state = context.read<TextBookBloc>().state;
+    if (state is! TextBookLoaded) return const [];
+    final text = _restoreLineBreaks(selectedText) ?? '';
+    final link = text.trim().isEmpty
+        ? widget.link
+        : widget.lastSelectedLinkListenable.value ?? widget.link;
+    return buildCommentaryPluginMenuEntries(
+      target: commentaryTargetForLink(link),
+      mainBook: (
+        book: state.book,
+        currentRef: state.currentTitle,
+        sectionIndex: link.index1 - 1,
+        pageNumber: null,
+      ),
+      selectedText: text,
+      // בחירה החוצה כמה מפרשים כפופה למגבלה המחמירה שביניהם, כמו בהעתקה.
+      copyGuard: () async =>
+          await widget.multiItemCopyGuard() ??
+          (
+            protection: await BookProtectionRepository.instance.forLink(link),
+            segmentCount: countTextSegments(text),
+          ),
+      menuContext: menuContext,
+    );
+  }
+
+  String? _restoreLineBreaks(String? text) =>
+      (widget.restoreLineBreaks ?? (s) => s)(text);
 
   /// פותח את יעד הקישור בכרטיסייה חדשה (טקסט או PDF, לפי תבנית הפתיחה).
   Future<void> _navigateToLink(Link link) async {
@@ -2813,7 +2850,7 @@ class _CommentaryLinkItemState extends State<_CommentaryLinkItem> {
                         widget.lastSelectedLinkListenable.value ?? link,
                         removeNikud: true,
                       ),
-                    );
+                    )..addAll(_pluginEntries(menuCtx, savedTextAtBuild));
                   },
                   child: CommentaryContent(
                     key: ValueKey(widget.getLinkKey(link)),

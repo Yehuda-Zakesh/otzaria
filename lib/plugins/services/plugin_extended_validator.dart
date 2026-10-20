@@ -161,6 +161,7 @@ const Set<String> _knownApiMethods = {
   'ui.showWarning',
   'ui.pickFolder',
   'ui.print',
+  'ui.printFile',
   'ui.exportPdf',
   'ui.setUnsavedChanges',
   'fs.extractZip',
@@ -226,6 +227,7 @@ const Set<String> _knownApiMethods = {
   'database.batchQuery',
   'network.fetchStream',
   'network.download',
+  'network.fetchFile',
   'shortcut.create',
 };
 
@@ -438,6 +440,7 @@ const Map<String, String> _methodRequiredPermission = {
   'database.batchQuery': 'database.read',
   'network.fetchStream': 'network.access',
   'network.download': 'network.access',
+  'network.fetchFile': 'network.access',
   'shortcut.create': 'ui.create_shortcut',
 };
 
@@ -631,6 +634,8 @@ const Map<String, String> _methodMinVersion = {
   'search.setFieldText': '0.9.99',
   'search.setFieldActionState': '0.9.99',
   'search.endFieldSession': '0.9.99',
+  'network.fetchFile': '0.9.99',
+  'ui.printFile': '0.9.99',
 };
 
 /// שדות שמורים שאינם API methods (כדי שלא ייתפסו ב-shorthand scanner).
@@ -858,6 +863,7 @@ class PluginExtendedValidator {
   };
   static const String _contextMenuActionMinVersion = '0.9.97';
   static const String _searchSubmitRoutingMinVersion = '0.9.97';
+  static const String _boundToolbarOpenPluginMinVersion = '0.9.99';
   static const String _externalEditionsMinVersion = '0.9.97';
   static const String _libraryBooksMinVersion = '0.9.98';
   static const String _storageReferenceMinVersion = '0.9.98';
@@ -1593,6 +1599,25 @@ class PluginExtendedValidator {
         .where(DeclarativeToolbarTemplateCompiler.isDeclarative)
         .toList();
     if (declarativeToolbarItems.isNotEmpty) {
+      if (declarativeToolbarItems.any(
+        (item) => item.containsKey('openPlugin'),
+      )) {
+        try {
+          if (PluginVersionUtils.compareCoreVersions(
+                _boundToolbarOpenPluginMinVersion,
+                manifest.minAppVersion,
+              ) >
+              0) {
+            errors.add(
+              'openPlugin בפקד קשור נתמך החל מגרסה '
+              '$_boundToolbarOpenPluginMinVersion, אך minAppVersion שהוצהר הוא '
+              '${manifest.minAppVersion}. עדכן את minAppVersion',
+            );
+          }
+        } on PluginVersionFormatException {
+          // minAppVersion נבדק ב-PluginManifestValidator.
+        }
+      }
       final usedActionTypes = <String>{
         for (final item in declarativeToolbarItems) ...[
           if (item['action'] case {'type': final String type}) type,

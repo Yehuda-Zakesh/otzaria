@@ -109,6 +109,11 @@ String _applyForm(
         letters[1],
         'ק',
       ),
+      HolyNameStyle.daletDalet => _replaceAt(
+        _replaceAt(inner, letters[3], 'ד'),
+        letters[1],
+        'ד',
+      ),
       HolyNameStyle.hehApostrophe => _hehApostrophe(inner, letters.first),
       HolyNameStyle.doubleYod => _doubleYod(inner, letters),
     };

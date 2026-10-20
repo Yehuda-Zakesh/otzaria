@@ -1121,8 +1121,46 @@ Future<void> main() async {
       });
     });
 
+    group('סגנון ידוד', () {
+      test('שם הקודש בתוך פסוק מוחלף בידוד', () {
+        expect(
+          replaceHolyNames(
+            'ויאמר יהוה אל משה',
+            style: HolyNameStyle.daletDalet,
+          ),
+          equals('ויאמר ידוד אל משה'),
+        );
+      });
+
+      test('הניקוד והטעמים של השם נשמרים, כמו ביקוק', () {
+        expect(
+          replaceHolyNames('לַֽיהֹוָֽה', style: HolyNameStyle.daletDalet),
+          equals('לַֽידֹוָֽד'),
+        );
+      });
+
+      test('שתי אותיות שימוש מנוקדות לפני השם — מוחלף; שלוש — לא', () {
+        expect(
+          replaceHolyNames('וּבַיהוָה', style: HolyNameStyle.daletDalet),
+          equals('וּבַידוָד'),
+        );
+        expect(
+          replaceHolyNames('גוּבַיהוָה', style: HolyNameStyle.daletDalet),
+          equals('גוּבַיהוָה'),
+        );
+      });
+
+      test('מילה חילונית אינה מוחלפת גם בסגנון ידוד', () {
+        expect(
+          replaceHolyNames('ויגביהוהו', style: HolyNameStyle.daletDalet),
+          equals('ויגביהוהו'),
+        );
+      });
+    });
+
     group('HolyNameStyle.fromStorage', () {
       test('ממפה מפתחות שמורים ומחזיר יקוק כברירת מחדל', () {
+        expect(HolyNameStyle.fromStorage('dalet'), HolyNameStyle.daletDalet);
         expect(HolyNameStyle.fromStorage('heh'), HolyNameStyle.hehApostrophe);
         expect(HolyNameStyle.fromStorage('yy'), HolyNameStyle.doubleYod);
         expect(HolyNameStyle.fromStorage('kuf'), HolyNameStyle.kufKuf);

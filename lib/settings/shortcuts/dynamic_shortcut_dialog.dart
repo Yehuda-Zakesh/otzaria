@@ -234,6 +234,10 @@ class _DynamicShortcutForm extends StatelessWidget {
                   label: t('יקוק'),
                 ),
                 AppMenuEntry(
+                  value: HolyNameDisplay.daletDalet.name,
+                  label: t('ידוד'),
+                ),
+                AppMenuEntry(
                   value: HolyNameDisplay.hehApostrophe.name,
                   label: t("ה'"),
                 ),

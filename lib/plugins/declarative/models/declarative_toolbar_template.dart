@@ -19,11 +19,16 @@ class CompiledDeclarativeToolbarTemplate {
   final Map<String, dynamic>? actionTemplate;
   final CompiledDeclarativeChildrenBinding? childrenBinding;
 
+  /// כפתור שלחיצה עליו פותחת את דף התוסף ומוסרת לו את אירוע הלחיצה, במקום
+  /// פעולת host. סותר את [actionTemplate].
+  final bool openPlugin;
+
   const CompiledDeclarativeToolbarTemplate({
     required this.baseItem,
     required this.programId,
     required this.visibleOutput,
     required this.actionTemplate,
     required this.childrenBinding,
+    this.openPlugin = false,
   });
 }

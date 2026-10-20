@@ -1,6 +1,9 @@
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/indexing/bloc/indexing_state.dart';
 import 'package:otzaria/library/bloc/library_state.dart';
 import 'package:otzaria/library_update/bloc/library_update_bloc.dart';
 import 'package:otzaria/navigation/view/startup_work_gate.dart';
@@ -277,6 +280,33 @@ void main() {
       expect(updated, isTrue);
     });
 
+    test('עדכון שנכשל עדיין מסיים את הרצף ב-onFinished', () async {
+      var finished = false;
+      await expectLater(
+        runStartupIndexingSequence(
+          tourActive: false,
+          resolveIndexing: () async => fail('אין אינדוקס אחרי כשל'),
+          waitForIndexing: () async {},
+          runUpdates: () => Future<void>.error(StateError('update failed')),
+          onFinished: () => finished = true,
+        ),
+        throwsStateError,
+      );
+      expect(finished, isTrue);
+    });
+
+    test('onFinished רץ אחרי האינדוקס שבסוף הרצף', () async {
+      final steps = <String>[];
+      await runStartupIndexingSequence(
+        tourActive: false,
+        resolveIndexing: () async => steps.add('index'),
+        waitForIndexing: () async {},
+        runUpdates: () async => steps.add('update'),
+        onFinished: () => steps.add('finished'),
+      );
+      expect(steps, ['update', 'index', 'finished']);
+    });
+
     test('בלי סיור: עדכון הספרייה קודם לאינדוקס', () async {
       final steps = <String>[];
       await runStartupIndexingSequence(
@@ -286,6 +316,70 @@ void main() {
         runUpdates: () async => steps.add('update'),
       );
       expect(steps, ['update', 'index']);
+    });
+  });
+
+  group('StartupIndexingDeferral', () {
+    late ValueNotifier<bool> flag;
+    late StreamController<IndexingState> states;
+    late StartupIndexingDeferral deferral;
+
+    setUp(() {
+      flag = ValueNotifier(true);
+      states = StreamController<IndexingState>.broadcast();
+      deferral = StartupIndexingDeferral(
+        flag,
+        startTimeout: const Duration(seconds: 30),
+      );
+    });
+
+    tearDown(() => states.close());
+
+    test('נשאר דלוק עד שהאינדוקס מתחיל, ואז נכבה ומפסיק להאזין', () {
+      fakeAsync((async) {
+        deferral.releaseWhenStarted(IndexingInitial(), states.stream);
+        async.flushMicrotasks();
+        expect(flag.value, isTrue);
+        expect(states.hasListener, isTrue);
+
+        states.add(IndexingInitial());
+        async.flushMicrotasks();
+        expect(flag.value, isTrue);
+
+        states.add(const IndexingInProgress(booksProcessed: 0, totalBooks: 5));
+        async.flushMicrotasks();
+        expect(flag.value, isFalse);
+        expect(states.hasListener, isFalse);
+        expect(async.pendingTimers, isEmpty);
+      });
+    });
+
+    test('אינדוקס שלא התחיל אינו משאיר את הסימון דלוק לתמיד', () {
+      fakeAsync((async) {
+        deferral.releaseWhenStarted(IndexingInitial(), states.stream);
+        async.elapse(const Duration(seconds: 29));
+        expect(flag.value, isTrue);
+        async.elapse(const Duration(seconds: 1));
+        expect(flag.value, isFalse);
+        expect(states.hasListener, isFalse);
+      });
+    });
+
+    test('נכבה מיד כשהאינדוקס כבר רץ או שהסתיים', () {
+      deferral.releaseWhenStarted(const IndexingComplete(), states.stream);
+      expect(flag.value, isFalse);
+      expect(states.hasListener, isFalse);
+    });
+
+    test('clear מבטל המתנה פתוחה', () {
+      fakeAsync((async) {
+        deferral.releaseWhenStarted(IndexingInitial(), states.stream);
+        deferral.clear();
+        async.flushMicrotasks();
+        expect(flag.value, isFalse);
+        expect(states.hasListener, isFalse);
+        expect(async.pendingTimers, isEmpty);
+      });
     });
   });
 

@@ -626,6 +626,76 @@ void main() {
       );
       expect(stale.existsSync(), isFalse);
     });
+
+    group('אנדרואיד: volume לפי הנתיב', () {
+      const archivePath =
+          '/data/user/0/org.otzaria.otzaria/app_flutter/'
+          'library_update_cache/seforim.db.zst';
+
+      Future<void> check({
+        required String dbDir,
+        required int dataFree,
+        required int dbFree,
+      }) =>
+          LibraryUpdateRepository(
+            discovery: _unusedDiscovery(),
+            downloader: PatchDownloader(decompress: (b) async => b),
+            isAndroid: true,
+            diskSpaceProvider: (dirPath) async => dirPath.startsWith('/data/')
+                ? DiskSpaceInfo(
+                    volumeId: '/dev/block/dm-47',
+                    freeBytes: dataFree,
+                  )
+                : DiskSpaceInfo(volumeId: '/dev/fuse', freeBytes: dbFree),
+          ).ensureDiskSpaceForFullDownload(
+            archivePath: archivePath,
+            archiveNeeded: 2 * oneGb,
+            dbDir: dbDir,
+          );
+
+      test('אחסון משותף ו-/data נבדקים מול סכום הארכיון והחילוץ', () async {
+        // 8GB מספיקים לארכיון לבד ולחילוץ לבד, אבל לא לשניהם יחד.
+        await expectLater(
+          check(
+            dbDir: '/storage/emulated/0/ספרים',
+            dataFree: 8 * oneGb,
+            dbFree: 8 * oneGb,
+          ),
+          throwsA(
+            isA<LibraryUpdateDiskSpaceException>().having(
+              (e) => e.message,
+              'message',
+              contains('להורדה ולחילוץ'),
+            ),
+          ),
+        );
+      });
+
+      test('כרטיס SD הוא volume נפרד: כל צד נבדק בנפרד', () async {
+        const sdDir = '/storage/1A2B-3C4D/ספרים';
+        await check(dbDir: sdDir, dataFree: 8 * oneGb, dbFree: 8 * oneGb);
+        await expectLater(
+          check(dbDir: sdDir, dataFree: 100 * oneGb, dbFree: oneGb),
+          throwsA(
+            isA<LibraryUpdateDiskSpaceException>().having(
+              (e) => e.message,
+              'message',
+              contains('לחילוץ הספרייה'),
+            ),
+          ),
+        );
+        await expectLater(
+          check(dbDir: sdDir, dataFree: oneGb, dbFree: 100 * oneGb),
+          throwsA(
+            isA<LibraryUpdateDiskSpaceException>().having(
+              (e) => e.message,
+              'message',
+              contains('להורדת הספרייה'),
+            ),
+          ),
+        );
+      });
+    });
   });
 
   group('applyDeltaPlan: בדיקת מקום פנוי לפני הורדת הצעד', () {

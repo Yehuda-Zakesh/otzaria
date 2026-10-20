@@ -26,6 +26,8 @@ String _oracle(String s, HolyNameStyle style) {
         'י${match[1]}ק${match[2]}ו${match[3]}ק${match[4]}',
       HolyNameStyle.hehApostrophe => "ה'",
       HolyNameStyle.doubleYod => 'י${match[1]}י${match[3]}${match[4]}',
+      HolyNameStyle.daletDalet =>
+        'י${match[1]}ד${match[2]}ו${match[3]}ד${match[4]}',
     };
   });
 }

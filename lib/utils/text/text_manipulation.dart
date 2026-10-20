@@ -1684,21 +1684,30 @@ int _htmlTagEnd(String text, int start) {
   return -1;
 }
 
-/// מילת "יקוק" (כך מוצג שם הוי"ה) עם עד שתי אותיות שימוש, כל אות עם הניקוד
-/// שלה. הכלל היחיד לזיהוי — בחיפוש הכללי ובחיפוש בתוך ספר.
+/// מילת "יקוק" או "ידוד" (כך מוצג שם הוי"ה) עם עד שתי אותיות שימוש, כל אות
+/// עם הניקוד שלה. הכלל היחיד לזיהוי — בחיפוש הכללי ובחיפוש בתוך ספר.
 final RegExp _holyNamePlaceholderWord = RegExp(
   r'^((?:[\u05D5\u05D1\u05DB\u05DC\u05DE\u05E9\u05D4]\p{Mn}*){0,2})'
-  r'\u05D9(\p{Mn}*)\u05E7(\p{Mn}*)\u05D5(\p{Mn}*)\u05E7(\p{Mn}*)$',
+  r'\u05D9(\p{Mn}*)([\u05E7\u05D3])(\p{Mn}*)\u05D5(\p{Mn}*)\3(\p{Mn}*)$',
   unicode: true,
 );
 const String holyNamePlaceholder = '\u05D9\u05E7\u05D5\u05E7';
+
+/// "ידוד" — צורת התצוגה החלופית של שם הוי"ה ([HolyNameStyle.daletDalet]).
+const String holyNameDaletPlaceholder = '\u05D9\u05D3\u05D5\u05D3';
+
+/// כל צורות התצוגה של שם הוי"ה שמשתמש עשוי להקליד בחיפוש.
+const List<String> holyNamePlaceholders = [
+  holyNamePlaceholder,
+  holyNameDaletPlaceholder,
+];
 
 /// [token] — מילה אחת של [splitQueryWords] — עם שם הוי"ה במקום "יקוק" ועם
 /// הניקוד שהוקלד, או `null` כשאינה מילת "יקוק".
 String? holyNameForPlaceholderWord(String token) {
   final m = _holyNamePlaceholderWord.firstMatch(token);
   if (m == null) return null;
-  return '${m[1]}\u05D9${m[2]}\u05D4${m[3]}\u05D5${m[4]}\u05D4${m[5]}';
+  return '${m[1]}\u05D9${m[2]}\u05D4${m[4]}\u05D5${m[5]}\u05D4${m[6]}';
 }
 
 /// מוסיף לכל מילת "יקוק" ב-[query] את שם הוי"ה כמילה חלופית: החיפוש וההדגשה
@@ -1708,7 +1717,7 @@ Map<int, List<String>> withHolyNameAlternatives(
   Map<int, List<String>> alternativeWords,
 ) {
   final mentioned = [query, ...alternativeWords.values.expand((w) => w)].any(
-    (text) => removeVolwels(text).contains(holyNamePlaceholder),
+    (text) => holyNamePlaceholders.any(removeVolwels(text).contains),
   );
   if (!mentioned) return alternativeWords;
   Map<int, List<String>>? result;
@@ -1737,7 +1746,10 @@ enum HolyNameStyle {
   hehApostrophe('heh'),
 
   /// החלפה ב"יי": ניקוד ה-ו וה-ה האחרונה עובר ל-י השנייה (יְיָ).
-  doubleYod('yy');
+  doubleYod('yy'),
+
+  /// החלפת ה' ב-ד' (ידוד) תוך שמירת הניקוד והטעמים, כמו [kufKuf].
+  daletDalet('dalet');
 
   final String storageKey;
   const HolyNameStyle(this.storageKey);
@@ -1763,6 +1775,8 @@ String replaceHolyNames(
           'י${match[1]}ק${match[2]}ו${match[3]}ק${match[4]}',
         HolyNameStyle.hehApostrophe => "ה'",
         HolyNameStyle.doubleYod => 'י${match[1]}י${match[3]}${match[4]}',
+        HolyNameStyle.daletDalet =>
+          'י${match[1]}ד${match[2]}ו${match[3]}ד${match[4]}',
       });
     copied = match.end;
   }
