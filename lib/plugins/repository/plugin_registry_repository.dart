@@ -294,10 +294,6 @@ class PluginRegistryRepository {
     return _db.getPluginPublishedRecords(pluginId);
   }
 
-  Future<List<String>> getPublishedRecordsByType(String type) async {
-    return _db.getPublishedRecordsByType(type);
-  }
-
   /// מחזיר האם התוסף מופעל. null = לא נמצא (=treat as disabled).
   Future<bool> getIsEnabled(String pluginId) async {
     await PluginSafeMode.ready;

@@ -305,6 +305,8 @@ void main() {
       );
 
       final bloc = _newBloc(_FakeTabsRepository());
+      bloc.add(AddTab(_createTextTab('ספר תקוע', index: 9, categoryId: 1)));
+      await bloc.stream.firstWhere((s) => s.tabs.length == 1);
       final tab = TextBookTab(
         book: _HangingTocBook(title: 'ספר תקוע', categoryId: 1),
         index: 3,
@@ -314,10 +316,49 @@ void main() {
       // שכאן לעולם אינה מסתיימת; בלי תקרת-הזמן הטאב לא היה נפתח לעולם.
       bloc.add(OpenOrFocusTab(tab));
       await bloc.stream
-          .firstWhere((s) => s.tabs.length == 1)
+          .firstWhere((s) => s.tabs.length == 2)
           .timeout(const Duration(seconds: 5));
 
-      expect(bloc.state.tabs.single, same(tab));
+      expect(bloc.state.tabs.last, same(tab));
+
+      await _closeBlocAndAllowDeferredDispose(bloc);
+    });
+
+    test('פתיחת ספר שאינו פתוח בטאב אינה טוענת את תוכן העניינים', () async {
+      final bloc = _newBloc(_FakeTabsRepository());
+      bloc.add(AddTab(_createTextTab('ספר אחר', categoryId: 2)));
+      await bloc.stream.firstWhere((s) => s.tabs.length == 1);
+
+      final book = _CountingTocBook(title: 'ספר חדש', categoryId: 1);
+      bloc.add(OpenOrFocusTab(TextBookTab(book: book, index: 0)));
+      await bloc.stream.firstWhere((s) => s.tabs.length == 2);
+
+      // הקורא טוען את תוכן העניינים בעצמו; כאן הוא נדרש רק מול אותו ספר.
+      expect(book.tocLoads, 0);
+
+      await _closeBlocAndAllowDeferredDispose(bloc);
+    });
+
+    test('ספר שפתוח בטאב מושווה לפי הכותרת מתוכן העניינים', () async {
+      final bloc = _newBloc(_FakeTabsRepository());
+      final toc = [TocEntry(text: 'פרק א', index: 0, level: 1)];
+      bloc.add(
+        AddTab(
+          TextBookTab(
+            book: _CountingTocBook(title: 'ספר א', categoryId: 1, toc: toc),
+            index: 0,
+          ),
+        ),
+      );
+      bloc.add(AddTab(_createTextTab('ספר ב', categoryId: 2)));
+      await bloc.stream.firstWhere((s) => s.tabs.length == 2);
+
+      final book = _CountingTocBook(title: 'ספר א', categoryId: 1, toc: toc);
+      bloc.add(OpenOrFocusTab(TextBookTab(book: book, index: 0)));
+      await bloc.stream.firstWhere((s) => s.currentTabIndex == 0);
+
+      expect(bloc.state.tabs, hasLength(2));
+      expect(book.tocLoads, 1);
 
       await _closeBlocAndAllowDeferredDispose(bloc);
     });
@@ -2767,6 +2808,24 @@ class _HangingTocBook extends TextBook {
   @override
   Future<List<TocEntry>> get tableOfContents =>
       Completer<List<TocEntry>>().future;
+}
+
+/// סופר את טעינות תוכן העניינים של הספר.
+class _CountingTocBook extends TextBook {
+  _CountingTocBook({
+    required super.title,
+    super.categoryId,
+    this.toc = const [],
+  });
+
+  final List<TocEntry> toc;
+  int tocLoads = 0;
+
+  @override
+  Future<List<TocEntry>> get tableOfContents async {
+    tocLoads++;
+    return toc;
+  }
 }
 
 TextBookTab _createTextTab(String title, {int index = 0, int? categoryId}) {

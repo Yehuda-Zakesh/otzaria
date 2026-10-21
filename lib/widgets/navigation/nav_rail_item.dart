@@ -1,4 +1,4 @@
-// lib/widgets/nav_rail_item.dart
+// lib/widgets/navigation/nav_rail_item.dart
 //
 // NavRailItem — כפתור ניווט אנכי בסגנון Material 3.
 //

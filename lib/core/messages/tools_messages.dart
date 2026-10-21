@@ -68,6 +68,12 @@ abstract class ToolsMessages {
   static const String notificationsPermissionRequired =
       'לא ניתן להפעיל התראות - נדרשות הרשאות.\n'
       'עבור להגדרות המכשיר > אפליקציות > אוצריא > הרשאות';
+  static const String calendarMainWindowUnavailable =
+      'החלון הראשי אינו זמין, ולכן השינוי בלוח השנה לא נשמר. נסה שוב.';
+  static const String calendarMainWindowSlow =
+      'החלון הראשי עדיין לא אישר את השינוי בלוח השנה. הוא יעודכן כשיאשר.';
+  static const String calendarAlertsScheduleFailed =
+      'השינוי נשמר, אך חלק מההתראות לא תוזמנו במערכת ההפעלה.';
   static const String testNotificationSent =
       'התראת בדיקה נשלחה. אם היא לא הופיעה על המסך — בדוק שההתראות עבור אוצריא מאופשרות בהגדרות מערכת ההפעלה.';
   static const String testNotificationFailed =

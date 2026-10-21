@@ -87,7 +87,8 @@ class _PersonalNotesManagerScreenState
   final FocusNode _searchFocusNode = FocusNode();
   final FocusNode _windowFocusNode = FocusNode(skipTraversal: true);
   final ScrollController _contentScrollController = ScrollController();
-  String _searchQuery = '';
+  // רק רשימת ההערות תלויה בשאילתה, כך שהקלדה אינה בונה מחדש את עץ הספרייה.
+  final ValueNotifier<String> _searchQuery = ValueNotifier('');
   double _navigationWidth = 250.0;
   // טווח תאריכים לסינון לפי תאריך עדכון ההערה. null = ללא סינון תאריכים.
   DateTimeRange? _dateRange;
@@ -293,6 +294,7 @@ class _PersonalNotesManagerScreenState
     _notesLoadGeneration++;
     _cancelPendingNotesLoad();
     _searchController.dispose();
+    _searchQuery.dispose();
     _searchFocusNode.dispose();
     _windowFocusNode.dispose();
     _contentScrollController.dispose();
@@ -376,7 +378,12 @@ class _PersonalNotesManagerScreenState
                     mainContent: Column(
                       children: [
                         if (_dateRange != null) _buildDateFilterBanner(),
-                        Expanded(child: _buildAllNotesList()),
+                        Expanded(
+                          child: ValueListenableBuilder<String>(
+                            valueListenable: _searchQuery,
+                            builder: (context, _, _) => _buildAllNotesList(),
+                          ),
+                        ),
                       ],
                     ),
                     paneWidth: _navigationWidth,
@@ -421,16 +428,8 @@ class _PersonalNotesManagerScreenState
             icon: OtzariaIcons.search_in_document_24_regular,
             hintText: 'חפש בהערות...',
             onSubmitted: (_) => requestKeyboardFocus(),
-            onChanged: (value) {
-              setState(() {
-                _searchQuery = value;
-              });
-            },
-            onClear: () {
-              setState(() {
-                _searchQuery = '';
-              });
-            },
+            onChanged: (value) => _searchQuery.value = value,
+            onClear: () => _searchQuery.value = '',
           ),
           trailingItems: [
             AppTopBarItem(
@@ -962,8 +961,9 @@ class _PersonalNotesManagerScreenState
     }
 
     // סינון לפי חיפוש
-    if (_searchQuery.isNotEmpty) {
-      final query = _searchQuery.toLowerCase();
+    final searchQuery = _searchQuery.value;
+    if (searchQuery.isNotEmpty) {
+      final query = searchQuery.toLowerCase();
       allNotes.removeWhere((noteWithBook) {
         final note = noteWithBook.note;
         return !note.contentPlain.toLowerCase().contains(query) &&

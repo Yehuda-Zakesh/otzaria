@@ -324,8 +324,8 @@ String _cacheKey(String version, {bool? isDev}) {
   return '${dev ? 'dev' : 'stable'}:$version';
 }
 
-/// מאחסן release ב-cache עבור גרסה נתונה. נקרא מ-`getLatestVersion` כדי
-/// להבטיח ש-`getChangelog`/`getBinaryUrl` מקבלים בדיוק את ה-release שזוהה
+/// מאחסן release ב-cache עבור גרסה נתונה. נקרא מ-`_getLatestVersion` כדי
+/// להבטיח ש-`_getChangelog`/`_getBinaryUrl` מקבלים בדיוק את ה-release שזוהה
 /// כ"החדש ביותר", ולא נבחר מחדש לפי prefix.
 void _cacheRelease(
   String version,
@@ -372,7 +372,7 @@ Map<String, dynamic> pickPreferredReleaseForDevChannel({
 }
 
 /// שולפת את מידע ה-release מ-GitHub עבור גרסה נתונה ושומרת אותו במטמון.
-/// אם `getLatestVersion` כבר הקדים לאחסן את ה-release המדויק שזוהה, נחזיר
+/// אם `_getLatestVersion` כבר הקדים לאחסן את ה-release המדויק שזוהה, נחזיר
 /// אותו ישירות — כך מובטח עקביות בין ה-release שזוהה כ"חדש" לבין
 /// ה-changelog וקובץ ההתקנה.
 Future<Map<String, dynamic>> _fetchRelease(String version) async {

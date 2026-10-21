@@ -363,25 +363,33 @@ void main() {
     expect(harness.recorder.votes.last.result.rank, 2);
   });
 
-  testWidgets('פתיחה: התאמה לפי עניין בלבד נפתחת בלי הדגשת מילים', (
-    tester,
-  ) async {
-    final harness = await pumpScreen(tester);
+  testWidgets(
+    'פתיחה: התאמה לפי עניין בלבד מחפשת את המילים בספר, במקום התוצאה (issue #2508)',
+    (tester) async {
+      final harness = await pumpScreen(tester);
 
-    await tester.tap(find.text('ספר 1, א'));
-    await settle(tester);
-    await tester.tap(find.text('ספר 2, א'));
-    await settle(tester);
+      await tester.tap(find.text('ספר 1, א'));
+      await settle(tester);
+      await tester.tap(find.text('ספר 2, א'));
+      await settle(tester);
 
-    final opened = harness.tabs.opened.map((e) => e.tab as TextBookTab);
-    expect(opened.map((tab) => tab.searchText), ['כבוד אב', '']);
-    expect(opened.last.initialSearchResultLines, {2});
-    expect(harness.recorder.opens.map((open) => open.via), [
-      SearchFeedbackOpenVia.click,
-      SearchFeedbackOpenVia.click,
-    ]);
-    SemanticDwellBinding.resetForTesting();
-  });
+      final opened = harness.tabs.opened.map((e) => e.tab as TextBookTab);
+      expect(opened.map((tab) => tab.searchText), ['כבוד אב', 'כבוד אב']);
+      final semanticOnly = opened.last;
+      expect(semanticOnly.index, 2);
+      expect(semanticOnly.searchMode, SearchMode.fuzzy);
+      expect(semanticOnly.searchDistance, kSmartSearchFuzzyMaxDistance);
+      expect(semanticOnly.matchPolicy, SearchMatchPolicy.smart);
+      // הקטע אינו התאמה מילולית; שורות התוצאה נקבעות בחיפוש בספר.
+      expect(semanticOnly.initialSearchResultLines, isNull);
+      expect(opened.first.initialSearchResultLines, {1});
+      expect(harness.recorder.opens.map((open) => open.via), [
+        SearchFeedbackOpenVia.click,
+        SearchFeedbackOpenVia.click,
+      ]);
+      SemanticDwellBinding.resetForTesting();
+    },
+  );
 
   testWidgets('פתיחה: תוצאה מילולית מחפשת בספר במצב שבו נמצאה (issue #1874)', (
     tester,
@@ -450,6 +458,34 @@ void main() {
       (harness.tabs.opened.single.tab as TextBookTab).matchPolicy,
       SearchMatchPolicy.smart,
     );
+    SemanticDwellBinding.resetForTesting();
+  });
+
+  testWidgets('תצוגה מקדימה של התאמה לפי עניין בלבד מדגישה את מילות החיפוש', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final harness = await pumpScreen(tester, preview: true);
+    tester
+        .widget<SemanticResultCard>(
+          find.byKey(const ValueKey('semantic-result-1')),
+        )
+        .onTap();
+    await settle(tester);
+    final panel = tester.widget<BookPreviewPanel>(
+      find.byType(BookPreviewPanel),
+    );
+    expect(panel.searchText, 'כבוד אב');
+    expect(panel.initialTextIndex, 2);
+    expect(panel.initialTextIsSearchResult, isFalse);
+    panel.onOpenInReader!(0);
+    await settle(tester);
+    final opened = harness.tabs.opened.single.tab as TextBookTab;
+    expect(opened.searchText, 'כבוד אב');
+    expect(opened.initialSearchResultLines, isNull);
     SemanticDwellBinding.resetForTesting();
   });
 

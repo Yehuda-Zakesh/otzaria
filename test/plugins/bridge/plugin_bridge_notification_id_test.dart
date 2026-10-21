@@ -1,4 +1,3 @@
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mockito/mockito.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';
@@ -9,11 +8,14 @@ import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/models/plugin_manifest.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/search/search_repository.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tools/calendar/bloc/calendar_cubit.dart';
 import 'package:otzaria/tools/calendar/services/notification_service.dart';
 import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
+
+import '../../test_helpers/memory_cache_provider.dart';
 
 class _MockHistoryBloc extends Mock implements HistoryBloc {}
 
@@ -46,15 +48,23 @@ class _KvRepo extends Mock implements PluginRegistryRepository {
   ) async => kv['$pluginId/$namespace/$key'] = valueJson;
 }
 
-class _RecordingPlugin extends Mock implements FlutterLocalNotificationsPlugin {
+class _FakeNotifications extends Mock implements NotificationService {
+  final scheduledIds = <int>[];
   final shownIds = <int>[];
+
   @override
-  Future<void> show({
+  bool get isInitialized => true;
+  @override
+  bool get hasPermissions => true;
+  @override
+  Future<bool> ensureInitialized() async => true;
+  @override
+  Future<void> cancelNotifications(Iterable<int> ids) async {}
+  @override
+  Future<void> showNotification({
     required int id,
-    String? title,
-    String? body,
-    NotificationDetails? notificationDetails,
-    String? payload,
+    required String title,
+    required String body,
   }) async {
     // אותה בדיקה ש-validateId של flutter_local_notifications מריץ.
     if (id > 0x7FFFFFFF || id < -0x80000000) {
@@ -62,20 +72,7 @@ class _RecordingPlugin extends Mock implements FlutterLocalNotificationsPlugin {
     }
     shownIds.add(id);
   }
-}
 
-class _FakeNotifications extends Mock implements NotificationService {
-  final scheduledIds = <int>[];
-  final _plugin = _RecordingPlugin();
-  List<int> get shownIds => _plugin.shownIds;
-
-  @override
-  FlutterLocalNotificationsPlugin get flutterLocalNotificationsPlugin =>
-      _plugin;
-  @override
-  bool get isInitialized => true;
-  @override
-  bool get hasPermissions => true;
   @override
   Future<void> scheduleNotification({
     required int id,
@@ -146,6 +143,9 @@ String _future() =>
     DateTime.now().add(const Duration(hours: 1)).toIso8601String();
 
 void main() {
+  // הבעלים בודק שהמזהה אינו של התראת לוח השנה, ברישום שבהגדרות.
+  setUpAll(() => Settings.init(cacheProvider: MemoryCacheProvider()));
+
   group('מזהה ברירת המחדל של התראת תוסף נכנס ב-32 ביט', () {
     test('sendSystem בלי id', () async {
       final notifications = _FakeNotifications();

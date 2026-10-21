@@ -2,18 +2,21 @@
 ///
 /// **כלל מפתח:** כל ה-state ב-`TextBookBloc` (visibleIndices, selectedIndex,
 /// highlightedLine, חיפוש, קישורים, פסיקות וכו') משתמש ב-**שורות מקור**
-/// כאינדקסים. הסגמנטים נחשבים רק כפריט-תצוגה ב-`ScrollablePositionedList`.
+/// כאינדקסים. הסגמנטים נחשבים רק כפריטי-תצוגה ברשימת הקריאה.
 ///
 /// התרגום בין שורות לפריטים נעשה רק ב-`LineScrollController`.
 /// **אסור** להזליג segmentIndex אל ה-state של ה-bloc. הוא מקומי לרינדור.
 library;
 
 import 'package:characters/characters.dart';
+import 'package:flutter/foundation.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
+import 'package:otzaria/text_book/models/content_line_changes.dart';
 import 'package:otzaria/text_book/utils/inline_notes_utils.dart' as notes;
 import 'package:otzaria/text_book/utils/reading_layout.dart';
 
 export 'package:otzaria/text_book/utils/reading_layout.dart';
+export 'package:otzaria/text_book/models/content_line_changes.dart';
 
 class ReadingLineRange {
   final int lineIndex;
@@ -62,6 +65,10 @@ class ReadingSegmentViewport {
   });
 }
 
+/// מעל מה שמוצג בבת אחת; בלי תקרה, גלילה בספר שלם שומרת עותק של כל
+/// טקסטו בפסקאות הממוזגות.
+const int kMaxBuiltReadingSegments = 256;
+
 /// פריטי הרינדור של [layout] מול התוכן הנוכחי. מספר הפריטים קבוע לפי
 /// הפריסה; פריט שחלק משורותיו לא נטען מסומן `isLoaded == false`.
 class ReadingSegments {
@@ -69,15 +76,58 @@ class ReadingSegments {
     required this.layout,
     required this.content,
     this.loadedLineFlags,
-  });
+    this.maxCachedSegments = kMaxBuiltReadingSegments,
+    this.maxCachedCharacters = 512 * 1024,
+    this.readerIdentity,
+    this.contentVersion = 0,
+    this.contentChanges,
+  }) : assert(maxCachedSegments > 0),
+       assert(maxCachedCharacters >= 0);
 
   final ReadingLayout layout;
   final List<String> content;
+  final Object? readerIdentity;
+  final int contentVersion;
+  final ContentLineChanges? contentChanges;
+
+  /// null מציין שאין דלתא ידועה מהתצלום המבוקש, ונדרשת השוואה מלאה.
+  List<ContentLineRange>? changedLinesSince(ReadingSegments before) {
+    if (readerIdentity != null &&
+        before.readerIdentity != null &&
+        !identical(readerIdentity, before.readerIdentity)) {
+      return null;
+    }
+    if (identical(content, before.content) &&
+        identical(loadedLineFlags, before.loadedLineFlags)) {
+      return const [];
+    }
+    final changes = contentChanges;
+    if (readerIdentity == null ||
+        !identical(readerIdentity, before.readerIdentity) ||
+        content.length != before.content.length ||
+        changes == null ||
+        changes.fromVersion != before.contentVersion ||
+        contentVersion == before.contentVersion) {
+      return null;
+    }
+    return changes.ranges;
+  }
 
   /// null = כל השורות טעונות.
   final List<bool>? loadedLineFlags;
 
+  final int maxCachedSegments;
+  final int maxCachedCharacters;
+
   final Map<int, ReadingSegment> _built = {};
+  final Set<int> _visibleItems = {};
+  int _cachedCharacters = 0;
+
+  @visibleForTesting
+  int get debugBuiltCount => _built.length;
+
+  @visibleForTesting
+  int get debugCachedCharacters => _cachedCharacters;
 
   int get length => layout.itemCount;
 
@@ -87,7 +137,40 @@ class ReadingSegments {
 
   ReadingSegment operator [](int item) {
     RangeError.checkValidIndex(item, this, 'item', length);
-    return _built[item] ??= _buildSegment(item);
+    final cached = _built.remove(item);
+    final segment = cached ?? _buildSegment(item);
+    _built[item] = segment;
+    if (cached == null) _cachedCharacters += segment.text.length;
+    _trimCache(keep: item);
+    return segment;
+  }
+
+  /// שומר את פריטי המסך גם כשהטקסט שלהם חורג מתקציב המטמון.
+  void retainVisibleItems(Iterable<int> items) {
+    _visibleItems
+      ..clear()
+      ..addAll(items);
+    _trimCache();
+  }
+
+  void _trimCache({int? keep}) {
+    var count = _built.length;
+    var characters = _cachedCharacters;
+    if (count <= maxCachedSegments && characters <= maxCachedCharacters) return;
+    final evicted = <int>[];
+    for (final entry in _built.entries) {
+      if (entry.key == keep || _visibleItems.contains(entry.key)) continue;
+      evicted.add(entry.key);
+      characters -= entry.value.text.length;
+      count--;
+      if (count <= maxCachedSegments && characters <= maxCachedCharacters) {
+        break;
+      }
+    }
+    for (final item in evicted) {
+      _built.remove(item);
+    }
+    _cachedCharacters = characters;
   }
 
   ReadingSegment get first => this[0];
@@ -162,15 +245,23 @@ ReadingSegments readingSegmentsOf(TextBookLoaded state) {
   final cached = _segmentsByContent[state.content];
   if (cached != null &&
       identical(cached.layout, layout) &&
-      identical(cached.loadedLineFlags, state.loadedLineFlags)) {
+      identical(cached.loadedLineFlags, state.loadedLineFlags) &&
+      identical(cached.readerIdentity, state.readerIdentity) &&
+      cached.contentVersion == state.contentVersion &&
+      identical(cached.contentChanges, state.contentChanges)) {
+    cached.retainVisibleItems(state.visibleIndices.map(layout.itemForLine));
     return cached;
   }
   final segments = ReadingSegments(
     layout: layout,
     content: state.content,
     loadedLineFlags: state.loadedLineFlags,
+    readerIdentity: state.readerIdentity,
+    contentVersion: state.contentVersion,
+    contentChanges: state.contentChanges,
   );
   _segmentsByContent[state.content] = segments;
+  segments.retainVisibleItems(state.visibleIndices.map(layout.itemForLine));
   return segments;
 }
 
@@ -264,12 +355,7 @@ typedef MeasuredLineExtent =
 int segmentIndexForLine(ReadingSegments segments, int lineIndex) =>
     segments.layout.itemForLine(lineIndex);
 
-/// השבר היחסי של שורת [lineIndex] בתוך הסגמנט [segment] (0..1).
-///
-/// משמש לדיוק עדין של גלילה: אחרי שגולשים לסגמנט, ה-`scrollOffsetController`
-/// מתקדם בשבר הזה בתוך הסגמנט כדי שהשורה הספציפית תהיה גלויה.
-/// [intraLineFraction] (0..1) מוסיף דיוק לתוך השורה עצמה — מיקום ההתאמה בתוך
-/// הפסקה — כדי שהגלילה תגיע למילה ולא לתחילת הפסקה.
+/// השבר היחסי של שורת מקור בתוך הפריט; [intraLineFraction] מוסיף מיקום בתוכה.
 double lineFractionWithinSegment(
   ReadingSegment segment,
   int lineIndex, {
@@ -326,8 +412,7 @@ double lineFractionInItem(
   int item,
   MeasuredLineExtent? measure,
 ) {
-  final lineCount = segment.sourceLineIndices.length;
-  if (measure == null || !segment.isLoaded || lineCount <= 1) return null;
+  if (measure == null || !segment.isLoaded) return null;
   if (measure(item, segment.startLineIndex) == null) return null;
   return (offset) =>
       measure(item, segment.sourceLineIndices[offset]) ??
@@ -368,10 +453,14 @@ List<int> sourceLineIndicesForSegmentViewports(
   MeasuredLineExtent? measure,
 }) {
   final sourceIndices = <int>{};
+  final measuredViewports = measure == null
+      ? null
+      : <int, ReadingSegmentViewport>{};
   for (final viewport in viewports) {
     if (viewport.segmentIndex < 0 || viewport.segmentIndex >= segments.length) {
       continue;
     }
+    measuredViewports?[viewport.segmentIndex] = viewport;
 
     final segment = segments[viewport.segmentIndex];
     final lineCount = segment.sourceLineIndices.length;
@@ -474,5 +563,23 @@ List<int> sourceLineIndicesForSegmentViewports(
       ),
     );
   }
-  return sourceIndices.toList()..sort();
+  var result = sourceIndices.toList();
+  if (measure != null) {
+    final visible = result.where((line) {
+      final item = segments.layout.itemForLine(line);
+      if (!segments[item].isLoaded) return true;
+      final bounds = measure(item, line);
+      if (bounds == null) return true;
+      final viewport = measuredViewports![item]!;
+      final extent = viewport.trailingEdge - viewport.leadingEdge;
+      if (!extent.isFinite || extent <= 0) return true;
+      final leading = viewport.leadingEdge + extent * bounds.top;
+      final trailing = viewport.leadingEdge + extent * bounds.bottom;
+      return trailing > 0 &&
+          leading < 1 &&
+          !(isLineRemnant?.call(leading, trailing) ?? false);
+    }).toList();
+    if (visible.isNotEmpty) result = visible;
+  }
+  return result..sort();
 }

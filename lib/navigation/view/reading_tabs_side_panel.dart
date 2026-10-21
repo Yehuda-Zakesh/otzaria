@@ -133,7 +133,7 @@ class _ReadingTabsSidePanelState extends State<ReadingTabsSidePanel> {
                   const Divider(height: 1),
                   Expanded(
                     child: KeyedSubtree(
-                      key: tourReadingTabsSideTargetKey,
+                      key: TourTargetKeys.of(context).readingTabsSide,
                       child: VerticalReadingTabStrip(
                         collapsed: collapsed,
                         width: width,

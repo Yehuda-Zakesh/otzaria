@@ -56,7 +56,7 @@ class SystemAccountProbe {
 
   const SystemAccountProbe._();
 
-  /// `whoami.exe` מתוך System32, כמו ב-`resolveWindowsRegistryExecutable`.
+  /// `whoami.exe` מתוך System32.
   @visibleForTesting
   static String get whoamiExecutable => p.join(
     Platform.environment['SystemRoot'] ?? r'C:\Windows',

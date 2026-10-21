@@ -1,5 +1,5 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
@@ -26,11 +26,10 @@ void main() {
       final booksByPath = SearchBloc.bookForIndexedFilePathMap(library);
 
       expect(
-        booksByPath[IndexingRepository.buildIndexedBookFilePath(official)],
+        booksByPath[BookIdentity.indexedFilePath(official)],
         same(official),
       );
-      final resolved =
-          booksByPath[IndexingRepository.buildIndexedBookFilePath(personal)];
+      final resolved = booksByPath[BookIdentity.indexedFilePath(personal)];
       expect(resolved, same(personal));
       expect(resolved!.isUserBook, isTrue);
     });
@@ -50,7 +49,7 @@ void main() {
 
   // האינדקס הוא מטמון של ה-DB ומפתחו הוא מזהה שורה. החלפת ספרייה מקצה את
   // המזהה לספר אחר, בעוד הכרטיס עדיין מציג את הכותרת מהמסמך הישן.
-  group('IndexingRepository.bookForIndexedDocument — שער סנכרון האינדקס', () {
+  group('BookIdentity.bookForIndexedDocument — שער סנכרון האינדקס', () {
     late Library library;
     late TextBook rashiIsaiah;
     late Map<String, Book> booksByPath;
@@ -67,9 +66,9 @@ void main() {
 
     test('מפתח שכותרתו תואמת מחזיר את הספר עצמו', () {
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           booksByPath,
-          indexedFilePath: IndexingRepository.buildIndexedBookFilePath(
+          indexedFilePath: BookIdentity.indexedFilePath(
             rashiIsaiah,
           ),
           indexedTitle: 'רש"י על ישעיהו',
@@ -87,7 +86,7 @@ void main() {
       );
 
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           SearchBloc.bookForIndexedFilePathMap(staleLibrary),
           indexedFilePath: 'id:1234',
           indexedTitle: 'רש"י על ישעיהו',
@@ -98,7 +97,7 @@ void main() {
 
     test('מפתח שאינו בקטלוג מחזיר null', () {
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           booksByPath,
           indexedFilePath: 'id:999999',
           indexedTitle: 'רש"י על ישעיהו',
@@ -109,7 +108,7 @@ void main() {
 
     test('מפה שטרם נבנתה (הספרייה בטעינה) מחזירה null ואינה זורקת', () {
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           null,
           indexedFilePath: 'id:1234',
           indexedTitle: 'רש"י על ישעיהו',
@@ -120,7 +119,7 @@ void main() {
 
     test('ההתאמה מדויקת — רווח נוסף בכותרת אינו נחשב תואם', () {
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           booksByPath,
           indexedFilePath: 'id:1234',
           indexedTitle: 'רש"י על ישעיהו ',
@@ -131,7 +130,7 @@ void main() {
 
     test('כותרת ריקה במסמך אינה פותחת ספר אקראי', () {
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           booksByPath,
           indexedFilePath: 'id:1234',
           indexedTitle: '',
@@ -148,18 +147,18 @@ void main() {
       mixed.books.addAll([official, personal]);
       final byPath = SearchBloc.bookForIndexedFilePathMap(mixed);
 
-      final resolvedPersonal = IndexingRepository.bookForIndexedDocument(
+      final resolvedPersonal = BookIdentity.bookForIndexedDocument(
         byPath,
-        indexedFilePath: IndexingRepository.buildIndexedBookFilePath(personal),
+        indexedFilePath: BookIdentity.indexedFilePath(personal),
         indexedTitle: 'שבת',
       );
       expect(resolvedPersonal, same(personal));
       expect(resolvedPersonal!.isUserBook, isTrue);
 
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           byPath,
-          indexedFilePath: IndexingRepository.buildIndexedBookFilePath(
+          indexedFilePath: BookIdentity.indexedFilePath(
             official,
           ),
           indexedTitle: 'שבת',
@@ -176,7 +175,7 @@ void main() {
       final byPath = SearchBloc.bookForIndexedFilePathMap(pdfLibrary);
 
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           byPath,
           indexedFilePath: path,
           indexedTitle: 'שבת',
@@ -185,7 +184,7 @@ void main() {
       );
       // אותו נתיב, קובץ שהוחלף בספר אחר — הכרטיס לא יפתח את החדש.
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           byPath,
           indexedFilePath: path,
           indexedTitle: 'עירובין',
@@ -203,11 +202,11 @@ void main() {
       );
       final fileLibrary = Library(categories: []);
       fileLibrary.books.add(fileBook);
-      final key = IndexingRepository.buildIndexedBookFilePath(fileBook);
+      final key = BookIdentity.indexedFilePath(fileBook);
       final byPath = SearchBloc.bookForIndexedFilePathMap(fileLibrary);
 
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           byPath,
           indexedFilePath: key,
           indexedTitle: 'ספר אישי',
@@ -215,7 +214,7 @@ void main() {
         same(fileBook),
       );
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           byPath,
           indexedFilePath: key,
           indexedTitle: 'ספר אחר',
@@ -234,7 +233,7 @@ void main() {
       final byPath = SearchBloc.bookForIndexedFilePathMap(externalLibrary);
 
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           byPath,
           indexedFilePath: 'ext:hb:77',
           indexedTitle: 'ספר חיצוני',
@@ -242,7 +241,7 @@ void main() {
         same(external),
       );
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           byPath,
           indexedFilePath: 'ext:hb:77',
           indexedTitle: 'ספר שהוחלף',
@@ -253,7 +252,7 @@ void main() {
 
     test('מפה ריקה מחזירה null', () {
       expect(
-        IndexingRepository.bookForIndexedDocument(
+        BookIdentity.bookForIndexedDocument(
           const {},
           indexedFilePath: 'id:1234',
           indexedTitle: 'רש"י על ישעיהו',

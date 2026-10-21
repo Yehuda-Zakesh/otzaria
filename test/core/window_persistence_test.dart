@@ -1,6 +1,10 @@
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/core/user_state/user_state_database.dart';
+import 'package:otzaria/core/user_state/window_bounds.dart';
+import 'package:otzaria/core/user_state/window_session_store.dart';
 import 'package:otzaria/core/window_persistence.dart';
 import 'package:otzaria/core/windowing/app_window_controller.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
@@ -89,12 +93,101 @@ void main() {
       expect(window.calls, isEmpty);
     });
   });
+
+  group('WindowPersistenceBinding — מופע לכל חלון', () {
+    late Directory tmp;
+    late UserStateDatabase database;
+    late WindowSessionStore sessions;
+
+    setUp(() async {
+      tmp = Directory.systemTemp.createTempSync('otzaria_window_persist_');
+      database = UserStateDatabase.openAt('${tmp.path}/user_state.db');
+      await database.database;
+      sessions = WindowSessionStore(database: database);
+    });
+
+    tearDown(() {
+      database.close();
+      if (tmp.existsSync()) tmp.deleteSync(recursive: true);
+    });
+
+    WindowPersistenceBinding bindingFor(
+      int? slot,
+      Rect bounds, {
+      double Function()? devicePixelRatio,
+    }) {
+      final window = _RecordingWindow(visible: true, bounds: bounds);
+      return WindowPersistenceBinding(
+        controller: window,
+        geometry: window,
+        slot: () => slot,
+        sessions: sessions,
+        devicePixelRatio: devicePixelRatio,
+      );
+    }
+
+    Future<Rect?> savedBounds(int slot) async {
+      final bounds = WindowBounds.decode(
+        (await sessions.load(slot))?.boundsJson,
+      );
+      if (bounds == null) return null;
+      return Rect.fromLTWH(
+        bounds.left!,
+        bounds.top!,
+        bounds.width!,
+        bounds.height!,
+      );
+    }
+
+    test('כל חלון שומר את הגבולות שלו לשורה שלו', () async {
+      const a = Rect.fromLTWH(10, 20, 800, 600);
+      const b = Rect.fromLTWH(900, 40, 640, 480);
+      bindingFor(1, a).scheduleSave();
+      bindingFor(2, b).scheduleSave();
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+
+      expect(await savedBounds(1), a);
+      expect(await savedBounds(2), b);
+    });
+
+    test('מצב splash של חלון אחד אינו חוסם שמירה של אחר', () async {
+      const b = Rect.fromLTWH(900, 40, 640, 480);
+      final first = bindingFor(1, const Rect.fromLTWH(0, 0, 500, 500))
+        ..splashMode = true;
+      first.scheduleSave();
+      bindingFor(2, b).scheduleSave();
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+
+      expect(await savedBounds(1), isNull);
+      expect(await savedBounds(2), b);
+    });
+
+    test('חלון בלי משבצת אינו שומר', () async {
+      bindingFor(null, const Rect.fromLTWH(0, 0, 500, 500)).scheduleSave();
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+
+      expect(await sessions.loadAll(), isEmpty);
+    });
+
+    test('כל חלון שומר את ה-DPR של התצוגה שלו', () async {
+      const bounds = Rect.fromLTWH(10, 20, 800, 600);
+      bindingFor(1, bounds, devicePixelRatio: () => 1.5).scheduleSave();
+      bindingFor(2, bounds, devicePixelRatio: () => 2).scheduleSave();
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+
+      double? savedDpr(WindowSession? session) =>
+          WindowBounds.decode(session?.boundsJson)?.dpr;
+      expect(savedDpr(await sessions.load(1)), 1.5);
+      expect(savedDpr(await sessions.load(2)), 2);
+    });
+  });
 }
 
 class _RecordingWindow implements AppWindowController, AppWindowGeometry {
-  _RecordingWindow({required this.visible});
+  _RecordingWindow({required this.visible, this.bounds = Rect.zero});
 
   final bool visible;
+  final Rect bounds;
   final List<String> calls = [];
 
   @override
@@ -115,7 +208,7 @@ class _RecordingWindow implements AppWindowController, AppWindowGeometry {
   @override
   Future<void> focus() async {}
   @override
-  Future<Rect> getBounds() async => Rect.zero;
+  Future<Rect> getBounds() async => bounds;
   @override
   Future<bool> isFullScreen() async => false;
   @override

@@ -1,3 +1,4 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'dart:async';
 import 'dart:developer' as developer;
 import 'dart:io';
@@ -11,7 +12,6 @@ import 'package:otzaria/library/bloc/library_event.dart';
 import 'package:otzaria/library/bloc/library_state.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
-import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/data/repository/book_search_worker.dart';
 import 'package:otzaria/find_ref/repository/find_ref_repository.dart';
@@ -253,7 +253,7 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
     return [
       for (final book in books)
         if (changedBookKeys.contains(
-              IndexingRepository.catalogueOrderKey(book),
+              BookIdentity.keyOf(book),
             ) ||
             switch (book.source) {
               AttachedBookSource(:final slug) => changedAttachedSlugs.contains(
@@ -290,7 +290,7 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
       final previousLibrary = await _repository.librarySnapshotForRefresh();
       final pathsBeforeRefresh = <String, String>{
         for (final b in previousLibrary?.getIndexableBooks() ?? const <Book>[])
-          IndexingRepository.catalogueOrderKey(b): _indexedCategoryPath(b),
+          BookIdentity.keyOf(b): _indexedCategoryPath(b),
       };
 
       final libraryPath = Settings.getValue<String>(
@@ -323,7 +323,7 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
       final newBooksToIndex = <Book>[];
       final movedBookKeys = <String>{};
       for (final b in indexableBooks) {
-        final key = IndexingRepository.catalogueOrderKey(b);
+        final key = BookIdentity.keyOf(b);
         final before = pathsBeforeRefresh[key];
         if (before == null) {
           newBooksToIndex.add(b);

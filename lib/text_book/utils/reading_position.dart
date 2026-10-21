@@ -2,7 +2,7 @@
 library;
 
 import 'package:flutter/foundation.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 import 'package:otzaria/text_book/utils/reading_segment_navigation.dart';
 import 'package:otzaria/text_book/utils/reading_segments.dart';
@@ -75,6 +75,28 @@ class ReadingAnchor {
   final int line;
   final double intraLineFraction;
   final double alignment;
+
+  Map<String, Object> toJson() => {
+    'line': line,
+    'intraLineFraction': intraLineFraction,
+    'alignment': alignment,
+  };
+
+  static ReadingAnchor? tryFromJson(Object? value) {
+    if (value is! Map) return null;
+    final line = value['line'];
+    final fraction = value['intraLineFraction'];
+    final alignment = value['alignment'];
+    if (line is! int || line < 0 || fraction is! num || alignment is! num) {
+      return null;
+    }
+    if (!fraction.isFinite || !alignment.isFinite) return null;
+    return ReadingAnchor(
+      line: line,
+      intraLineFraction: fraction.toDouble().clamp(0, 1),
+      alignment: alignment.toDouble(),
+    );
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -179,15 +201,13 @@ ReadingPosition? readingPositionFromItems(
   final item = itemPosition.index;
   final extent = itemPosition.itemTrailingEdge - itemPosition.itemLeadingEdge;
   final start = lineFractionInItem(segments, item, line, measure: measure);
-  final end = segments[item].sourceLineIndices.length <= 1
-      ? 1.0
-      : lineFractionInItem(
-          segments,
-          item,
-          line,
-          intraLineFraction: 1,
-          measure: measure,
-        );
+  final end = lineFractionInItem(
+    segments,
+    item,
+    line,
+    intraLineFraction: 1,
+    measure: measure,
+  );
   return (
     leading: itemPosition.itemLeadingEdge + extent * start,
     trailing: itemPosition.itemLeadingEdge + extent * end,

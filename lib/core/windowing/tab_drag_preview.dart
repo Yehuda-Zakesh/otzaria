@@ -4,17 +4,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
-/// גבול הציור של אזור התוכן.
-///
-/// ⚠️ מפתח יחיד ולא מפה: יש בדיוק אזור תוכן אחד בכל חלון, וכל חלון הוא
-/// isolate נפרד — כלומר אין התנגשות בין חלונות.
-///
-/// ⚠️ ה-[RepaintBoundary] שמחזיק אותו אינו רק לצילום. אזור התוכן הוא
-/// תת-העץ הכבד בתוכנה, וגבול ציור סביבו מבודד את הצטיירותו מסרגל
-/// הכרטיסיות שמעליו — כלומר הוא משלם על עצמו גם כשאין גרירה.
-///
-final GlobalKey windowContentBoundaryKey = GlobalKey();
-
 /// גבולות ציור לכרטיסיות, לצילום תוכן הכרטיסיה הנגררת.
 /// כרטיסיה שאינה מותקנת משתמשת ב-[composeTabContentPlaceholder].
 class TabContentBoundaries {

@@ -1,3 +1,4 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'dart:async';
 
 import 'package:otzaria/plugins/models/plugin_search_field_action.dart';
@@ -13,7 +14,6 @@ import 'package:otzaria/core/messages/pdf_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
-import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/indexing/models/index_update_mode.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/pdf_book/bloc/pdf_book_bloc.dart';
@@ -38,7 +38,7 @@ import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
 import 'package:otzaria/widgets/navigation/search_pane_base.dart';
 import 'package:otzaria/widgets/navigation/search_result_nav_button.dart';
 import 'package:pdfrx/pdfrx.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 
 class PdfBookSearchView extends StatefulWidget {
@@ -335,7 +335,7 @@ class PdfBookSearchViewState extends State<PdfBookSearchView> {
 
   /// המפתח שבו רשומות מסמכי הספר באינדקס. לספר בעל מזהה חיצוני זה אינו
   /// נתיב הקובץ, ולכן השוואה ל-[pdfFilePath] הייתה משליכה את כל התוצאות.
-  String get _indexedFilePath => IndexingRepository.indexedPdfFilePath(
+  String get _indexedFilePath => BookIdentity.indexedPdfFilePath(
     externalLibraryId: widget.externalLibraryId,
     filePath: widget.pdfFilePath,
     source: widget.source,

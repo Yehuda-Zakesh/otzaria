@@ -10,7 +10,11 @@ import 'package:otzaria/tools/calendar/services/google_calendar_service.dart';
 import 'package:otzaria/tools/calendar/services/notification_service.dart';
 import 'package:otzaria/tools/calendar/bloc/calendar_cubit.dart';
 import 'package:kosher_dart/kosher_dart.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_owner.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_store.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
+
+import '../support/calendar_alerts_fakes.dart';
 import 'package:timezone/timezone.dart' as tz;
 
 class _CountingEvent extends CustomEvent {
@@ -105,7 +109,7 @@ class _FakeNotificationService implements NotificationService {
   bool get isInitialized => true;
 
   @override
-  Future<void> cancelNotification(int id) async {}
+  Future<void> cancelNotifications(Iterable<int> ids) async {}
 
   @override
   Future<bool> checkPermissions() async => false;
@@ -114,33 +118,6 @@ class _FakeNotificationService implements NotificationService {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
-/// רושם את מועדי ההתראות שתוזמנו לאירועים.
-class _RecordingNotificationService extends _FakeNotificationService {
-  final scheduledDates = <DateTime>[];
-
-  @override
-  Future<void> scheduleNotification({
-    required int id,
-    required String title,
-    required String body,
-    required DateTime eventDate,
-    required int reminderMinutes,
-    bool soundEnabled = true,
-  }) async {
-    scheduledDates.add(eventDate);
-  }
-}
-
-class _NotificationsEnabledSettings extends _InMemorySettingsRepository {
-  @override
-  Future<Map<String, dynamic>> loadSettings() async => {
-    ...await super.loadSettings(),
-    'calendarNotificationsEnabled': true,
-  };
-}
-
-/// SettingsRepository מינימלי בזיכרון — שומר ערכים שכתבנו וחושף אותם
-/// דרך getters לאסרציות בטסטים.
 class _InMemorySettingsRepository implements SettingsRepository {
   String calendarZmanAlertsJson = '{}';
   String calendarEnabledZmanim = '';
@@ -1603,17 +1580,20 @@ void main() {
       CustomEvent event, {
       DateTime? notificationNow,
     }) async {
-      final settings = _NotificationsEnabledSettings()
-        ..storedEventsJson = jsonEncode([event.toJson()]);
-      final notifications = _RecordingNotificationService();
-      final cubit = CalendarCubit(
-        settingsRepository: settings,
-        notificationService: notifications,
+      final notifications = WindowsLikeNotifications();
+      final owner = CalendarAlertsOwner(
+        store: MemoryAlertsStore({
+          CalendarAlertsKeys.events: jsonEncode([event.toJson()]),
+        }),
+        notifications: notifications,
+        pluginEvents: () async => const [],
         now: () => notificationNow ?? DateTime.now(),
+        broadcast: (_) {},
+        dedupeDuplicates: false,
       );
-      await Future.delayed(const Duration(milliseconds: 100));
-      await cubit.close();
-      return notifications.scheduledDates;
+      await owner.restoreIfNeeded();
+      owner.dispose();
+      return [for (final call in notifications.scheduled) call.eventDate];
     }
 
     DateTime at10(DateTime day, [int addDays = 0]) =>

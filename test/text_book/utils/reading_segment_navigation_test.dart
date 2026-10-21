@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/text_book/utils/reading_segment_navigation.dart';
 import 'package:otzaria/text_book/utils/reading_segments.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 import '../../test_helpers/reading_toc.dart';
 
@@ -32,7 +32,6 @@ void main() {
     'scrollToSourceLine: duration zero + סגמנט גלוי + fraction>0 לא קורס',
     (tester) async {
       final itemScrollController = ItemScrollController();
-      final scrollOffsetController = ScrollOffsetController();
       final positionsListener = ItemPositionsListener.create();
 
       final lines = List.generate(20, (i) => 'שורה מספר $i');
@@ -45,7 +44,6 @@ void main() {
               height: 400,
               child: ScrollablePositionedList.builder(
                 itemScrollController: itemScrollController,
-                scrollOffsetController: scrollOffsetController,
                 itemPositionsListener: positionsListener,
                 itemCount: lines.length,
                 // פריט גבוה מה-viewport כדי שדיוק תוך-סגמנטי אכן יגלול.
@@ -63,7 +61,6 @@ void main() {
       // הרצה במקביל ל-pump כדי שאנימציית הדיוק תושלם.
       final scrollFuture = scrollToSourceLine(
         scrollController: itemScrollController,
-        scrollOffsetController: scrollOffsetController,
         positionsListener: positionsListener,
         segments: segments,
         lineIndex: 0,
@@ -90,10 +87,9 @@ void main() {
   );
 
   testWidgets(
-    'scrollToSourceLine: יעד כותרת (ללא דיוק תוך-שורתי) מתוקן לעוגן גם כשהגלילה הופרעה',
+    'scrollToSourceLine: ניווט חדש מבטל את הישן בלי תיקון שמחזיר אליו',
     (tester) async {
       final itemScrollController = ItemScrollController();
-      final scrollOffsetController = ScrollOffsetController();
       final positionsListener = ItemPositionsListener.create();
 
       final lines = List.generate(30, (i) => 'שורה מספר $i');
@@ -106,7 +102,6 @@ void main() {
               height: 400,
               child: ScrollablePositionedList.builder(
                 itemScrollController: itemScrollController,
-                scrollOffsetController: scrollOffsetController,
                 itemPositionsListener: positionsListener,
                 itemCount: lines.length,
                 itemBuilder: (context, index) =>
@@ -120,7 +115,6 @@ void main() {
 
       final scrollFuture = scrollToSourceLine(
         scrollController: itemScrollController,
-        scrollOffsetController: scrollOffsetController,
         positionsListener: positionsListener,
         segments: segments,
         lineIndex: 7,
@@ -128,8 +122,7 @@ void main() {
         duration: const Duration(milliseconds: 250),
       );
 
-      // הפרעה באמצע האנימציה (מדמה reanchor/רה-פריסה מטעינה הדרגתית):
-      // היעד נשאר גלוי אך רחוק מקו העוגן.
+      // ניווט חדש מחליף את הקודם גם כשהוא בוחר את אותו פריט ביישור אחר.
       await tester.pump(const Duration(milliseconds: 100));
       itemScrollController.jumpTo(index: 7, alignment: 0.5);
 
@@ -142,8 +135,8 @@ void main() {
       );
       expect(
         position.itemLeadingEdge,
-        closeTo(kReadingAnchorAlignment, kAnchorLandingEpsilon),
-        reason: 'ניווט מכותרות חייב להתאושש מהפרעה ולנחות על קו העוגן',
+        closeTo(0.5, kAnchorLandingEpsilon),
+        reason: 'ניווט שבוטל לא רשאי לתקן את המיקום שבחר הניווט החדש',
       );
     },
   );
@@ -152,7 +145,6 @@ void main() {
     'scrollToSourceLine: רשימה שירדה מהעץ באמצע האנימציה לא זורקת',
     (tester) async {
       final itemScrollController = ItemScrollController();
-      final scrollOffsetController = ScrollOffsetController();
       final positionsListener = ItemPositionsListener.create();
 
       final lines = List.generate(20, (i) => 'שורה מספר $i');
@@ -165,7 +157,6 @@ void main() {
             child: withList
                 ? ScrollablePositionedList.builder(
                     itemScrollController: itemScrollController,
-                    scrollOffsetController: scrollOffsetController,
                     itemPositionsListener: positionsListener,
                     itemCount: lines.length,
                     // פריט גבוה מה-viewport: היעד גלוי, ולכן הגלילה עוברת
@@ -183,7 +174,6 @@ void main() {
 
       final scrollFuture = scrollToSourceLine(
         scrollController: itemScrollController,
-        scrollOffsetController: scrollOffsetController,
         positionsListener: positionsListener,
         segments: segments,
         lineIndex: 0,
@@ -217,7 +207,6 @@ void main() {
       // issue #1973: טעינת רקע ממלאת פסקאות לפני היעד תוך כדי הגלילה אליו;
       // מספור הפריטים יציב, והיעד נמדד מול התוכן העדכני.
       final itemScrollController = ItemScrollController();
-      final scrollOffsetController = ScrollOffsetController();
       final positionsListener = ItemPositionsListener.create();
 
       final lines = [
@@ -269,7 +258,6 @@ void main() {
                   setListState = setState;
                   return ScrollablePositionedList.builder(
                     itemScrollController: itemScrollController,
-                    scrollOffsetController: scrollOffsetController,
                     itemPositionsListener: positionsListener,
                     itemCount: segments.length,
                     // פריט גבוה מה-viewport כדי שדיוק תוך-סגמנטי אכן יגלול.
@@ -289,7 +277,6 @@ void main() {
       const targetLine = 6;
       final scrollFuture = scrollToSourceLine(
         scrollController: itemScrollController,
-        scrollOffsetController: scrollOffsetController,
         positionsListener: positionsListener,
         segments: partial,
         latestSegments: () => segments,
@@ -363,6 +350,54 @@ void main() {
     test('פתיחה בפריט אחר נשארת על קו העוגן', () {
       expect(initialReadingAlignment(1), kReadingAnchorAlignment);
       expect(initialReadingAlignment(120), kReadingAnchorAlignment);
+    });
+  });
+
+  group('readingExtentEstimator', () {
+    const plain = 'בראשית ברא אלהים את השמים ואת הארץ והארץ היתה תהו ובהו';
+    const vocalized =
+        'בְּרֵאשִׁ֖ית בָּרָ֣א אֱלֹהִ֑ים אֵ֥ת הַשָּׁמַ֖יִם וְאֵ֥ת הָאָֽרֶץ '
+        'וְהָאָ֗רֶץ הָיְתָ֥ה תֹ֙הוּ֙ וָבֹ֔הוּ';
+
+    test('אינו בונה פסקאות', () {
+      final segments = buildReadingSegments(
+        [for (var i = 0; i < 2000; i++) plain],
+        continuous: true,
+        breakLines: [for (var i = 0; i < 2000; i += 10) i],
+      );
+      final estimate = readingExtentEstimator(segments, 20);
+      for (var i = 0; i < segments.length; i++) {
+        estimate(i, 400);
+      }
+      expect(segments.debugBuiltCount, 0);
+    });
+
+    test('ניקוד, טעמים ותגיות אינם מגדילים את ההערכה', () {
+      expect(visibleReadingCharCount(vocalized), plain.length);
+      expect(visibleReadingCharCount('<b>$plain</b>'), plain.length);
+      final lines = [
+        for (var i = 0; i < 20; i++) plain,
+        for (var i = 0; i < 20; i++) '<span>$vocalized</span>',
+      ];
+      final segments = buildReadingSegments(
+        lines,
+        continuous: true,
+        breakLines: const [0, 20],
+      );
+      final estimate = readingExtentEstimator(segments, 20);
+      expect(estimate(3, 400) / estimate(1, 400), closeTo(1, 0.05));
+    });
+
+    test('פריט שלא נטען מוערך לפי האורך הממוצע של הטעונים', () {
+      final lines = [for (var i = 0; i < 30; i++) plain];
+      final segments = buildReadingSegments(
+        lines,
+        continuous: true,
+        breakLines: const [0, 10, 20],
+        loadedLineFlags: [for (var i = 0; i < 30; i++) i < 20],
+      );
+      final estimate = readingExtentEstimator(segments, 20);
+      expect(estimate(5, 400), estimate(1, 400));
     });
   });
 }

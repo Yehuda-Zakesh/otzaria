@@ -1,4 +1,4 @@
-import 'package:otzaria/indexing/repository/indexing_repository.dart';
+import 'package:otzaria/data/book_identity.dart';
 import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/plugins/models/plugin_book_identity.dart';
@@ -321,7 +321,7 @@ class PluginSearchApi {
   }) {
     // אינדקס שאינו מסונכרן ממפה את מפתח המסמך לספר אחר; עדיף להחזיר לתוסף
     // זהות ריקה מאשר לייחס לתוצאה את ה-id של ספר זר.
-    final resolved = IndexingRepository.validatedIndexedBook(
+    final resolved = BookIdentity.validatedIndexedBook(
       book,
       indexedTitle: result.title,
     );
@@ -360,7 +360,7 @@ class PluginSearchApi {
     engine.MergedSibling sibling,
     Map<String, Book> booksByPath,
   ) {
-    final book = IndexingRepository.bookForIndexedDocument(
+    final book = BookIdentity.bookForIndexedDocument(
       booksByPath,
       indexedFilePath: sibling.filePath,
       indexedTitle: sibling.title,
@@ -387,7 +387,7 @@ class PluginSearchApi {
     final map = <String, Book>{};
     for (final book in library.getAllBooks()) {
       map.putIfAbsent(
-        IndexingRepository.buildIndexedBookFilePath(book),
+        BookIdentity.indexedFilePath(book),
         () => book,
       );
     }

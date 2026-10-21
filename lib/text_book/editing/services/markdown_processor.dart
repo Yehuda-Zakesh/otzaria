@@ -2,10 +2,6 @@
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as html_dom;
 
-// אין צורך בייבוא שאינו בשימוש
-// import '../models/editor_settings.dart';
-// import 'link_sanitizer.dart';
-
 /// Service for processing and sanitizing HTML content directly from the editor.
 class MarkdownProcessor {
   const MarkdownProcessor();

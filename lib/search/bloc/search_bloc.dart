@@ -1,8 +1,8 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/search/bloc/search_event.dart';
 import 'package:otzaria/search/bloc/search_state.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
@@ -1263,7 +1263,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
 
     for (final book in library.getIndexableBooks()) {
       booksByIndexedFilePath.putIfAbsent(
-        IndexingRepository.buildIndexedBookFilePath(book),
+        BookIdentity.indexedFilePath(book),
         () => book,
       );
     }

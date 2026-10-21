@@ -1,14 +1,14 @@
 import 'package:flutter/widgets.dart';
 import 'package:otzaria/text_book/utils/reading_segments.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:otzaria/widgets/lists/jump_aware_item_scroll_controller.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
-/// קו העוגן (חלק מ-0..1 מגובה ה-viewport) שאליו הניווט מיישר את תחילת הקטע,
-/// וגם הקו שלפיו נקבע "המיקום הנוכחי" בספר (ההדגשה בסרגל הניווט). שני הצדדים
-/// חייבים להשתמש באותו ערך כדי שההדגשה תתאים בדיוק למקום שהניווט מוביל אליו.
+export 'package:otzaria/text_book/utils/reading_extent_estimates.dart';
+
+/// קו היישור לניווט ולמדידת מיקום הקריאה, כחלק מגובה התצוגה.
 const double kReadingAnchorAlignment = 0.05;
 
-/// היישור שבו נפתחת רשימת הקריאה. מעל הפריט הראשון אין תוכן, ולכן קו העוגן
-/// אינו בר-השגה שם: הפתיחה מציגה רווח ריק שנעלם בגלילה הראשונה ואינו חוזר.
+/// הפריט הראשון נפתח בקצה, בלי להוסיף רווח שאי אפשר לחזור אליו בגלילה.
 double initialReadingAlignment(int initialIndex) =>
     initialIndex == 0 ? 0 : kReadingAnchorAlignment;
 
@@ -16,17 +16,14 @@ double initialReadingAlignment(int initialIndex) =>
 /// וברירת המחדל של החבילה (2) בונה כחמישה מסכים של פסקאות.
 const double kReaderCacheExtentScreens = 1.5;
 
-/// קו העוגן לניווט אל תוצאת חיפוש — ממקם את המילה שנמצאה סביב מרכז-עליון
-/// התצוגה (ולא בראש), כדי שיהיה הקשר גם מעל המילה. זהה לסרגל התוצאות בחלונית
-/// ולפתיחת ספר מהחיפוש הכללי.
+/// יישור תוצאת חיפוש משאיר הקשר מעל המילה שנמצאה.
 const double kSearchResultAnchorAlignment = 0.35;
 
 /// סבילות סיווג סביב קו העוגן. חייבת להיות גדולה מ-[kAnchorLandingEpsilon]
 /// (שגיאת נחיתה מותרת) וקטנה מגובה שורת טקסט (~0.025) - אחרת הסיווג מתהפך.
 const double _anchorRemnantTolerance = 0.008;
 
-/// סף עצירה לדיוק העדין האיטרטיבי (חלק מה-viewport): מתחת למרחק הזה מהעוגן
-/// הניווט נחשב "הגיע". חייב להישאר קטן מ-[_anchorRemnantTolerance].
+/// סבילות הנחיתה כחלק מהתצוגה; קטנה מסבילות הסיווג של שייר פסקה.
 const double kAnchorLandingEpsilon = 0.003;
 
 /// כמה מהקטע (חלק מה-viewport) נמצא ב"אזור הקריאה" - מתחת לקו העוגן.
@@ -58,30 +55,30 @@ Future<void> closePaneAfterNavigation({
   }
 }
 
-ItemPosition? _findPosition(ItemPositionsListener listener, int segmentIndex) {
-  for (final position in listener.itemPositions.value) {
-    if (position.index == segmentIndex) {
-      return position;
-    }
-  }
-  return null;
-}
+/// פותר נקודה בשורת מקור לאחר פריסת פריט הרשימה ולפני ציורו.
+TargetRectResolver readingAnchorTargetRectResolver({
+  required ReadingSegments Function() segments,
+  required int lineIndex,
+  double intraLineFraction = 0,
+  MeasuredLineExtent? measure,
+  bool Function()? isCurrent,
+}) => (item, box) {
+  if (!(isCurrent?.call() ?? true)) return null;
+  final current = segments();
+  if (current.isEmpty) return null;
+  final line = lineIndex.clamp(0, current.layout.lineCount - 1);
+  if (current.layout.itemForLine(line) != item) return null;
+  final within = intraLineFraction.clamp(0.0, 1.0);
+  final measured = measure?.call(item, line);
+  final fraction = measured == null
+      ? lineFractionInItem(current, item, line, intraLineFraction: within)
+      : measured.top + within * (measured.bottom - measured.top);
+  return Rect.fromLTWH(0, fraction * box.size.height, 0, 0);
+};
 
-/// גלילה לשורת מקור [lineIndex] תוך תרגום אוטומטי לסגמנט.
-///
-/// [intraLineFraction] (0..1) הוא מיקום היעד בתוך השורה (למשל מילת חיפוש בתוך
-/// פסקה ארוכה). כשהסגמנט כבר גלוי מתבצעת גלילה יחסית אחת ישירות אל היעד — בלי
-/// קפיצה לתחילת הסגמנט ואז תיקון — כדי שלא ייראה "זיגזג" כשמתחילים מתחת ליעד.
-///
-/// הנחיתה נמדדת ומתוקנת גם ליעד ללא דיוק תוך-שורתי (ניווט מכותרות/TOC):
-/// רה-פריסה תוך כדי האנימציה (טעינה הדרגתית) מסיטה את היעד, ובלי תיקון נשארים במקום.
-///
-/// [latestSegments] מחשב מחדש את מיקום השורה בפסקה כשתוכנה נטען תוך כדי
-/// הגלילה; בלעדיו משתמשים ב-[segments] לאורך כל הגלילה. [measure] — גבולות
-/// השורה מהרינדור כשהפריט בנוי; בלעדיו לפי אורך הטקסט.
+/// מיישר שורת מקור מדודה בתוך הפריט, בלי תיקוני קפיצה אחרי הציור.
 Future<void> scrollToSourceLine({
   required ItemScrollController scrollController,
-  required ScrollOffsetController? scrollOffsetController,
   required ItemPositionsListener? positionsListener,
   required ReadingSegments segments,
   required int lineIndex,
@@ -94,134 +91,44 @@ Future<void> scrollToSourceLine({
   bool Function()? isCurrent,
   MeasuredLineExtent? measure,
 }) async {
-  if (segments.isEmpty || !scrollController.isAttached) {
+  if (segments.isEmpty ||
+      !scrollController.isAttached ||
+      !(isCurrent?.call() ?? true)) {
     return;
   }
-
-  var segmentIndex = -1;
-  var fraction = 0.0;
-  var safeLineIndex = lineIndex;
-  bool resolveTarget() {
-    final current = latestSegments?.call() ?? segments;
-    if (current.isEmpty) return false;
-    safeLineIndex = lineIndex.clamp(0, current.layout.lineCount - 1).toInt();
-    segmentIndex = segmentIndexForLine(current, safeLineIndex);
-    fraction = lineFractionInItem(
-      current,
-      segmentIndex,
-      safeLineIndex,
-      intraLineFraction: intraLineFraction,
-      measure: measure,
-    );
-    return true;
-  }
-
-  if (!resolveTarget()) return;
-
-  Future<void> scrollToSegment() async {
-    if (duration == Duration.zero) {
-      scrollController.jumpTo(index: segmentIndex, alignment: alignment);
-    } else {
-      await scrollController.scrollTo(
-        index: segmentIndex,
-        alignment: alignment,
-        duration: duration,
-        curve: curve,
-      );
-    }
-  }
-
-  // בלי כלי מדידה אין אפשרות לאמת את הנחיתה — גלילה רגילה בלבד.
-  if (scrollOffsetController == null ||
-      positionsListener == null ||
-      viewportExtent <= 0) {
-    await scrollToSegment();
-    return;
-  }
-
-  // `animateScroll` זורק assert על `Duration.zero`; מצב מיידי נוחת בפריים אחד.
-  final instant = duration == Duration.zero;
-  final fineDuration = instant ? _instantStep : duration;
-
-  // יעד רחוק במצב רציף: קפיצה — המעבר המונפש בין שתי הרשימות של החבילה נעצר
-  // על יעד שגוי כשפסקאות שטרם נטענו בגובה משוער. במצב רגיל: גלילה מונפשת.
-  if (_findPosition(positionsListener, segmentIndex) == null) {
-    if (instant || segments.layout.continuous) {
-      scrollController.jumpTo(index: segmentIndex, alignment: alignment);
-    } else {
-      await scrollController.scrollTo(
-        index: segmentIndex,
-        alignment: alignment,
-        duration: duration,
-        curve: curve,
-      );
-    }
-    await WidgetsBinding.instance.endOfFrame;
-  }
-
-  // דיוק עדין איטרטיבי: viewportExtent הוא קירוב מההקשר הקורא, ולכן צעד
-  // יחיד מפספס ביחס הסטייה - מודדים ומתקנים עד שהיעד יושב על קו העוגן.
-  var stepDuration = fineDuration;
-  var previousDistance = double.infinity;
-  var confirming = false;
-  // קפיצה אחת אחרי שהרשימה הוחלפה: היעד נפתר מחדש, אך הפריט החדש טרם נבנה.
-  var rejumped = false;
-  for (var attempt = 0; attempt < 5; attempt++) {
-    // הרשימה יורדת מהעץ באמצע האנימציה (מעבר כרטיסיה, סגירתה, העברתה לחלון
-    // אחר), או מוחלפת בקורא חיצוני — מדידות ישנות אינן מעידות שהרשימה חיה.
-    if (!scrollController.isAttached || !(isCurrent?.call() ?? true)) {
-      return;
-    }
-    final previousIndex = segmentIndex;
-    final previousFraction = fraction;
-    if (!resolveTarget()) return;
-    if (segmentIndex != previousIndex || fraction != previousFraction) {
-      // המרחק שנמדד מול היעד הקודם אינו רלוונטי אחרי שהפסקה נטענה.
-      previousDistance = double.infinity;
-      confirming = false;
-    }
-    final measured = _findPosition(positionsListener, segmentIndex);
-    if (measured == null) {
-      if (rejumped) return;
-      rejumped = true;
-      scrollController.jumpTo(index: segmentIndex, alignment: alignment);
-      await WidgetsBinding.instance.endOfFrame;
-      continue;
-    }
-    final extent =
-        (measured.itemTrailingEdge - measured.itemLeadingEdge) * viewportExtent;
-    if (!extent.isFinite || extent <= 0) {
-      return;
-    }
-    final delta =
-        measured.itemLeadingEdge * viewportExtent +
-        fraction * extent -
-        alignment * viewportExtent;
-    if (delta.abs() <= viewportExtent * kAnchorLandingEpsilon) {
-      // היעד על קו העוגן - מאמתים במסך הבא, כי רה-פריסה (טעינה הדרגתית או
-      // החלפת הרשימות של החבילה) מסיטה אותו דווקא אחרי המדידה הזו.
-      if (confirming) {
-        return;
-      }
-      confirming = true;
-      previousDistance = double.infinity;
-      await WidgetsBinding.instance.endOfFrame;
-      continue;
-    }
-    // אין התכנסות (קירוב גובה קיצוני) - עוצרים.
-    if (delta.abs() >= previousDistance) {
-      return;
-    }
-    confirming = false;
-    previousDistance = delta.abs();
-    await scrollOffsetController.animateScroll(
-      offset: delta,
-      duration: stepDuration,
-      curve: attempt == 0 ? curve : Curves.easeOut,
-    );
-    await WidgetsBinding.instance.endOfFrame;
-    stepDuration = instant ? _instantStep : const Duration(milliseconds: 120);
-  }
+  ReadingSegments current() => latestSegments?.call() ?? segments;
+  final initial = current();
+  if (initial.isEmpty) return;
+  final line = lineIndex.clamp(0, initial.layout.lineCount - 1);
+  final item = initial.layout.itemForLine(line);
+  final resolver = readingAnchorTargetRectResolver(
+    segments: current,
+    lineIndex: lineIndex,
+    intraLineFraction: intraLineFraction,
+    measure: measure,
+    isCurrent: isCurrent,
+  );
+  final visible =
+      positionsListener?.itemPositions.value.any(
+        (p) =>
+            p.index == item && p.itemTrailingEdge > 0 && p.itemLeadingEdge < 1,
+      ) ??
+      false;
+  Future<void> move() => duration == Duration.zero
+      ? scrollController.jumpToAsync(
+          index: item,
+          alignment: alignment,
+          targetRectResolver: resolver,
+        )
+      : scrollController.scrollTo(
+          index: item,
+          alignment: alignment,
+          duration: duration,
+          curve: curve,
+          targetRectResolver: resolver,
+        );
+  final controller = scrollController;
+  await (visible && controller is JumpAwareItemScrollController
+      ? controller.withoutNotifying(move)
+      : move());
 }
-
-const Duration _instantStep = Duration(milliseconds: 1);

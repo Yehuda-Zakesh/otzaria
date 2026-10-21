@@ -1,13 +1,9 @@
 import 'package:flutter/material.dart';
-
-/// חלונית הניווט של טאב הטקסט הפעיל, כיעד להדגשה בסיור המודרך.
-///
-/// כל הטאבים הפתוחים חיים בעץ במקביל, ולכן אי-אפשר להצמיד מפתח גלובלי אחד
-/// לכולם — הטאב הפעיל מפרסם כאן את המפתח שלו.
-GlobalKey? activeTextBookNavPanelTourTargetKey;
+import 'package:otzaria/tour/tour_target_keys.dart';
 
 /// עוטף את חלונית הניווט של ספר טקסט במפתח יציב, ומפרסם אותו כיעד לסיור
-/// המודרך כל עוד [isActiveTab] נכון.
+/// המודרך ב-[TourTargetKeys.activeTextBookNavPanel] של החלון כל עוד
+/// [isActiveTab] נכון.
 ///
 /// עטיפה שמתווספת ונעלמת לפי [isActiveTab] הייתה מחליפה את מבנה העץ באותו
 /// מקום, ו-Flutter משמיד אז את כל תת-העץ — החיפוש והניווט אובדים בכל מעבר טאב.
@@ -34,9 +30,13 @@ class _TextBookNavPanelTourTargetState
     debugLabel: 'text_book_nav_panel_tour_target',
   );
 
+  /// נשמר ב-initState: ב-dispose כבר אסור לחפש ב-context.
+  late final TourTargetKeys _tour;
+
   @override
   void initState() {
     super.initState();
+    _tour = TourTargetKeys.of(context);
     _syncTourTarget();
   }
 
@@ -48,8 +48,8 @@ class _TextBookNavPanelTourTargetState
 
   @override
   void dispose() {
-    if (activeTextBookNavPanelTourTargetKey == _paneKey) {
-      activeTextBookNavPanelTourTargetKey = null;
+    if (_tour.activeTextBookNavPanel == _paneKey) {
+      _tour.activeTextBookNavPanel = null;
     }
     super.dispose();
   }
@@ -58,9 +58,9 @@ class _TextBookNavPanelTourTargetState
   /// הנכנס והיוצא מתעדכנים באותו frame ובסדר לא מובטח.
   void _syncTourTarget() {
     if (widget.isActiveTab) {
-      activeTextBookNavPanelTourTargetKey = _paneKey;
-    } else if (activeTextBookNavPanelTourTargetKey == _paneKey) {
-      activeTextBookNavPanelTourTargetKey = null;
+      _tour.activeTextBookNavPanel = _paneKey;
+    } else if (_tour.activeTextBookNavPanel == _paneKey) {
+      _tour.activeTextBookNavPanel = null;
     }
   }
 

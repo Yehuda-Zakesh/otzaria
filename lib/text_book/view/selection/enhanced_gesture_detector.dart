@@ -1,14 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// GestureDetector משופר שמזהה כוונת בחירה vs. פעולה רגילה
-///
-/// תיעדוף Gestures:
-/// - Drag → מצב בחירה (SelectionArea מטפל)
-/// - Double-click → בחירת פסקה (SelectionArea מטפל)
-/// - Shift+Click → בחירת טווח (SelectionArea מטפל)
-/// - Single click (ללא Shift, ללא drag) → פעולה רגילה
+/// מבדיל לחיצה רגילה, בחירה בגרירה ולחיצות מרובות בלי להתחרות בבחירת הטקסט.
 class EnhancedGestureDetector extends StatefulWidget {
   final Widget child;
   final VoidCallback? onSingleTap;
@@ -18,6 +14,9 @@ class EnhancedGestureDetector extends StatefulWidget {
   final GestureTapDownCallback? onSecondaryTapDown;
   final VoidCallback? onDragSelectionStart;
   final HitTestBehavior? behavior;
+
+  /// תחום לחיצות משותף לקורא; ברירת המחדל היא רשימת הגלילה הקרובה.
+  final Object? coordinationGroup;
 
   const EnhancedGestureDetector({
     super.key,
@@ -29,7 +28,17 @@ class EnhancedGestureDetector extends StatefulWidget {
     this.onSecondaryTapDown,
     this.onDragSelectionStart,
     this.behavior,
+    this.coordinationGroup,
   });
+
+  /// מבטל לחיצה ממתינה בקורא; אותו pointer נשמר עבור לחיצה כפולה ומשולשת.
+  static void cancelPendingTap(Object group, {int? exceptPointer}) {
+    final pending = _EnhancedGestureDetectorState._pendingTaps[group];
+    if (pending != null &&
+        (exceptPointer == null || pending._tapPointer != exceptPointer)) {
+      pending._cancelPendingTap();
+    }
+  }
 
   @override
   State<EnhancedGestureDetector> createState() =>
@@ -39,10 +48,86 @@ class EnhancedGestureDetector extends StatefulWidget {
 class _EnhancedGestureDetectorState extends State<EnhancedGestureDetector> {
   Offset? _tapDownPosition;
   int? _tapDownButtons;
-  int? _lastTapTime;
+  static final _pendingTaps = Expando<_EnhancedGestureDetectorState>();
+  ScrollPosition? _scrollPosition;
+  Object? _pendingGroup;
+  int? _tapPointer;
+  Object? get _coordinationGroup => widget.coordinationGroup ?? _scrollPosition;
+  Timer? _tapTimer;
   int _tapCount = 0;
   static const int _multiTapTimeout = 300; // זמן מקסימלי בין לחיצות רצופות
   static const double _dragThreshold = 5.0;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final position = Scrollable.maybeOf(context)?.position;
+    if (position != _scrollPosition) {
+      _cancelPendingTap();
+      _scrollPosition = position;
+    }
+  }
+
+  @override
+  void didUpdateWidget(EnhancedGestureDetector oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.coordinationGroup, widget.coordinationGroup)) {
+      _cancelPendingTap();
+    }
+  }
+
+  void _cancelPendingTap() {
+    _tapTimer?.cancel();
+    _tapTimer = null;
+    _tapCount = 0;
+    _tapDownPosition = null;
+    _tapDownButtons = null;
+    _tapPointer = null;
+    final position = _scrollPosition;
+    position?.removeListener(_cancelPendingTap);
+    final group = _pendingGroup;
+    if (group != null && identical(_pendingTaps[group], this)) {
+      _pendingTaps[group] = null;
+    }
+    _pendingGroup = null;
+  }
+
+  void _scheduleTapTimeout() {
+    _tapTimer?.cancel();
+    final position = _scrollPosition;
+    final box = context.findRenderObject();
+    final origin = box is RenderBox && box.hasSize
+        ? box.localToGlobal(Offset.zero)
+        : null;
+    position?.removeListener(_cancelPendingTap);
+    _pendingGroup = _coordinationGroup;
+    if (_pendingGroup != null) _pendingTaps[_pendingGroup!] = this;
+    position?.addListener(_cancelPendingTap);
+    _tapTimer = Timer(const Duration(milliseconds: _multiTapTimeout), () {
+      final single =
+          _tapCount == 1 &&
+          mounted &&
+          (box is! RenderBox ||
+              origin == null ||
+              (box.attached &&
+                  (box.localToGlobal(Offset.zero) - origin).distance <=
+                      _dragThreshold));
+      _cancelPendingTap();
+      if (single && mounted) widget.onSingleTap?.call();
+    });
+  }
+
+  @override
+  void deactivate() {
+    _cancelPendingTap();
+    super.deactivate();
+  }
+
+  @override
+  void dispose() {
+    _cancelPendingTap();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -51,11 +136,20 @@ class _EnhancedGestureDetectorState extends State<EnhancedGestureDetector> {
       onPointerDown: _handlePointerDown,
       onPointerUp: _handlePointerUp,
       onPointerMove: _handlePointerMove,
+      onPointerCancel: (_) => _cancelPendingTap(),
+      onPointerSignal: (_) => _cancelPendingTap(),
       child: widget.child,
     );
   }
 
   void _handlePointerDown(PointerDownEvent event) {
+    final group = _coordinationGroup;
+    if (group != null) {
+      final previous = _pendingTaps[group];
+      if (!identical(previous, this)) previous?._cancelPendingTap();
+    }
+    if (event.buttons != kPrimaryMouseButton) _cancelPendingTap();
+    _tapPointer = event.pointer;
     _tapDownPosition = event.localPosition;
     _tapDownButtons = event.buttons;
 
@@ -73,40 +167,33 @@ class _EnhancedGestureDetectorState extends State<EnhancedGestureDetector> {
     if (_tapDownPosition != null && _tapDownButtons == kPrimaryMouseButton) {
       final distance = (event.localPosition - _tapDownPosition!).distance;
       if (distance > _dragThreshold) {
-        // A drag has started, notify the parent to handle selection
         widget.onDragSelectionStart?.call();
-        _tapDownPosition = null;
-        // איפוס ספירת הלחיצות כדי לבטל single tap שממתין
-        _tapCount = 0;
-        _lastTapTime = null;
+        _cancelPendingTap();
       }
     }
   }
 
   void _handlePointerUp(PointerUpEvent event) {
-    if (_tapDownButtons == kSecondaryMouseButton) {
-      _tapDownPosition = null;
-      _tapDownButtons = null;
+    if (_tapDownButtons != kPrimaryMouseButton) {
+      _cancelPendingTap();
       return;
     }
 
-    // בדיקה שהכפתור ששוחרר הוא הכפתור הראשי
-    // לאחר שחרור הכפתור, event.buttons הוא 0, אז אנחנו בודקים שהאירוע הוא מהכפתור הראשי
     if (_tapDownPosition == null) {
       return;
     }
 
     final distance = (event.localPosition - _tapDownPosition!).distance;
     if (distance > _dragThreshold) {
-      _tapDownPosition = null;
+      _cancelPendingTap();
       return;
     }
 
     final isShiftPressed = HardwareKeyboard.instance.isShiftPressed;
 
     if (isShiftPressed) {
+      _cancelPendingTap();
       widget.onShiftClick?.call();
-      _tapDownPosition = null;
       return;
     }
 
@@ -116,41 +203,19 @@ class _EnhancedGestureDetectorState extends State<EnhancedGestureDetector> {
         HardwareKeyboard.instance.isMetaPressed;
 
     if (isCtrlPressed && widget.onCtrlClick != null) {
+      _cancelPendingTap();
       widget.onCtrlClick!.call();
-      _tapDownPosition = null;
       return;
     }
 
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (_lastTapTime != null && (now - _lastTapTime!) < _multiTapTimeout) {
-      _tapCount++;
-      if (_tapCount >= 3) {
-        // לחיצה משולשת - לא עושים כלום, נותנים ל-SelectionArea לטפל
-        // (SelectionArea בוחר את כל הקטע בלחיצה משולשת)
-        _tapCount = 0;
-        _lastTapTime = null;
-        _tapDownPosition = null;
-        return;
-      }
-      if (_tapCount >= 2) {
-        widget.onDoubleTap?.call();
-        // לא מאפסים את הספירה - ממשיכים לספור ללחיצה שלישית
-        _lastTapTime = now;
-        _tapDownPosition = null;
-        return;
-      }
-    } else {
-      _tapCount = 1;
+    if (!(_tapTimer?.isActive ?? false)) _tapCount = 0;
+    _tapCount++;
+    if (_tapCount >= 3) {
+      _cancelPendingTap();
+      return;
     }
-    _lastTapTime = now;
-
-    Future.delayed(const Duration(milliseconds: _multiTapTimeout), () {
-      if (mounted && _tapCount == 1 && _lastTapTime == now) {
-        widget.onSingleTap?.call();
-        _tapCount = 0;
-        _lastTapTime = null;
-      }
-    });
+    _scheduleTapTimeout();
+    if (_tapCount == 2) widget.onDoubleTap?.call();
 
     _tapDownPosition = null;
     _tapDownButtons = null;

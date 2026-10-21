@@ -17,6 +17,7 @@ import 'package:otzaria/data/data_providers/file_system_library_provider.dart';
 import 'package:otzaria/data/data_providers/library_provider_manager.dart';
 import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
 import 'package:otzaria/library/models/library.dart';
+import 'package:otzaria/library_update/services/library_runtime_refresh_service.dart';
 import 'package:otzaria/migration/database/untrusted_database.dart';
 import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
@@ -395,19 +396,34 @@ void main() {
       expect(indexRows(library.slug), 2);
     });
 
-    test('שינוי גרסת המסד הרשמי בונה מחדש', () async {
-      final library = await attach(
-        attachedDb('ext', rows: [_row(0, targetLineIndex: 1)]),
-      );
-      await buildCatalog();
-      expect(await links.sync(), {library.slug});
+    test(
+      'רענון הספרייה בונה מחדש קישורים חיצוניים ומשמר חיבור מצורף',
+      () async {
+        final library = await attach(
+          attachedDb('ext', rows: [_row(0, targetLineIndex: 1)]),
+        );
+        await buildCatalog();
+        expect(await links.sync(), {library.slug});
 
-      final db = sqlite3.sqlite3.open(officialPath);
-      db.execute("UPDATE schema_meta SET value = '2' WHERE key = 'db_version'");
-      db.close();
-      links.resetRuntime();
-      expect(await links.sync(), {library.slug});
-    });
+        final db = sqlite3.sqlite3.open(officialPath);
+        db.execute(
+          "UPDATE schema_meta SET value = '2' WHERE key = 'db_version'",
+        );
+        db.close();
+        final attachedRepository = await registry.repositoryFor(library.slug);
+        final attachedConnection = await attachedRepository!.database.database;
+        await const LibraryRuntimeRefreshService().refreshAfterDbUpdate();
+        expect(
+          await registry.repositoryFor(library.slug),
+          same(attachedRepository),
+        );
+        expect(
+          await attachedRepository.database.database,
+          same(attachedConnection),
+        );
+        expect(await links.sync(), {library.slug});
+      },
+    );
 
     test('הסרת המסד מוחקת את שורותיו', () async {
       final library = await attach(

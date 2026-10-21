@@ -229,6 +229,90 @@ void main() {
   );
 
   test(
+    'applyFullDownload: קטיעת רשת משאירה קובץ חלקי שההורדה הבאה תמשיך ממנו',
+    () async {
+      final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+      _writeDb(dbPath, version: 1, marker: 'old');
+      final bytes = Uint8List.fromList(
+        List<int>.generate(4096, (i) => i % 251),
+      );
+      Stream<List<int>> interrupted() async* {
+        yield bytes.sublist(0, 1024);
+        throw const SocketException('Failed host lookup');
+      }
+
+      final repository = LibraryUpdateRepository(
+        discovery: _unusedDiscovery(),
+        downloader: PatchDownloader(
+          httpClient: MockClient.streaming(
+            (request, bodyStream) async => http.StreamedResponse(
+              interrupted(),
+              200,
+              contentLength: bytes.length,
+              headers: {'etag': '"e-1"'},
+            ),
+          ),
+          decompress: (b) async => b,
+          networkRetryDelays: const [],
+        ),
+        refreshService: _NoopRefreshService(),
+        dbPathProvider: () => dbPath,
+        dataRootProvider: () async => tmp.path,
+        nowTimestamp: () => '2026-07-19T00:00:00Z',
+        diskSpaceProvider: (_) async => DiskSpaceInfo.unknown,
+        fullDbExtractor: (a, o) async => fail('כשל רשת — אסור להגיע לחילוץ'),
+      );
+      LibraryUpdatePlan planFor(String updatedAt) =>
+          LibraryUpdatePlan.fullDownload(
+            localVersion: 1,
+            targetVersion: 2,
+            asset: ReleaseAsset(
+              name: DatabaseConstants.databaseArchiveFileName,
+              downloadUrl: 'https://x/seforim.db.zst',
+              size: bytes.length,
+              id: 7,
+              updatedAt: updatedAt,
+            ),
+            releaseTag: 'v2',
+          );
+      final plan = planFor('2026-07-01T00:00:00Z');
+
+      expect(await repository.hasResumableDownload(plan), isFalse);
+      await expectLater(
+        repository.applyFullDownload(plan),
+        throwsA(predicate(PatchDownloader.isTransientNetworkError)),
+      );
+
+      expect(await repository.hasResumableDownload(plan), isTrue);
+      // נכס שהוחלף ב-release יורד מאפס — אין להבטיח המשך.
+      expect(
+        await repository.hasResumableDownload(planFor('2026-08-01T00:00:00Z')),
+        isFalse,
+      );
+    },
+    timeout: const Timeout(Duration(seconds: 30)),
+  );
+
+  test('hasResumableDownload בדלתא: רק patch חלקי עם validator חזק', () async {
+    final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
+    final repository = _localFullDownloadRepository(tmp: tmp, dbPath: dbPath);
+    final plan = _deltaPlan(size: 100);
+    final cacheDir = Directory(p.join(tmp.path, 'library_update_cache'))
+      ..createSync(recursive: true);
+    final partial = File(p.join(cacheDir.path, 'patch.db.zst'));
+    final sidecar = File(PatchDownloader.resumeSidecarPath(partial.path));
+
+    expect(await repository.hasResumableDownload(plan), isFalse);
+
+    partial.writeAsBytesSync(List<int>.filled(40, 1));
+    sidecar.writeAsStringSync('aa\nW/"weak"');
+    expect(await repository.hasResumableDownload(plan), isFalse);
+
+    sidecar.writeAsStringSync('aa\n"strong"');
+    expect(await repository.hasResumableDownload(plan), isTrue);
+  });
+
+  test(
     'applyFullDownload: ביטול באמצע ההורדה משאיר ארכיון חלקי ו-sidecar ל-resume',
     () async {
       final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);

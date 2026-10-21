@@ -33,17 +33,32 @@ class ExternalTabDrag {
   int get hashCode => Object.hash(title, local);
 }
 
-/// הגרירה החיצונית הפעילה בחלון הזה, או null כשאין.
+/// מצב הגרירה החיצונית של חלון אחד.
 ///
-/// גלובלי ולא ב-bloc: זהו מצב ויזואלי קצר-חיים של הגרירה, שנעלם בשחרור
-/// ואינו נשמר לדיסק. מעבר דרך bloc היה מוסיף אירוע ומצב לכל תזוזת עכבר.
-final ValueNotifier<ExternalTabDrag?> externalTabDrag =
-    ValueNotifier<ExternalTabDrag?>(null);
+/// לא ב-bloc: זהו מצב ויזואלי קצר-חיים של הגרירה, שנעלם בשחרור ואינו
+/// נשמר לדיסק. מעבר דרך bloc היה מוסיף אירוע ומצב לכל תזוזת עכבר.
+class ExternalTabDragState {
+  /// המצב של החלון שה-isolate הזה מציג; היום כל חלון הוא isolate משלו.
+  static final ExternalTabDragState current = ExternalTabDragState();
 
-/// מיקום ההכנסה שהרצועה חישבה עבור הגרירה החיצונית, או null כשהסמן אינו
-/// מעל רצועת הכרטיסיות.
-///
-/// ⚠️ הרצועה כותבת לכאן ו-[WindowBusHost] קורא — לא להפך. רק הרצועה
-/// יודעת היכן הכרטיסיות שלה יושבות על המסך, וההודעה מהאפיק נושאת נקודה
-/// גלובלית בלבד.
-final ValueNotifier<int?> externalTabDropIndex = ValueNotifier<int?>(null);
+  /// הגרירה החיצונית הפעילה בחלון הזה, או null כשאין.
+  final ValueNotifier<ExternalTabDrag?> drag = ValueNotifier<ExternalTabDrag?>(
+    null,
+  );
+
+  /// מיקום ההכנסה שהרצועה חישבה עבור הגרירה החיצונית, או null כשהסמן אינו
+  /// מעל רצועת הכרטיסיות.
+  ///
+  /// ⚠️ הרצועה כותבת לכאן ו-[WindowBusHost] קורא — לא להפך. רק הרצועה
+  /// יודעת היכן הכרטיסיות שלה יושבות על המסך, וההודעה מהאפיק נושאת נקודה
+  /// גלובלית בלבד.
+  final ValueNotifier<int?> dropIndex = ValueNotifier<int?>(null);
+}
+
+/// [ExternalTabDragState.drag] של החלון של ה-isolate הזה.
+ValueNotifier<ExternalTabDrag?> get externalTabDrag =>
+    ExternalTabDragState.current.drag;
+
+/// [ExternalTabDragState.dropIndex] של החלון של ה-isolate הזה.
+ValueNotifier<int?> get externalTabDropIndex =>
+    ExternalTabDragState.current.dropIndex;

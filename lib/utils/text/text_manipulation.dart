@@ -267,9 +267,10 @@ String removePunctuation(String text) {
     r'<br\s*/?>',
     caseSensitive: false,
   ).hasMatch(text);
-  final normalizedText = text
-      .replaceAll(RegExp(r'\r\n?'), '\n')
-      .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n');
+  // סריקת RegExp של \r איטית גם כשאין התאמה, ורוב הטקסט בלי \r.
+  final normalizedText =
+      (text.contains('\r') ? text.replaceAll(RegExp(r'\r\n?'), '\n') : text)
+          .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n');
 
   final lines = normalizedText.split('\n');
   final processedLines = <String>[];
@@ -431,8 +432,28 @@ String removePunctuation(String text) {
 final RegExp _quoteContextTokens = RegExp(
   '${_htmlStripper.pattern}|${_htmlEntity.pattern}|["״]',
 );
-final RegExp _acronymLetter = RegExp(r'[א-תa-zA-Z]');
-final RegExp _quoteAdjacentPunctuation = RegExp(r'[!:;.,?\-—–\x00]');
+
+/// `[א-תa-zA-Z]` על יחידת קוד: נבדק לכל גרשיים, בלי מחרוזת ו-RegExp לתו.
+@visibleForTesting
+bool isAcronymLetterUnit(int c) =>
+    (c >= 0x05D0 && c <= 0x05EA) ||
+    (c >= 0x61 && c <= 0x7A) ||
+    (c >= 0x41 && c <= 0x5A);
+
+/// `[!:;.,?\-—–\x00]` על יחידת קוד.
+@visibleForTesting
+bool isQuoteAdjacentPunctuationUnit(int c) =>
+    c == 0x21 ||
+    c == 0x3A ||
+    c == 0x3B ||
+    c == 0x2E ||
+    c == 0x2C ||
+    c == 0x3F ||
+    c == 0x2D ||
+    c == 0x2014 ||
+    c == 0x2013 ||
+    c == 0x00;
+
 final RegExp _htmlTagName = RegExp(r'^<\s*(/?)\s*([a-zA-Z][a-zA-Z0-9:-]*)');
 const Set<String> _voidHtmlTags = {
   'area',
@@ -522,20 +543,21 @@ String _stripQuotesOutsideTags(String text) {
     var after = quote.context + 1;
     // תג שסוגר מעטפת שנפתחה לפני הגרשיים מסמן גבול, גם עם תגים מקוננים.
     // כל רצף נסרק לכל היותר משני צדדיו, בלי להעתיק את השורה לכל גרשיים.
-    while (before >= 0 && _quoteAdjacentPunctuation.hasMatch(context[before])) {
+    while (before >= 0 &&
+        isQuoteAdjacentPunctuationUnit(context.codeUnitAt(before))) {
       before--;
     }
     while (after < context.length &&
-        _quoteAdjacentPunctuation.hasMatch(context[after])) {
+        isQuoteAdjacentPunctuationUnit(context.codeUnitAt(after))) {
       after++;
     }
     final isAcronym =
         before >= 0 &&
-        _acronymLetter.hasMatch(context[before]) &&
+        isAcronymLetterUnit(context.codeUnitAt(before)) &&
         after < context.length &&
-        _acronymLetter.hasMatch(context[after]) &&
+        isAcronymLetterUnit(context.codeUnitAt(after)) &&
         (after + 1 == context.length ||
-            !_acronymLetter.hasMatch(context[after + 1]));
+            !isAcronymLetterUnit(context.codeUnitAt(after + 1)));
     if (!isAcronym) {
       result.write(text.substring(lastEnd, quote.source));
       lastEnd = quote.source + 1;

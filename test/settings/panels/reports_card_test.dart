@@ -8,6 +8,8 @@ void main() {
   late List<ReportsTab?> opened;
   late ReportCounts counts;
 
+  const elsewhere = 'על טעות בספר מדווחים מתוך הספר, ועל תוסף מתוך התוסף';
+
   setUp(() {
     opened = [];
     counts = const ReportCounts(books: 2, app: 1, sent: 20);
@@ -36,16 +38,28 @@ void main() {
     tester,
   ) async {
     await pumpCard(tester);
-    expect(find.text('3 שמורים בתור · 20 נשלחו'), findsOneWidget);
+    expect(find.text('3 שמורים בתור · 20 נשלחו\n$elsewhere'), findsOneWidget);
   });
 
   testWidgets('says so when nothing is saved', (tester) async {
     counts = const ReportCounts(sent: 4);
     await pumpCard(tester);
-    expect(find.text('אין דיווחים שמורים בתור · 4 נשלחו'), findsOneWidget);
+    expect(
+      find.text('אין דיווחים שמורים בתור · 4 נשלחו\n$elsewhere'),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('"הצג דיווחים" opens the dialog on its default tab', (
+  testWidgets('the card names what it shows and reports only app problems', (
+    tester,
+  ) async {
+    await pumpCard(tester);
+    expect(find.text('הדיווחים שלך'), findsOneWidget);
+    expect(find.text('דווח על תקלה בתוכנה'), findsOneWidget);
+    expect(find.text('הדיווחים ששלחתי'), findsOneWidget);
+  });
+
+  testWidgets('"הדיווחים ששלחתי" opens the dialog on its default tab', (
     tester,
   ) async {
     await pumpCard(tester);

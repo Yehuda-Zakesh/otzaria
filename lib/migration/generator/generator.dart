@@ -6,7 +6,7 @@ import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
 import 'package:pdfrx/pdfrx.dart';
 
-import 'package:otzaria/models/books.dart' show flattenToc;
+import '../services/external_book_import.dart';
 
 import '../models/book.dart';
 import '../models/category.dart';
@@ -68,7 +68,6 @@ class DatabaseGenerator {
   /// [directory] The directory to process
   /// [parentCategoryId] The ID of the parent category, if any
   /// [level] The current level in the directory hierarchy
-  /// [metadata] The metadata for books
   Future<void> processDirectory(
     String directory,
     int? parentCategoryId,
@@ -160,70 +159,10 @@ class DatabaseGenerator {
     return insertedId;
   }
 
-  /// Finds or creates a chain of categories from a list of names.
-  /// Returns the ID of the leaf (deepest) category and count of newly created categories.
-  ///
-  /// [categoryNames] List of category names from root to leaf
-  /// Returns a record with categoryId and categoriesCreated count
-  Future<({int categoryId, int categoriesCreated})> findOrCreateCategoryChain(
-    List<String> categoryNames,
-  ) async {
-    int? currentParentId;
-    int categoriesCreated = 0;
-
-    for (int i = 0; i < categoryNames.length; i++) {
-      final categoryName = categoryNames[i];
-      final level = i;
-
-      // Try to find existing category with same name and parent
-      final existingCategory = await _findCategoryByNameAndParent(
-        categoryName,
-        currentParentId,
-      );
-
-      if (existingCategory != null) {
-        currentParentId = existingCategory.id;
-      } else {
-        // Create new category - repository handles ID generation and duplicate check
-        final category = Category(
-          parentId: currentParentId,
-          title: categoryName,
-          level: level,
-        );
-
-        final insertedId = await repository.insertCategory(category);
-        currentParentId = insertedId;
-        categoriesCreated++;
-
-        _log.info('Created new category: $categoryName (id: $insertedId)');
-      }
-    }
-
-    return (categoryId: currentParentId!, categoriesCreated: categoriesCreated);
-  }
-
-  /// Finds a category by name and parent ID
-  Future<Category?> _findCategoryByNameAndParent(
-    String name,
-    int? parentId,
-  ) async {
-    final categories = parentId == null
-        ? await repository.getRootCategories()
-        : await repository.getCategoryChildren(parentId);
-
-    for (final cat in categories) {
-      if (cat.title == name) {
-        return cat;
-      }
-    }
-    return null;
-  }
-
   /// Creates a book in the database and processes its content.
   ///
   /// [bookPath] The path to the book file
   /// [categoryId] The ID of the category the book belongs to
-  /// [metadata] The metadata for the book
   /// [isPersonal] Whether the book is personal (default: false)
   Future<void> createAndProcessBook(
     String bookPath,
@@ -438,23 +377,10 @@ class DatabaseGenerator {
 
     if (!storeLines) {
       final roots = TocParser.parseEntriesFromContent(lines.join('\n'));
-      final headings = flattenToc(roots);
-      final ids = {
-        for (var i = 0; i < headings.length; i++) headings[i]: i + 1,
-      };
-      await repository.replaceExternalBookToc(bookId, [
-        for (final entry in headings)
-          TocEntry(
-            id: ids[entry]!,
-            bookId: bookId,
-            parentId: ids[entry.parent],
-            text: entry.text,
-            level: entry.level,
-            lineIndex: entry.index,
-            hasChildren: entry.children.isNotEmpty,
-            isLastChild: (entry.parent?.children ?? roots).last == entry,
-          ),
-      ]);
+      await repository.replaceExternalBookToc(
+        bookId,
+        externalBookTocEntries(roots),
+      );
       return;
     }
 

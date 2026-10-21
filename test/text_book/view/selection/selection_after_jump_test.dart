@@ -7,6 +7,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_event.dart';
@@ -19,7 +20,6 @@ import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/combined_view/combined_book_screen.dart';
-import 'package:otzaria/widgets/lists/scroll_position_reanchor.dart';
 
 import '../../../test_helpers/memory_cache_provider.dart';
 
@@ -148,7 +148,7 @@ void main() {
   MultiSelectableSelectionContainerDelegate scrollableRegistrar(
     WidgetTester tester,
   ) {
-    final ctx = tester.element(find.byType(SliverList).first);
+    final ctx = tester.element(find.byType(SuperSliverList).first);
     return SelectionContainer.maybeOf(ctx)!
         as MultiSelectableSelectionContainerDelegate;
   }
@@ -257,6 +257,19 @@ void main() {
     });
   }
 
+  // יעד שכבר במסך: הניווט רק גולל, ותיקוני הנחיתה אינם קפיצה שמנקה בחירה.
+  for (final duration in [Duration.zero, const Duration(milliseconds: 250)]) {
+    testWidgets('ניווט לשורה שבמסך שומר את הבחירה, $duration', (tester) async {
+      await selectThenMove(
+        tester,
+        scrolledBy: 0,
+        move: (tab) async =>
+            unawaited(tab.lines.scrollToLine(5, duration: duration)),
+        expected: 'מילה8',
+      );
+    });
+  }
+
   // מעבר למסך שלם ומנוחה מפעילים עיגון מחדש; בחזרה הבחירה על אותה מילה.
   testWidgets('גלילה של יותר ממסך וחזרה שומרת את הבחירה', (tester) async {
     Future<void> scrollBy(TextBookTab tab, double offset) async {
@@ -267,7 +280,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.pump(ScrollPositionReanchor.idleDelay * 2);
+      await tester.pump(_scrollRest * 2);
     }
 
     await selectThenMove(
@@ -333,3 +346,6 @@ void main() {
     expect(selectedText(tester), isEmpty);
   });
 }
+
+/// רגיעה אחרי גלילה, כמו בין פעולות של משתמש.
+const _scrollRest = Duration(milliseconds: 350);

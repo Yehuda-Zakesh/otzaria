@@ -383,7 +383,7 @@ class _MySettingsScreenState extends State<MySettingsScreen> {
               for (final idx in group.indices)
                 if (_isTabAvailable(idx))
                   ListTile(
-                    key: tourSettingsTabTargetKeys[idx],
+                    key: TourTargetKeys.of(context).settingsTabs[idx],
                     leading: RtlIcon(
                       _tabsData[idx].icon,
                       color: colorScheme.primary,
@@ -545,7 +545,9 @@ class _MySettingsScreenState extends State<MySettingsScreen> {
                                   final index =
                                       availableTabIndexes[visibleIndex];
                                   return SidebarNavItem(
-                                    key: tourSettingsTabTargetKeys[index],
+                                    key: TourTargetKeys.of(
+                                      context,
+                                    ).settingsTabs[index],
                                     icon: _tabsData[index].icon,
                                     iconFilled: _tabsData[index].iconFilled,
                                     label: context.settingsText(

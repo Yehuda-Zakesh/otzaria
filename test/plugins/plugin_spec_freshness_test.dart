@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/plugins/models/plugin_api_catalog.dart';
 
 import '../../tool/plugins/plugin_spec_generator.dart';
 
@@ -212,36 +213,14 @@ void main() {
       );
     });
 
-    // הבדיקה הפנימית של המחולל: method שנאכף בגשר עם noManifestPermission
-    // ונשכח ב-_knownApiMethods לא ייעלם מהמפרט בלי להיתפס.
-    test('כל method בטבלת ההרשאות של הגשר מוכר במפרט', () {
+    test('כל method בקטלוג מוכר במפרט, גם ללא הרשאת manifest', () {
       final spec =
           jsonDecode(specFile.readAsStringSync()) as Map<String, dynamic>;
       final known = {
         ...(spec['apiMethods'] as List).cast<String>(),
         ...(spec['undocumentedApiMethods'] as List).cast<String>(),
       };
-      final bridgeSource = File(
-        '${root.path}/lib/plugins/bridge/plugin_bridge_handler.dart',
-      ).readAsStringSync();
-      final table = RegExp(
-        r"methodPermissions\s*=\s*\{([\s\S]*?)\n\s*\};",
-      ).firstMatch(bridgeSource);
-      expect(table, isNotNull, reason: 'לא אותרה methodPermissions בגשר');
-
-      final methods = RegExp(
-        r"'([\w.]+)'\s*:",
-      ).allMatches(table!.group(1)!).map((m) => m.group(1)!).toSet();
-      expect(
-        methods.length,
-        greaterThanOrEqualTo(100),
-        reason: 'טבלת ההרשאות בגשר נקראה חלקית — ייתכן מקור פגום',
-      );
-      expect(
-        methods.where((m) => !known.contains(m)),
-        isEmpty,
-        reason: 'method נאכף בגשר אך אינו ברשימות ה-methods המוכרים במפרט',
-      );
+      expect(known, pluginApiMethods.keys.toSet());
     });
 
     test('פנימית עקבי: כל method מוכר ובעל גרסה, וכל הרשאה מוכרת', () {

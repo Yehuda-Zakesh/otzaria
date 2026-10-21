@@ -119,9 +119,6 @@ class PluginExternalEditionsRegistry {
     _byKey.removeWhere((key, _) => key.startsWith('$pluginId/'));
   }
 
-  @visibleForTesting
-  void clear() => _byKey.clear();
-
   /// פרסינג ואימות בלבד (ללא רישום) — משמש גם את הוולידציה בעת אריזה,
   /// שם עדיין אין InstalledPlugin ולכן המקורות המוכרזים מגיעים כפרמטר.
   static ParsedExternalEditionsPayload parsePayload(

@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:otzaria/core/windowing/app_window_controller.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 
 /// מספק לכל widget את החלון שהוא יושב בו.
 ///
@@ -12,11 +13,16 @@ class AppWindowScope extends InheritedWidget {
     super.key,
     required this.controller,
     required this.geometry,
+    this.keys,
     required super.child,
   });
 
   final AppWindowController controller;
   final AppWindowGeometry geometry;
+
+  /// ה-GlobalKey-ים של החלון; `null` — [AppWindowKeys.current]. נשלף דרך
+  /// [AppWindowKeys.of].
+  final AppWindowKeys? keys;
 
   static AppWindowController controllerOf(BuildContext context) =>
       _of(context).controller;
@@ -32,5 +38,7 @@ class AppWindowScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(AppWindowScope oldWidget) =>
-      controller != oldWidget.controller || geometry != oldWidget.geometry;
+      controller != oldWidget.controller ||
+      geometry != oldWidget.geometry ||
+      keys != oldWidget.keys;
 }

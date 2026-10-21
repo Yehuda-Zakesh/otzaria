@@ -1,4 +1,4 @@
-// lib/widgets/tool_ui_helpers.dart
+// lib/widgets/misc/tool_ui_helpers.dart
 //
 // עזרי UI משותפים למסכי כלים.
 

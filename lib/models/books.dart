@@ -7,8 +7,6 @@ import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/utils/file/document_format.dart';
 
-//import 'package:pdfrx/pdfrx.dart';
-
 /// Represents a book in the application.
 ///
 /// A `Book` object has a [title] which is the name of the book,

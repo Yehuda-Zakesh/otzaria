@@ -295,6 +295,24 @@ Future<void> main() async {
     });
   });
 
+  group('אפשרויות החיפוש החכם נשמרות (issue #2511)', () {
+    test('בלי העדפה שמורה שתיהן פעילות', () {
+      expect(SearchDefaults.initialSemanticIncludeLexicalForNewSearch(), true);
+      expect(SearchDefaults.initialSemanticGroupIdenticalForNewSearch(), true);
+    });
+
+    test('כיבוי והפעלה מחדש נשמרים, כל אפשרות בנפרד', () {
+      SearchDefaults.saveSemanticIncludeLexicalDefault(false);
+      expect(SearchDefaults.initialSemanticIncludeLexicalForNewSearch(), false);
+      expect(SearchDefaults.initialSemanticGroupIdenticalForNewSearch(), true);
+
+      SearchDefaults.saveSemanticGroupIdenticalDefault(false);
+      SearchDefaults.saveSemanticIncludeLexicalDefault(true);
+      expect(SearchDefaults.initialSemanticIncludeLexicalForNewSearch(), true);
+      expect(SearchDefaults.initialSemanticGroupIdenticalForNewSearch(), false);
+    });
+  });
+
   group('טאב חיפוש חדש נפתח עם ההעדפה', () {
     test('טאב בלי configuration מקבל את המיון והאיחוד השמורים', () {
       SearchDefaults.saveSortOrderDefault(ResultsOrder.relevance);

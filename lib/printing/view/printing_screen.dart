@@ -45,7 +45,7 @@ import 'package:otzaria/widgets/controls/action_buttons.dart';
 import 'package:otzaria/widgets/lists/filter_chips_widget.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 import 'package:otzaria/widgets/feedback/scrollable_positioned_list_scrollbar.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'package:pdf/pdf.dart' hide PdfDocument;
 import 'package:pdf/widgets.dart' as pw;
@@ -1414,6 +1414,11 @@ class _PrintingScreenState extends State<PrintingScreen> {
         ? await _loadLinksForPrintRange(selectedStart, selectedEnd)
         : <Link>[];
     await _loadCommentaryProtection(rangeLinks);
+    final linksByLine = groupLinksBySourceLine(
+      rangeLinks,
+      selectedStart + 1,
+      selectedEnd,
+    );
     final limit = CommentaryPrintLimit();
 
     for (var i = selectedStart; i < selectedEnd; i++) {
@@ -1430,7 +1435,7 @@ class _PrintingScreenState extends State<PrintingScreen> {
       if (_includeCommentaries) {
         final linksForLine = await getLinksforIndexs(
           indexes: [i],
-          links: rangeLinks,
+          links: linksByLine[lineNumber1Based] ?? const [],
           commentatorsToShow: _selectedCommentators,
         );
 
@@ -2698,7 +2703,6 @@ class _PrintingScreenState extends State<PrintingScreen> {
 
               final list = ScrollablePositionedListScrollbar(
                 scrollController: _itemScrollController,
-                itemPositionsListener: _itemPositionsListener,
                 itemCount: itemCount,
                 child: ScrollablePositionedList.separated(
                   itemScrollController: _itemScrollController,
@@ -3037,6 +3041,26 @@ enum _ExportFormat {
 /// יעד הפעולה מהפאנל: הדפסה למדפסת, שמירה ל-PDF או שמירה ל-Word.
 /// הסדר קבוע — האינדקס נשמר ב-Settings.
 enum _PrintDestination { pdf, word, printer }
+
+/// קישורי [links] לפי שורת מקור (1-based) בטווח [first, last], בסדרם המקורי:
+/// כל שורה בהדפסה מסננת רק את קישוריה ולא את כל קישורי הטווח.
+@visibleForTesting
+Map<int, List<Link>> groupLinksBySourceLine(
+  List<Link> links,
+  int first,
+  int last,
+) {
+  final byLine = <int, List<Link>>{};
+  for (final link in links) {
+    final start = link.index1;
+    if (start >= first && start <= last) (byLine[start] ??= []).add(link);
+    final end = min(link.index1End ?? start, last);
+    for (var line = max(start + 1, first); line <= end; line++) {
+      (byLine[line] ??= []).add(link);
+    }
+  }
+  return byLine;
+}
 
 /// קישורי הטווח להדפסה — אותו מקור של חלונית המפרשים: קישורי הספר לפי מקורו,
 /// קישורי המשתמש וקישורים חוצי-מסדים.

@@ -90,11 +90,6 @@ class PluginSearchDialogRegistry extends ChangeNotifier {
     if (_items.length != before) notifyListeners();
   }
 
-  /// מסיר רק את הרישומים של המופע [key] (סגירת טאב אחד של התוסף).
-  void removeInstance(PluginInstanceKey key) {
-    if (_items.remove(key) != null) notifyListeners();
-  }
-
   /// השורות המוצגות בפועל — שורה שתנאי ה-`when` שלה אינו מתקיים מסוננת החוצה
   /// (ונשארת רשומה, כך שהיא חוזרת כשהתנאי מתקיים). שורה זהה שנרשמה מכמה
   /// מופעים מוצגת פעם אחת.

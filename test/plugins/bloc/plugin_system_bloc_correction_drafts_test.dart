@@ -14,6 +14,8 @@ import 'package:otzaria/plugins/services/plugin_correction_session_service.dart'
 import 'package:otzaria/plugins/services/plugin_installer_service.dart';
 import 'package:otzaria/plugins/storage/plugin_correction_draft_store.dart';
 
+import '../../test_helpers/plugin_alerts_client.dart';
+
 InstalledPlugin _plugin(String id) => InstalledPlugin(
   pluginId: id,
   name: 'תוסף $id',
@@ -127,6 +129,7 @@ void main() {
     final repo = _FakeRepo();
     final bloc = PluginSystemBloc(
       repository: repo,
+      alertsClient: pluginAlertsClientFor(repo),
       installerService: _StubInstaller(repo),
     );
     addTearDown(bloc.close);

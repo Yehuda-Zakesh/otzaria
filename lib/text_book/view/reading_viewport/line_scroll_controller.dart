@@ -6,7 +6,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 import 'package:otzaria/text_book/utils/reading_position.dart';
 import 'package:otzaria/text_book/utils/reading_segment_navigation.dart';
@@ -63,7 +63,14 @@ class _Target {
 }
 
 class LineScrollController {
-  LineScrollController() {
+  LineScrollController({ReadingAnchor? initialAnchor}) {
+    if (initialAnchor != null) {
+      _pending = _Target.anchor(initialAnchor);
+      _position.value = ReadingPosition.target(
+        initialAnchor.line,
+        intraLineFraction: initialAnchor.intraLineFraction,
+      );
+    }
     positionsListener.itemPositions.addListener(_onItemPositions);
   }
 
@@ -82,13 +89,48 @@ class LineScrollController {
   final ReaderItemBoxes itemBoxes = ReaderItemBoxes();
 
   final ValueNotifier<ReadingPosition?> _position = ValueNotifier(null);
+  final ValueNotifier<int> _navigationEpoch = ValueNotifier(0);
+  final ValueNotifier<bool> _canGoBack = ValueNotifier(false);
+  final List<ReadingAnchor> _backAnchors = [];
 
   /// המיקום הנוכחי, או יעד הניווט מרגע שהתחיל ועד שנחת.
   ValueListenable<ReadingPosition?> get position => _position;
 
+  /// משתנה בתחילת ניווט מפורש, לפני פרסום היעד; תיקוני פריסה אינם ניווט.
+  ValueListenable<int> get navigationEpoch => _navigationEpoch;
+
+  ValueListenable<bool> get canGoBack => _canGoBack;
+
+  void _rememberPosition({ReadingAnchor? destination}) {
+    final anchor = captureAnchor();
+    if (anchor == null ||
+        anchor == destination ||
+        _backAnchors.lastOrNull == anchor) {
+      return;
+    }
+    _backAnchors.add(anchor);
+    if (_backAnchors.length > 50) _backAnchors.removeAt(0);
+    _canGoBack.value = true;
+  }
+
+  /// נקודת חזרה אחת בתחילת גרירת פס גלילה או לחיצה על המסילה.
+  void beginUserNavigation() {
+    _rememberPosition();
+    _navigationEpoch.value++;
+    _cancelRun();
+  }
+
+  Future<void> goBack() {
+    if (_backAnchors.isEmpty) return Future<void>.value();
+    final anchor = _backAnchors.removeLast();
+    _canGoBack.value = _backAnchors.isNotEmpty;
+    return _navigate(_Target.anchor(anchor));
+  }
+
   ReadingViewportBinding? _binding;
   ExternalLineNavigator? _external;
   _Target? _pending;
+  _Target? _activeTarget;
 
   /// יעד שנחת על פריט שטרם נטען: ממתינים לטעינתו ומדייקים שוב.
   _Target? _awaitingLoad;
@@ -105,6 +147,8 @@ class LineScrollController {
 
   bool get hasPendingTarget => _pending != null;
 
+  bool get isNavigating => _navigating > 0;
+
   ReadingSegments? get _segments => _binding?.segments();
 
   bool get _nativeReady =>
@@ -120,7 +164,12 @@ class LineScrollController {
     final pending = _pending;
     if (navigator != null && pending != null) {
       _pending = null;
-      unawaited(navigator(pending.line));
+      _activeTarget = pending;
+      unawaited(
+        navigator(pending.line).whenComplete(() {
+          if (identical(_activeTarget, pending)) _activeTarget = null;
+        }),
+      );
     }
   }
 
@@ -165,11 +214,24 @@ class LineScrollController {
       duration: duration,
       curve: curve,
     );
+    _rememberPosition(
+      destination: ReadingAnchor(
+        line: target.line,
+        intraLineFraction: target.intraLineFraction,
+        alignment: target.alignment,
+      ),
+    );
+    return _navigate(target);
+  }
+
+  Future<void> _navigate(_Target target) {
+    _navigationEpoch.value++;
+    _activeTarget = target;
     _awaitingLoad = null;
     _publish(
       ReadingPosition.target(
         target.line,
-        intraLineFraction: intraLineFraction,
+        intraLineFraction: target.intraLineFraction,
       ),
     );
     final external = _external;
@@ -178,7 +240,9 @@ class LineScrollController {
       _pending = null;
       _token++;
       itemController.notifyBeforeJump();
-      return external(target.line);
+      return external(target.line).whenComplete(() {
+        if (identical(_activeTarget, target)) _activeTarget = null;
+      });
     }
     if (!_nativeReady) {
       _token++;
@@ -202,6 +266,8 @@ class LineScrollController {
 
   /// היעד יבוצע רק בתצוגה הבאה שתתחבר — למשל ביציאה מצורת הדף.
   void scrollToLineOnNextAttach(int line) {
+    _rememberPosition(destination: ReadingAnchor(line: line));
+    _navigationEpoch.value++;
     _awaitingLoad = null;
     _token++;
     _publish(ReadingPosition.target(line));
@@ -211,6 +277,7 @@ class LineScrollController {
   /// מיקום שדווח מקורא חיצוני.
   void reportExternalLine(int line) {
     if (line < 0) return;
+    _activeTarget = null;
     _forgetMeasured();
     _publish(ReadingPosition.target(line));
   }
@@ -222,11 +289,20 @@ class LineScrollController {
   }
 
   /// לעטיפת רשימת הקורא: מבחין בין גלילת משתמש לבין ניווט ושינויי גובה.
-  Widget trackUserScroll(Widget list) =>
-      NotificationListener<ScrollNotification>(
-        onNotification: _onScrollNotification,
-        child: list,
-      );
+  Widget trackUserScroll(Widget list) => Listener(
+    onPointerDown: (_) => _cancelPendingForUserInput(),
+    onPointerSignal: (_) => _cancelPendingForUserInput(),
+    child: NotificationListener<ScrollNotification>(
+      onNotification: _onScrollNotification,
+      child: list,
+    ),
+  );
+
+  void _cancelPendingForUserInput() {
+    if (_navigating > 0 || _pending != null || _awaitingLoad != null) {
+      _cancelRun();
+    }
+  }
 
   bool _onScrollNotification(ScrollNotification notification) {
     if (notification.depth != 0) return false;
@@ -247,12 +323,26 @@ class LineScrollController {
     _token++;
     _pending = null;
     _awaitingLoad = null;
+    _activeTarget = null;
+    itemController.listController?.cancelPositioning();
+    if (_navigating == 0 && !_disposed && _external == null && _nativeReady) {
+      _measure();
+    }
   }
 
   /// הנקודה שעל קו העוגן עכשיו.
   ReadingAnchor? captureAnchor() {
+    final target = _pending ?? _activeTarget ?? _awaitingLoad;
+    if (target != null) {
+      return ReadingAnchor(
+        line: target.line,
+        intraLineFraction: target.intraLineFraction,
+        alignment: target.alignment,
+      );
+    }
     final segments = _segments;
     if (segments == null || _external != null) {
+      if (_external == null && _measuredAnchor != null) return _measuredAnchor;
       final current = _position.value;
       return current == null
           ? null
@@ -261,6 +351,12 @@ class LineScrollController {
               intraLineFraction: current.intraLineFraction,
             );
     }
+    final measuredSegments = _measuredSegments;
+    if (_measuredAnchor != null &&
+        measuredSegments != null &&
+        !measuredSegments.layout.hasSameStructure(segments.layout)) {
+      return _measuredAnchor;
+    }
     return readingAnchorFromItems(
       segments,
       positionsListener.itemPositions.value,
@@ -268,24 +364,17 @@ class LineScrollController {
     );
   }
 
-  /// לפני שינוי רוחב: קובע את הרשימה על הפריט העליון, ואחרי הפריסה מחזיר את
-  /// השורה המדויקת לקו העוגן.
+  /// לפני שינוי רוחב: אחרי הפריסה מחזיר את השורה המדויקת לקו העוגן.
   void keepViewAcrossRelayout() {
-    if (!_nativeReady) return;
+    if (!_nativeReady ||
+        _navigating > 0 ||
+        _pending != null ||
+        _awaitingLoad != null) {
+      return;
+    }
     final anchor = captureAnchor();
     if (anchor == null) return;
-    final top = reanchorTargetPosition(positionsListener.itemPositions.value);
-    if (top != null) {
-      itemController.jumpTo(index: top.index, alignment: top.itemLeadingEdge);
-    }
-    final token = ++_token;
-    _navigating++;
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await WidgetsBinding.instance.endOfFrame;
-      _navigating--;
-      if (token != _token || _disposed) return;
-      await _run(_Target.anchor(anchor));
-    });
+    unawaited(_run(_Target.anchor(anchor)));
   }
 
   void _publish(ReadingPosition position) {
@@ -307,10 +396,10 @@ class LineScrollController {
     if (binding == null || segments == null || segments.isEmpty) return;
     final token = ++_token;
     _navigating++;
+    _activeTarget = target;
     try {
       await scrollToSourceLine(
         scrollController: itemController,
-        scrollOffsetController: offsetController,
         positionsListener: positionsListener,
         segments: segments,
         latestSegments: () => _segments ?? segments,
@@ -325,6 +414,7 @@ class LineScrollController {
       );
     } finally {
       _navigating--;
+      if (identical(_activeTarget, target)) _activeTarget = null;
     }
     if (token != _token || _disposed) {
       // ניווט שהמשתמש קטע: המיקום הוא מה שעל המסך עכשיו.
@@ -336,6 +426,13 @@ class LineScrollController {
     final landed = _segments;
     if (landed != null && landed.isNotEmpty) {
       final item = landed.layout.itemForLine(target.line);
+      if (item != segments.layout.itemForLine(target.line)) {
+        if (!_nativeReady) {
+          _pending = target.instant;
+          return;
+        }
+        return _run(target.instant);
+      }
       if (!landed[item].isLoaded) {
         _awaitingLoad = target.instant;
         return;
@@ -414,6 +511,8 @@ class LineScrollController {
     ReadingSegments after,
     int line,
   ) {
+    final changes = after.changedLinesSince(before);
+    if (changes != null) return changes.any((range) => range.first <= line);
     final a = before.loadedLineFlags;
     final b = after.loadedLineFlags;
     if (identical(a, b)) return false;
@@ -511,7 +610,14 @@ class LineScrollController {
 
   void dispose() {
     _disposed = true;
+    _cancelRun();
+    _binding = null;
+    _external = null;
+    _forgetMeasured();
     positionsListener.itemPositions.removeListener(_onItemPositions);
+    _navigationEpoch.dispose();
+    _canGoBack.dispose();
+    _position.dispose();
   }
 }
 

@@ -1,3 +1,4 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:otzaria/utils/file/file_picker_dialog_options.dart';
@@ -124,7 +125,7 @@ Future<({Set<String> include, List<Book> relocated})> _scanLibraryMove(
       if (segments.isNotEmpty && segments.first.isNotEmpty) {
         include.add(segments.first);
       }
-      if (IndexingRepository.hasPathKeyedIndexEntry(book)) relocated.add(book);
+      if (BookIdentity.hasPathKeyedIndexEntry(book)) relocated.add(book);
     }
   } catch (e) {
     debugPrint('[performLibraryMove] library scan failed: $e');

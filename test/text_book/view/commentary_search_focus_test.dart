@@ -348,6 +348,38 @@ Future<void> main() async {
       );
     }
 
+    testWidgets('שאילתה פנימית גוברת על highlight וחוזרת אליו כשמתרוקנת', (
+      tester,
+    ) async {
+      final controller = TextEditingController();
+      final highlight = ValueNotifier<String>('');
+      addTearDown(controller.dispose);
+      addTearDown(highlight.dispose);
+      await _pumpWidget(
+        tester,
+        textBookBloc: textBookBloc,
+        settingsBloc: settingsBloc,
+        externalSearchController: controller,
+        highlightQueryListenable: highlight,
+      );
+      final list = tester.state<CommentaryListBaseState>(
+        find.byType(CommentaryListBase),
+      );
+      controller.text = 'עמק';
+      await _pumpSearchCounts(tester);
+      expect(list.totalSearchResultsNotifier.value, 80);
+
+      highlight.value = 'יין';
+      await _pumpSearchCounts(tester);
+      expect(list.totalSearchResultsNotifier.value, 80);
+      controller.clear();
+      await _pumpSearchCounts(tester);
+      expect(list.totalSearchResultsNotifier.value, 40);
+      highlight.value = '';
+      await _pumpSearchCounts(tester);
+      expect(list.totalSearchResultsNotifier.value, 0);
+    }, skip: !engineReady);
+
     testWidgets('שאילתה חיצונית חדשה: התוצאה הבאה היא הראשונה (#2606)', (
       tester,
     ) async {
@@ -373,6 +405,133 @@ Future<void> main() async {
       await tester.pump();
       expect(list.currentSearchIndexNotifier.value, 0);
       expect(_contentFor(tester, links.first).currentSearchIndex, 0);
+    }, skip: !engineReady);
+
+    testWidgets('החלפת controller חיצוני מסנכרנת קיים ומנתקת ישן', (
+      tester,
+    ) async {
+      final first = TextEditingController();
+      final second = TextEditingController(text: 'עמק');
+      addTearDown(first.dispose);
+      addTearDown(second.dispose);
+      await _pumpWidget(
+        tester,
+        textBookBloc: textBookBloc,
+        settingsBloc: settingsBloc,
+        externalSearchController: first,
+      );
+      final retained = tester.state<CommentaryListBaseState>(
+        find.byType(CommentaryListBase),
+      );
+      await _pumpWidget(
+        tester,
+        textBookBloc: textBookBloc,
+        settingsBloc: settingsBloc,
+        externalSearchController: second,
+      );
+      await _pumpSearchCounts(tester);
+      expect(tester.state(find.byType(CommentaryListBase)), same(retained));
+      expect(retained.totalSearchResultsNotifier.value, 80);
+      second.clear();
+      await _pumpSearchCounts(tester);
+      first.text = 'עמק';
+      await _pumpSearchCounts(tester);
+      expect(retained.totalSearchResultsNotifier.value, 0);
+      await _pumpWidget(
+        tester,
+        textBookBloc: textBookBloc,
+        settingsBloc: settingsBloc,
+      );
+      first.text = 'ישן';
+      second.text = 'עמק';
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    }, skip: !engineReady);
+
+    testWidgets('notifiers חיצוניים מתחברים ומוסרים באותו State', (
+      tester,
+    ) async {
+      final query = TextEditingController();
+      final total = ValueNotifier(-99);
+      final current = ValueNotifier(-99);
+      final expanded = ValueNotifier(false);
+      final byPath = ValueNotifier<Map<String, int>>({});
+      final snippets = ValueNotifier<List<CommentarySearchSnippet>>([]);
+      final replacementByPath = ValueNotifier<Map<String, int>>({});
+      final replacementSnippets = ValueNotifier<List<CommentarySearchSnippet>>(
+        [],
+      );
+      addTearDown(query.dispose);
+      addTearDown(total.dispose);
+      addTearDown(current.dispose);
+      addTearDown(expanded.dispose);
+      addTearDown(byPath.dispose);
+      addTearDown(snippets.dispose);
+      addTearDown(replacementByPath.dispose);
+      addTearDown(replacementSnippets.dispose);
+      await _pumpWidget(
+        tester,
+        textBookBloc: textBookBloc,
+        settingsBloc: settingsBloc,
+        externalSearchController: query,
+      );
+      final retained = tester.state<CommentaryListBaseState>(
+        find.byType(CommentaryListBase),
+      );
+      await _pumpWidget(
+        tester,
+        textBookBloc: textBookBloc,
+        settingsBloc: settingsBloc,
+        externalSearchController: query,
+        externalTotal: total,
+        externalCurrent: current,
+        externalExpanded: expanded,
+        externalByPath: byPath,
+        externalSnippets: snippets,
+      );
+      expect(tester.state(find.byType(CommentaryListBase)), same(retained));
+      expect(total.value, 0);
+      expect(find.text('external-total:0'), findsOneWidget);
+      expect(expanded.value, isTrue);
+      query.text = 'עמק';
+      await _pumpSearchCounts(tester);
+      expect(total.value, 80);
+      expect(find.text('external-total:80'), findsOneWidget);
+      expect(current.value, -1);
+      final savedByPath = byPath.value;
+      final savedSnippets = snippets.value;
+      expect(savedByPath, isNotEmpty);
+      expect(savedSnippets, isNotEmpty);
+      await _pumpWidget(
+        tester,
+        textBookBloc: textBookBloc,
+        settingsBloc: settingsBloc,
+        externalSearchController: query,
+        externalTotal: total,
+        externalCurrent: current,
+        externalExpanded: expanded,
+        externalByPath: replacementByPath,
+        externalSnippets: replacementSnippets,
+      );
+      expect(tester.state(find.byType(CommentaryListBase)), same(retained));
+      expect(replacementByPath.value, same(savedByPath));
+      expect(replacementSnippets.value, same(savedSnippets));
+      await _pumpWidget(
+        tester,
+        textBookBloc: textBookBloc,
+        settingsBloc: settingsBloc,
+        externalSearchController: query,
+      );
+      query.clear();
+      retained.toggleAllExpanded();
+      await _pumpSearchCounts(tester);
+      expect(total.value, 80);
+      expect(expanded.value, isTrue);
+      expect(byPath.value, same(savedByPath));
+      expect(snippets.value, same(savedSnippets));
+      expect(replacementByPath.value, same(savedByPath));
+      expect(replacementSnippets.value, same(savedSnippets));
+      expect(tester.takeException(), isNull);
     }, skip: !engineReady);
 
     testWidgets('ניווט לתוצאה רחוקה אינו מפיל את הרשימה', (tester) async {
@@ -411,6 +570,11 @@ Future<void> _pumpWidget(
   TextEditingController? externalSearchController,
   ValueListenable<String>? highlightQueryListenable,
   bool showSearch = true,
+  ValueNotifier<int>? externalTotal,
+  ValueNotifier<int>? externalCurrent,
+  ValueNotifier<bool>? externalExpanded,
+  ValueNotifier<Map<String, int>>? externalByPath,
+  ValueNotifier<List<CommentarySearchSnippet>>? externalSnippets,
 }) async {
   addTearDown(() async {
     await tester.pumpWidget(const SizedBox.shrink());
@@ -425,13 +589,31 @@ Future<void> _pumpWidget(
           BlocProvider<SettingsBloc>.value(value: settingsBloc),
         ],
         child: Scaffold(
-          body: CommentaryListBase(
-            openBookCallback: (_) {},
-            fontSize: 18,
-            showSearch: showSearch,
-            externalSearchController: externalSearchController,
-            highlightQueryListenable: highlightQueryListenable,
-            shrinkWrap: false,
+          body: Column(
+            children: [
+              if (externalTotal != null)
+                ValueListenableBuilder<int>(
+                  valueListenable: externalTotal,
+                  builder: (context, value, child) =>
+                      Text('external-total:$value'),
+                ),
+              Expanded(
+                key: const ValueKey('retained-commentary'),
+                child: CommentaryListBase(
+                  openBookCallback: (_) {},
+                  fontSize: 18,
+                  showSearch: showSearch,
+                  externalSearchController: externalSearchController,
+                  highlightQueryListenable: highlightQueryListenable,
+                  externalTotalResultsNotifier: externalTotal,
+                  externalCurrentIndexNotifier: externalCurrent,
+                  externalAllExpandedNotifier: externalExpanded,
+                  externalSearchResultsByPathNotifier: externalByPath,
+                  externalSearchSnippetsNotifier: externalSnippets,
+                  shrinkWrap: false,
+                ),
+              ),
+            ],
           ),
         ),
       ),

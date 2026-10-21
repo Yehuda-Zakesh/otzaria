@@ -1,12 +1,7 @@
 // ignore_for_file: avoid_print, depend_on_referenced_packages
 //
-// analyzer מגיע דרך dependency_overrides ולא כתלות ישירה — סקריפט תחזוקה
-// בלבד, שאינו נכנס ל-build של האפליקציה.
-//
-// מחולל `docs/plugin-sdk/spec.json` — המפרט המכונה-קריא של ממשק התוספים.
-// המקור היחיד לאמת הוא קוד האפליקציה: הקבועים ב-lib/plugins/**. הסקריפט
-// מפרסר את ה-AST של אותם קבצים ולא מקודד אף רשימה בעצמו, כדי שהוספת API
-// חדש בקוד תשתקף במפרט בלי לגעת כאן.
+// analyzer משמש לקריאת קבועי manifest/settings; שיטות ה-SDK מיובאות מהקטלוג.
+// מחולל את docs/plugin-sdk/spec.json מקוד האפליקציה, בלי רשימות מקומיות.
 
 import 'dart:convert';
 import 'dart:io';
@@ -16,11 +11,9 @@ import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:path/path.dart' as p;
+import 'package:otzaria/plugins/models/plugin_api_catalog.dart';
 
-/// גרסת סכימה של `spec.json`. מעלים אותה רק כששדה קיים משנה משמעות.
-/// אזהרה: צרכני ה-JS (knownApi.js בוולידטור, pluginValidation.js באתר) זורקים
-/// ברמת המודול כשהערך אינו מוכר — כלומר העלאה כאן משביתה את ה-Action ואת החנות
-/// עד שהעותקים המצורפים והקבוע SUPPORTED_SPEC_SCHEMA מסונכרנים. אין נפילה רכה.
+/// גרסת סכימה של `spec.json`; שינוי מחייב סנכרון עם צרכני ה-JS לפני פרסום.
 const int specSchemaVersion = 1;
 
 const String specRelativePath = 'docs/plugin-sdk/spec.json';
@@ -56,9 +49,7 @@ class _ConstEnv {
       throw PluginSpecError('קובץ מקור חסר: $path');
     }
     final source = file.readAsStringSync();
-    // throwIfDiagnostics: true — מקור פגום (למשל `}` מוקדם שסוגר רשימה בטרם עת)
-    // עדיין נותן AST בר-שחזור אך מקצר רשימות בשקט; חובה לזרוק כאן, אחרת המפרט
-    // ייצא חלקי והוולידטורים יתירו API/הגדרות אסורים.
+    // AST בר-שחזור עלול לקצר רשימות בשקט; מקור פגום חייב לעצור את המחולל.
     final ParseStringResult parsed;
     try {
       parsed = parseString(content: source, throwIfDiagnostics: true);
@@ -188,7 +179,6 @@ Map<String, Object?> buildPluginSpec(Directory root) {
   for (final relative in const [
     'lib/plugins/services/plugin_extended_validator.dart',
     'lib/plugins/models/plugin_valid_permissions.dart',
-    'lib/plugins/bridge/plugin_bridge_handler.dart',
     'lib/plugins/services/plugin_manifest_validator.dart',
     'lib/plugins/services/plugin_settings_access_policy.dart',
     'lib/settings/engine/settings_repository.dart',
@@ -196,24 +186,11 @@ Map<String, Object?> buildPluginSpec(Directory root) {
     env.addFile(p.join(root.path, p.joinAll(p.posix.split(relative))));
   }
 
-  final knownMethods = env.stringCollection('_knownApiMethods');
-  final undocumented = env.stringCollection('_knownUndocumentedMethods');
-  final bridgePermissions = env.stringMap(
-    'PluginBridgeHandler.methodPermissions',
-  );
-  final noManifestPermission = env.stringConst(
-    'PluginBridgeHandler.noManifestPermission',
-  );
-
-  // מיפוי ההרשאות מגיע משני מקומות: הטבלה הנאכפת בגשר, והמפה שהוולידטור
-  // משתמש בה. הגשר גובר — הוא מה שנאכף בזמן ריצה.
   final methodPermissions = <String, String>{
-    ...env.stringMap('_methodRequiredPermission'),
+    for (final entry in pluginApiMethods.entries)
+      entry.key:
+          ?(entry.value.runtimePermission ?? entry.value.validationPermission),
   };
-  for (final entry in bridgePermissions.entries) {
-    if (entry.value == noManifestPermission) continue;
-    methodPermissions[entry.key] = entry.value;
-  }
 
   List<String> sorted(Iterable<String> values) =>
       values.toSet().toList()..sort();
@@ -235,10 +212,10 @@ Map<String, Object?> buildPluginSpec(Directory root) {
     'legacyPermissionAliases': sortedMap(
       env.stringMap('pluginLegacyPermissionAliases'),
     ),
-    'apiMethods': sorted(knownMethods),
-    'undocumentedApiMethods': sorted(undocumented),
+    'apiMethods': sorted(pluginApiKnownMethods),
+    'undocumentedApiMethods': sorted(pluginApiUndocumentedMethods),
     'methodPermissions': sortedMap(methodPermissions),
-    'methodMinVersions': sortedMap(env.stringMap('_methodMinVersion')),
+    'methodMinVersions': sortedMap(pluginApiMinVersions),
     'events': sorted(env.stringCollection('_knownEvents')),
     // מדיניות blocklist: כל הגדרה קריאה למעט מה שחסום. הכללים משוקפים
     // כנתונים, כדי שכלי JS יוכלו לשחזר את PluginSettingsAccessPolicy.isBlocked.

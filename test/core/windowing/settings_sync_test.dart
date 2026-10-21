@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/core/windowing/settings_sync.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
+import 'package:otzaria/settings/engine/settings_repository.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_store.dart';
 
 /// ⚠️ קידומת ייחודית לסוויטה — [ui.IsolateNameServer] גלובלי לתהליך.
 const String _namespace = 'otzaria.test.settingssync';
@@ -132,6 +134,45 @@ void main() {
       await SettingsSync.instance.handleRequest({'type': 'somethingElse'}),
       isNull,
     );
+  });
+
+  group('מצב ההתראות שבבעלות החלון הראשי', () {
+    test('אינו משודר', () async {
+      for (final key in SettingsSync.ownerAuthoritativeKeys) {
+        SettingsSync.instance.broadcastChange(key, '[]');
+      }
+
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      expect(peer.received, isEmpty);
+    });
+
+    test('settingChanged שלו נדחה ואינו מוחל', () async {
+      final handled = await SettingsSync.instance.handleRequest({
+        'type': SettingsSync.requestChanged,
+        'key': SettingsRepository.keyCalendarEvents,
+        'value': '[{"id":"deleted"}]',
+      });
+
+      expect(handled, isFalse);
+      expect(applied, isEmpty);
+    });
+
+    test('מוחל רק כערך מאושר מהבעלים', () async {
+      expect(
+        await SettingsSync.instance.applyAuthoritativeValues({
+          SettingsRepository.keyCalendarEvents: '[]',
+        }),
+        isTrue,
+      );
+      expect(applied, {SettingsRepository.keyCalendarEvents: '[]'});
+    });
+
+    test('כולל את כל מפתחות הבעלים', () {
+      expect(SettingsSync.ownerAuthoritativeKeys, {
+        ...CalendarAlertsKeys.defaults.keys,
+        CalendarAlertsKeys.ledger,
+      });
+    });
   });
 }
 

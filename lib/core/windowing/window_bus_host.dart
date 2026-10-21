@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/app_runtime_reset.dart';
 import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/core/messages/window_messages.dart';
@@ -42,6 +43,9 @@ import 'package:otzaria/widgets/misc/restart_widget.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/models/tab.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_client.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_owner.dart';
+import 'package:otzaria/tools/calendar/services/notification_service.dart';
 
 /// מחבר את [WindowBus] לחלון שהוא יושב בו.
 ///
@@ -111,6 +115,19 @@ class _WindowBusHostState extends State<WindowBusHost> {
     // שנגזר ממנה עוד לא. בלי הטעינה מחדש המשתמש היה מחליף ערכת נושא
     // בחלון אחד ורואה שני חלונות של אותה תוכנה נראים שונה.
     _settingsChanged = SettingsSync.instance.changes.listen((key) {
+      // איפוס מחלון אחר מחק כאן גם את רישום ההתראות; הבעלים מבטל לפי הזיכרון.
+      if (key.isEmpty && !WindowRole.isSecondary) {
+        unawaited(
+          CalendarAlertsOwner.instance.handleSettingsReset().catchError(
+            (Object error, StackTrace stackTrace) =>
+                NotificationService.logFailure(
+                  'יישור ההתראות אחרי איפוס מחלון אחר נכשל',
+                  error,
+                  stackTrace,
+                ),
+          ),
+        );
+      }
       if (!mounted) return;
       context.read<SettingsBloc>().add(LoadSettings());
       if (key == HiddenLibraryStore.bookKeysSetting ||
@@ -231,6 +248,13 @@ class _WindowBusHostState extends State<WindowBusHost> {
       case SettingsSync.requestChanged:
         // הגדרה שונתה בחלון אחר — מוחלת על ה-box המקומי ומרעננת את ה-state.
         return SettingsSync.instance.handleRequest(request);
+      case CalendarAlertsOwner.requestCommand:
+        if (WindowRole.isSecondary) throw StateError('Not the main window');
+        return CalendarAlertsOwner.instance.handleBusRequest(request);
+      case CalendarAlertsOwner.requestStateChanged:
+      case CalendarAlertsOwner.requestScheduleStatus:
+        if (!WindowRole.isSecondary) return null;
+        return RemoteCalendarAlertsClient.instance.handleBusMessage(request);
       case MultiWindowService.requestRestart:
         return _restartSelf(
           pluginSafeMode: request['pluginSafeMode'] is bool
@@ -477,7 +501,8 @@ class _WindowBusHostState extends State<WindowBusHost> {
   /// של המארח, והוא היה פותח את הקישור גם אצלו.
   Future<Object?> _openUri(Object? uri) async {
     if (uri is! String || uri.trim().isEmpty) return false;
-    final screen = mainWindowScreenKey.currentState;
+    if (!mounted) return false;
+    final screen = AppWindowKeys.of(context).mainWindowScreen.currentState;
     if (screen == null) return false;
     unawaited(screen.handleInternalDeepLink(uri));
     return true;

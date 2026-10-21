@@ -8,7 +8,9 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/data/data_providers/link_visibility_sql.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
+import 'package:otzaria/migration/database/query_loader.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
 import 'package:otzaria/migration/database/sqlite3_utils.dart';
 import 'package:otzaria/migration/models/category.dart';
@@ -642,6 +644,110 @@ void main() {
           0,
         ),
         isEmpty,
+      );
+    });
+  });
+
+  group('selectCommentatorsByBook', () {
+    // השאילתה הבלתי-מצטברת, מקור להשוואת התוצאות.
+    const legacyQuery = '''
+SELECT DISTINCT l.targetBookId, b.title AS targetBookTitle, a.name AS author, COUNT(*) AS linkCount
+FROM link l
+JOIN connection_type ct ON l.connectionTypeId = ct.id
+JOIN book b ON l.targetBookId = b.id
+LEFT JOIN book_author ba ON b.id = ba.bookId
+LEFT JOIN author a ON ba.authorId = a.id
+WHERE l.sourceBookId = ?
+AND ct.name IN ('COMMENTARY', 'SUPER_COMMENTARY', 'TARGUM', 'MIDRASH', 'PARSHANUT', 'DIBUR_HAMATCHIL', 'ELUCIDATION', 'FOOTNOTES')
+/*LINK_VISIBILITY_FILTER*/
+GROUP BY l.targetBookId, b.title, a.name
+ORDER BY b.orderIndex, b.title''';
+
+    String withVisibility(String query) => query.replaceFirst(
+      linkVisibilityFilterMarker,
+      suppressedSideFilter(true, displayedSide: 0),
+    );
+
+    test('קישורי הספר נצברים לפני הצירוף לספר ולמחברים', () async {
+      await enableSideVisibility();
+      final db = await database.database;
+      final query = QueryLoader.loadQueries(
+        'LinkQueries.sq',
+      )['selectCommentatorsByBook']!;
+      final plan = db.select('EXPLAIN QUERY PLAN ${withVisibility(query)}', [
+        1,
+      ]);
+      final rowById = {for (final row in plan) row['id'] as int: row};
+      bool insideSubquery(int id) {
+        for (var p = rowById[id]!['parent'] as int; p != 0;) {
+          final row = rowById[p]!;
+          if (RegExp(
+            r'^(CO-ROUTINE|MATERIALIZE)',
+          ).hasMatch('${row['detail']}')) {
+            return true;
+          }
+          p = row['parent'] as int;
+        }
+        return false;
+      }
+
+      int nodeFor(String table) =>
+          plan.firstWhere(
+                (r) => RegExp('^(SCAN|SEARCH) $table\\b').hasMatch(
+                  '${r['detail']}',
+                ),
+              )['id']
+              as int;
+      expect(insideSubquery(nodeFor('l')), isTrue);
+      expect(insideSubquery(nodeFor('b')), isFalse);
+    });
+
+    test('התוצאה זהה לשאילתה הקודמת', () async {
+      final source = await buildSourceBook();
+      final rashi = await buildRashiBook();
+      final catId = await createCategory();
+      final tosafot = await createBook(catId, 'תוספות');
+      final tosafotLines = await insertLinesAndGetIds(tosafot, ['ת-1', 'ת-2']);
+      await enableSideVisibility();
+      final db = await database.database;
+      db.execute("INSERT INTO author (name) VALUES ('רש\"י'), ('ר\"ת')");
+      db.execute(
+        'INSERT INTO book_author (bookId, authorId) SELECT ?, id FROM author',
+        [rashi.bookId],
+      );
+
+      for (var i = 0; i < 4; i++) {
+        await insertCommentaryLink(
+          sourceBookId: source.bookId,
+          sourceLineId: source.lineIds[i],
+          targetBookId: rashi.bookId,
+          targetLineId: rashi.lineIds[i],
+        );
+      }
+      final suppressed = await insertCommentaryLink(
+        sourceBookId: source.bookId,
+        sourceLineId: source.lineIds[5],
+        targetBookId: rashi.bookId,
+        targetLineId: rashi.lineIds[3],
+      );
+      await suppressSourceSide(suppressed);
+      for (final type in ['TARGUM', 'QUOTATION']) {
+        await insertCommentaryLink(
+          sourceBookId: source.bookId,
+          sourceLineId: source.lineIds[6],
+          targetBookId: tosafot,
+          targetLineId: tosafotLines[0],
+          connectionTypeName: type,
+        );
+      }
+
+      final actual = await database.linkDao.selectCommentatorsByBook(
+        source.bookId,
+      );
+      expect(actual, hasLength(3));
+      expect(
+        actual,
+        db.select(withVisibility(legacyQuery), [source.bookId]).toMapList(),
       );
     });
   });

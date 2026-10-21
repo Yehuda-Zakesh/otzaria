@@ -9,7 +9,7 @@ import 'package:otzaria/widgets/misc/app_context_menu.dart';
 import 'package:otzaria/widgets/misc/app_popup_menu.dart';
 import 'package:otzaria/widgets/feedback/scrollable_positioned_list_scrollbar.dart';
 import 'package:otzaria/widgets/text/otzaria_search_field.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 /// שורה ברשימה המוצגת: כותרת קבוצה או פריט. הרשימה משוטחת כדי לאפשר
 /// וירטואליזציה — נבנות רק השורות הנראות.
@@ -394,7 +394,6 @@ class _ItemsListViewState extends State<ItemsListView> {
   Widget _buildRowsList(BuildContext context, List<_ListRow> rows) {
     return ScrollablePositionedListScrollbar(
       scrollController: _itemScrollController,
-      itemPositionsListener: _itemPositionsListener,
       itemCount: rows.length,
       child: ScrollablePositionedList.builder(
         itemScrollController: _itemScrollController,

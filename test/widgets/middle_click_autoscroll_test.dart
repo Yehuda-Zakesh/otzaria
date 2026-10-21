@@ -10,6 +10,66 @@ const _itemCount = 500;
 const _viewportHeight = 600.0;
 
 void main() {
+  testWidgets('החלפות רבות של רשימות שומרות זיהוי של הרשימה המחוברת בלבד', (
+    tester,
+  ) async {
+    final controllers = <ScrollController>[];
+    late StateSetter rebuild;
+    var generation = 0;
+    var current = ScrollController();
+    controllers.add(current);
+    addTearDown(() {
+      for (final controller in controllers) {
+        controller.dispose();
+      }
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MiddleClickAutoScroll(
+          child: StatefulBuilder(
+            builder: (_, setState) {
+              rebuild = setState;
+              return ListView.builder(
+                key: ValueKey(generation),
+                controller: current,
+                itemCount: 100,
+                itemBuilder: (_, index) => const SizedBox(height: 100),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 25; i++) {
+      final next = ScrollController();
+      controllers.add(next);
+      rebuild(() {
+        generation++;
+        current = next;
+      });
+      await tester.pumpAndSettle();
+    }
+    expect(
+      controllers
+          .take(controllers.length - 1)
+          .every((item) => !item.hasClients),
+      isTrue,
+    );
+    final center = tester.getCenter(find.byType(ListView));
+    final gesture = await tester.createGesture(
+      kind: PointerDeviceKind.mouse,
+      buttons: kMiddleMouseButton,
+    );
+    await gesture.down(center);
+    await tester.pump();
+    await gesture.moveTo(center + const Offset(0, 120));
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(current.offset, greaterThan(0));
+    await gesture.up();
+  });
+
   late ScrollController controller;
 
   Widget buildApp({

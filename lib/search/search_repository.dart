@@ -7,19 +7,6 @@ export 'package:otzaria/search/search_engine_gateway.dart'
     show SearchEngineRequest;
 
 /// Performs a search operation across indexed texts.
-///
-/// [query] The search query string
-/// [facets] List of facets to search within
-/// [limit] Maximum number of results to return
-/// [order] Sort order for results
-/// [fuzzy] Whether to perform fuzzy matching
-/// [distance] Default distance between words (slop)
-/// [customSpacing] Custom spacing between specific word pairs
-/// [alternativeWords] Alternative words for each word position (OR queries)
-/// [searchOptions] Search options for each word (prefixes, suffixes, etc.)
-///
-/// Returns a Future containing a list of search results
-///
 class SearchRepository {
   final SearchEngineGateway _gateway;
   final Future<SearchEngineOperations> Function()? _engineProvider;
@@ -122,10 +109,6 @@ class SearchRepository {
   /// Performs a combined search + count in a single engine pass.
   /// Returns total hit count alongside paged results, without streaming.
   /// Prefer this over separate search() + count() calls when streaming is not needed.
-  ///
-  /// [query] The search query string
-  /// [facets] List of facets to search within
-  /// [limit] Maximum number of results to return
   ///
   /// Returns a Future containing [SearchPageResult] with results and totalCount
   Future<SearchPageResult> searchTextsAndCount(

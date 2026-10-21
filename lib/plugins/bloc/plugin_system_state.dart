@@ -103,8 +103,6 @@ class PluginSystemDevInstallRequiresPermissions extends PluginSystemState {
     this.previousVersion,
   });
 
-  bool get isUpdate => previousVersion != null;
-
   @override
   List<Object?> get props => [
     manifest,
@@ -136,8 +134,6 @@ class PluginSystemInstallRequiresPermissions extends PluginSystemState {
     this.reportContext,
     this.isUserInitiated = false,
   });
-
-  bool get isUpdate => previousVersion != null;
 
   @override
   List<Object?> get props => [

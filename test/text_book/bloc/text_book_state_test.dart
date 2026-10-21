@@ -2,10 +2,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
+import 'package:otzaria/text_book/models/content_line_changes.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart'
     show SearchScope;
 
 void main() {
+  test('דלתת תוכן נשמרת בשינוי UI ונמחקת בהחלפת תוכן לא מוכרת', () {
+    final changes = ContentLineChanges(
+      fromVersion: 1,
+      ranges: [(first: 3, last: 5), (first: 1, last: 3)],
+    );
+    expect(changes.ranges, [(first: 1, last: 5)]);
+    final state = _loadedState().copyWith(
+      contentVersion: 2,
+      contentChanges: changes,
+    );
+    expect(state.copyWith(fontSize: 30).contentChanges, same(changes));
+    expect(state.copyWith(content: ['תוכן חדש']).contentChanges, isNull);
+    expect(state.copyWith(contentVersion: 3).contentChanges, isNull);
+    expect(state.copyWith(loadedLineFlags: [true]).contentChanges, isNull);
+  });
+
   group('TextBookLoaded equality', () {
     test('changes when spacing values change', () {
       final withSpacing = _loadedState(

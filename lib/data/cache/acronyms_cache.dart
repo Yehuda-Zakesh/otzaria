@@ -273,20 +273,6 @@ class AcronymsCache {
     _loadingFuture = null;
   }
 
-  /// בדיקות בלבד — מזריק מונחים גולמיים (כמו ב-DB) ומנרמל אותם כמו הטעינה
-  /// האמיתית, כדי לבדוק את מסלול ההתאמה בלי DB.
-  @visibleForTesting
-  void setAttachedAcronymsForTesting(
-    String slug,
-    Map<int, List<String>> rawTermsByBookId,
-  ) {
-    _attachedAcronyms[slug] = buildAcronymCacheData(
-      rawTermsByBookId.entries.expand(
-        (entry) => entry.value.map((term) => (entry.key, term)),
-      ),
-    ).acronymsByBookId;
-  }
-
   @visibleForTesting
   void setAcronymsForTesting(Map<int, List<String>> rawTermsByBookId) {
     final data = buildAcronymCacheData(

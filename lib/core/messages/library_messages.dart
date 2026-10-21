@@ -112,6 +112,23 @@ abstract class LibraryMessages {
   static const String updateNetworkInterrupted =
       'החיבור לרשת נקטע במהלך ההורדה';
 
+  static const String downloadPausedResumable =
+      'ההורדה נעצרה. אפשר להמשיך מהנקודה שבה נעצרה';
+
+  static const String tapToResumeDownload = 'לחץ להמשך ההורדה';
+
+  static const String backgroundTimeLimitReached =
+      'המערכת הגבילה את זמן ההורדה ברקע';
+
+  static const String backgroundTimeLimitStopped = 'עדכון הספרייה נעצר';
+
+  static const String libraryDownloadNotificationChannel = 'הורדת הספרייה';
+
+  static const String libraryDownloadNotificationTitle = 'עדכון ספרייה';
+
+  static const String libraryDownloadNotificationText =
+      'מוריד ומעדכן את הספרייה';
+
   static const String deltaApplyFailed = 'החלת עדכון הדלתא נכשלה';
 
   static const String deltaResultMismatch =

@@ -24,7 +24,7 @@ import 'package:otzaria/text_book/utils/dibburim_structure.dart';
 import 'package:otzaria/text_book/utils/inline_section_markers.dart';
 import 'package:otzaria/text_book/utils/reading_segment_navigation.dart';
 import 'package:otzaria/widgets/navigation/nav_panel_search.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
 
 /// "הלכות וסימנים" (`SimanNames`) ראשון — המבנה הראשון המתאים למיקום הוא
@@ -111,6 +111,9 @@ class _AltTocSidebarViewState extends State<AltTocSidebarView>
   final Map<int, int> _activeEntryIds = {};
   final Map<int, int> _lastScrolledEntryIds = {};
 
+  // מעבר כותרת בגלילה מחליף רק את הסימון; מאזין לכל ערך בונה מחדש שתי שורות ולא את כל העץ.
+  final Map<int, ValueNotifier<int>> _selectionTicks = {};
+
   // מעקב פתיחת הפאנל: גלילה מחדש למיקום הפעיל רק במעבר סגור→פתוח.
   bool _wasLeftPaneShown = false;
 
@@ -160,6 +163,9 @@ class _AltTocSidebarViewState extends State<AltTocSidebarView>
   @override
   void dispose() {
     _debounceTimer?.cancel();
+    for (final ticks in _selectionTicks.values) {
+      ticks.dispose();
+    }
     _sidebarScrollController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -464,17 +470,26 @@ class _AltTocSidebarViewState extends State<AltTocSidebarView>
         .toList();
     if (changed.isEmpty) return;
 
-    setState(() {
+    // שומרים את התנהגות המבנים הקיימים: רק המבנה הראשון המתאים נפתח
+    // אוטומטית. דיבורי-המתחיל נשארים מכווצים עד בחירת המשתמש.
+    final databaseMatch = matches.firstWhere(
+      (match) => match.structureId != kDibburimStructureId,
+      orElse: () => (structureId: kDibburimStructureId, entryId: 0),
+    );
+    final needsRebuild =
+        _searchController.text.isNotEmpty ||
+        (databaseMatch.structureId != kDibburimStructureId &&
+            !_isRevealed(databaseMatch.structureId, databaseMatch.entryId));
+    for (final match in changed) {
+      _selectionTicks[_activeEntryIds[match.structureId]]?.value++;
+      _selectionTicks[match.entryId]?.value++;
+    }
+    final update = needsRebuild ? setState : (VoidCallback fn) => fn();
+    update(() {
       for (final match in changed) {
         _activeEntryIds[match.structureId] = match.entryId;
       }
 
-      // שומרים את התנהגות המבנים הקיימים: רק המבנה הראשון המתאים נפתח
-      // אוטומטית. דיבורי-המתחיל נשארים מכווצים עד בחירת המשתמש.
-      final databaseMatch = matches.firstWhere(
-        (match) => match.structureId != kDibburimStructureId,
-        orElse: () => (structureId: kDibburimStructureId, entryId: 0),
-      );
       if (databaseMatch.structureId != kDibburimStructureId) {
         if (!_structureRoots.containsKey(databaseMatch.structureId)) {
           _structureExpanded[databaseMatch.structureId] = true;
@@ -540,6 +555,19 @@ class _AltTocSidebarViewState extends State<AltTocSidebarView>
         debugPrint('Error scrolling to active item: $e');
       }
     });
+  }
+
+  /// הערך כבר גלוי בעץ, ולכן ההרחבה שב-[_findAndHighlightEntry] לא תשנה דבר.
+  bool _isRevealed(int structureId, int entryId) {
+    if (_structureExpanded[structureId] != true ||
+        !_structureRoots.containsKey(structureId)) {
+      return false;
+    }
+    final parents = _structureParents[structureId] ?? const {};
+    for (var id = parents[entryId]; id != null; id = parents[id]) {
+      if (_entryExpanded[id] != true) return false;
+    }
+    return true;
   }
 
   void _expandParents(int structureId, int entryId) {
@@ -923,19 +951,26 @@ class _AltTocSidebarViewState extends State<AltTocSidebarView>
     final children = _structureChildren[structureId]?[entry.id];
     final hasChildren = children != null && children.isNotEmpty;
     final isExpanded = _entryExpanded[entry.id] ?? false;
-    final isSelected = entry.id == _activeEntryIds[structureId];
     // רמת המבנה היא 0, ולכן ערכי ה-TOC מוזחים רמה אחת פנימה.
     final level = entry.level + 1;
 
-    final tile = NavTreeTile.heading(
-      title: entry.text ?? '',
-      level: level,
-      isSelected: isSelected,
-      isExpanded: isExpanded,
-      hasChildren: hasChildren,
-      onTap: () =>
-          _handleEntryTap(structureId, entry, toggleIfLinkless: hasChildren),
-      onToggleExpand: hasChildren ? () => _toggleEntryExpanded(entry.id) : null,
+    final tile = ValueListenableBuilder<int>(
+      valueListenable: _selectionTicks.putIfAbsent(
+        entry.id,
+        () => ValueNotifier(0),
+      ),
+      builder: (context, _, _) => NavTreeTile.heading(
+        title: entry.text ?? '',
+        level: level,
+        isSelected: entry.id == _activeEntryIds[structureId],
+        isExpanded: isExpanded,
+        hasChildren: hasChildren,
+        onTap: () =>
+            _handleEntryTap(structureId, entry, toggleIfLinkless: hasChildren),
+        onToggleExpand: hasChildren
+            ? () => _toggleEntryExpanded(entry.id)
+            : null,
+      ),
     );
 
     return Column(

@@ -4,6 +4,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/focus_repository.dart';
@@ -23,7 +24,6 @@ import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/plugins/services/plugin_search_field_actions_registry.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
-import 'package:otzaria/tour/tour_target_keys.dart';
 import 'package:otzaria/widgets/controls/action_buttons.dart';
 import 'package:provider/provider.dart';
 
@@ -1253,7 +1253,9 @@ void main() {
 
           expect(tester.takeException(), isNull);
           // הפאנל עצמו נמדד ולא ה-Dialog, שממלא את המסך ומרכז את הפאנל בתוכו.
-          final panel = tester.getRect(find.byKey(tourFindRefDialogTargetKey));
+          final panel = tester.getRect(
+            find.byKey(AppWindowKeys.current.tour.findRefDialog),
+          );
           expect(panel.left, greaterThanOrEqualTo(0));
           expect(panel.top, greaterThanOrEqualTo(0));
           expect(panel.right, lessThanOrEqualTo(entry.value.width));
@@ -1272,7 +1274,9 @@ void main() {
       await _pumpDialog(tester, results: [_ref('בראשית פרק א')]);
 
       expect(tester.takeException(), isNull);
-      final panel = tester.getRect(find.byKey(tourFindRefDialogTargetKey));
+      final panel = tester.getRect(
+        find.byKey(AppWindowKeys.current.tour.findRefDialog),
+      );
       expect(panel.height, lessThanOrEqualTo(720 - 300));
       expect(find.text('סגור'), findsOneWidget);
     });
@@ -1446,7 +1450,9 @@ void main() {
       await _pumpDialog(tester, results: [_ref('בראשית פרק א')]);
 
       expect(tester.takeException(), isNull);
-      final panel = tester.getRect(find.byKey(tourFindRefDialogTargetKey));
+      final panel = tester.getRect(
+        find.byKey(AppWindowKeys.current.tour.findRefDialog),
+      );
       expect(panel.height, lessThanOrEqualTo(360 - 220));
       expect(find.byType(TextField), findsOneWidget);
     });

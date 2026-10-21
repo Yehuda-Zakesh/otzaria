@@ -1,8 +1,8 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
-import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
@@ -452,7 +452,7 @@ SearchResult _result({
     text: 'שיעור הילוך מיל',
     segment: BigInt.from(segment),
     isPdf: book is PdfBook,
-    filePath: IndexingRepository.buildIndexedBookFilePath(book),
+    filePath: BookIdentity.indexedFilePath(book),
     mergedCount: 1,
     merged: const [],
     textStatus: TextStatus.ok,

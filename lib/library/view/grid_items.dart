@@ -133,17 +133,45 @@ bool _textOverflows({
   required double maxWidth,
   required TextAlign textAlign,
 }) {
+  final textDirection = Directionality.of(context);
+  final textScaler = MediaQuery.textScalerOf(context);
+  final cacheKey = (
+    text,
+    style,
+    maxLines,
+    maxWidth,
+    textDirection,
+    textAlign,
+    textScaler,
+  );
+  final cached = _overflowCache.remove(cacheKey);
+  if (cached != null) return _overflowCache[cacheKey] = cached;
+  debugLibraryTextOverflowLayouts++;
   final textPainter = TextPainter(
     text: TextSpan(text: text, style: style),
     maxLines: maxLines,
     ellipsis: 'Γאª',
-    textDirection: Directionality.of(context),
+    textDirection: textDirection,
     textAlign: textAlign,
-    textScaler: MediaQuery.textScalerOf(context),
+    textScaler: textScaler,
   )..layout(maxWidth: maxWidth);
-
-  return textPainter.didExceedMaxLines;
+  final overflows = textPainter.didExceedMaxLines;
+  textPainter.dispose();
+  if (_overflowCache.length >= 2000) {
+    _overflowCache.remove(_overflowCache.keys.first);
+  }
+  return _overflowCache[cacheKey] = overflows;
 }
+
+// בנייה מחדש של פריט ברשימה מודדת שוב את אותן שורות; גופן שנטען משנה מדידה.
+final Map<Object, bool> _overflowCache = () {
+  final cache = <Object, bool>{};
+  PaintingBinding.instance.systemFonts.addListener(cache.clear);
+  return cache;
+}();
+
+@visibleForTesting
+int debugLibraryTextOverflowLayouts = 0;
 
 Decoration _libraryTooltipDecoration(BuildContext context) {
   final cs = Theme.of(context).colorScheme;

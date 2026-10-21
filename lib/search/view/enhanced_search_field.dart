@@ -61,9 +61,6 @@ class EnhancedSearchField extends StatefulWidget {
   State<EnhancedSearchField> createState() => _EnhancedSearchFieldState();
 }
 
-// GlobalKey לגישה ל-State מבחוץ
-final GlobalKey enhancedSearchFieldKey = GlobalKey();
-
 class _EnhancedSearchFieldState extends State<EnhancedSearchField> {
   final GlobalKey _textFieldKey = GlobalKey();
   final GlobalKey _searchOptionsOverlayKey = GlobalKey();

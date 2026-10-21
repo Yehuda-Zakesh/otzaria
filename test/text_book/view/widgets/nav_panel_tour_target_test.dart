@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/text_book/view/widgets/nav_panel_tour_target.dart';
 
 /// ילד עם State שסופר יצירות — כך אפשר להוכיח שהחלונית לא נבנתה מאפס.
@@ -64,7 +65,7 @@ void main() {
   setUp(() {
     _ProbeState.initCount = 0;
     _ProbeState.disposeCount = 0;
-    activeTextBookNavPanelTourTargetKey = null;
+    AppWindowKeys.current.tour.activeTextBookNavPanel = null;
   });
 
   Future<_HostState> pumpHost(
@@ -114,7 +115,7 @@ void main() {
   testWidgets('הטאב הפעיל מפרסם את מפתח החלונית שלו', (tester) async {
     await pumpHost(tester);
 
-    final key = activeTextBookNavPanelTourTargetKey;
+    final key = AppWindowKeys.current.tour.activeTextBookNavPanel;
     expect(key, isNotNull);
     expect(key!.currentContext, isNotNull);
     expect(
@@ -129,28 +130,28 @@ void main() {
   testWidgets('טאב רקע אינו מפרסם מפתח', (tester) async {
     await pumpHost(tester, isActive: false);
 
-    expect(activeTextBookNavPanelTourTargetKey, isNull);
+    expect(AppWindowKeys.current.tour.activeTextBookNavPanel, isNull);
   });
 
   testWidgets('הפעלת טאב שהיה ברקע מפרסמת את המפתח שלו', (tester) async {
     final host = await pumpHost(tester, isActive: false);
-    expect(activeTextBookNavPanelTourTargetKey, isNull);
+    expect(AppWindowKeys.current.tour.activeTextBookNavPanel, isNull);
 
     host.setActive(true);
     await tester.pump();
 
-    expect(activeTextBookNavPanelTourTargetKey, isNotNull);
+    expect(AppWindowKeys.current.tour.activeTextBookNavPanel, isNotNull);
   });
 
   testWidgets('טאב שיורד לרקע לבדו מנקה את הפרסום', (tester) async {
     final host = await pumpHost(tester);
-    expect(activeTextBookNavPanelTourTargetKey, isNotNull);
+    expect(AppWindowKeys.current.tour.activeTextBookNavPanel, isNotNull);
 
     host.setActive(false);
     await tester.pump();
 
     expect(
-      activeTextBookNavPanelTourTargetKey,
+      AppWindowKeys.current.tour.activeTextBookNavPanel,
       isNull,
       reason: 'הסיור לא אמור להדגיש חלונית של טאב שאינו על המסך',
     );
@@ -186,13 +187,13 @@ void main() {
       ),
     );
 
-    final firstKey = activeTextBookNavPanelTourTargetKey;
+    final firstKey = AppWindowKeys.current.tour.activeTextBookNavPanel;
     expect(firstKey, isNotNull);
 
     setOuterState(() => activeIndex = to);
     await tester.pump();
 
-    final secondKey = activeTextBookNavPanelTourTargetKey;
+    final secondKey = AppWindowKeys.current.tour.activeTextBookNavPanel;
     expect(secondKey, isNotNull, reason: 'הפרסום של הטאב הנכנס נמחק');
     expect(secondKey, isNot(firstKey));
     expect(
@@ -219,11 +220,11 @@ void main() {
 
   testWidgets('סגירת הטאב הפעיל מנקה את הפרסום', (tester) async {
     await pumpHost(tester);
-    expect(activeTextBookNavPanelTourTargetKey, isNotNull);
+    expect(AppWindowKeys.current.tour.activeTextBookNavPanel, isNotNull);
 
     await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
 
-    expect(activeTextBookNavPanelTourTargetKey, isNull);
+    expect(AppWindowKeys.current.tour.activeTextBookNavPanel, isNull);
   });
 
   testWidgets('סגירת טאב רקע לא מוחקת את הפרסום של הטאב הפעיל', (
@@ -257,12 +258,12 @@ void main() {
       ),
     );
 
-    final activeKey = activeTextBookNavPanelTourTargetKey;
+    final activeKey = AppWindowKeys.current.tour.activeTextBookNavPanel;
     expect(activeKey, isNotNull);
 
     setOuterState(() => showBackgroundTab = false);
     await tester.pump();
 
-    expect(activeTextBookNavPanelTourTargetKey, activeKey);
+    expect(AppWindowKeys.current.tour.activeTextBookNavPanel, activeKey);
   });
 }

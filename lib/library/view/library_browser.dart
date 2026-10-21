@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/plugins/models/plugin_search_field_action.dart';
 import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/core/messages/messages_exports.dart';
@@ -325,6 +326,14 @@ class LibraryBrowser extends StatefulWidget {
   State<LibraryBrowser> createState() => _LibraryBrowserState();
 }
 
+final _libraryBrowserKeys = Expando<GlobalKey<State<LibraryBrowser>>>();
+
+extension LibraryBrowserKeyX on AppWindowKeys {
+  /// מפתח הספרייה של החלון. נוצר בגישה הראשונה וקבוע לחיי ה-[AppWindowKeys].
+  GlobalKey<State<LibraryBrowser>> get libraryBrowser =>
+      _libraryBrowserKeys[this] ??= GlobalKey<State<LibraryBrowser>>();
+}
+
 class _LibraryBrowserState extends State<LibraryBrowser>
     with AutomaticKeepAliveClientMixin, TickerProviderStateMixin {
   @override
@@ -354,6 +363,9 @@ class _LibraryBrowserState extends State<LibraryBrowser>
   Timer? _searchDebounce;
   bool _pendingKeepPreview = false;
   bool _lastScrollVisible = true;
+
+  // רק המצב הריק מציג את טקסט החיפוש; בלעדיו הקלדה לא בונה מחדש את התוכן.
+  bool _showsEmptyState = false;
 
   static const List<String> _orderedTopCategories = [
     'תנ"ך',
@@ -517,7 +529,7 @@ class _LibraryBrowserState extends State<LibraryBrowser>
                 p.currentCategory != c.currentCategory ||
                 p.searchResults != c.searchResults ||
                 p.searchCategoryResults != c.searchCategoryResults ||
-                p.searchQuery != c.searchQuery ||
+                (_showsEmptyState && p.searchQuery != c.searchQuery) ||
                 p.selectedTopics != c.selectedTopics,
             builder: (context, state) {
               if (state.error != null) {
@@ -844,7 +856,9 @@ class _LibraryBrowserState extends State<LibraryBrowser>
     final focusRepository = context.read<FocusRepository>();
 
     final handled =
-        await mainWindowScreenKey.currentState?.handleInternalDeepLink(
+        await AppWindowKeys.of(
+          context,
+        ).mainWindowScreen.currentState?.handleInternalDeepLink(
           normalized.toString(),
         ) ??
         false;
@@ -1416,6 +1430,7 @@ class _LibraryBrowserState extends State<LibraryBrowser>
     SettingsState settingsState,
     FocusRepository repo,
   ) {
+    _showsEmptyState = true;
     final searchText = repo.librarySearchController.text;
     final isDeepLink = _isDeepLinkText(searchText);
 
@@ -1477,6 +1492,7 @@ class _LibraryBrowserState extends State<LibraryBrowser>
     return BlocSelector<LibraryBloc, LibraryState, bool>(
       selector: (s) => s.isSearching,
       builder: (ctx, isSearching) {
+        _showsEmptyState = false;
         if (isSearching) {
           return const Center(child: _SearchingIndicator());
         }

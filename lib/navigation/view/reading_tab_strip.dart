@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/windowing/external_tab_drag.dart';
 import 'package:otzaria/core/windowing/tab_drag_preview.dart';
 import 'package:otzaria/navigation/view/tab_visuals.dart';
@@ -718,7 +719,9 @@ class _DraggableTabState extends State<_DraggableTab> {
 
     // המוק נמדד לפי אזור התוכן, ולא לפי החלון הרחב ממנו.
     final contentBox =
-        windowContentBoundaryKey.currentContext?.findRenderObject()
+        AppWindowKeys.of(
+              context,
+            ).windowContentBoundary.currentContext?.findRenderObject()
             as RenderBox?;
     final size = contentBox != null && contentBox.hasSize
         ? contentBox.size

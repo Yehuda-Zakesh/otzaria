@@ -1,3 +1,4 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'dart:math';
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:otzaria/settings/engine/app_settings_store.dart';
@@ -26,8 +27,8 @@ void main() {
         source: _attached,
         externalLibraryId: 'official-ext',
       );
-      expect(IndexingRepository.catalogueOrderKey(book), 'db:$_slug:7');
-      expect(IndexingRepository.buildIndexedBookFilePath(book), 'db:$_slug:7');
+      expect(BookIdentity.keyOf(book), 'db:$_slug:7');
+      expect(BookIdentity.indexedFilePath(book), 'db:$_slug:7');
     });
 
     test('PDF ממסד מצורף ממופתח לפי id, זהה למסך החיפוש ב-PDF', () {
@@ -37,9 +38,9 @@ void main() {
         path: '/drive/lib/a.pdf',
         source: _attached,
       );
-      expect(IndexingRepository.buildIndexedBookFilePath(book), 'db:$_slug:3');
+      expect(BookIdentity.indexedFilePath(book), 'db:$_slug:3');
       expect(
-        IndexingRepository.indexedPdfFilePath(
+        BookIdentity.indexedPdfFilePath(
           externalLibraryId: null,
           filePath: book.path,
           source: _attached,
@@ -59,10 +60,10 @@ void main() {
     });
 
     test('attachedSlugOfKey', () {
-      expect(IndexingRepository.attachedSlugOfKey('db:a:b:12'), 'a:b');
-      expect(IndexingRepository.attachedSlugOfKey('db:x:1'), 'x');
-      expect(IndexingRepository.attachedSlugOfKey('uid:1'), isNull);
-      expect(IndexingRepository.attachedSlugOfKey('db::1'), isNull);
+      expect(BookIdentity.attachedSlugOfKey('db:a:b:12'), 'a:b');
+      expect(BookIdentity.attachedSlugOfKey('db:x:1'), 'x');
+      expect(BookIdentity.attachedSlugOfKey('uid:1'), isNull);
+      expect(BookIdentity.attachedSlugOfKey('db::1'), isNull);
     });
   });
 
@@ -99,10 +100,7 @@ void main() {
         expect(keys.toSet(), hasLength(keys.length));
         expect(
           keys.toSet(),
-          library
-              .getIndexableBooks()
-              .map(IndexingRepository.buildIndexedBookFilePath)
-              .toSet(),
+          library.getIndexableBooks().map(BookIdentity.indexedFilePath).toSet(),
         );
       },
     );
@@ -135,10 +133,10 @@ void main() {
       // הסמנטיקה הישנה: מקום ברצף, וספר אישי בטווח משלו אחרי כל הספרייה.
       final positions = SearchCatalogueOrderHelper.buildKeyOrderMap<String>(
         library,
-        keyOf: (book) => IndexingRepository.catalogueOrderKey(book as Book),
+        keyOf: (book) => BookIdentity.keyOf(book as Book),
       );
       int oldOrder(Book book) {
-        final key = IndexingRepository.catalogueOrderKey(book);
+        final key = BookIdentity.keyOf(book);
         final personalId = key.startsWith('uid:')
             ? int.tryParse(key.substring(4))
             : null;
@@ -152,8 +150,7 @@ void main() {
       final indexable = library.getIndexableBooks();
       expect(mapping, hasLength(indexable.length));
       for (final book in indexable) {
-        final entry =
-            mapping[IndexingRepository.buildIndexedBookFilePath(book)];
+        final entry = mapping[BookIdentity.indexedFilePath(book)];
         expect(entry, isNotNull, reason: book.title);
         expect(entry!.catalogueOrder, oldOrder(book), reason: book.title);
         expect(

@@ -22,7 +22,7 @@ import 'package:otzaria/tabs/models/pdf_tab.dart';
 import 'package:otzaria/widgets/lists/nav_tree_tile.dart';
 import 'package:otzaria/widgets/feedback/scrollable_positioned_list_scrollbar.dart';
 import 'package:otzaria/widgets/navigation/nav_side_panel.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 import '../helpers/memory_settings_cache.dart';
 
 class _FakeSettingsBloc extends Bloc<SettingsEvent, SettingsState>

@@ -4,10 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/plugins/services/plugin_extended_validator.dart';
 import 'package:otzaria/plugins/utils/plugin_version_utils.dart';
 
-/// מוודא שמפת גרסאות ה-API (`_methodMinVersion` ב-PluginExtendedValidator),
-/// הטבלה ב-`docs/plugin-sdk/API_REFERENCE.md` ורשימת ה-methods המוכרים
-/// נשארות עקביות. כל API חדש חייב להופיע בכל שלושת המקומות עם אותה גרסה,
-/// אחרת האכיפה בעת אריזה תתפצל מהתיעוד.
+/// מוודא שגרסאות הקטלוג תואמות לטבלה ב-`docs/plugin-sdk/API_REFERENCE.md`.
 void main() {
   group('סנכרון גרסאות API (מפה ⇄ טבלת התיעוד ⇄ known methods)', () {
     final versions = PluginExtendedValidator.methodMinVersions;
@@ -22,7 +19,7 @@ void main() {
         missing,
         isEmpty,
         reason:
-            'methods ללא גרסה ב-_methodMinVersion: $missing. הוסף שורה '
+            'methods ללא גרסה ב-קטלוג ה-SDK: $missing. הוסף שורה '
             'במפה ובטבלה שב-API_REFERENCE.md.',
       );
     });
@@ -38,7 +35,7 @@ void main() {
       expect(
         unknown,
         isEmpty,
-        reason: 'גרסה הוגדרה ל-method שאינו ב-_knownApiMethods: $unknown',
+        reason: 'גרסה הוגדרה ל-method שאינו ב-קטלוג ה-SDK: $unknown',
       );
     });
 

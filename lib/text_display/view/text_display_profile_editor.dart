@@ -8,16 +8,7 @@ import 'package:otzaria_icons/otzaria_icons.dart';
 
 /// עורך פרופיל תצוגה מלא — שורה לכל שדה. משמש את מסך ההגדרות ואת
 /// הפופאפ בסרגל הספר, כדי שהמשתמש יראה את אותם פקדים בכל מקום.
-class TextDisplayProfileEditor extends StatelessWidget {
-  final TextDisplayProfile profile;
-  final ValueChanged<TextDisplayProfile> onChanged;
-
-  const TextDisplayProfileEditor({
-    super.key,
-    required this.profile,
-    required this.onChanged,
-  });
-
+abstract final class TextDisplayProfileEditor {
   /// השורות כרשימה — לשיבוץ ישיר בתוך [SettingsCard] (שמוסיף מפרידים).
   static List<Widget> tiles(
     BuildContext context, {
@@ -96,17 +87,5 @@ class TextDisplayProfileEditor extends StatelessWidget {
         onChanged: (v) => onChanged(profile.copyWith(anchorMarkers: v)),
       ),
     ];
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: tiles(
-        context,
-        profile: profile,
-        onChanged: onChanged,
-      ),
-    );
   }
 }

@@ -18,17 +18,21 @@ dart run tool/plugins/generate_plugin_spec.dart          # כותב
 dart run tool/plugins/generate_plugin_spec.dart --check   # רק בודק, יוצא 1 אם מיושן
 ```
 
-המחולל קורא את הקבועים מקוד האפליקציה (AST, לא Markdown):
+המחולל מייבא את קטלוג שיטות ה-SDK, שהוא Dart טהור ללא תלות ב-Flutter.
+את יתר הקבועים הוא קורא מקוד האפליקציה באמצעות AST:
 
 | מקור | מה נלקח |
 |---|---|
-| `lib/plugins/services/plugin_extended_validator.dart` | `_knownApiMethods`, `_knownUndocumentedMethods`, `_methodRequiredPermission`, `_methodMinVersion`, `_knownEvents`, `_whenConditionMinVersion` |
+| `lib/plugins/models/plugin_api_catalog.dart` | שיטות מתועדות ופנימיות, הרשאות הגשר והאריזה, גרסאות מינימום ורמזי הרשאות |
+| `lib/plugins/services/plugin_extended_validator.dart` | `_knownEvents`, `_whenConditionMinVersion`, `_headlessMinVersion` |
 | `lib/plugins/models/plugin_valid_permissions.dart` | `pluginValidPermissions`, `pluginBaselinePermissions`, `pluginLegacyPermissionAliases` |
-| `lib/plugins/bridge/plugin_bridge_handler.dart` | `methodPermissions` (הטבלה הנאכפת בזמן ריצה — גוברת) |
 | `lib/plugins/services/plugin_manifest_validator.dart` | `validStabilityValues` |
 | `lib/plugins/services/plugin_settings_access_policy.dart` | `blockedSubstrings` / `blockedPrefixes` / `blockedKeys` |
 
-**הוספת API חדש דורשת רק את השורות בקוד** — המחולל אינו מקודד רשימות בעצמו.
+**הוספת API חדש דורשת רשומה בקטלוג** — הגשר, הוולידטורים והמחולל משתמשים בה.
+הרשאת הגשר גוברת במפרט; כשאין כזו, מפורסמת הרשאת האריזה. כך פעולות רשת
+ממשיכות לפרסם `network.access` אף שההרשאה בפועל נבדקת לפי היעד.
+מפת רמזי ההרשאות חלקית במכוון, ונקבעת בשדה `hasPermissionHint`.
 אם שם קבוע משתנה, המחולל נכשל בקול (`PluginSpecError`) ולא מייצר מפרט חסר.
 
 ## מה נכשל אם שוכחים

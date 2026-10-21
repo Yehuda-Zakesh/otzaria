@@ -2,10 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
 import 'database.dart';
 
-/// גישה ל-`line_ref` — אינדקס ההפניות הקנוני `(bookId, refKeyHash) → lineIndex`.
-///
-/// הטבלה נבנית בבונה ה-DB, ולכן חסרה במסדים שנבנו לפניה; [isAvailable] מאפשר
-/// לקורא ליפול חזרה למסלול ה-TOC במקום לסרוק.
 /// שורה מועמדת מהאינדקס, עם ה-heRef שלה לאימות ההתאמה.
 typedef LineRefCandidate = ({
   int bookId,
@@ -14,6 +10,10 @@ typedef LineRefCandidate = ({
   String? heRef,
 });
 
+/// גישה ל-`line_ref` — אינדקס ההפניות הקנוני `(bookId, refKeyHash) → lineIndex`.
+///
+/// הטבלה נבנית בבונה ה-DB, ולכן חסרה במסדים שנבנו לפניה; [isAvailable] מאפשר
+/// לקורא ליפול חזרה למסלול ה-TOC במקום לסרוק.
 class LineRefDao {
   final MyDatabase _db;
 

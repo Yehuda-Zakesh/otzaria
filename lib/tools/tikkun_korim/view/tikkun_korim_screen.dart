@@ -34,7 +34,7 @@ import 'package:otzaria/widgets/navigation/app_top_bar.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
 import 'package:otzaria/widgets/widgets_exports.dart' show showWarningDialog;
 import 'package:otzaria/printing/view/printing_screen.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 /// רוחב בורר בסרגל העליון והריפוד משני צדדיו.
 const double _kSelectorWidth = 150;

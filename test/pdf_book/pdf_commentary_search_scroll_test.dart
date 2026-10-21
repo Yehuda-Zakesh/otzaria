@@ -67,6 +67,7 @@ Future<void> main() async {
     late ValueNotifier<int> total;
     late ValueNotifier<int> current;
     late ValueNotifier<List<CommentarySearchSnippet>> snippets;
+    late ValueNotifier<bool> expanded;
 
     setUp(() {
       tab = _tab()..linksAreComplete = true;
@@ -75,6 +76,7 @@ Future<void> main() async {
       total = ValueNotifier(0);
       current = ValueNotifier(0);
       snippets = ValueNotifier([]);
+      expanded = ValueNotifier(false);
     });
     tearDown(() {
       tab.dispose();
@@ -82,9 +84,15 @@ Future<void> main() async {
       total.dispose();
       current.dispose();
       snippets.dispose();
+      expanded.dispose();
     });
 
-    Widget panel(int start, int end, {Set<int>? extraLines}) => _wrap(
+    Widget panel(
+      int start,
+      int end, {
+      Set<int>? extraLines,
+      bool externalSearch = true,
+    }) => _wrap(
       PdfCommentaryPanel(
         key: key,
         tab: tab,
@@ -96,10 +104,11 @@ Future<void> main() async {
         lineStartOverride: start,
         lineEndOverride: end,
         extraLineIndices: extraLines,
-        externalSearchController: query,
+        externalSearchController: externalSearch ? query : null,
         externalTotalResultsNotifier: total,
         externalCurrentIndexNotifier: current,
         externalSearchSnippetsNotifier: snippets,
+        externalAllExpandedNotifier: expanded,
         commentaryGroupsLoader: (links) async => [
           for (final link in links)
             LinkGroup(
@@ -223,6 +232,68 @@ Future<void> main() async {
       expect(current.value, -1);
       expect(snippets.value.single.path, '${_title(2)}.txt');
       expect(snippets.value.single.snippet, contains('חדש'));
+      expect(tester.takeException(), isNull);
+    }, skip: !engineReady);
+
+    testWidgets('החלפת controller חיצוני מנתקת את הישן ואת ההסרה', (
+      tester,
+    ) async {
+      tab.links = [_SearchLink(2, 1, Future.value('אמר אמר חדש'))];
+      await tester.pumpWidget(panel(1, 9));
+      await tester.pumpAndSettle();
+      query.text = 'אמר';
+      await finishSearch(tester);
+      expect(total.value, 2);
+      final old = query;
+      addTearDown(old.dispose);
+      query = TextEditingController(text: 'חדש');
+      final retained = key.currentState;
+      await tester.pumpWidget(panel(1, 9));
+      await finishSearch(tester);
+      expect(key.currentState, same(retained));
+      expect(total.value, 1);
+      query.clear();
+      await finishSearch(tester);
+      old.text = 'אמר';
+      await finishSearch(tester);
+      expect(total.value, 0);
+      await tester.pumpWidget(panel(1, 9, externalSearch: false));
+      old.text = 'ישן';
+      query.text = 'אמר';
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    }, skip: !engineReady);
+
+    testWidgets('notifiers חדשים מקבלים חיפוש קיים באותו State', (
+      tester,
+    ) async {
+      tab.links = [_SearchLink(2, 1, Future.value('אמר אמר חדש'))];
+      await tester.pumpWidget(panel(1, 9));
+      await tester.pumpAndSettle();
+      query.text = 'אמר';
+      await finishSearch(tester);
+      key.currentState!.navigateSearchNext();
+      await tester.pumpAndSettle();
+      expect(total.value, 2);
+      expect(current.value, 0);
+      final retained = key.currentState;
+      final savedSnippets = snippets.value;
+      expect(savedSnippets, isNotEmpty);
+      addTearDown(total.dispose);
+      addTearDown(current.dispose);
+      addTearDown(snippets.dispose);
+      addTearDown(expanded.dispose);
+      total = ValueNotifier(-99);
+      current = ValueNotifier(-99);
+      snippets = ValueNotifier([]);
+      expanded = ValueNotifier(false);
+      await tester.pumpWidget(panel(1, 9));
+      await finishSearch(tester);
+      expect(key.currentState, same(retained));
+      expect(total.value, 2);
+      expect(current.value, 0);
+      expect(snippets.value, same(savedSnippets));
+      expect(expanded.value, isTrue);
       expect(tester.takeException(), isNull);
     }, skip: !engineReady);
 

@@ -1,3 +1,4 @@
+import 'package:otzaria/book_common/bloc/commentary_search_bloc.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:otzaria/widgets/smart_text/render_settings.dart';
@@ -75,7 +76,7 @@ import 'package:otzaria/printing/view/printing_screen.dart';
 
 import 'dart:async';
 
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 /// Type alias לתאימות - משתמש ב-LinkGroup מה-Service
 typedef CommentaryGroup = LinkGroup;
@@ -422,10 +423,7 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
   final Map<String, bool> _expansionStates = {};
 
   // Anti-jitter search stats
-  final Map<String, int> _searchResultsPerLink = {};
-
-  /// קטע התצוגה של תוצאת החיפוש בכל מפרש (link key → snippet).
-  final Map<String, String> _searchSnippetsPerLink = {};
+  Map<String, int> get _searchResultsPerLink => _searchBloc.state.counts;
 
   /// הטקסט המרונדר של כל מפרש מוצג — לשחזור מעברי שורה בהעתקה רב-שורתית,
   /// ש-Flutter מחזיר שטוחה.
@@ -438,25 +436,16 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
   /// המפרש שנלחץ לאחרונה. ל-SelectionArea היחיד אין מידע על המפרש הספציפי,
   /// והוא נדרש לייחוס כותרת המקור בהעתקה.
   Link? _lastSelectedLink;
-  Timer? _searchUpdateDebounce;
-  final Map<String, int> _pendingCounts = {};
-  // חישוב ספירות חיפוש ברקע על כל הקישורים — הרשימה וירטואלית ופריטים שלא
-  // נבנו אינם מדווחים, לכן אסור להסתמך על ה-widgets לספירה.
-  Timer? _searchComputeDebounce;
-  int _searchComputeGen = 0;
-  int _lastLinksSignature = 0;
 
   // Scroll support
   final ItemScrollController _itemScrollController = ItemScrollController();
   final ItemPositionsListener _itemPositionsListener =
       ItemPositionsListener.create();
-  Completer<bool>? _pendingItemPositionWait;
-  VoidCallback? _pendingItemPositionListener;
-  int? _pendingItemPositionIndex;
-  String? _pendingItemPositionId;
+  final ListController _listController = ListController();
+  final Map<String, GlobalKey> _headerKeys = {};
+  HeaderAnchorHandle? _headerAnchor;
+  Map<Key, int> _flatIndexByKey = const {};
   int _searchScrollGeneration = 0;
-  final ScrollOffsetController _scrollOffsetController =
-      ScrollOffsetController();
   final FocusNode _commentaryFocusNode = FocusNode();
   final Map<String, GlobalKey> _itemKeys = {};
   List<Link> _orderedLinks = [];
@@ -550,22 +539,22 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
   }
 
   void _clearSearchAndCloseField() {
-    _searchComputeDebounce?.cancel();
+    _cancelSearchScroll();
     _searchController.clear();
     setState(() {
       _searchQuery = '';
       _currentSearchIndex = 0;
       _totalSearchResults = 0;
-      _searchResultsPerLink.clear();
-      _searchSnippetsPerLink.clear();
+
       _showSearchField = false;
     });
-    _publishSearchSnippets();
+    _scheduleSearchCompute();
   }
 
   @override
   void initState() {
     super.initState();
+    _searchSubscription = _searchBloc.stream.listen(_applySearchState);
     _tabController = TabController(
       length: 3, // מפרשים, קישורים, הערות
       vsync: this,
@@ -590,17 +579,17 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
     _loadCommentatorGroups();
     _scrolledRangeKey = _currentRangeKey();
     _searchScopeKey = _currentLinksScopeKey();
+    if (widget.externalSearchController != null) _onExternalSearchChanged();
   }
 
   void _onExternalSearchChanged() {
+    _cancelSearchScroll();
     final text = widget.externalSearchController!.text;
     if (!mounted) return;
     setState(() {
       _searchQuery = text;
       _currentSearchIndex = -1;
       if (text.isEmpty) {
-        _searchResultsPerLink.clear();
-        _searchSnippetsPerLink.clear();
         _totalSearchResults = 0;
       }
     });
@@ -720,6 +709,33 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
   @override
   void didUpdateWidget(PdfCommentaryPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.externalTotalResultsNotifier !=
+            widget.externalTotalResultsNotifier ||
+        oldWidget.externalCurrentIndexNotifier !=
+            widget.externalCurrentIndexNotifier ||
+        oldWidget.externalSearchSnippetsNotifier !=
+            widget.externalSearchSnippetsNotifier ||
+        oldWidget.externalAllExpandedNotifier !=
+            widget.externalAllExpandedNotifier) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        widget.externalTotalResultsNotifier?.value = _totalSearchResults;
+        widget.externalCurrentIndexNotifier?.value = _currentSearchIndex;
+        widget.externalAllExpandedNotifier?.value = _allExpanded;
+        _publishSearchSnippets();
+      });
+    }
+    if (oldWidget.externalSearchController != widget.externalSearchController) {
+      oldWidget.externalSearchController?.removeListener(
+        _onExternalSearchChanged,
+      );
+      widget.externalSearchController?.addListener(_onExternalSearchChanged);
+      if (widget.externalSearchController != null) {
+        _onExternalSearchChanged();
+      } else {
+        _clearSearchAndCloseField();
+      }
+    }
     // אם initialTabIndex השתנה, מעדכן את הטאב
     if (oldWidget.initialTabIndex != widget.initialTabIndex &&
         widget.initialTabIndex != null) {
@@ -754,7 +770,7 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
       _lastResolvedGroups = null;
       _orderedLinks = [];
       _orderedGroups = [];
-      _cancelPendingItemPositionWait();
+      _cancelSearchScroll();
       _itemKeys.clear();
       _commentatorGroups = [];
       _loadCommentatorGroups();
@@ -771,11 +787,14 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
 
   @override
   void dispose() {
-    _cancelPendingItemPositionWait();
+    unawaited(_searchSubscription?.cancel());
+    unawaited(_searchBloc.close());
+    _cancelSearchScroll();
+    _cancelHeaderAnchor();
+    _listController.dispose();
     _commentarySelectionDelegate.dispose();
     _hiddenSelectionSubscription?.cancel();
-    _searchUpdateDebounce?.cancel();
-    _searchComputeDebounce?.cancel();
+
     _tabController.removeListener(_tabControllerListener);
     widget.openFilterRequest?.removeListener(_handleOpenFilterRequest);
     widget.openFilterNotifier?.removeListener(_onOpenFilterRequest);
@@ -820,25 +839,23 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
     _scrolledRangeKey = rangeKey;
     _searchScopeKey = scopeKey;
     if (isFirstRange) return;
-    _searchComputeGen++;
     _searchScrollGeneration++;
-    _searchComputeDebounce?.cancel();
-    _searchUpdateDebounce?.cancel();
-    _lastLinksSignature = 0;
+
     _orderedLinks = [];
     _orderedGroups = [];
-    _cancelPendingItemPositionWait();
+    _cancelSearchScroll();
     _totalSearchResults = 0;
     _currentSearchIndex = -1;
-    _searchResultsPerLink.clear();
-    _searchSnippetsPerLink.clear();
-    _pendingCounts.clear();
+    _scheduleSearchCompute();
+    final generation = _searchScrollGeneration;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _searchScopeKey != scopeKey) return;
       widget.externalTotalResultsNotifier?.value = _totalSearchResults;
       widget.externalCurrentIndexNotifier?.value = _currentSearchIndex;
       _publishSearchSnippets();
-      if (rangeChanged && _itemScrollController.isAttached) {
+      if (rangeChanged &&
+          generation == _searchScrollGeneration &&
+          _itemScrollController.isAttached) {
         _itemScrollController.jumpTo(index: 0);
       }
     });
@@ -880,9 +897,10 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
 
   /// מרחיב/מכווץ את כל קבוצות המפרשים (להפעלה מסרגל הכלים של הכרטיסייה).
   void toggleAllExpanded() {
-    // Toggling adds or removes items above the view, so the list index would
-    // land elsewhere. Keep the group that was on top in view instead.
+    _cancelPendingNavigation();
+    final generation = _searchScrollGeneration;
     final anchorTitle = _topVisibleGroupTitle();
+    final preserved = _preserveGroupHeader(anchorTitle);
     setState(() {
       final nextExpanded = !_allExpanded;
       _allExpanded = nextExpanded;
@@ -894,9 +912,13 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
       }
     });
     widget.externalAllExpandedNotifier?.value = _allExpanded;
-    if (anchorTitle == null) return;
+    if (anchorTitle == null || preserved) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_itemScrollController.isAttached) return;
+      if (!mounted ||
+          generation != _searchScrollGeneration ||
+          !_itemScrollController.isAttached) {
+        return;
+      }
       final index = _flatItems.indexWhere(
         (item) => item.link == null && item.group.bookTitle == anchorTitle,
       );
@@ -913,122 +935,52 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
     return top < _flatItems.length ? _flatItems[top].group.bookTitle : null;
   }
 
+  late final CommentarySearchBloc _searchBloc = CommentarySearchBloc(
+    keyOf: _getLinkKey,
+  );
+  StreamSubscription<CommentarySearchState>? _searchSubscription;
+
   void _scheduleSearchCompute() {
-    _searchComputeDebounce?.cancel();
-    // כשאין קישורים אין מה לחשב — טעינתם תפעיל תזמון מחדש (לפי חתימה).
-    if (_orderedLinks.isEmpty) return;
-    _searchComputeDebounce = Timer(
-      const Duration(milliseconds: 250),
-      _computeSearchCounts,
-    );
-  }
-
-  /// עובר על כל הקישורים ומזין את משפך העדכון של ספירות החיפוש, במקביל
-  /// לדיווח (הזהה) מה-widgets שנבנו בפועל.
-  Future<void> _computeSearchCounts() async {
-    if (!mounted || _searchQuery.isEmpty) return;
-    final query = _searchQuery;
-    final links = List<Link>.from(_orderedLinks);
-    if (links.isEmpty) return;
-    final gen = ++_searchComputeGen;
-
-    for (final link in links) {
-      String data;
-      try {
-        data = await link.content;
-      } catch (_) {
-        data = '';
-      }
-      if (!mounted || gen != _searchComputeGen || _searchQuery != query) {
-        return;
-      }
-      final count = countCommentarySearchMatches(
-        content: data,
-        query: query,
+    _searchBloc.add(
+      CommentarySearchRequested(
+        links: _orderedLinks,
+        query: _searchQuery,
         displayProfile: widget.displayProfile,
-        // התוכן מרונדר ב-CommentaryContent עם partialWordHighlight: true.
-        partialWordMatch: true,
-      );
-      // גזירה באותו מעבר שכבר טען את התוכן — כך הרשימה שלמה גם לפריטים
-      // שהרשימה הווירטואלית לא בנתה.
-      if (count > 0) {
-        _searchSnippetsPerLink[_getLinkKey(
-          link,
-        )] = buildCommentarySearchSnippet(
-          content: data,
-          query: query,
-          displayProfile: widget.displayProfile,
-        );
-      } else {
-        _searchSnippetsPerLink.remove(_getLinkKey(link));
-      }
-      _updateSearchResultsCount(link, count);
-    }
-  }
-
-  /// מפרסם את רשימת קטעי החיפוש להורה, בסדר התצוגה ועם ה-globalIndex שממנו
-  /// הניווט 'תוצאה הבאה' יודע לאיזה מפרש לגלול.
-  void _publishSearchSnippets() {
-    final notifier = widget.externalSearchSnippetsNotifier;
-    if (notifier == null || !mounted) return;
-    notifier.value = orderCommentarySearchSnippets<Link>(
-      items: _orderedLinks,
-      keyOf: _getLinkKey,
-      pathOf: (link) => link.path2,
-      countsByKey: _searchResultsPerLink,
-      snippetsOf: (key, count) {
-        final snippet = _searchSnippetsPerLink[key];
-        return snippet != null && count > 0 ? [snippet] : const [];
-      },
+        includeSnippets: widget.externalSearchSnippetsNotifier != null,
+      ),
     );
   }
 
-  void _updateSearchResultsCount(Link link, int count) {
+  void _applySearchState(CommentarySearchState state) {
     if (!mounted) return;
-
-    final key = _getLinkKey(link);
-    final currentValue = _searchResultsPerLink[key];
-    final pendingValue = _pendingCounts[key];
-    if (currentValue == count && pendingValue == count) {
-      return;
-    }
-
-    _pendingCounts[key] = count;
-
-    if (_searchUpdateDebounce?.isActive ?? false) return;
-
-    _searchUpdateDebounce = Timer(const Duration(milliseconds: 150), () {
-      if (!mounted) return;
-      final bool hasActualChange = _pendingCounts.entries.any(
-        (entry) => _searchResultsPerLink[entry.key] != entry.value,
-      );
-
-      if (!hasActualChange) {
-        _pendingCounts.clear();
-        // ספירות זהות עדיין יכולות לשאת קטעים חדשים (שאילתה אחרת, אותו מספר
-        // התאמות), ולכן הפרסום נדרש גם כאן.
-        _publishSearchSnippets();
-        return;
+    setState(() {
+      _searchResultOffsets = null;
+      _totalSearchResults = state.total;
+      if (_currentSearchIndex >= state.total && state.total > 0) {
+        _currentSearchIndex = 0;
       }
-
-      setState(() {
-        _searchResultsPerLink.addAll(_pendingCounts);
-        _pendingCounts.clear();
-        _totalSearchResults = totalCommentarySearchResults(
-          _searchResultsPerLink,
-        );
-
-        // Reset current index if out of bounds
-        if (_currentSearchIndex >= _totalSearchResults) {
-          _currentSearchIndex = 0;
-        }
-        widget.externalTotalResultsNotifier?.value = _totalSearchResults;
-        widget.externalCurrentIndexNotifier?.value = _currentSearchIndex;
-      });
-      // חובה כאן: הקטעים נגזרים מהספירות, והן נכנסות רק בתוך ה-flush הזה.
-      // פרסום מחוץ לו מייצר רשימה לפי ספירות של השאילתה הקודמת.
-      _publishSearchSnippets();
     });
+    widget.externalTotalResultsNotifier?.value = state.total;
+    widget.externalCurrentIndexNotifier?.value = _currentSearchIndex;
+    _publishSearchSnippets();
+  }
+
+  void _publishSearchSnippets() {
+    widget.externalSearchSnippetsNotifier?.value =
+        _searchQuery.isEmpty || _orderedLinks.isEmpty
+        ? []
+        : _searchBloc.state.snippets;
+  }
+
+  void _updateSearchResultsCount(Link link, int count, int generation) {
+    if (!mounted) return;
+    _searchBloc.add(
+      CommentarySearchReported(
+        generation: generation,
+        key: _getLinkKey(link),
+        count: count,
+      ),
+    );
   }
 
   /// משחזר מעברי שורה בבחירה רב-שורתית לפי הטקסט המרונדר של המפרשים המוצגים.
@@ -1193,11 +1145,11 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
     return ProgressiveScroll(
       focusNode: _commentaryFocusNode,
       autofocus: widget.isFullScreen,
-      scrollController: _scrollOffsetController,
+      scrollController: _itemScrollController,
+      onNavigationStart: _cancelPendingNavigation,
       maxSpeed: 10000.0,
       curve: 10.0,
-      accelerationFactor: 5,
-      itemScrollController: _itemScrollController,
+      accelerationFactor: 312.5,
       onKeyEvent: (_, event) => ContextMenuUtils.reportCommentaryErrorShortcut(
         context,
         event,
@@ -1474,13 +1426,12 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
         ),
       ],
       onChanged: (value) {
+        _cancelSearchScroll();
         setState(() {
           _searchQuery = value;
           // No current match until the first Enter, so it lands on the first.
           _currentSearchIndex = -1;
           if (value.isEmpty) {
-            _searchResultsPerLink.clear();
-            _searchSnippetsPerLink.clear();
             _totalSearchResults = 0;
           }
         });
@@ -1495,7 +1446,7 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
 
   Widget _buildCommentariesView() {
     if (_showFilterTab) {
-      _cancelPendingItemPositionWait();
+      _cancelSearchScroll();
       return _buildCommentatorsFilter();
     }
 
@@ -1595,7 +1546,7 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
     final visibleContent = _getVisibleContent();
     if (visibleContent == null) {
       _invalidateFullSelection();
-      _cancelPendingItemPositionWait();
+      _cancelSearchScroll();
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -1611,8 +1562,10 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
     }
 
     if (visibleContent.commentaryLinks.isEmpty) {
+      _orderedLinks = [];
+      _scheduleSearchCompute();
       _invalidateFullSelection();
-      _cancelPendingItemPositionWait();
+      _cancelSearchScroll();
       if (widget.linksLoading) {
         return Center(
           child: Padding(
@@ -1679,7 +1632,7 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
             : null;
         if (currentGroups == null) {
           _invalidateFullSelection();
-          _cancelPendingItemPositionWait();
+          _cancelSearchScroll();
         }
         final sortedGroups = currentGroups ?? _lastResolvedGroups;
         if (sortedGroups == null) {
@@ -1710,19 +1663,19 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
         }
         _flatItems = flatItems;
         _linkFlatIndex = linkFlatIndex;
+        _flatIndexByKey = {
+          for (var index = 0; index < flatItems.length; index++)
+            _flatItemKey(flatItems[index]): index,
+        };
+        final titles = sortedGroups.map((group) => group.bookTitle).toSet();
+        _headerKeys.removeWhere((title, _) => !titles.contains(title));
         if (currentGroups != null) {
           _lastResolvedGroups = currentGroups;
           _orderedGroups = currentGroups;
         }
-        _cancelPendingWaitIfItemChanged();
 
-        // Rebuild _orderedLinks based on groups
         final orderedLinks = <Link>[];
         for (final group in currentGroups ?? const <CommentaryGroup>[]) {
-          // We need to verify link order inside group.
-          // In _buildCommentariesView, relevantLinks are sorted by title then index.
-          // _groupConsecutiveLinks groups them.
-          // So the links inside group.links should already be in order.
           orderedLinks.addAll(group.links);
         }
         if (currentGroups != null) _orderedLinks = orderedLinks;
@@ -1732,13 +1685,7 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
             .map((l) => _getLinkKey(l))
             .toSet();
 
-        // קישורים חדשים (טעינה/מעבר קטע) — חישוב ספירות חיפוש מחדש אם יש
-        // שאילתה פעילה.
-        final linksSignature = Object.hashAll(currentLinkKeys);
-        if (linksSignature != _lastLinksSignature) {
-          _lastLinksSignature = linksSignature;
-          _scheduleSearchCompute();
-        }
+        _scheduleSearchCompute();
         _itemKeys.removeWhere((key, value) => !currentLinkKeys.contains(key));
         for (final key in currentLinkKeys) {
           if (!_itemKeys.containsKey(key)) {
@@ -1748,36 +1695,6 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
         _renderedTextByKey.removeWhere(
           (key, value) => !currentLinkKeys.contains(key),
         );
-
-        // ניקוי ספירות חיפוש מקישורים שאינם בקטע הנוכחי
-        final staleSearchKeys = _searchResultsPerLink.keys
-            .where((key) => !currentLinkKeys.contains(key))
-            .toList();
-        if (staleSearchKeys.isNotEmpty) {
-          for (final key in staleSearchKeys) {
-            _searchResultsPerLink.remove(key);
-            _searchSnippetsPerLink.remove(key);
-          }
-          _pendingCounts.removeWhere(
-            (key, _) => !currentLinkKeys.contains(key),
-          );
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            final newTotal = _searchResultsPerLink.values.fold(
-              0,
-              (sum, c) => sum + c,
-            );
-            if (_totalSearchResults != newTotal ||
-                _currentSearchIndex >= newTotal) {
-              setState(() {
-                _totalSearchResults = newTotal;
-                if (_currentSearchIndex >= newTotal) {
-                  _currentSearchIndex = 0;
-                }
-              });
-            }
-          });
-        }
 
         return SelectionContainer(
           delegate: _commentarySelectionDelegate,
@@ -1791,26 +1708,29 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
                 maintainSize: true,
                 child: ScrollablePositionedListScrollbar(
                   scrollController: _itemScrollController,
-                  offsetController: _scrollOffsetController,
-                  itemPositionsListener: _itemPositionsListener,
                   itemCount: flatItems.length,
+                  onNavigationStart: _cancelPendingNavigation,
                   labelForIndex: (index) =>
                       index >= 0 && index < flatItems.length
                       ? flatItems[index].group.bookTitle
                       : '',
                   child: constrainToContentWidth(
-                    ScrollablePositionedList.builder(
-                      key: PageStorageKey(
-                        pdfCommentaryListStorageKey(
-                          widget.tab.activeCommentators,
+                    _trackHeaderScroll(
+                      ScrollablePositionedList.builder(
+                        key: PageStorageKey(
+                          pdfCommentaryListStorageKey(
+                            widget.tab.activeCommentators,
+                          ),
                         ),
+                        restorePosition: true,
+                        itemCount: flatItems.length,
+                        itemScrollController: _itemScrollController,
+                        itemPositionsListener: _itemPositionsListener,
+                        listController: _listController,
+                        findChildIndexCallback: (key) => _flatIndexByKey[key],
+                        itemBuilder: (context, index) =>
+                            _buildFlatItem(flatItems[index]),
                       ),
-                      itemCount: flatItems.length,
-                      itemScrollController: _itemScrollController,
-                      itemPositionsListener: _itemPositionsListener,
-                      scrollOffsetController: _scrollOffsetController,
-                      itemBuilder: (context, index) =>
-                          _buildFlatItem(flatItems[index]),
                     ),
                     widget.contentMaxWidth,
                   ),
@@ -1828,199 +1748,120 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
     );
   }
 
-  void _scrollToSearchResult() {
-    final generation = ++_searchScrollGeneration;
-    _cancelPendingItemPositionWait();
-    if (_totalSearchResults == 0 ||
-        _orderedLinks.isEmpty ||
-        !_itemScrollController.isAttached) {
-      return;
-    }
-
-    int cumulativeIndex = 0;
+  Future<void> _scrollToSearchResult() async {
+    _cancelSearchScroll();
+    final generation = _searchScrollGeneration;
+    if (_totalSearchResults == 0 || _orderedLinks.isEmpty) return;
+    var cumulativeIndex = 0;
     Link? targetLink;
-
-    // 1. מוצא את ה-link שמכיל את תוצאת החיפוש הנוכחית
     for (final link in _orderedLinks) {
-      final linkKey = _getLinkKey(link);
-      final itemResults = _searchResultsPerLink[linkKey] ?? 0;
-      if (_currentSearchIndex < cumulativeIndex + itemResults) {
+      final count = _searchResultsPerLink[_getLinkKey(link)] ?? 0;
+      if (_currentSearchIndex < cumulativeIndex + count) {
         targetLink = link;
         break;
       }
-      cumulativeIndex += itemResults;
+      cumulativeIndex += count;
     }
-
     if (targetLink == null) return;
-
-    // 2. מוצא את ה-group שמכיל את ה-link
-    final targetLinkKey = _getLinkKey(targetLink);
-    final targetGroup = _orderedGroups
+    final linkKey = _getLinkKey(targetLink);
+    final group = _orderedGroups
         .where(
-          (group) => group.links.any((l) => _getLinkKey(l) == targetLinkKey),
+          (group) => group.links.any((link) => _getLinkKey(link) == linkKey),
         )
         .firstOrNull;
-    if (targetGroup == null) return;
-
-    // 3. מבטיח שה-ExpansionTile של הקבוצה פתוח
-    final groupTitle = targetGroup.bookTitle;
-    final groupKey = groupTitle;
-    final bool isCurrentlyExpanded = _expansionStates[groupKey] ?? _allExpanded;
-
-    if (!isCurrentlyExpanded) {
-      setState(() {
-        _expansionStates[groupKey] = true;
-      });
+    if (group == null) return;
+    if (!(_expansionStates[group.bookTitle] ?? _allExpanded)) {
+      setState(() => _expansionStates[group.bookTitle] = true);
     }
+    WidgetsBinding.instance.ensureVisualUpdate();
+    await WidgetsBinding.instance.endOfFrame;
+    while (mounted && generation == _searchScrollGeneration) {
+      final index = _linkFlatIndex[linkKey];
+      if (index == null || !_itemScrollController.isAttached) return;
+      await _itemScrollController.jumpToAsync(index: index, alignment: 0.1);
+      if (_linkFlatIndex[linkKey] == index) return;
+    }
+  }
 
-    // 4. ביצוע הגלילה
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted || generation != _searchScrollGeneration) return;
+  void _cancelSearchScroll() {
+    _searchScrollGeneration++;
+    _listController.cancelPositioning();
+  }
 
-      if (!isCurrentlyExpanded) {
-        await Future.delayed(const Duration(milliseconds: 200));
-        if (!mounted || generation != _searchScrollGeneration) return;
-      }
+  Key _flatItemKey(CommentaryFlatItem item) => item.link == null
+      ? ValueKey('h:${item.group.bookTitle}')
+      : ValueKey('l:${_getLinkKey(item.link!)}');
 
-      final linkKey = _getLinkKey(targetLink!);
-      final itemKey = _itemKeys[linkKey];
-      final BuildContext? itemContext = itemKey?.currentContext;
-
-      // בודק אם הפריט כבר בעץ הרינדור (לא נדרשת גלילה גסה)
-      final bool itemInRenderTree =
-          itemContext != null &&
-          itemContext.mounted &&
-          itemContext.findRenderObject() is RenderBox;
-
-      if (!itemInRenderTree) {
-        // The index exists only after the expanded group was laid out.
-        final flatIndex = _linkFlatIndex[linkKey];
-        if (flatIndex != null && _itemScrollController.isAttached) {
-          // לא scrollTo: הוא בונה רשימה שנייה, ובשתיהן אותו GlobalKey (issue #1505).
-          _itemScrollController.jumpTo(index: flatIndex, alignment: 0.05);
-          final reachedTarget = await _waitForItemPosition(
-            flatIndex,
-            'l:$linkKey',
-            generation,
-          );
-          if (!reachedTarget) return;
-        }
-        if (!mounted || generation != _searchScrollGeneration) return;
-      }
-
-      final BuildContext? ctx = itemKey?.currentContext;
-      if (ctx != null && ctx.mounted) {
-        try {
-          final scrollable = Scrollable.of(ctx);
-          scrollable.position.ensureVisible(
-            ctx.findRenderObject()!,
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeInOut,
-            alignment: 0.1,
-          );
-        } catch (e) {
-          debugPrint('Error scrolling to item: $e');
-        }
-      }
+  bool _preserveGroupHeader(String? title) {
+    final render = _headerKeys[title]?.currentContext?.findRenderObject();
+    if (render is! RenderBox || !render.hasSize) return false;
+    final viewport = RenderAbstractViewport.maybeOf(render);
+    if (viewport is! RenderBox) return false;
+    final viewportBox = viewport as RenderBox;
+    final top = render.localToGlobal(Offset.zero, ancestor: viewportBox).dy;
+    if (top + render.size.height <= 0 || top >= viewportBox.size.height) {
+      return false;
+    }
+    final scroll = _itemScrollController.scrollController;
+    if (scroll != null &&
+        scroll.hasClients &&
+        scroll.position.isScrollingNotifier.value) {
+      scroll.jumpTo(scroll.offset);
+    }
+    final handle = _listController.preserveHeader(render);
+    if (handle == null) return false;
+    _headerAnchor = handle;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      handle.cancel();
+      if (identical(_headerAnchor, handle)) _headerAnchor = null;
     });
+    return true;
   }
 
-  /// Identifies a flat list item across rebuilds: its index moves when a
-  /// group above it expands or collapses.
-  String? _flatItemIdAt(int index) {
-    if (index < 0 || index >= _flatItems.length) return null;
-    final item = _flatItems[index];
-    final link = item.link;
-    return link == null
-        ? 'h:${item.group.bookTitle}'
-        : 'l:${_getLinkKey(link)}';
+  void _cancelHeaderAnchor() {
+    _headerAnchor?.cancel();
+    _headerAnchor = null;
   }
 
-  Future<bool> _waitForItemPosition(
-    int index,
-    String itemId,
-    int generation,
-  ) async {
-    bool isVisible() => _itemPositionsListener.itemPositions.value.any(
-      (position) => position.index == index,
-    );
-    bool isTargetItemCurrent() => _flatItemIdAt(index) == itemId;
-    if (!mounted || generation != _searchScrollGeneration) return false;
-    if (!isTargetItemCurrent()) return false;
-    if (isVisible()) return true;
-
-    final wait = Completer<bool>();
-    void onPositionsChanged() {
-      if (wait.isCompleted) return;
-      if (!mounted ||
-          generation != _searchScrollGeneration ||
-          !isTargetItemCurrent()) {
-        wait.complete(false);
-      } else if (isVisible()) {
-        wait.complete(true);
-      }
-    }
-
-    _pendingItemPositionWait = wait;
-    _pendingItemPositionListener = onPositionsChanged;
-    _pendingItemPositionIndex = index;
-    _pendingItemPositionId = itemId;
-    _itemPositionsListener.itemPositions.addListener(onPositionsChanged);
-    onPositionsChanged();
-    try {
-      return await wait.future;
-    } finally {
-      _itemPositionsListener.itemPositions.removeListener(onPositionsChanged);
-      if (identical(_pendingItemPositionWait, wait)) {
-        _pendingItemPositionWait = null;
-        _pendingItemPositionListener = null;
-        _pendingItemPositionIndex = null;
-        _pendingItemPositionId = null;
-      }
-    }
+  void _cancelPendingNavigation() {
+    _cancelHeaderAnchor();
+    _cancelSearchScroll();
   }
 
-  void _cancelPendingWaitIfItemChanged() {
-    final index = _pendingItemPositionIndex;
-    final itemId = _pendingItemPositionId;
-    if (index == null || itemId == null) return;
-    if (_flatItemIdAt(index) != itemId) _cancelPendingItemPositionWait();
-  }
-
-  void _cancelPendingItemPositionWait() {
-    final listener = _pendingItemPositionListener;
-    if (listener != null) {
-      _itemPositionsListener.itemPositions.removeListener(listener);
-    }
-    final wait = _pendingItemPositionWait;
-    _pendingItemPositionWait = null;
-    _pendingItemPositionListener = null;
-    _pendingItemPositionIndex = null;
-    _pendingItemPositionId = null;
-    if (wait != null && !wait.isCompleted) wait.complete(false);
-  }
+  Widget _trackHeaderScroll(Widget child) => Listener(
+    onPointerDown: (_) => _cancelPendingNavigation(),
+    onPointerSignal: (_) => _cancelPendingNavigation(),
+    child: NotificationListener<ScrollStartNotification>(
+      onNotification: (notification) {
+        if (notification.depth == 0) _cancelHeaderAnchor();
+        return false;
+      },
+      child: child,
+    ),
+  );
 
   Widget _buildFlatItem(CommentaryFlatItem item) {
     final group = item.group;
     final link = item.link;
     return BlocBuilder<SettingsBloc, SettingsState>(
-      key: link == null
-          ? ValueKey('h:${group.bookTitle}')
-          : ValueKey('l:${_getLinkKey(link)}'),
+      key: _flatItemKey(item),
       builder: (context, settingsState) {
         final Widget child;
         if (link == null) {
           final groupKey = group.bookTitle;
           final isExpanded = _expansionStates[groupKey] ?? _allExpanded;
           child = _PdfCommentaryGroupHeader(
+            key: _headerKeys.putIfAbsent(groupKey, GlobalKey.new),
             bookTitle: groupKey,
             settingsState: settingsState,
             isExpanded: isExpanded,
-            onTap: () => setState(() {
-              _expansionStates[groupKey] = !isExpanded;
-            }),
+            onTap: () {
+              if (isExpanded) _preserveGroupHeader(groupKey);
+              setState(() => _expansionStates[groupKey] = !isExpanded);
+            },
           );
         } else {
+          final generation = _searchBloc.generation;
           child = _PdfCommentaryLinkItem(
             link: link,
             settingsState: settingsState,
@@ -2029,7 +1870,8 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
             buildContextMenu: _buildCommentaryContextMenuEntries,
             getSavedSelectedText: () => _currentSelectedText,
             searchQuery: _searchQuery,
-            onSearchResultsCountUpdate: _updateSearchResultsCount,
+            onSearchResultsCountUpdate: (link, count) =>
+                _updateSearchResultsCount(link, count, generation),
             getKeyForLink: _getLinkKeyObject,
             getItemSearchIndex: _getItemSearchIndex,
             displayProfile: widget.displayProfile,
@@ -2377,6 +2219,7 @@ class _PdfCommentaryGroupHeader extends StatelessWidget {
   final VoidCallback onTap;
 
   const _PdfCommentaryGroupHeader({
+    super.key,
     required this.bookTitle,
     required this.settingsState,
     required this.isExpanded,

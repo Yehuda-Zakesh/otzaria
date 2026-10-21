@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_inappwebview_windows/flutter_inappwebview_windows.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/models/plugin_manifest.dart';
 import 'package:otzaria/plugins/services/plugin_manifest_validator.dart';
@@ -475,12 +476,15 @@ class _PluginTabPageState extends State<PluginTabPage> with PluginWebViewHost {
     Uri uri,
     NavigationAction navigationAction,
   ) async {
+    if (!mounted) return;
     final target = PluginDeepLinkPolicy.dispatchUriForUserNavigation(
       uri,
       navigationAction,
     );
     if (target == null) return;
-    await mainWindowScreenKey.currentState?.handleInternalDeepLink(
+    await AppWindowKeys.of(
+      context,
+    ).mainWindowScreen.currentState?.handleInternalDeepLink(
       target.toString(),
     );
   }

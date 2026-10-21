@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
+import 'package:otzaria/settings/engine/settings_repository.dart';
 
 /// סנכרון הגדרות **חי** בין חלונות אוצריא.
 ///
@@ -106,6 +107,20 @@ class SettingsSync {
   /// הכותרת בחלונות האחרים בלי ששום מעבר נייטיב קרה, ובלי דרך לצאת.
   static const Set<String> _windowScopedKeys = {'key-is-fullscreen'};
 
+  /// ⚠️ מצב ההתראות של `CalendarAlertsOwner`: רק דרך [applyAuthoritativeValues].
+  /// שידור רגיל אינו מסודר, וערך ישן היה מחזיר אירוע שנמחק.
+  static const Set<String> ownerAuthoritativeKeys = {
+    SettingsRepository.keyCalendarEvents,
+    SettingsRepository.keyCalendarNotificationsEnabled,
+    SettingsRepository.keyCalendarNotificationTime,
+    SettingsRepository.keyCalendarNotificationSound,
+    SettingsRepository.keyCalendarZmanAlerts,
+    SettingsRepository.keySelectedCity,
+    SettingsRepository.keyCalendarIcsSubscriptions,
+    // רישום המזהים פרטי לבעלים.
+    SettingsRepository.keyCalendarEventNotificationIds,
+  };
+
   static bool _isWindowScoped(String key) =>
       _windowScopedKeys.contains(key) ||
       _windowScopedPrefixes.any(key.startsWith);
@@ -117,6 +132,7 @@ class SettingsSync {
     if (!MultiWindowService.canOpenWindows) return;
     if (_applyingRemote) return;
     if (_isWindowScoped(key)) return;
+    if (ownerAuthoritativeKeys.contains(key)) return;
     if (!_isSyncable(value)) return;
     _latest[key] = value;
     _pending[key]?.cancel();
@@ -161,6 +177,7 @@ class SettingsSync {
     if (request['type'] != requestChanged) return null;
     final key = request['key'];
     if (key is! String) return null;
+    if (ownerAuthoritativeKeys.contains(key)) return false;
 
     final apply = applyLocally;
     if (apply == null) return false;

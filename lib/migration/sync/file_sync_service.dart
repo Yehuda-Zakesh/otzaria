@@ -9,6 +9,7 @@ import '../database/repository/seforim_repository.dart';
 import '../database/database_compaction.dart';
 import '../../settings/services/custom_folders/custom_folder.dart';
 import '../generator/generator.dart';
+import '../services/external_book_import.dart';
 import '../models/book.dart';
 import '../models/category.dart';
 import '../../utils/file/file_hidden_utils.dart';
@@ -647,8 +648,8 @@ class FileSyncService {
     final chainKey = categoryPath.join('\u0000');
     var categoryResult = caches.categoryChains[chainKey];
     final isFirstChainResolution = categoryResult == null;
-    categoryResult ??= caches.categoryChains[chainKey] = await generator
-        .findOrCreateCategoryChain(categoryPath);
+    categoryResult ??= caches.categoryChains[chainKey] =
+        await findOrCreateBookCategoryChain(_customFoldersRepo, categoryPath);
     final categoryId = categoryResult.categoryId;
     // הקטגוריות נוצרו רק בפתרון הראשון של השרשרת; קבצים נוספים באותה
     // תיקייה לא סופרים אותן שוב.
@@ -667,97 +668,78 @@ class FileSyncService {
       validBookKeys?.add('$categoryId|$title|$fileType');
     }
 
-    bool wasAdded = false;
-    bool wasUpdated = false;
-
+    final stat = await File(filePath).stat();
     if (existingBook != null) {
-      debugPrint(
-        '[FileSyncService] Found existing book: title=$title, id=${existingBook.id}, filePath=${existingBook.filePath}, isFileBacked=${existingBook.isFileBacked}, totalLines=${existingBook.totalLines}',
-      );
-
-      final existingSourceName = await caches.sourceNameById(
-        existingBook.sourceId,
-        _customFoldersRepo,
-      );
-
-      // Book exists - check if file has changed
-      final file = File(filePath);
-      final fileStat = await file.stat();
-      final fileSize = fileStat.size;
-      final lastModified = fileStat.modified.millisecondsSinceEpoch;
-
-      // Only update if file has actually changed
       final fileChanged =
-          existingBook.fileSize != fileSize ||
-          existingBook.lastModified != lastModified;
-
-      // Also update if the storage preference changed (e.g. user toggled addToDatabase)
-      final expectedIsContentExternal = !effectiveInsertContent;
+          existingBook.fileSize != stat.size ||
+          existingBook.lastModified != stat.modified.millisecondsSinceEpoch;
       final storageChanged =
-          existingBook.isFileBacked != expectedIsContentExternal;
-      final sourceChanged = existingSourceName != customSourceName;
-
-      if (fileChanged || storageChanged || sourceChanged) {
-        if (fileChanged) {
-          await _validateConvertedDocument(file, title, format);
-        }
-        if (storageChanged) {
-          debugPrint(
-            '[FileSyncService] Storage preference changed for ${existingBook.title}: isFileBacked=${existingBook.isFileBacked} -> $expectedIsContentExternal',
-          );
-        }
-        if (sourceChanged) {
-          debugPrint(
-            '[FileSyncService] Source changed for ${existingBook.title}: $existingSourceName -> $customSourceName',
-          );
-        }
-        wasUpdated = true;
-        await generator.createAndProcessBook(
-          filePath,
-          categoryId,
-          insertContent: effectiveInsertContent,
-          sourceName: customSourceName,
-        );
+          existingBook.isFileBacked != !effectiveInsertContent;
+      final sourceChanged =
+          await caches.sourceNameById(
+            existingBook.sourceId,
+            _customFoldersRepo,
+          ) !=
+          customSourceName;
+      if (!fileChanged && !storageChanged && !sourceChanged) {
+        return const _FileProcessResult(wasAdded: false, wasUpdated: false);
       }
-    } else {
-      await _validateConvertedDocument(File(filePath), title, format);
-      wasAdded = true;
+    }
+
+    if (effectiveInsertContent) {
       await generator.createAndProcessBook(
         filePath,
         categoryId,
-        insertContent: effectiveInsertContent,
+        insertContent: true,
         sourceName: customSourceName,
+      );
+    } else {
+      final prepared = await prepareExternalBookInIsolate(
+        filePath,
+        stat,
+        format,
+      );
+      final sourceId = await caches.sourceIdFor(
+        customSourceName ?? 'Personal',
+        _customFoldersRepo,
+      );
+      if (existingBook != null) {
+        await prepared.update(
+          _customFoldersRepo,
+          existingBook.id,
+          sourceId: sourceId == existingBook.sourceId ? null : sourceId,
+        );
+      } else {
+        await prepared.insert(
+          _customFoldersRepo,
+          categoryId: categoryId,
+          sourceId: sourceId,
+          topics: generator.extractTopics(filePath),
+        );
+      }
+      // ה-worker משתמש בדיווח גם כפעימת חיים נגד זיהוי תקיעה שגוי.
+      _reportProgress(
+        0.4,
+        '${existingBook == null ? 'מעבד' : 'עודכן'} ספר: $title',
       );
     }
 
-    if (wasAdded || wasUpdated) {
-      // רענון נקודתי של תמונת-המצב — הקאש משותף בין תיקיות, ותיקייה שנסרקת
-      // אחר-כך חייבת לראות את הספר שנכתב כרגע (קטגוריות ממוזגות).
-      final refreshed = await _customFoldersRepo
-          .checkBookExistsInCategoryWithFileType(title, categoryId, fileType);
-      if (refreshed != null) {
-        caches.booksByKey['$categoryId|$title|$fileType'] = refreshed;
-      }
+    // תיקייה ממוזגת הבאה בסריקה חייבת לראות את הספר שנכתב כרגע.
+    final refreshed = await _customFoldersRepo
+        .checkBookExistsInCategoryWithFileType(title, categoryId, fileType);
+    if (refreshed != null) {
+      caches.booksByKey['$categoryId|$title|$fileType'] = refreshed;
     }
 
     // ספר חדש נחשב תקין ל-prune רק לאחר שהעיבוד הצליח.
     validBookKeys?.add('$categoryId|$title|$fileType');
 
     return _FileProcessResult(
-      wasAdded: wasAdded,
-      wasUpdated: wasUpdated,
+      wasAdded: existingBook == null,
+      wasUpdated: existingBook != null,
       categoriesCreated: categoriesCreated,
-      updatedBookId: wasUpdated ? existingBook?.id : null,
+      updatedBookId: existingBook?.id,
     );
-  }
-
-  Future<void> _validateConvertedDocument(
-    File file,
-    String title,
-    DocumentFormat format,
-  ) async {
-    if (!format.isTextual || !format.requiresConversion) return;
-    await convertDocumentForIndex(file, title, format);
   }
 
   /// Pure sync logic — receives all inputs, touches no Settings.
@@ -1004,6 +986,10 @@ class _FolderScanCaches {
   final Map<String, Book> booksByKey;
 
   final Map<int, String?> _sourceNamesById = {};
+  final Map<String, int> _sourceIdsByName = {};
+
+  Future<int> sourceIdFor(String name, SeforimRepository repo) async =>
+      _sourceIdsByName[name] ??= await repo.insertSource(name, -1);
 
   final Map<String, ({int categoryId, int categoriesCreated})> categoryChains =
       {};

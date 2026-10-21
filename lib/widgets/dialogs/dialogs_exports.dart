@@ -14,9 +14,6 @@
 // ─── דיאלוגי קלט ─────────────────────────────────────────────────────────────
 // [InputDialog] / [showInputDialog]                   → input_dialog.dart
 //
-// ─── דיאלוגי הגדרות ──────────────────────────────────────────────────────────
-// [GenericSettingsDialog]                             → generic_settings_dialog.dart
-//
 // ─── דיאלוגי בחירה ───────────────────────────────────────────────────────────
 // [SelectionDialog]                                   → selection_dialog.dart
 //

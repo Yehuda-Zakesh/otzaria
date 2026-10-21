@@ -1,3 +1,4 @@
+import 'package:otzaria/data/book_identity.dart';
 // לתחזוקת חיבור הסיור המודרך למסך הראשי ראו:
 // docs/guided_tour_developer_guide.md
 
@@ -8,10 +9,10 @@ import 'package:flutter/services.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:otzaria/app_report/view/app_report_dialog.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/core/startup_timeline.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
-import 'package:otzaria/core/windowing/tab_drag_preview.dart';
 import 'package:otzaria/widgets/misc/rtl_icon.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/core/error_log_file.dart';
@@ -52,13 +53,10 @@ import 'package:otzaria/semantic_search/repository/semantic_search_repository.da
 import 'package:otzaria/semantic_search/semantic_work_status.dart';
 import 'package:otzaria/library/view/library_browser.dart';
 import 'package:otzaria/tabs/reading_screen.dart';
-import 'package:otzaria/text_book/view/text_book_screen.dart';
-import 'package:otzaria/text_book/view/widgets/nav_panel_tour_target.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/personal_notes/services/personal_notes_user_book_keys.dart';
-import 'package:otzaria/pdf_book/view/pdf_book_screen.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/tools/open_tool_tab.dart';
 import 'package:otzaria/tools/tools_launcher_controller.dart';
@@ -136,7 +134,6 @@ import 'package:otzaria/plugins/services/reader_location_tracker.dart';
 import 'package:otzaria/tour/bloc/tour_cubit.dart';
 import 'package:otzaria/tour/models/live_tip.dart';
 import 'package:otzaria/tour/models/tour_step.dart';
-import 'package:otzaria/tour/tour_target_keys.dart';
 import 'package:otzaria/tour/view/tour_overlay_screen.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/plugins/view/plugin_background_host.dart';
@@ -168,9 +165,7 @@ class _PinnedToolNavItem {
   /// מובנים כמו "שמור וזכור" שמשתמשים בלוגו ייחודי במקום באייקון Fluent.
   final String? imageAsset;
 
-  /// `true` עבור תוסף, `false` עבור כלי מובנה. שימושי כי בעת בחירה
-  /// תוספים פותחים דרך `openPluginTransiently` בעוד שכלים מובנים פותחים
-  /// דרך `requestOpenTool`.
+  /// `true` עבור תוסף, `false` עבור כלי מובנה.
   final bool isPlugin;
   final InstalledPlugin? plugin;
 
@@ -306,13 +301,19 @@ bool shouldResyncMainPage({
     cachedPage != targetPage ||
     (shownPage?.round() ?? targetPage) != targetPage;
 
-final GlobalKey<State<LibraryBrowser>> libraryBrowserKey =
-    GlobalKey<State<LibraryBrowser>>();
-final GlobalKey<MainWindowScreenState> mainWindowScreenKey =
-    GlobalKey<MainWindowScreenState>();
+final _mainWindowScreenKeys = Expando<GlobalKey<MainWindowScreenState>>();
+
+extension MainWindowScreenKeyX on AppWindowKeys {
+  /// מפתח המסך הראשי של החלון. נוצר בגישה הראשונה וקבוע לחיי ה-[AppWindowKeys].
+  GlobalKey<MainWindowScreenState> get mainWindowScreen =>
+      _mainWindowScreenKeys[this] ??= GlobalKey<MainWindowScreenState>();
+}
 
 class MainWindowScreenState extends State<MainWindowScreen>
     with TickerProviderStateMixin {
+  /// מפתחות החלון — נשלפים פעם אחת, כדי שיהיו זמינים גם מ-callback-ים מאוחרים.
+  late final AppWindowKeys _windowKeys = AppWindowKeys.of(context);
+
   // לא final: ה-controller נוצר מחדש בעת שינוי אוריינטציה
   // (ראה _handleOrientationChange) כדי למנוע מצב שבו pixel offset מהציר
   // הישן (vertical) מתפרש כעמוד שגוי בציר החדש (horizontal).
@@ -954,7 +955,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
               RefreshLibrary(
                 changedBookKeys: {
                   for (final id in result.updatedBookIds)
-                    IndexingRepository.userBookKey(id),
+                    BookIdentity.userBookKey(id),
                 },
               ),
             );
@@ -1020,7 +1021,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
     final refresh = _startupRefreshWait.begin();
     try {
       final settled = bloc.stream.firstWhere(libraryUpdateSettledForIndexing);
-      bloc.add(const StartLibraryUpdate());
+      bloc.add(const StartLibraryUpdate(automatic: true));
       final result = await settled;
       // אותו תנאי שבו ה-listener של LibraryUpdateBloc שולח RefreshLibrary.
       final refreshRequested =
@@ -1460,7 +1461,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
   }
 
   /// מטפל בקישור otzaria:// שהגיע ממקור פנימי (למשל שדה חיפוש בספרייה).
-  /// ניתן לקרוא לפונקציה זו דרך [mainWindowScreenKey]. מחזיר `true` אם הקישור
+  /// ניתן לקרוא לפונקציה זו דרך [MainWindowScreenKeyX.mainWindowScreen]. מחזיר `true` אם הקישור
   /// טופל בהצלחה — שדה החיפוש בספרייה משתמש בערך הזה כדי להחליט אם לנקות.
   Future<bool> handleInternalDeepLink(String uriString) =>
       _handleExternalActivationUriString(uriString);
@@ -2051,12 +2052,6 @@ class MainWindowScreenState extends State<MainWindowScreen>
         : RtlIcon(icon);
   }
 
-  /// סדר העמודים במהלך slide חוצה: מחליף (swap) בין מסך היעד ([targetIndex])
-  /// למסך שיושב בעמוד-השכן ([slotIndex]), כך שמסך היעד מוצג בשכן לצורך ההחלקה.
-  ///
-  /// כל העמודים נשארים בעץ, וה-State של עמוד שמחליף מקום נשמר דרך reparenting.
-  ///
-  /// במנוחה ([targetIndex] או [slotIndex] הם null) — מוחזר הסדר הקנוני כמות שהוא.
   /// עמוד חי מחוץ למסך אסור שיקבל פוקוס: מעבר Tab שנחת בו גלל אליו את
   /// ה-PageView, והספרייה/ההגדרות הוצגו בתוך מסך העיון.
   @visibleForTesting
@@ -2080,6 +2075,12 @@ class MainWindowScreenState extends State<MainWindowScreen>
     await WidgetsBinding.instance.endOfFrame;
   }
 
+  /// סדר העמודים במהלך slide חוצה: מחליף (swap) בין מסך היעד ([targetIndex])
+  /// למסך שיושב בעמוד-השכן ([slotIndex]), כך שמסך היעד מוצג בשכן לצורך ההחלקה.
+  ///
+  /// כל העמודים נשארים בעץ, וה-State של עמוד שמחליף מקום נשמר דרך reparenting.
+  ///
+  /// במנוחה ([targetIndex] או [slotIndex] הם null) — מוחזר הסדר הקנוני כמות שהוא.
   @visibleForTesting
   static List<Widget> buildTransitionPages(
     List<Widget> canonical, {
@@ -2170,7 +2171,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
       // חייבים לסגור את הפאנל — ה-scrim שלו מכסה רק את אזור התוכן.
       _closeToolsLauncher();
       if (_lastScreen == Screen.library) {
-        final libraryState = libraryBrowserKey.currentState;
+        final libraryState = _windowKeys.libraryBrowser.currentState;
         if (libraryState != null) {
           (libraryState as dynamic).closeTransientPanels();
         }
@@ -2307,7 +2308,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
         );
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
-          (libraryBrowserKey.currentState as dynamic).navigateHome();
+          (_windowKeys.libraryBrowser.currentState as dynamic).navigateHome();
         });
       case TourStepAction.openLibraryBookPreview:
         context.read<NavigationBloc>().add(
@@ -2315,7 +2316,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
         );
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
-          final libraryState = libraryBrowserKey.currentState;
+          final libraryState = _windowKeys.libraryBrowser.currentState;
           if (libraryState != null) {
             (libraryState as dynamic).prepareTourBookPreview();
           }
@@ -2336,7 +2337,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
         if (step.id == 'toc') {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) return;
-            final tocContext = textBookNavigationTourTargetKey.currentContext;
+            final tocContext =
+                _windowKeys.tour.textBookNavigation.currentContext;
             if (tocContext != null && tocContext.mounted) {
               tocContext.read<TextBookBloc>().add(const ToggleLeftPane(true));
             }
@@ -2470,8 +2472,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
 
   void _openReadingOverflowMenuForTour() {
     final state =
-        (textBookOverflowTourTargetKey.currentState ??
-                pdfBookOverflowTourTargetKey.currentState)
+        (_windowKeys.tour.textBookOverflow.currentState ??
+                _windowKeys.tour.pdfBookOverflow.currentState)
             as dynamic;
     if (state == null) {
       return;
@@ -2569,7 +2571,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
     if (step.area != TourSpotlightArea.bookCard) {
       return null;
     }
-    final libraryState = libraryBrowserKey.currentState;
+    final libraryState = _windowKeys.libraryBrowser.currentState;
     if (libraryState == null) {
       return null;
     }
@@ -2579,7 +2581,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
   Rect? _exactTourTargetRect(TourStep step) {
     switch (step.id) {
       case 'navigation':
-        return _combinedRectForKeys(tourMainNavigationTargetKeys);
+        return _combinedRectForKeys(_windowKeys.tour.mainNavigation);
       case 'library':
         return _libraryTourRect('tourLibraryRect');
       case 'library_search':
@@ -2587,32 +2589,32 @@ class MainWindowScreenState extends State<MainWindowScreen>
       case 'categories':
         return _libraryTourRect('tourLibraryCategoriesRect');
       case 'advanced_search':
-        return _rectForGlobalKey(tourSearchDialogTargetKey);
+        return _rectForGlobalKey(_windowKeys.tour.searchDialog);
       case 'find_ref':
-        return _rectForGlobalKey(tourFindRefDialogTargetKey);
+        return _rectForGlobalKey(_windowKeys.tour.findRefDialog);
       case 'reading':
-        return _rectForGlobalKey(tourReadingScreenTargetKey);
+        return _rectForGlobalKey(_windowKeys.tour.readingScreen);
       case 'tabs':
         return _tabsTourTargetRect();
       case 'reading_settings':
-        return _rectForGlobalKey(tourReadingSettingsButtonTargetKey);
+        return _rectForGlobalKey(_windowKeys.tour.readingSettingsButton);
       case 'tools':
         return _navItemTourRect(_toolsNavIndex);
       case 'settings':
         return _navItemTourRectForScreen(Screen.settings);
       case 'appearance':
-        return _rectForGlobalKey(tourSettingsTabTargetKeys[0]!);
+        return _rectForGlobalKey(_windowKeys.tour.settingsTabs[0]!);
     }
 
     if (step.id == 'toc') {
-      return _rectForGlobalKey(textBookNavigationTourTargetKey) ??
-          _rectForGlobalKey(pdfBookNavigationTourTargetKey);
+      return _rectForGlobalKey(_windowKeys.tour.textBookNavigation) ??
+          _rectForGlobalKey(_windowKeys.tour.pdfBookNavigation);
     }
 
     return switch (step.area) {
       TourSpotlightArea.tableOfContents =>
-        _rectForGlobalKey(textBookNavigationTourTargetKey) ??
-            _rectForGlobalKey(pdfBookNavigationTourTargetKey),
+        _rectForGlobalKey(_windowKeys.tour.textBookNavigation) ??
+            _rectForGlobalKey(_windowKeys.tour.pdfBookNavigation),
       // טיפים חיים באזור ההגדרות נצמדים לפריט הניווט של ההגדרות
       TourSpotlightArea.settings => _navItemTourRectForScreen(Screen.settings),
       _ => null,
@@ -2621,47 +2623,49 @@ class MainWindowScreenState extends State<MainWindowScreen>
 
   List<Rect> _resolveTourTargetRects(TourStep step) {
     if (step.id == 'advanced_search') {
-      final dialogRect = _rectForGlobalKey(tourSearchDialogTargetKey);
+      final dialogRect = _rectForGlobalKey(_windowKeys.tour.searchDialog);
       final navSearchRect = _navItemTourRectForScreen(Screen.search);
       return [?dialogRect, ?navSearchRect];
     }
 
     if (step.id == 'find_ref') {
-      final dialogRect = _rectForGlobalKey(tourFindRefDialogTargetKey);
+      final dialogRect = _rectForGlobalKey(_windowKeys.tour.findRefDialog);
       final navFindRefRect = _navItemTourRectForScreen(Screen.find);
       return [?dialogRect, ?navFindRefRect];
     }
 
     if (step.id == 'toc') {
       final buttonRect =
-          _rectForGlobalKey(textBookNavigationTourTargetKey) ??
-          _rectForGlobalKey(pdfBookNavigationTourTargetKey);
-      final panelRect = _rectForGlobalKey(activeTextBookNavPanelTourTargetKey);
+          _rectForGlobalKey(_windowKeys.tour.textBookNavigation) ??
+          _rectForGlobalKey(_windowKeys.tour.pdfBookNavigation);
+      final panelRect = _rectForGlobalKey(
+        _windowKeys.tour.activeTextBookNavPanel,
+      );
       return [?buttonRect, ?panelRect];
     }
 
     if (step.id == 'tools') {
       final navRect = _navItemTourRect(_toolsNavIndex);
       final panelRect = _isToolsLauncherOpen
-          ? _rectForGlobalKey(tourToolsLauncherPanelTargetKey)
+          ? _rectForGlobalKey(_windowKeys.tour.toolsLauncherPanel)
           : null;
       return [?navRect, ?panelRect];
     }
 
     if (step.id == 'bookmark') {
       final titleBarHistoryRect = _rectForGlobalKey(
-        tourTitleBarHistoryButtonTargetKey,
+        _windowKeys.tour.titleBarHistoryButton,
       );
       final titleBarBookmarkRect = _rectForGlobalKey(
-        tourTitleBarBookmarkButtonTargetKey,
+        _windowKeys.tour.titleBarBookmarkButton,
       );
       final directRect = _directReadingTourTargetRect(step.area);
       if (directRect != null) {
         return [directRect, ?titleBarHistoryRect, ?titleBarBookmarkRect];
       }
       final overflowRect =
-          _rectForGlobalKey(textBookOverflowTourTargetKey) ??
-          _rectForGlobalKey(pdfBookOverflowTourTargetKey);
+          _rectForGlobalKey(_windowKeys.tour.textBookOverflow) ??
+          _rectForGlobalKey(_windowKeys.tour.pdfBookOverflow);
       final menuItemRect = _readingOverflowMenuItemRect(step.area);
       return [
         ?overflowRect,
@@ -2682,8 +2686,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
     }
 
     final overflowRect =
-        _rectForGlobalKey(textBookOverflowTourTargetKey) ??
-        _rectForGlobalKey(pdfBookOverflowTourTargetKey);
+        _rectForGlobalKey(_windowKeys.tour.textBookOverflow) ??
+        _rectForGlobalKey(_windowKeys.tour.pdfBookOverflow);
     final menuItemRect = _readingOverflowMenuItemRect(step.area);
     return [?overflowRect, ?menuItemRect];
   }
@@ -2695,8 +2699,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
     }
 
     final overflowRect =
-        _rectForGlobalKey(textBookOverflowTourTargetKey) ??
-        _rectForGlobalKey(pdfBookOverflowTourTargetKey);
+        _rectForGlobalKey(_windowKeys.tour.textBookOverflow) ??
+        _rectForGlobalKey(_windowKeys.tour.pdfBookOverflow);
     final menuItemRect = _readingOverflowMenuItemRect(area);
 
     if (overflowRect != null && menuItemRect != null) {
@@ -2708,17 +2712,17 @@ class MainWindowScreenState extends State<MainWindowScreen>
   Rect? _directReadingTourTargetRect(TourSpotlightArea area) {
     return switch (area) {
       TourSpotlightArea.commentators => _rectForGlobalKey(
-        textBookCommentatorsTourTargetKey,
+        _windowKeys.tour.textBookCommentators,
       ),
       TourSpotlightArea.bookmark =>
-        _rectForGlobalKey(textBookBookmarkTourTargetKey) ??
-            _rectForGlobalKey(pdfBookBookmarkTourTargetKey),
+        _rectForGlobalKey(_windowKeys.tour.textBookBookmark) ??
+            _rectForGlobalKey(_windowKeys.tour.pdfBookBookmark),
       TourSpotlightArea.bookSearch =>
-        _rectForGlobalKey(textBookSearchTourTargetKey) ??
-            _rectForGlobalKey(pdfBookSearchTourTargetKey),
+        _rectForGlobalKey(_windowKeys.tour.textBookSearch) ??
+            _rectForGlobalKey(_windowKeys.tour.pdfBookSearch),
       TourSpotlightArea.print =>
-        _rectForGlobalKey(textBookPrintTourTargetKey) ??
-            _rectForGlobalKey(pdfBookPrintTourTargetKey),
+        _rectForGlobalKey(_windowKeys.tour.textBookPrint) ??
+            _rectForGlobalKey(_windowKeys.tour.pdfBookPrint),
       _ => null,
     };
   }
@@ -2726,23 +2730,23 @@ class MainWindowScreenState extends State<MainWindowScreen>
   Rect? _readingOverflowMenuItemRect(TourSpotlightArea area) {
     return switch (area) {
       TourSpotlightArea.commentators => _rectForGlobalKey(
-        textBookOverflowCommentatorsTourTargetKey,
+        _windowKeys.tour.textBookOverflowCommentators,
       ),
       TourSpotlightArea.bookmark =>
-        _rectForGlobalKey(textBookOverflowBookmarkTourTargetKey) ??
-            _rectForGlobalKey(pdfBookOverflowBookmarkTourTargetKey),
+        _rectForGlobalKey(_windowKeys.tour.textBookOverflowBookmark) ??
+            _rectForGlobalKey(_windowKeys.tour.pdfBookOverflowBookmark),
       TourSpotlightArea.bookSearch =>
-        _rectForGlobalKey(textBookOverflowSearchTourTargetKey) ??
-            _rectForGlobalKey(pdfBookOverflowSearchTourTargetKey),
+        _rectForGlobalKey(_windowKeys.tour.textBookOverflowSearch) ??
+            _rectForGlobalKey(_windowKeys.tour.pdfBookOverflowSearch),
       TourSpotlightArea.print =>
-        _rectForGlobalKey(textBookOverflowPrintTourTargetKey) ??
-            _rectForGlobalKey(pdfBookOverflowPrintTourTargetKey),
+        _rectForGlobalKey(_windowKeys.tour.textBookOverflowPrint) ??
+            _rectForGlobalKey(_windowKeys.tour.pdfBookOverflowPrint),
       _ => null,
     };
   }
 
   Rect? _libraryTourRect(String methodName) {
-    final libraryState = libraryBrowserKey.currentState;
+    final libraryState = _windowKeys.libraryBrowser.currentState;
     if (libraryState == null) {
       return null;
     }
@@ -2768,11 +2772,11 @@ class MainWindowScreenState extends State<MainWindowScreen>
   Rect? _tabsTourTargetRect() {
     // במצב "בצד" העמודה האנכית היא רצועת הכרטיסיות; במצב "למעלה" היא נשארת
     // בעץ ברוחב 0, ולכן רק רוחב ממשי מעיד שהיא זו שמוצגת.
-    final sideRect = _rectForGlobalKey(tourReadingTabsSideTargetKey);
+    final sideRect = _rectForGlobalKey(_windowKeys.tour.readingTabsSide);
     if (sideRect != null && sideRect.width > 1) {
       return sideRect;
     }
-    final rect = _rectForGlobalKey(tourReadingTabsTargetKey, inflate: 0);
+    final rect = _rectForGlobalKey(_windowKeys.tour.readingTabs, inflate: 0);
     if (rect == null) {
       return null;
     }
@@ -2785,11 +2789,11 @@ class MainWindowScreenState extends State<MainWindowScreen>
   }
 
   Rect? _navItemTourRect(int index) {
-    if (index < 0 || index >= tourMainNavigationItemTargetKeys.length) {
+    if (index < 0 || index >= _windowKeys.tour.mainNavigationItems.length) {
       return null;
     }
     return _rectForGlobalKey(
-      tourMainNavigationItemTargetKeys[index],
+      _windowKeys.tour.mainNavigationItems[index],
       inflate: 2,
     );
   }
@@ -2968,7 +2972,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
                   RefreshLibrary(
                     changedBookKeys: {
                       for (final id in state.changedBookIds)
-                        IndexingRepository.officialBookKey(id),
+                        BookIdentity.officialBookKey(id),
                     },
                     requestIds: {requestId},
                   ),
@@ -3593,7 +3597,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
                 LibraryPageBuildDecision.buildRealPage) {
               _cachedLibraryPage = KeepAlivePage(
                 key: const ValueKey('page-library'),
-                child: LibraryBrowser(key: libraryBrowserKey),
+                child: LibraryBrowser(key: _windowKeys.libraryBrowser),
               );
               _hasBuiltRealLibraryPage = true;
             } else if (libraryBuildDecision ==
@@ -3733,8 +3737,9 @@ class MainWindowScreenState extends State<MainWindowScreen>
                                           width: 440,
                                           deferChildBuildOnOpen: true,
                                           child: ToolsLauncherPanel(
-                                            key:
-                                                tourToolsLauncherPanelTargetKey,
+                                            key: _windowKeys
+                                                .tour
+                                                .toolsLauncherPanel,
                                             onClose: _closeToolsLauncher,
                                             onToolSelected: (entry) {
                                               _closeToolsLauncher();
@@ -3948,8 +3953,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
                                                 ),
                                                 Expanded(
                                                   child: RepaintBoundary(
-                                                    key:
-                                                        windowContentBoundaryKey,
+                                                    key: _windowKeys
+                                                        .windowContentBoundary,
                                                     child: pageView,
                                                   ),
                                                 ),
@@ -4364,8 +4369,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
       isSelected: isSelected,
       onTap: () => _onNavTap(context, index, currentScreen),
       tooltip: tooltip,
-      tourTargetKey: tourMainNavigationTargetKeys[index],
-      tourItemKey: tourMainNavigationItemTargetKeys[index],
+      tourTargetKey: _windowKeys.tour.mainNavigation[index],
+      tourItemKey: _windowKeys.tour.mainNavigationItems[index],
       isTourHighlighted: isTourHighlighted,
       compact: compact,
     );

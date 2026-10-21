@@ -19,12 +19,12 @@ import 'package:path/path.dart' as p;
 typedef AttachedLibraryProbeFn =
     Future<AttachedLibraryProbeResult> Function(String path);
 
-/// תוצאת צירוף קובץ: [library] בהצלחה, אחרת [problem].
 /// The new database did not pass the post-install checks.
 class AttachedUpdateVerificationFailed implements Exception {
   const AttachedUpdateVerificationFailed();
 }
 
+/// תוצאת צירוף קובץ: [library] בהצלחה, אחרת [problem].
 class AttachResult {
   final AttachedLibrary? library;
   final AttachedLibraryProblem? problem;

@@ -537,19 +537,6 @@ class _PendingReportEditValues {
     required this.contextText,
     this.correctionDraft,
   });
-
-  _PendingReportEditValues copyWith({
-    String? selectedText,
-    String? errorDetails,
-    String? contextText,
-  }) {
-    return _PendingReportEditValues(
-      selectedText: selectedText ?? this.selectedText,
-      errorDetails: errorDetails ?? this.errorDetails,
-      contextText: contextText ?? this.contextText,
-      correctionDraft: correctionDraft,
-    );
-  }
 }
 
 class _PendingReportEditFields extends StatefulWidget {

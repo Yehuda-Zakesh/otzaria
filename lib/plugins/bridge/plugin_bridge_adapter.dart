@@ -20,7 +20,6 @@ import 'package:path/path.dart' as p;
 import 'package:otzaria/plugins/plugin_constants.dart';
 import 'package:otzaria/theme/app_fonts.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:kosher_dart/kosher_dart.dart';
 import 'package:http/http.dart' as http;
 import 'package:otzaria/update/app_release_version.dart';
@@ -95,6 +94,9 @@ import 'package:otzaria/tools/calendar/bloc/calendar_cubit.dart';
 import 'package:otzaria/tools/calendar/helpers/zmanim_helpers.dart'
     as zmanim_helpers;
 import 'package:otzaria/tools/calendar/models/calendar_location.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_client.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_owner.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_store.dart';
 import 'package:otzaria/tools/calendar/services/notification_service.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:otzaria/settings/engine/settings_repository.dart';
@@ -658,7 +660,7 @@ class _PluginNetworkRequest {
 }
 
 // ===================================================================
-// Bridge Adapter - strict 1:1 with plugin_system_plan.md
+// Bridge Adapter
 // ===================================================================
 String _transformTextReaderContent((String, TextDisplayProfile) input) {
   final (rawText, profile) = input;
@@ -680,7 +682,7 @@ class PluginBridgeAdapter {
   final String instanceId;
   final PluginRegistryRepository _pluginRepo;
   final PluginBridgeDependencies _dependencies;
-  final NotificationService _notificationService;
+  final CalendarAlertsClient _alerts;
   final PluginDatabaseService _databaseService;
   final PluginHighlightRegistry _highlightRegistry;
   final PluginSearchFieldSessionService _searchFieldSessions;
@@ -692,6 +694,7 @@ class PluginBridgeAdapter {
     this.readerTab,
     PluginRegistryRepository? pluginRepository,
     NotificationService? notificationService,
+    CalendarAlertsClient? alertsClient,
     PluginDatabaseService? databaseService,
     this._networkFetchService,
     this._fileDownloadService,
@@ -706,7 +709,19 @@ class PluginBridgeAdapter {
   }) : _pluginRepo = pluginRepository ?? PluginRegistryRepository(),
        _pluginReportService = reportService,
        _pluginBookCorrectionService = bookCorrectionService,
-       _notificationService = notificationService ?? NotificationService(),
+       // שירות שהוזרק (בדיקות) מקבל בעלים פרטי; אחרת הבעלים של החלון.
+       _alerts =
+           alertsClient ??
+           (notificationService == null
+               ? CalendarAlertsClient.forCurrentWindow()
+               : LocalCalendarAlertsClient(
+                   CalendarAlertsOwner(
+                     notifications: notificationService,
+                     pluginIds: RegistryPluginNotificationIdStore(
+                       pluginRepository,
+                     ),
+                   ),
+                 )),
        _databaseService = databaseService ?? PluginDatabaseService(),
        _highlightRegistry =
            highlightRegistry ?? PluginHighlightRegistry.instance,
@@ -6224,6 +6239,7 @@ class PluginBridgeAdapter {
             currentBookUid: _currentBookUid(),
             currentWorkspaceId: _currentWorkspaceId(),
           );
+          unawaited(_alerts.send('pluginEventsChanged'));
         }
         return true;
       case 'remove':
@@ -6241,6 +6257,7 @@ class PluginBridgeAdapter {
             currentBookUid: _currentBookUid(),
             currentWorkspaceId: _currentWorkspaceId(),
           );
+          unawaited(_alerts.send('pluginEventsChanged'));
         }
         return true;
       case 'listOwn':
@@ -6419,6 +6436,7 @@ class PluginBridgeAdapter {
       );
     }
     final information = await BookDetailsService().getBookInformation(book);
+    final filePath = information.fileDetails['נתיב הקובץ'];
     final package = await PackageInfo.fromPlatform();
     final version = await DataCollectionService().readLibraryVersion();
     return _bookCorrectionService.submit(
@@ -6428,11 +6446,10 @@ class PluginBridgeAdapter {
         bookId: resolved.book.id,
         title: book.title,
         sourceFolder: information.source ?? '',
-        filePath:
-            libraryDisplayPath(
-              information.fileDetails['נתיב הקובץ'] ?? '',
-            ) ??
-            '',
+        // האתר מאתר את המקור לפי הנתיב המלא, עם `אוצריא/` והסיומת.
+        filePath: filePath == BookDetailsService.bookNotFoundText
+            ? ''
+            : filePath ?? '',
         libraryVersion: version,
         client: ReportClientInfo(
           appVersion: '${package.version}+${package.buildNumber}',
@@ -6806,34 +6823,12 @@ class PluginBridgeAdapter {
           throw Exception('error.invalid_params: title and body required');
         }
 
-        // בדיקה אם השירות מאותחל
-        if (!_notificationService.isInitialized) {
-          throw Exception(
-            'error.unavailable: Notification service not initialized',
-          );
-        }
-
-        // בדיקה אם יש הרשאות
-        if (!_notificationService.hasPermissions) {
-          throw Exception(
-            'error.forbidden: Notification permissions not granted',
-          );
-        }
-
-        // שליחת התראה מיידית
         final notificationId = id ?? _newNotificationId();
-
-        await _notificationService.flutterLocalNotificationsPlugin.show(
-          id: notificationId,
-          title: title,
-          body: body,
-          notificationDetails: _buildNotificationDetails(),
-        );
-
-        // שמירת ה-ID לעקוב אחרי התראות התוסף
-        await _trackNotificationId(notificationId);
-
-        return {'id': notificationId};
+        return _notificationCommand('pluginShow', {
+          'id': notificationId,
+          'title': title,
+          'body': body,
+        });
 
       case 'scheduleSystem':
         // תזמון התראה למערכת ההפעלה
@@ -6861,85 +6856,33 @@ class PluginBridgeAdapter {
           );
         }
 
-        if (!_notificationService.isInitialized) {
-          throw Exception(
-            'error.unavailable: Notification service not initialized',
-          );
-        }
-
-        if (!_notificationService.hasPermissions) {
-          throw Exception(
-            'error.forbidden: Notification permissions not granted',
-          );
-        }
-
         final notificationId = id ?? _newNotificationId();
-
-        await _notificationService.scheduleNotification(
-          id: notificationId,
-          title: title,
-          body: body,
-          eventDate: dateTime,
-          reminderMinutes: 0,
-        );
-
-        // שמירת ה-ID לעקוב אחרי התראות התוסף
-        await _trackNotificationId(notificationId);
-
-        return {'id': notificationId};
+        return _notificationCommand('pluginSchedule', {
+          'id': notificationId,
+          'title': title,
+          'body': body,
+          'at': dateTime.toIso8601String(),
+        });
 
       case 'cancel':
         // ביטול התראה
         final id = args['id'] as int?;
         if (id == null) throw Exception('error.invalid_params: id required');
-
-        if (!_notificationService.isInitialized) {
-          throw Exception(
-            'error.unavailable: Notification service not initialized',
-          );
-        }
-
-        await _notificationService.cancelNotification(id);
-        await _untrackNotificationId(id);
-        return true;
+        return _notificationCommand('pluginCancel', {'id': id});
 
       case 'cancelAll':
         // ביטול כל ההתראות של התוסף
-        if (!_notificationService.isInitialized) {
-          throw Exception(
-            'error.unavailable: Notification service not initialized',
-          );
-        }
-
-        final notificationIds = await _getTrackedNotificationIds();
-        for (final id in notificationIds) {
-          await _notificationService.cancelNotification(id);
-        }
-        await _clearTrackedNotificationIds();
-        return true;
+        return _notificationCommand('pluginCancelAll');
 
       case 'checkPermissions':
-        // בדיקת הרשאות התראות
-        if (!_notificationService.isInitialized) {
-          return {'granted': false, 'initialized': false};
-        }
-
-        final hasPermissions = await _notificationService.checkPermissions();
-        return {
-          'granted': hasPermissions,
-          'initialized': _notificationService.isInitialized,
-        };
+        // בדיקת הרשאות התראות, בלי אתחול
+        return _notificationCommand('pluginPermissions');
 
       case 'requestPermissions':
         // בקשת הרשאות התראות
-        if (!_notificationService.isInitialized) {
-          throw Exception(
-            'error.unavailable: Notification service not initialized',
-          );
-        }
-
-        final granted = await _notificationService.requestPermissions();
-        return {'granted': granted};
+        final ack = await _alerts.send('ensurePermission');
+        if (!ack.ok) throw Exception(ack.error ?? 'error.unavailable');
+        return {'granted': ack.value == true};
 
       default:
         throw Exception(
@@ -6962,90 +6905,24 @@ class PluginBridgeAdapter {
         .join('&');
   }
 
-  /// Build notification details for all platforms
-  NotificationDetails _buildNotificationDetails() {
-    const androidDetails = AndroidNotificationDetails(
-      'plugin_channel',
-      'התראות תוספים',
-      channelDescription: 'התראות מתוספי אוצריא',
-      importance: Importance.max,
-      priority: Priority.high,
-      playSound: true,
-      icon: '@mipmap/ic_launcher',
-    );
-
-    const iOSDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-
-    const windowsDetails = WindowsNotificationDetails();
-
-    return const NotificationDetails(
-      android: androidDetails,
-      iOS: iOSDetails,
-      macOS: iOSDetails,
-      linux: LinuxNotificationDetails(),
-      windows: windowsDetails,
+  /// פעולת התראה של התוסף אצל הבעלים, שגם רושם את המזהה בתור שלו.
+  Future<Object?> _notificationCommand(
+    String op, [
+    Map<String, Object?> args = const {},
+  ]) async {
+    final ack = await _alerts.send(op, {...args, 'pluginId': plugin.pluginId});
+    if (ack.ok) return ack.value;
+    throw Exception(
+      ack.error ??
+          switch (ack.failure) {
+            CalendarAlertsFailure.timeout => 'error.timeout: main window',
+            _ => 'error.unavailable: main window',
+          },
     );
   }
 
   // flutter_local_notifications דוחה מזהה שאינו נכנס ב-32 ביט.
   static int _newNotificationId() => math.Random().nextInt(0x7FFFFFFF);
-
-  /// Track notification ID for this plugin (internal namespace)
-  Future<void> _trackNotificationId(int id) async {
-    final ids = await _getTrackedNotificationIds();
-    if (!ids.contains(id)) {
-      ids.add(id);
-      await _pluginRepo.setKV(
-        plugin.pluginId,
-        '_internal',
-        'notification_ids',
-        jsonEncode(ids),
-      );
-    }
-  }
-
-  /// Untrack notification ID
-  Future<void> _untrackNotificationId(int id) async {
-    final ids = await _getTrackedNotificationIds();
-    if (ids.remove(id)) {
-      await _pluginRepo.setKV(
-        plugin.pluginId,
-        '_internal',
-        'notification_ids',
-        jsonEncode(ids),
-      );
-    }
-  }
-
-  /// Get all tracked notification IDs for this plugin
-  Future<List<int>> _getTrackedNotificationIds() async {
-    final value = await _pluginRepo.getKV(
-      plugin.pluginId,
-      '_internal',
-      'notification_ids',
-    );
-    if (value == null) return [];
-    try {
-      final decoded = jsonDecode(value);
-      if (decoded is List) {
-        return decoded.cast<int>();
-      }
-    } catch (_) {}
-    return [];
-  }
-
-  /// Clear all tracked notification IDs
-  Future<void> _clearTrackedNotificationIds() async {
-    await _pluginRepo.removeKV(
-      plugin.pluginId,
-      '_internal',
-      'notification_ids',
-    );
-  }
 
   // ----------------------------------------------------------------
   // Helpers

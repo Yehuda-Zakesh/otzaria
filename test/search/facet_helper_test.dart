@@ -1,5 +1,6 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/indexing/repository/indexing_repository.dart';
+import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/search/utils/facet_helper.dart';
 
@@ -24,17 +25,17 @@ void main() {
       );
 
       final bookByIndexedFilePath = <String, Book>{
-        IndexingRepository.buildIndexedBookFilePath(genesis): genesis,
-        IndexingRepository.buildIndexedBookFilePath(berachot): berachot,
+        BookIdentity.indexedFilePath(genesis): genesis,
+        BookIdentity.indexedFilePath(berachot): berachot,
       };
 
       final counts = FacetHelper.buildFacetCountsFromResults(
         [
           _FakeSearchResult(
-            IndexingRepository.buildIndexedBookFilePath(genesis),
+            BookIdentity.indexedFilePath(genesis),
           ),
           _FakeSearchResult(
-            IndexingRepository.buildIndexedBookFilePath(berachot),
+            BookIdentity.indexedFilePath(berachot),
           ),
         ],
         bookByIndexedFilePath,
@@ -64,15 +65,15 @@ void main() {
       final counts = FacetHelper.buildFacetCountsFromResults(
         [
           _FakeSearchResult(
-            IndexingRepository.buildIndexedBookFilePath(firstBook),
+            BookIdentity.indexedFilePath(firstBook),
           ),
           _FakeSearchResult(
-            IndexingRepository.buildIndexedBookFilePath(secondBook),
+            BookIdentity.indexedFilePath(secondBook),
           ),
         ],
         {
-          IndexingRepository.buildIndexedBookFilePath(firstBook): firstBook,
-          IndexingRepository.buildIndexedBookFilePath(secondBook): secondBook,
+          BookIdentity.indexedFilePath(firstBook): firstBook,
+          BookIdentity.indexedFilePath(secondBook): secondBook,
         },
       );
 
@@ -105,12 +106,12 @@ void main() {
 
       final counts = FacetHelper.buildFacetCountsFromBookCounts(
         {
-          IndexingRepository.buildIndexedBookFilePath(genesis): 3,
-          IndexingRepository.buildIndexedBookFilePath(berachot): 2,
+          BookIdentity.indexedFilePath(genesis): 3,
+          BookIdentity.indexedFilePath(berachot): 2,
         },
         {
-          IndexingRepository.buildIndexedBookFilePath(genesis): genesis,
-          IndexingRepository.buildIndexedBookFilePath(berachot): berachot,
+          BookIdentity.indexedFilePath(genesis): genesis,
+          BookIdentity.indexedFilePath(berachot): berachot,
         },
       );
 
@@ -132,10 +133,10 @@ void main() {
 
       final counts = FacetHelper.buildFacetCountsFromBookCounts(
         {
-          IndexingRepository.buildIndexedBookFilePath(genesis): 1,
+          BookIdentity.indexedFilePath(genesis): 1,
         },
         {
-          IndexingRepository.buildIndexedBookFilePath(genesis): genesis,
+          BookIdentity.indexedFilePath(genesis): genesis,
         },
       );
 
@@ -146,4 +147,94 @@ void main() {
       expect(counts.containsKey('/תנ"ך, תורה'), isFalse);
     });
   });
+
+  group('FacetHelper.buildFacetCountsFromBookCounts — ספרים רבים בקטגוריה', () {
+    late _CountingCategory leaf;
+    late Map<String, int> bookCounts;
+    late Map<String, Book> booksByKey;
+
+    setUp(() {
+      Category category(String title, Category? parent) => Category(
+        title: title,
+        description: '',
+        shortDescription: '',
+        order: 0,
+        subCategories: [],
+        books: [],
+        parent: parent,
+      );
+      final root = category('ספריית אוצריא', null);
+      final talmud = category('תלמוד בבלי', root);
+      leaf = _CountingCategory(category('סדר מועד', talmud));
+      bookCounts = {};
+      booksByKey = {};
+      for (var i = 0; i < 40; i++) {
+        final book = TextBook(title: 'מסכת $i', id: 300 + i, category: leaf);
+        final key = BookIdentity.indexedFilePath(book);
+        bookCounts[key] = i + 1;
+        booksByKey[key] = book;
+      }
+      final loose = TextBook(title: 'ספר בלי קטגוריה', id: 900);
+      final looseKey = BookIdentity.indexedFilePath(loose);
+      bookCounts[looseKey] = 7;
+      booksByKey[looseKey] = loose;
+    });
+
+    test('נתיב הקטגוריה מחושב פעם אחת לקטגוריה ולא לכל ספר', () {
+      FacetHelper.buildFacetCountsFromBookCounts(bookCounts, booksByKey);
+      expect(leaf.pathReads, lessThanOrEqualTo(3));
+    });
+
+    test('הספירות זהות לחישוב ספר-ספר', () {
+      final expected = <String, int>{};
+      for (final MapEntry(:key, :value) in bookCounts.entries) {
+        final book = booksByKey[key]!;
+        final categoryPath = FacetHelper.resolveCategoryPath(book);
+        FacetHelper.incrementFacet(
+          expected,
+          FacetHelper.buildBookFacet(categoryPath, book),
+          value,
+        );
+        if (categoryPath != null && categoryPath.isNotEmpty) {
+          FacetHelper.incrementFacetWithAncestors(
+            expected,
+            categoryPath,
+            value,
+          );
+        } else {
+          FacetHelper.incrementFacet(expected, '/', value);
+        }
+      }
+
+      final counts = FacetHelper.buildFacetCountsFromBookCounts(
+        bookCounts,
+        booksByKey,
+      );
+
+      expect(counts, expected);
+      expect(counts['/'], 827);
+      expect(counts['/תלמוד בבלי/סדר מועד'], 820);
+    });
+  });
+}
+
+class _CountingCategory extends Category {
+  _CountingCategory(Category source)
+    : super(
+        title: source.title,
+        description: '',
+        shortDescription: '',
+        order: 0,
+        subCategories: [],
+        books: [],
+        parent: source.parent,
+      );
+
+  int pathReads = 0;
+
+  @override
+  String get path {
+    pathReads++;
+    return super.path;
+  }
 }

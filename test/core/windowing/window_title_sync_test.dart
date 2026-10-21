@@ -31,4 +31,18 @@ void main() {
     expect(title.startsWith('תלמוד'), isTrue);
     expect(title.endsWith('אוצריא'), isTrue);
   });
+
+  test('כל חלון זוכר רק את הכותרת שנשלחה אליו', () async {
+    final sentA = <String>[];
+    final sentB = <String>[];
+    final a = WindowTitleSync(setTitle: (t) async => sentA.add(t));
+    final b = WindowTitleSync(setTitle: (t) async => sentB.add(t));
+
+    await a.sync('בראשית');
+    await b.sync('בראשית');
+    await a.sync('בראשית');
+
+    expect(sentA, ['בראשית — אוצריא']);
+    expect(sentB, ['בראשית — אוצריא']);
+  });
 }

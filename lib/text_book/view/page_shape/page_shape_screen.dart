@@ -43,7 +43,7 @@ import 'package:otzaria/widgets/layout/reading_area_width.dart';
 import 'package:otzaria/widgets/layout/resizable_drag_handle.dart';
 import 'package:otzaria/widgets/layout/adaptive_side_pane.dart';
 import 'package:otzaria/widgets/layout/context_overlay_panel.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:collection/collection.dart';
 
@@ -1083,7 +1083,8 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
       child: _isLoadingConfig
           ? const Scaffold(body: LoadingIndicator())
           : TextBookStateBuilder(
-              buildWhen: shouldRebuildReader,
+              // הטקסט הראשי מאזין לבחירה בעצמו; בלי זה כל בחירה בונה את כל הטורים.
+              buildWhen: shouldRebuildIgnoringSelection,
               loadingWidget: const Scaffold(body: LoadingIndicator()),
               builder: (context, state) {
                 // נראות כל פאנל תחתון נשלטת בנפרד; האזור התחתון מוצג רק אם
@@ -2707,7 +2708,7 @@ class _CommentaryPaneState extends State<_CommentaryPane> {
     }
 
     return TextBookStateBuilder(
-      buildWhen: shouldRebuildReader,
+      buildWhen: shouldRebuildIgnoringSelection,
       loadingWidget: const SizedBox(),
       builder: (context, state) {
         return BlocBuilder<SettingsBloc, SettingsState>(

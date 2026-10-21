@@ -455,9 +455,14 @@ class RenderReaderLineGutter extends RenderProxyBox {
   }
 }
 
-/// פריטי הקריאה הבנויים של כמה שורות, למדידת הגובה האמיתי של שורה בתוכם.
+/// פריטי הקריאה הבנויים, למדידת שורות ולעיגון בזמן שינוי פריסה.
 class ReaderItemBoxes {
   final Map<int, RenderReaderItemBox> _boxes = {};
+
+  RenderBox? boxForItem(int item) {
+    final box = _boxes[item];
+    return box != null && box.attached && box.hasSize ? box : null;
+  }
 
   /// גבולות [line] בפריט [item] כחלק מגובהו; null כשהפריט או השורה לא בנויים.
   ({double top, double bottom})? lineExtent(int item, int line) {
@@ -503,7 +508,7 @@ class ReaderItemBoxes {
   }
 }
 
-/// עוטף פריט של כמה שורות ברשימת הקורא — חייב להיות שורש הפריט, כי הגבולות
+/// עוטף פריט ברשימת הקורא — חייב להיות שורש הפריט, כי הגבולות
 /// נמדדים ביחס לגובה הפריט שהרשימה מדווחת.
 class ReaderItemBox extends SingleChildRenderObjectWidget {
   const ReaderItemBox({
@@ -529,15 +534,13 @@ class ReaderItemBox extends SingleChildRenderObjectWidget {
   }
 }
 
-/// פריט של כמה שורות נעטף ב-[ReaderItemBox]; שורה בודדת נשארת כמות שהיא.
+/// רושם רק פריטים בנויים; הרישום מוסר כשהפריט יוצא מהעץ.
 Widget wrapReaderItem({
   required int item,
   required ReadingLayout layout,
   required ReaderItemBoxes boxes,
   required Widget child,
-}) => layout.continuous && layout.lineCountOf(item) > 1
-    ? ReaderItemBox(item: item, boxes: boxes, child: child)
-    : child;
+}) => ReaderItemBox(item: item, boxes: boxes, child: child);
 
 class RenderReaderItemBox extends RenderProxyBox {
   RenderReaderItemBox({required this._item, required this._boxes});

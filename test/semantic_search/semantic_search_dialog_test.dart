@@ -977,6 +977,63 @@ void main() {
     expect(tab.options.includeLexical, isFalse);
     expect(tab.options.groupIdenticalText, isFalse);
   });
+
+  group('זכירת אפשרויות החיפוש החכם (issue #2511)', () {
+    final includeLexicalChip = find.byKey(
+      const ValueKey('semantic-include-lexical'),
+    );
+    final groupIdenticalChip = find.byKey(
+      const ValueKey('semantic-group-identical'),
+    );
+    bool chipSelected(WidgetTester tester, Finder chip) =>
+        tester.widget<FilterChip>(chip).selected;
+
+    testWidgets('כיבוי שתי האפשרויות נשמר לחיפוש החכם הבא', (tester) async {
+      await pumpDialog(tester, _availability(SemanticAvailabilityPhase.ready));
+      await tester.tap(_semanticSegment);
+      await tester.pumpAndSettle();
+      expect(chipSelected(tester, includeLexicalChip), isTrue);
+      expect(chipSelected(tester, groupIdenticalChip), isTrue);
+      await tester.tap(includeLexicalChip);
+      await tester.tap(groupIdenticalChip);
+      await tester.pumpAndSettle();
+
+      await tester.pumpWidget(const SizedBox());
+      await pumpDialog(tester, _availability(SemanticAvailabilityPhase.ready));
+      await tester.tap(_semanticSegment);
+      await tester.pumpAndSettle();
+      expect(chipSelected(tester, includeLexicalChip), isFalse);
+      expect(chipSelected(tester, groupIdenticalChip), isFalse);
+    });
+
+    testWidgets('עריכת כרטיסייה חכמה אינה משנה את ברירת המחדל', (
+      tester,
+    ) async {
+      SearchDefaults.saveSemanticIncludeLexicalDefault(false);
+      SearchDefaults.saveSemanticGroupIdenticalDefault(false);
+      final tab = SemanticSearchTab(
+        options: const SemanticQueryOptions(query: 'צדקה', facets: ['/']),
+        createResultsBloc: (_) =>
+            buildResultsBloc(source: null, recorder: RecordingRecorder()),
+      );
+      addTearDown(tab.dispose);
+      await pumpDialog(
+        tester,
+        _availability(SemanticAvailabilityPhase.ready),
+        editTab: tab,
+      );
+      expect(chipSelected(tester, includeLexicalChip), isTrue);
+      expect(chipSelected(tester, groupIdenticalChip), isTrue);
+      for (var i = 0; i < 2; i++) {
+        await tester.tap(includeLexicalChip);
+        await tester.tap(groupIdenticalChip);
+        await tester.pumpAndSettle();
+      }
+
+      expect(SearchDefaults.initialSemanticIncludeLexicalForNewSearch(), false);
+      expect(SearchDefaults.initialSemanticGroupIdenticalForNewSearch(), false);
+    });
+  });
   // הסשן זוכר מצב חכם מהשליחות שלמעלה; עריכה נפתחת במצב של הכרטיסייה.
   testWidgets('עריכת חיפוש רגיל מציעה את המצב החכם, ושליחה בו פותחת '
       'כרטיסייה חכמה חדשה', (tester) async {

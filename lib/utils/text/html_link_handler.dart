@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
@@ -204,7 +205,9 @@ class HtmlLinkHandler {
       }
 
       if (isOtzariaBookLink(url)) {
-        return await mainWindowScreenKey.currentState?.handleInternalDeepLink(
+        return await AppWindowKeys.of(
+              context,
+            ).mainWindowScreen.currentState?.handleInternalDeepLink(
               url.trim(),
             ) ??
             false;

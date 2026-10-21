@@ -231,8 +231,8 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
             // ההפוכה: הסרגל התארך, התוכן נדחף למטה, והרצועה שבין הכרטיסיות
             // לתוכן רק גדלה.
             //
-            // הפס נסגר מבפנים, ולא בהרחבה: הכרטיסיה מציירת עד תחתית הסרגל
-            // (`kTabBackgroundBottomOffset`), וזה בתוך הגבולות
+            // הפס נסגר מבפנים, ולא בהרחבה: הכרטיסיה מציירת עד תחתית הסרגל,
+            // וזה בתוך הגבולות
             // הקיימים — ולכן שום דבר אינו צריך להזמין מקום, ושום דבר אינו
             // נצבע מעליה.
             final topBar = SizedBox(
@@ -373,7 +373,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  key: tourTitleBarHistoryButtonTargetKey,
+                  key: TourTargetKeys.of(context).titleBarHistoryButton,
                   icon: const Icon(FluentIcons.history_24_regular, size: 18),
                   tooltip:
                       'הצג היסטוריה (${ShortcutHelper.formatShortcutForDisplay(historyShortcut)})',
@@ -381,7 +381,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                   style: _kIconButtonStyle,
                 ),
                 IconButton(
-                  key: tourTitleBarBookmarkButtonTargetKey,
+                  key: TourTargetKeys.of(context).titleBarBookmarkButton,
                   icon: const Icon(FluentIcons.bookmark_24_regular, size: 18),
                   tooltip:
                       'הצג סימניות (${ShortcutHelper.formatShortcutForDisplay(bookmarksShortcut)})',
@@ -650,7 +650,10 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                   recognizer.onDoubleTap = _onTabsAreaDoubleTap;
                 }),
           },
-          child: KeyedSubtree(key: tourReadingTabsTargetKey, child: tabStrip),
+          child: KeyedSubtree(
+            key: TourTargetKeys.of(context).readingTabs,
+            child: tabStrip,
+          ),
         ),
       ),
     );
@@ -670,7 +673,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4.0),
         child: IconButton(
-          key: tourReadingSettingsButtonTargetKey,
+          key: TourTargetKeys.of(context).readingSettingsButton,
           icon: Icon(
             widget.isReadingSettingsPanelOpen
                 ? FluentIcons.settings_24_filled

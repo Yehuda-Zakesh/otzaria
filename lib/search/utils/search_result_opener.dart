@@ -18,7 +18,8 @@ import 'package:otzaria/utils/navigation/talmud_bavli_open_format.dart';
 /// פותח תוצאת חיפוש שכבר אומתה מול האינדקס בכרטיסיית עיון.
 ///
 /// [resolvedBook] הוא הספר שפוענח מהמפתח; מחזיר את הכרטיסייה שנשלחה לפתיחה.
-/// [continuesToNextLine] מסמן גם את השורה הבאה כשורת תוצאה.
+/// [continuesToNextLine] מסמן גם את השורה הבאה כשורת תוצאה. [markResultLine]
+/// כבוי: היעד אינו התאמה מילולית, ושורות התוצאה נקבעות בחיפוש בספר בלבד.
 Future<OpenedTab?> openSearchResultInReader(
   BuildContext context, {
   required Book? resolvedBook,
@@ -34,6 +35,7 @@ Future<OpenedTab?> openSearchResultInReader(
   required InBookSearchParameters inBook,
   bool inBackground = false,
   bool continuesToNextLine = false,
+  bool markResultLine = true,
 }) async {
   final tabsBloc = context.read<TabsBloc>();
   final openLeftPane =
@@ -96,10 +98,12 @@ Future<OpenedTab?> openSearchResultInReader(
     searchMode: inBook.searchMode,
     searchDistance: inBook.distance,
     matchPolicy: inBook.matchPolicy,
-    initialSearchResultLines: searchResultLinesFor(
-      segment,
-      continuesToNextLine: continuesToNextLine,
-    ),
+    initialSearchResultLines: markResultLine
+        ? searchResultLinesFor(
+            segment,
+            continuesToNextLine: continuesToNextLine,
+          )
+        : null,
     showPageShapeView: PageShapeSettingsManager.getViewModePreference(title),
     openLeftPane: openLeftPane,
   );

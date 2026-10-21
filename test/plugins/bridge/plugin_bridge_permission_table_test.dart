@@ -65,7 +65,7 @@ InstalledPlugin _plugin(List<String> permissions) => InstalledPlugin(
 void main() {
   _storeOriginGuardTests();
   group('טבלת ההרשאות של הגשר', () {
-    const table = PluginBridgeHandler.methodPermissions;
+    final table = PluginBridgeHandler.methodPermissions;
 
     test('דיווח תיקון ספר דורש הרשאת שליחה בלי הרשאת רשת או DB', () {
       expect(table['feedback.submitBookCorrection'], 'feedback.send_email');

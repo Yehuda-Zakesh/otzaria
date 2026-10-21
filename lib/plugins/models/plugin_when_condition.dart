@@ -46,10 +46,6 @@ class PluginWhenCondition {
     this.conditions = const [],
   });
 
-  bool get isLeaf =>
-      kind == PluginWhenConditionKind.setting ||
-      kind == PluginWhenConditionKind.storage;
-
   /// כל מפתחות ההגדרות שהתנאי קורא.
   Set<String> get settingKeys =>
       _collectKeys(PluginWhenConditionKind.setting, <String>{});

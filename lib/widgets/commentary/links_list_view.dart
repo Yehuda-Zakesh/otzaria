@@ -30,7 +30,7 @@ import 'package:otzaria/widgets/smart_text/smart_text.dart';
 import 'package:otzaria/text_book/view/selection/selection_sync_controller.dart';
 import 'package:otzaria/book_common/selection/selection_hit_test.dart';
 import 'package:otzaria/widgets/feedback/scrollable_positioned_list_scrollbar.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 @visibleForTesting
 RenderSettings buildSelectedLinkRenderSettings({
@@ -270,12 +270,6 @@ class LinksListView extends StatefulWidget {
 class _LinksListViewState extends State<LinksListView> {
   final TextEditingController _searchController = TextEditingController();
   final ItemScrollController _itemScrollController = ItemScrollController();
-  final ItemPositionsListener _itemPositionsListener =
-      ItemPositionsListener.create();
-  // פריט = קישור, ומורחב הוא עשוי להיות גבוה מהמסך. בלי ה-offsetController
-  // גרירת האגודל הייתה נעצרת על גבולות פריטים ולא מזיזה כלום בתוך קישור כזה.
-  final ScrollOffsetController _scrollOffsetController =
-      ScrollOffsetController();
   String _searchQuery = '';
   final Map<String, Future<String>> _contentCache = {};
   final Map<String, bool> _expanded = {};
@@ -584,13 +578,9 @@ class _LinksListViewState extends State<LinksListView> {
 
         return ScrollablePositionedListScrollbar(
           scrollController: _itemScrollController,
-          itemPositionsListener: _itemPositionsListener,
-          offsetController: _scrollOffsetController,
           itemCount: filteredLinks.length,
           child: ScrollablePositionedList.builder(
             itemScrollController: _itemScrollController,
-            itemPositionsListener: _itemPositionsListener,
-            scrollOffsetController: _scrollOffsetController,
             itemCount: filteredLinks.length,
             itemBuilder: (context, index) {
               final link = filteredLinks[index];

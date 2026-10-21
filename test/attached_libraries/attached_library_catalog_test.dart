@@ -157,6 +157,25 @@ void main() {
     expect(officialTorah.books.every((b) => b.source.isOfficial), isTrue);
   });
 
+  test('נתיב הקטגוריה והנושאים מחושבים פעם אחת לקטגוריה', () async {
+    final library = await attach(
+      attachedFixture('ספרייה', SeforimFixtureVariant.full),
+    );
+
+    final catalog = await buildCatalog();
+
+    final root = _child(_child(catalog, _personalRoot)!, library.displayName)!;
+    final torah = _child(_child(root, 'תנ"ך')!, 'תורה')!;
+    final [first, second] = torah.books;
+    final expected = '$_personalRoot, ${library.displayName}, תנ"ך, תורה';
+    expect(first.categoryPath, expected);
+    expect(first.topics, expected);
+    expect(second.categoryPath, expected);
+    expect(second.topics, expected);
+    expect(identical(first.categoryPath, second.categoryPath), isTrue);
+    expect(identical(first.topics, second.topics), isTrue);
+  });
+
   test('מיזוג: ספרי המסד נכנסים לקטגוריות הספרייה לפי שם', () async {
     final library = await attach(
       attachedFixture('ממוזג', SeforimFixtureVariant.full),

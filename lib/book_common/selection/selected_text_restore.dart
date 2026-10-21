@@ -408,8 +408,9 @@ RestoredSelection? _restoreExact(
   final selectedIndexMap = <int>[];
   final selectedBuffer = StringBuffer();
   for (var i = 0; i < selectedText.length; i++) {
-    if (!isIgnored(selectedText.codeUnitAt(i))) {
-      selectedBuffer.write(selectedText[i]);
+    final unit = selectedText.codeUnitAt(i);
+    if (!isIgnored(unit)) {
+      selectedBuffer.writeCharCode(unit);
       selectedIndexMap.add(i);
     }
   }
@@ -432,8 +433,9 @@ RestoredSelection? _restoreExact(
   final visibleBuffer = StringBuffer();
   void addChars(String text, int lineIndex, bool isHeading) {
     for (var i = 0; i < text.length; i++) {
-      if (!isIgnored(text.codeUnitAt(i))) {
-        visibleBuffer.write(text[i]);
+      final unit = text.codeUnitAt(i);
+      if (!isIgnored(unit)) {
+        visibleBuffer.writeCharCode(unit);
         lineOfChar.add(lineIndex);
         columnOfChar.add(i);
         headingChar.add(isHeading);
@@ -676,7 +678,9 @@ String _restoreGreedy(String selectedText, List<String> visibleLines) {
       continue;
     }
     for (var offset = 0; offset < line.length; offset++) {
-      if (selectedText.startsWith(line.substring(offset))) {
+      // סינון בתו הראשון חוסך substring לכל עמודה (ריבועי באורך השורה).
+      if (line.codeUnitAt(offset) == selectedText.codeUnitAt(0) &&
+          selectedText.startsWith(line.substring(offset))) {
         return (lineIndex, offset);
       }
     }

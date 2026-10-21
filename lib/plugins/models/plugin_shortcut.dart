@@ -53,14 +53,6 @@ class PluginShortcut {
     );
   }
 
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'label': label,
-    if (key.isNotEmpty) 'key': key,
-    if (command != null) 'command': command,
-    if (contextMenuItemId != null) 'contextMenuItemId': contextMenuItemId,
-  };
-
   /// עותק עם [key] חדש — לשימוש ב-`app.updateShortcut`.
   PluginShortcut copyWith({String? key}) => PluginShortcut(
     id: id,

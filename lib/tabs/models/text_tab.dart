@@ -1,9 +1,10 @@
 import 'package:otzaria/shortcuts/dynamic/dynamic_shortcut_dispatcher.dart';
+
 import 'dart:async';
+
 import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/data/repository/text_book_repository.dart';
-// [EDITING DISABLED] import 'package:otzaria/text_book/editing/repository/local_overrides_repository.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/models/books.dart';
@@ -17,11 +18,10 @@ import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/utils/text/ref_helper.dart';
 import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
+import 'package:otzaria/text_book/utils/reading_segment_navigation.dart'
+    show initialReadingAlignment;
 
-/// Represents a tab that contains a text book.
-///
-/// It contains the book itself and a TextBookBloc that manages all the state
-/// and business logic for the text book viewing experience.
+/// כרטיסיית קורא טקסט; ה-BLoC שלה נוצר רק בגישה הראשונה אליו.
 class TextBookTab extends OpenedTab {
   /// The text book.
   final TextBook book;
@@ -58,16 +58,10 @@ class TextBookTab extends OpenedTab {
   /// חיפוש. אם null — אין הדגשה ממוקדת.
   final String? pinpointHighlight;
 
-  /// אינדקס הסעיף שעליו תחול ההדגשה הממוקדת. אם null וב‑[pinpointHighlight] יש
-  /// טקסט — נופלים חזרה ל‑[index] (זה המסלול של deep link, שבו פותחים בסעיף
-  /// המודגש). השדה הופך משמעותי בעת שיכפול טאב או side‑by‑side, שם ה‑index
-  /// הנוכחי כבר השתנה לפי הגלילה ואנחנו רוצים לשמר את הסעיף המקורי.
+  /// הסעיף המודגש, שנשאר קבוע גם כשהמיקום הנוכחי משתנה; null משתמש ב-[index].
   final int? pinpointHighlightSectionIndex;
 
-  /// The bloc that manages the text book state and logic.
-  ///
-  /// נבנה בגישה הראשונה: שולחנות עבודה מפענחים את כל הטאבים בכל שינוי, ו-bloc
-  /// שלא נסגר נשאר רשום לזרם ההסתרות הסטטי ואינו משתחרר.
+  /// נבנה בגישה הראשונה בלבד: פענוח ושמירת שולחן עבודה אינם צריכים BLoC חי.
   TextBookBloc get bloc => _bloc ??= _createBloc();
   TextBookBloc? _bloc;
   late final TextBookInitial _initialState;
@@ -76,7 +70,11 @@ class TextBookTab extends OpenedTab {
   TextBookState get blocState => _bloc?.state ?? _initialState;
 
   /// גלילת הקורא ומיקומו, בשורות מקור.
-  final LineScrollController lines = LineScrollController();
+  late final LineScrollController lines;
+
+  ReadingAnchor get readingAnchor =>
+      lines.captureAnchor() ??
+      ReadingAnchor(line: index, alignment: initialReadingAlignment(index));
 
   /// הכותרת הנוכחית של המיקום בספר (למשל "בראשית פרק ד")
   final currentTitle = ValueNotifier<String>("");
@@ -116,8 +114,7 @@ class TextBookTab extends OpenedTab {
   /// המאזין הוא [SplitedViewScreen] בלבד; כל הגדלה = פתח על טאב הערות.
   final ValueNotifier<int> openNotesTabNotifier = ValueNotifier<int>(0);
 
-  /// counter-ים שמתגלגלים עם בקשת ניווט מקיצור מקלדת גלובלי. המאזין הוא
-  /// מסך הספר; כל הגדלה = ניווט יחיד (זהה ללחיצה על כפתור הניווט המתאים).
+  /// כל הגדלה מפעילה בקשת ניווט אחת במסך הספר.
   final ValueNotifier<int> navPreviousSegmentNotifier = ValueNotifier<int>(0);
   final ValueNotifier<int> navNextSegmentNotifier = ValueNotifier<int>(0);
   final ValueNotifier<int> navPreviousTocNotifier = ValueNotifier<int>(0);
@@ -137,15 +134,10 @@ class TextBookTab extends OpenedTab {
   // StreamSubscription לניהול ה-listener
   StreamSubscription<TextBookState>? _stateSubscription;
 
-  /// Creates a new instance of [TextBookTab].
-  ///
-  /// The [index] parameter represents the initial index of the item in the scrollable list,
-  /// and the [book] parameter represents the text book.
-  /// The [searchText] parameter represents the initial search text,
-  /// and the [commentators] parameter represents the list of commentaries to show.
   TextBookTab({
     required this.book,
     required int index,
+    ReadingAnchor? initialReadingAnchor,
     this.searchText = '',
     this.highlightText = '',
     this.permanentHighlightLine,
@@ -166,20 +158,18 @@ class TextBookTab extends OpenedTab {
     this.pinpointHighlightSectionIndex,
     @visibleForTesting TextBookBloc? blocOverride,
     // מהדורה חלופית מקבלת כותרת טאב עם שם המהדורה, להבחנה מהנוסח הממוזג.
-  }) : _index = index,
+  }) : _index = initialReadingAnchor?.line ?? index,
        super(
          book.versionDisplayTitle == null
              ? book.title
              : '${book.title} (${book.versionDisplayTitle})',
        ) {
+    lines = LineScrollController(initialAnchor: initialReadingAnchor);
     // קביעת ברירת המחדל של splitedView מההגדרות אם לא סופק
     final bool effectiveSplitedView =
         splitedView ?? (Settings.getValue<bool>('key-splited-view') ?? true);
 
-    // מצב צורת הדף הוא פר-ספר: כשהקורא לא קבע במפורש (למשל שחזור טאב
-    // שמור), נופלים להעדפה שנשמרה לספר בהחלפת התצוגה — כך ספר שהמשתמש
-    // קורא בצורת הדף נפתח כך מכל מקום (ספרייה, היסטוריה, סימניות, קישור),
-    // ולא רק מהמסלולים שזכרו לשאול (issue #1424). בלי העדפה — תצוגה רגילה.
+    // כשאין בחירה מפורשת, גם פתיחה מהיסטוריה ומקישורים מכבדת את העדפת הספר.
     final bool effectiveShowPageShapeView =
         showPageShapeView ??
         PageShapeSettingsManager.getViewModePreference(book.title) ??
@@ -190,7 +180,7 @@ class TextBookTab extends OpenedTab {
 
     _initialState = TextBookInitial.named(
       book,
-      index,
+      _index,
       openLeftPane,
       commentators ?? [],
       searchText: searchText,
@@ -251,11 +241,8 @@ class TextBookTab extends OpenedTab {
     return bloc;
   }
 
-  /// `OpenedTab.from` מטפל ב-[TextBookTab] בענף ייעודי ואינו מגיע לכאן;
-  /// המימוש קיים כדי שהחוזה המופשט של [OpenedTab.clone] יתקיים, ומפנה
-  /// לאותו מקום אחד שבו יודעים אילו שדות לשמר.
   @override
-  OpenedTab clone() => OpenedTab.from(this);
+  OpenedTab clone() => TextReadingSnapshot._capture(this).createTab();
 
   /// Cleanup when the tab is disposed
   @override
@@ -281,10 +268,7 @@ class TextBookTab extends OpenedTab {
     super.dispose();
   }
 
-  /// Creates a new instance of [TextBookTab] from a JSON map.
-  ///
-  /// The JSON map should have 'initalIndex', 'title', 'commentaries',
-  /// and 'type' keys.
+  /// משחזר כרטיסייה בפורמט הקיים, כולל שמירות ללא נתוני ספר מקוננים.
   factory TextBookTab.fromJson(Map<String, dynamic> json) {
     final bool shouldOpenLeftPane = resolveRestoredReadingLeftPaneState(json);
 
@@ -295,9 +279,7 @@ class TextBookTab extends OpenedTab {
 
     final TextBook restoredBook = json['book'] != null
         ? Book.fromJson(Map<String, dynamic>.from(json['book'])) as TextBook
-        : TextBook(
-            title: json['title'],
-          );
+        : TextBook(title: json['title']);
     // קונפיגורציית החיפוש נטענת מהדיסק: בלעדיה הספר נפתח מחדש עם מסלול
     // המחרוזת הרצופה, וחלונית החיפוש הציגה "אין תוצאות" על חיפוש מורכב.
     final searchState = ReadingTabSearchState.fromJson(json);
@@ -313,6 +295,7 @@ class TextBookTab extends OpenedTab {
 
     return TextBookTab(
       index: json['initalIndex'],
+      initialReadingAnchor: ReadingAnchor.tryFromJson(json['readingAnchor']),
       book: restoredBook,
       highlightText: json['highlightText'] is String
           ? json['highlightText'] as String
@@ -343,82 +326,169 @@ class TextBookTab extends OpenedTab {
     );
   }
 
-  /// Converts the [TextBookTab] instance into a JSON map.
-  ///
-  /// The JSON map contains 'title', 'initalIndex', 'commentaries',
-  /// and 'type' keys.
   @override
-  Map<String, dynamic> toJson() {
-    // בטאב שטרם נטען (שולחן עבודה לא-פעיל) הערכים חיים רק בשדות/ב-state
-    // ההתחלתי — ברירות מחדל קבועות היו מאפסות אותם בשמירה לדיסק.
-    List<String> commentators = this.commentators ?? [];
-    bool splitedView = _lastSplitView;
-    bool showPageShapeView = _lastShowPageShapeView;
-    // ספר ה-state כולל העשרה שנעשתה ברקע (id/מחבר/קטגוריות) — עדיף לשמירה.
-    TextBook bookToSave = book;
-    // חמשת שדות ההדגשה. בלעדיהם הפעלה מחדש החזירה את הספר בלי ההדגשה
-    // שהמשתמש רואה ובלי סימון שורות התוצאה. שמות המפתחות הם שמות השדות של
-    // [TextBookTab] — ב-state שלושה מהם נקראים אחרת.
-    String highlightText = this.highlightText;
-    int? permanentHighlightLine = this.permanentHighlightLine;
-    Set<int>? searchResultLines = initialSearchResultLines;
-    String? pinpointHighlight = this.pinpointHighlight;
-    int? pinpointHighlightSectionIndex = this.pinpointHighlightSectionIndex;
+  Map<String, dynamic> toJson() => TextReadingSnapshot._capture(this).toJson();
+}
 
-    var searchState = ReadingTabSearchState(
-      searchText: searchText,
-      searchOptions: searchOptions,
-      alternativeWords: alternativeWords,
-      spacingValues: spacingValues,
-      searchMode: searchMode,
-      searchDistance: searchDistance,
-      matchPolicy: matchPolicy,
-    );
+/// מצב הקריאה שמשותף לשכפול ולשמירה, ללא יצירת BLoC.
+class TextReadingSnapshot {
+  TextReadingSnapshot._capture(TextBookTab tab) {
+    final state = tab.blocState;
+    _book = tab.book;
+    _persistedBook = state is TextBookLoaded ? state.book : tab.book;
+    _title = tab.title;
+    _readingAnchor = tab.lines.captureAnchor();
+    _index = _readingAnchor?.line ?? tab.index;
+    _isPinned = tab.isPinned;
+    _dedupeKey = tab.dedupeKey;
+    _showLeftPane = state.showLeftPane;
+    _commentators = tab.commentators;
+    _persistedSplitView = tab._lastSplitView;
+    _persistedPageShapeView = tab._lastShowPageShapeView;
+    _highlightText = tab.highlightText;
+    _permanentHighlightLine = tab.permanentHighlightLine;
+    _searchResultLines = tab.initialSearchResultLines;
+    _pinpointHighlight = tab.pinpointHighlight;
+    _pinpointHighlightSectionIndex = tab.pinpointHighlightSectionIndex;
 
-    if (blocState is TextBookLoaded) {
-      final loadedState = blocState as TextBookLoaded;
-      bookToSave = loadedState.book;
-      searchState = ReadingTabSearchState(
-        searchText: loadedState.searchText,
-        searchOptions: loadedState.searchOptions,
-        alternativeWords: loadedState.alternativeWords,
-        spacingValues: loadedState.spacingValues,
-        searchMode: loadedState.searchMode,
-        searchDistance: loadedState.searchDistance,
-        matchPolicy: loadedState.matchPolicy,
-      );
-      commentators = loadedState.activeCommentators;
-      splitedView = loadedState.showSplitView;
-      showPageShapeView = loadedState.showPageShapeView;
-      highlightText = loadedState.highlightText;
-      permanentHighlightLine = loadedState.permanentHighlightLine;
-      searchResultLines = loadedState.searchResultLines;
-      pinpointHighlight = loadedState.pinpointHighlightText;
-      pinpointHighlightSectionIndex = loadedState.pinpointHighlightIndex;
-    }
-
-    return {
-      'title': title,
-      'book': bookToSave.toJson(),
-      'initalIndex': index,
-      'commentators': commentators,
-      'splitedView': splitedView,
-      'showPageShapeView': showPageShapeView,
-      'showLeftPane': blocState.showLeftPane,
-      'isPinned': isPinned,
-      'type': 'TextBookTab',
-      // ערכי ברירת מחדל אינם נכתבים, כדי לא לנפח את הקובץ ולא להבדיל בין
-      // "לא נשמר" ל"נשמר ריק" — בדיוק כמו [ReadingTabSearchState.toJson].
-      if (highlightText.isNotEmpty) 'highlightText': highlightText,
-      'permanentHighlightLine': ?permanentHighlightLine,
-      // null = "לא רץ חיפוש מנוע"; רשימה ריקה = "רץ ולא מצא". הבחנה
-      // משמעותית, ולכן null אינו נכתב כרשימה ריקה.
-      if (searchResultLines != null)
-        'initialSearchResultLines': searchResultLines.toList(),
-      if (pinpointHighlight != null && pinpointHighlight.isNotEmpty)
-        'pinpointHighlight': pinpointHighlight,
-      'pinpointHighlightSectionIndex': ?pinpointHighlightSectionIndex,
-      ...searchState.toJson(),
+    final (
+      text,
+      options,
+      alternatives,
+      spacing,
+      mode,
+      distance,
+      policy,
+    ) = switch (state) {
+      TextBookLoaded s => (
+        s.searchText,
+        s.searchOptions,
+        s.alternativeWords,
+        s.spacingValues,
+        s.searchMode,
+        s.searchDistance,
+        s.matchPolicy,
+      ),
+      TextBookInitial s => (
+        s.searchText,
+        s.searchOptions,
+        s.alternativeWords,
+        s.spacingValues,
+        s.searchMode,
+        s.searchDistance,
+        s.matchPolicy,
+      ),
+      _ => (
+        tab.searchText,
+        tab.searchOptions,
+        tab.alternativeWords,
+        tab.spacingValues,
+        tab.searchMode,
+        tab.searchDistance,
+        tab.matchPolicy,
+      ),
     };
+    _search = ReadingTabSearchState(
+      searchText: text,
+      searchOptions: options,
+      alternativeWords: alternatives,
+      spacingValues: spacing,
+      searchMode: mode,
+      searchDistance: distance,
+      matchPolicy: policy,
+    ).copy();
+
+    if (state is TextBookLoaded) {
+      _splitView = state.showSplitView;
+      _pageShapeView = state.showPageShapeView;
+      _commentators = state.activeCommentators;
+      _highlightText = state.highlightText;
+      _permanentHighlightLine = state.permanentHighlightLine;
+      _searchResultLines = state.searchResultLines;
+      _pinpointHighlight = state.pinpointHighlightText;
+      _pinpointHighlightSectionIndex = state.pinpointHighlightIndex;
+      _persistedSplitView = state.showSplitView;
+      _persistedPageShapeView = state.showPageShapeView;
+    } else if (state is TextBookInitial) {
+      _splitView = state.splitedView;
+      _pageShapeView = state.showPageShapeView;
+    }
+    _commentators = _commentators == null ? null : List.of(_commentators!);
+    _searchResultLines = _searchResultLines == null
+        ? null
+        : Set.of(_searchResultLines!);
   }
+
+  late final TextBook _book;
+  late final TextBook _persistedBook;
+  late final String _title;
+  late final int _index;
+  late final ReadingAnchor? _readingAnchor;
+  late final bool _isPinned;
+  late final String? _dedupeKey;
+  late final bool _showLeftPane;
+  late final ReadingTabSearchState _search;
+  List<String>? _commentators;
+  bool? _splitView;
+  bool? _pageShapeView;
+  late bool _persistedSplitView;
+  late bool _persistedPageShapeView;
+  late String _highlightText;
+  int? _permanentHighlightLine;
+  Set<int>? _searchResultLines;
+  String? _pinpointHighlight;
+  int? _pinpointHighlightSectionIndex;
+
+  /// בונה טאב עצמאי ושומר את זהותו הזמנית, שאינה נשמרת לדיסק.
+  TextBookTab createTab() {
+    final search = _search.copy();
+    return TextBookTab(
+      book: _book,
+      index: _index,
+      initialReadingAnchor: _readingAnchor,
+      searchText: search.searchText,
+      searchOptions: search.searchOptions,
+      alternativeWords: search.alternativeWords,
+      spacingValues: search.spacingValues,
+      searchMode: search.searchMode,
+      searchDistance: search.searchDistance,
+      matchPolicy: search.matchPolicy,
+      highlightText: _highlightText,
+      permanentHighlightLine: _permanentHighlightLine,
+      initialSearchResultLines: _searchResultLines == null
+          ? null
+          : Set.of(_searchResultLines!),
+      pinpointHighlight: _pinpointHighlight,
+      pinpointHighlightSectionIndex: _pinpointHighlightSectionIndex,
+      commentators: _commentators == null ? null : List.of(_commentators!),
+      openLeftPane: _showLeftPane,
+      splitedView: _splitView,
+      showPageShapeView: _pageShapeView,
+      isPinned: _isPinned,
+      dedupeKey: _dedupeKey,
+    );
+  }
+
+  /// שומר את פורמט הטאב הקיים ואת נתוני הספר שהועשרו בזמן הקריאה.
+  Map<String, dynamic> toJson() => {
+    'title': _title,
+    'book': _persistedBook.toJson(),
+    'initalIndex': _index,
+    if (_readingAnchor != null) 'readingAnchor': _readingAnchor.toJson(),
+    'commentators': _commentators ?? <String>[],
+    'splitedView': _persistedSplitView,
+    'showPageShapeView': _persistedPageShapeView,
+    'showLeftPane': _showLeftPane,
+    'isPinned': _isPinned,
+    'type': 'TextBookTab',
+    if (_highlightText.isNotEmpty) 'highlightText': _highlightText,
+    'permanentHighlightLine': ?_permanentHighlightLine,
+    // null = חיפוש שלא רץ; סט ריק = חיפוש שלא מצא תוצאות.
+    if (_searchResultLines != null)
+      'initialSearchResultLines': _searchResultLines!.toList(),
+    if (_pinpointHighlight != null && _pinpointHighlight!.isNotEmpty)
+      'pinpointHighlight': _pinpointHighlight,
+    'pinpointHighlightSectionIndex': ?_pinpointHighlightSectionIndex,
+    ..._search.toJson(),
+  };
 }

@@ -10,8 +10,45 @@ import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/utils/file/hive_utils.dart';
 import 'package:flutter/foundation.dart';
 
+/// מצב הסשן של חלון אחד: המשבצת שלו, דור הסשן והאינדקס שממתין לכתיבה.
+///
+/// ⚠️ שייך לחלון ולא למאגר: הסגירה, הייבוא מגיבוי ו-`TabsBloc` פונים אליו
+/// דרך מופעים שונים של [TabsRepository], וחייבים לראות אותו מצב.
+class WindowTabsSession {
+  WindowTabsSession({int? Function()? slot})
+    : _slot = slot ?? (() => UserStateSlot.current);
+
+  /// הסשן של החלון שה-isolate הזה מציג; היום כל חלון הוא isolate משלו.
+  static final WindowTabsSession current = WindowTabsSession();
+
+  final int? Function() _slot;
+
+  /// המשבצת שהחלון הזה כותב אליה, או null כשאינו יכול לשמור.
+  ///
+  /// ⚠️ חלון בלי משבצת אינו שומר, ובשום מצב אינו נופל למשבצת של חלון אחר
+  /// — זו הייתה דריסת הכרטיסיות שלו.
+  int? get slot => _slot();
+
+  /// דור הסשן של החלון הזה: עולה בכל [TabsRepository.importRaw].
+  int get generation => _generation;
+  int _generation = 0;
+
+  /// האינדקס הפעיל שממתין לכתיבה, והמשבצת שאליה.
+  Timer? _indexTimer;
+  int? _pendingIndex;
+  int? _pendingIndexSlot;
+
+  void _cancelPendingIndex() {
+    _indexTimer?.cancel();
+    _indexTimer = null;
+    _pendingIndex = null;
+    _pendingIndexSlot = null;
+  }
+}
+
 class TabsRepository {
-  TabsRepository({this.sessions});
+  TabsRepository({this.sessions, WindowTabsSession? window})
+    : window = window ?? WindowTabsSession.current;
 
   /// שם ה-box ההיסטורי. נשאר ככינוי שהגיבוי משתמש בו בשמות הסעיפים.
   static const String boxName = 'tabs';
@@ -27,17 +64,16 @@ class TabsRepository {
   /// מאגר הסשנים של המופע הזה; null = המאגר הגלובלי.
   final WindowSessionStore? sessions;
 
+  /// החלון שהמאגר הזה שומר את הסשן שלו.
+  final WindowTabsSession window;
+
   WindowSessionStore get _store =>
       sessions ?? debugSessions ?? WindowSessionStore.instance;
 
   static WindowSessionStore get _staticStore =>
       debugSessions ?? WindowSessionStore.instance;
 
-  /// המשבצת שהחלון הזה כותב אליה, או null כשאינו יכול לשמור.
-  ///
-  /// ⚠️ חלון בלי משבצת אינו שומר, ובשום מצב אינו נופל למשבצת של חלון אחר
-  /// — זו הייתה דריסת הכרטיסיות שלו.
-  static int? get _sessionSlot => UserStateSlot.current;
+  int? get _sessionSlot => window.slot;
 
   /// המשבצת של החלון הראשון בתהליך — הסשן שנטען בהפעלה קרה.
   static const int _hostSlot = UserStateSlot.single;
@@ -45,8 +81,7 @@ class TabsRepository {
   /// דור הסשן של החלון הזה: עולה בכל [importRaw]. `TabsBloc` שנבנה לפני
   /// הייבוא אינו שומר יותר — אחרת סגירתו בעת ההפעלה מחדש הייתה כותבת את
   /// הכרטיסיות שבזיכרונו על אלה ששוחזרו.
-  static int get sessionGeneration => _sessionGeneration;
-  static int _sessionGeneration = 0;
+  static int get sessionGeneration => WindowTabsSession.current.generation;
 
   /// הטאבים הפתוחים והטאב הפעיל, גולמיים, לגיבוי; null כשאין משבצת.
   ///
@@ -68,13 +103,13 @@ class TabsRepository {
     if (slot == null) return;
     final tabs = data['tabs'];
     final current = data['currentTab'];
-    _cancelPendingIndex();
+    window._cancelPendingIndex();
     await _store.save(
       slot,
       tabsJson: jsonEncode(tabs is List ? tabs : <dynamic>[]),
       currentIndex: current is int ? current : 0,
     );
-    _sessionGeneration++;
+    window._generation++;
   }
 
   static List<dynamic> _decodeTabs(String tabsJson) {
@@ -249,7 +284,7 @@ class TabsRepository {
       tabs.length,
     );
     // הכתיבה המלאה נושאת גם את האינדקס, ולכן היא מחליפה כתיבה ממתינה.
-    _cancelPendingIndex();
+    window._cancelPendingIndex();
     await _store.save(
       slot,
       tabsJson: jsonEncode(tabs.map((tab) => tab.toJson()).toList()),
@@ -263,7 +298,7 @@ class TabsRepository {
     final slot = _sessionSlot;
     if (slot == null) return;
     try {
-      _cancelPendingIndex();
+      window._cancelPendingIndex();
       await _store.delete(slot);
     } catch (e) {
       debugPrint('⚠️ discardWindowSession failed: $e');
@@ -277,7 +312,7 @@ class TabsRepository {
   /// ו-`NavigationBloc` טוענים שניהם אחריו ורואים אותו דבר.
   static Future<int> adoptOrphanWindowSessions() async {
     if (WindowRole.isSecondary || WindowBus.instance.hasOtherWindows) return 0;
-    final host = _sessionSlot;
+    final host = WindowTabsSession.current.slot;
     if (host == null) return 0;
     try {
       final adopted = await _staticStore.adoptInto(host);
@@ -299,7 +334,7 @@ class TabsRepository {
     if (WindowRole.isSecondary || WindowBus.instance.hasOtherWindows) {
       return const [];
     }
-    final host = _sessionSlot;
+    final host = WindowTabsSession.current.slot;
     if (host == null) return const [];
     try {
       return await _staticStore.compactAround(host, WindowBus.slotCount);
@@ -308,11 +343,6 @@ class TabsRepository {
       return const [];
     }
   }
-
-  /// האינדקס הפעיל שממתין לכתיבה, והמשבצת שאליה.
-  static Timer? _indexTimer;
-  static int? _pendingIndex;
-  static int? _pendingIndexSlot;
 
   /// שומר רק את אינדקס הטאב הנוכחי, בלי לקודד מחדש את כל הטאבים.
   ///
@@ -329,32 +359,25 @@ class TabsRepository {
     for (var i = 0; i < tabs.length; i++) {
       persistedIndexByOriginalIndex[i] = i;
     }
-    _pendingIndex = _resolvePersistedCurrentTabIndex(
+    window._pendingIndex = _resolvePersistedCurrentTabIndex(
       persistedIndexByOriginalIndex,
       currentTabIndex,
       tabs.length,
     );
-    _pendingIndexSlot = slot;
-    _indexTimer?.cancel();
-    _indexTimer = Timer(_indexDebounce, () => unawaited(flushPendingWrites()));
+    window._pendingIndexSlot = slot;
+    window._indexTimer?.cancel();
+    window._indexTimer = Timer(
+      _indexDebounce,
+      () => unawaited(flushPendingWrites()),
+    );
   }
 
   /// מוציא כתיבה מושהית של האינדקס הפעיל מיד. נקרא לפני סגירת החלון.
   Future<void> flushPendingWrites() async {
-    _indexTimer?.cancel();
-    _indexTimer = null;
-    final index = _pendingIndex;
-    final slot = _pendingIndexSlot;
-    _pendingIndex = null;
-    _pendingIndexSlot = null;
+    final index = window._pendingIndex;
+    final slot = window._pendingIndexSlot;
+    window._cancelPendingIndex();
     if (index == null || slot == null) return;
     await _store.saveCurrentIndex(slot, index);
-  }
-
-  static void _cancelPendingIndex() {
-    _indexTimer?.cancel();
-    _indexTimer = null;
-    _pendingIndex = null;
-    _pendingIndexSlot = null;
   }
 }

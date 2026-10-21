@@ -47,6 +47,7 @@ import 'package:otzaria/tour/tour_target_keys.dart';
 import 'package:otzaria/library/view/grid_items.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
 import 'package:otzaria/tabs/models/searching_tab.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/navigation/view/main_window_screen.dart';
 import 'package:otzaria/widgets/controls/action_buttons.dart';
 import 'package:otzaria/widgets/layout/centered_scrollable_state.dart';
@@ -59,16 +60,17 @@ abstract interface class FindRefDialogHost {
 }
 
 class _MainWindowFindRefHost implements FindRefDialogHost {
-  const _MainWindowFindRefHost();
+  const _MainWindowFindRefHost(this._screenKey);
+
+  final GlobalKey<MainWindowScreenState> _screenKey;
 
   @override
   Future<bool> handleDeepLink(String uri) async =>
-      await mainWindowScreenKey.currentState?.handleInternalDeepLink(uri) ??
-      false;
+      await _screenKey.currentState?.handleInternalDeepLink(uri) ?? false;
 
   @override
   void openTextSearch(String query) {
-    final mainScreen = mainWindowScreenKey.currentState;
+    final mainScreen = _screenKey.currentState;
     if (mainScreen == null) {
       debugPrint('[FindRef] openTextSearch: main window screen not mounted');
       return;
@@ -78,9 +80,10 @@ class _MainWindowFindRefHost implements FindRefDialogHost {
 }
 
 class FindRefDialog extends StatefulWidget {
-  const FindRefDialog({super.key, this.host = const _MainWindowFindRefHost()});
+  const FindRefDialog({super.key, this.host});
 
-  final FindRefDialogHost host;
+  /// `null` — המסך הראשי של החלון שהדיאלוג יושב בו.
+  final FindRefDialogHost? host;
 
   @visibleForTesting
   static void resetExamplesRotationForTesting([int offset = 0]) =>
@@ -369,10 +372,16 @@ class _FindRefDialogState extends State<FindRefDialog> {
   // metrics notification ה-arrow היה נשאר מוסתר עד גלילה ידנית.
   final ValueNotifier<bool> _hasMoreBelow = ValueNotifier<bool>(false);
   FocusRestorer? _focusRestorer;
+  late final FindRefDialogHost _defaultHost;
+
+  FindRefDialogHost get _host => widget.host ?? _defaultHost;
 
   @override
   void initState() {
     super.initState();
+    _defaultHost = _MainWindowFindRefHost(
+      AppWindowKeys.of(context).mainWindowScreen,
+    );
     final hiddenStore = const HiddenLibraryStore();
     _lastVisibilitySelection = hiddenStore.load();
     _localVisibilityChanges = hiddenStore.changes.listen(
@@ -988,7 +997,7 @@ class _FindRefDialogState extends State<FindRefDialog> {
       return true;
     }
 
-    final handled = await widget.host.handleDeepLink(normalized.toString());
+    final handled = await _host.handleDeepLink(normalized.toString());
 
     if (handled && mounted) {
       final focusRepository = context.read<FocusRepository>();
@@ -1001,7 +1010,7 @@ class _FindRefDialogState extends State<FindRefDialog> {
   }
 
   /// פותח את דיאלוג החיפוש עם [query] מוכן בשדה — ללא הרצת חיפוש.
-  void _openTextSearch(String query) => widget.host.openTextSearch(query);
+  void _openTextSearch(String query) => _host.openTextSearch(query);
 
   /// חלון הדוגמאות של הפתיחה הנוכחית — מתקדם בכל פתיחה.
   List<String> _rotatedExamples() {
@@ -1919,7 +1928,7 @@ class _FindRefDialogState extends State<FindRefDialog> {
       child: MediaQuery.withClampedTextScaling(
         maxScaleFactor: 1.6,
         child: SizedBox(
-          key: tourFindRefDialogTargetKey,
+          key: TourTargetKeys.of(context).findRefDialog,
           width: dialogWidth,
           height: dialogHeight,
           child: Column(

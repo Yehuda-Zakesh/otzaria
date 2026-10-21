@@ -285,7 +285,7 @@ class ExternalTargetResolver {
   }
 }
 
-/// קורא את שורות `external_link` של [source] ופותר את יעדיהן. [bookId] ו-
+/// קורא את שורות `external_link` של [source] ופותר את יעדיהן. [book] ו-
 /// [lineRange] מצמצמים לספר ולטווח שורות; בלעדיהם — כל הטבלה (בניית האינדקס).
 /// עם [onRow] כל שורה נמסרת לו מיד ואינה נצברת — הרשימה המוחזרת ריקה.
 List<ResolvedExternalLink> readResolvedExternalLinks({

@@ -1,3 +1,4 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
@@ -85,7 +86,7 @@ void main() {
 
       expect(await repository.hasUnindexedBooks(library), isTrue);
       provider.indexedFilePaths.add(
-        IndexingRepository.buildIndexedBookFilePath(version),
+        BookIdentity.indexedFilePath(version),
       );
       expect(await repository.hasUnindexedBooks(library), isFalse);
     });
@@ -121,7 +122,7 @@ void main() {
         onProgress: (_, _) {},
       );
       expect(engine.committedCounts.keys, {
-        IndexingRepository.buildIndexedBookFilePath(visible),
+        BookIdentity.indexedFilePath(visible),
       });
 
       final probe = _ReindexProbeRepository(provider, hiddenStore: store);
@@ -133,7 +134,7 @@ void main() {
       );
       expect(probe.indexedBooks, [visible]);
       expect(engine.removedFilePaths, [
-        IndexingRepository.buildIndexedBookFilePath(visible),
+        BookIdentity.indexedFilePath(visible),
       ]);
     });
 
@@ -145,8 +146,8 @@ void main() {
       final engine = _RecordingSearchEngine();
       final provider = _RecordingTantivyDataProvider(engine);
       provider.indexedFilePaths.addAll([
-        IndexingRepository.buildIndexedBookFilePath(hidden),
-        IndexingRepository.buildIndexedBookFilePath(visible),
+        BookIdentity.indexedFilePath(hidden),
+        BookIdentity.indexedFilePath(visible),
       ]);
       final store = _FixedHiddenStore(
         HiddenLibrarySelection(
@@ -267,7 +268,7 @@ void main() {
           library
               .getAllBooks()
               .where(IndexingRepository.isIndexableBook)
-              .map(IndexingRepository.buildIndexedBookFilePath),
+              .map(BookIdentity.indexedFilePath),
         );
 
         expect(
@@ -316,16 +317,16 @@ void main() {
     });
   });
 
-  group('IndexingRepository.hasPathKeyedIndexEntry', () {
+  group('BookIdentity.hasPathKeyedIndexEntry', () {
     test('PdfBook בלי מזהה חיצוני מאונדקס לפי נתיב (גם עם id)', () {
       expect(
-        IndexingRepository.hasPathKeyedIndexEntry(
+        BookIdentity.hasPathKeyedIndexEntry(
           PdfBook(title: 'ברכות', path: r'C:\lib\ברכות.pdf'),
         ),
         isTrue,
       );
       expect(
-        IndexingRepository.hasPathKeyedIndexEntry(
+        BookIdentity.hasPathKeyedIndexEntry(
           PdfBook(title: 'ברכות', path: r'C:\lib\ברכות.pdf', id: 5),
         ),
         isTrue,
@@ -335,7 +336,7 @@ void main() {
 
     test('PdfBook עם מזהה חיצוני שורד העברה', () {
       expect(
-        IndexingRepository.hasPathKeyedIndexEntry(
+        BookIdentity.hasPathKeyedIndexEntry(
           PdfBook(
             title: 'שער המלך',
             path: r'C:\lib\external\שער המלך.pdf',
@@ -348,13 +349,13 @@ void main() {
 
     test('DocxBook ללא id — לפי נתיב; עם id — שורד העברה', () {
       expect(
-        IndexingRepository.hasPathKeyedIndexEntry(
+        BookIdentity.hasPathKeyedIndexEntry(
           DocxBook(title: 'מסמך', path: r'C:\lib\doc.docx'),
         ),
         isTrue,
       );
       expect(
-        IndexingRepository.hasPathKeyedIndexEntry(
+        BookIdentity.hasPathKeyedIndexEntry(
           DocxBook(title: 'מסמך', path: r'C:\lib\doc.docx', id: 7),
         ),
         isFalse,
@@ -363,13 +364,13 @@ void main() {
 
     test('TextBook מ-DB — לא לפי נתיב', () {
       expect(
-        IndexingRepository.hasPathKeyedIndexEntry(TextBook(title: 'שבת')),
+        BookIdentity.hasPathKeyedIndexEntry(TextBook(title: 'שבת')),
         isFalse,
       );
     });
   });
 
-  group('IndexingRepository.buildIndexedBookFilePath', () {
+  group('BookIdentity.indexedFilePath', () {
     test('ספר עם מזהה חיצוני מאונדקס לפי המזהה ולא לפי הנתיב', () {
       final onBuildMachine = PdfBook(
         title: 'שער המלך',
@@ -383,12 +384,12 @@ void main() {
       );
 
       expect(
-        IndexingRepository.buildIndexedBookFilePath(onBuildMachine),
+        BookIdentity.indexedFilePath(onBuildMachine),
         'ext:hb:14127',
       );
       expect(
-        IndexingRepository.buildIndexedBookFilePath(afterInstall),
-        IndexingRepository.buildIndexedBookFilePath(onBuildMachine),
+        BookIdentity.indexedFilePath(afterInstall),
+        BookIdentity.indexedFilePath(onBuildMachine),
         reason: 'אינדקס בנוי מראש חייב להתאים גם כשנתיב ההתקנה שונה',
       );
     });
@@ -397,8 +398,8 @@ void main() {
       final pdf = PdfBook(id: 42, title: 'ברכות', path: r'C:\lib\ברכות.pdf');
       final text = TextBook(id: 42, title: 'ברכות');
 
-      expect(IndexingRepository.buildIndexedBookFilePath(pdf), pdf.path);
-      expect(IndexingRepository.buildIndexedBookFilePath(text), 'id:42');
+      expect(BookIdentity.indexedFilePath(pdf), pdf.path);
+      expect(BookIdentity.indexedFilePath(text), 'id:42');
     });
 
     test('מסכת PDF מהתיקייה המצורפת שורדת נתיב התקנה אחר', () {
@@ -412,19 +413,19 @@ void main() {
       );
 
       expect(
-        IndexingRepository.buildIndexedBookFilePath(
+        BookIdentity.indexedFilePath(
           masechet(r'D:\build\library\תלמוד בבלי\ברכות.pdf'),
         ),
         'ext:talmud-pdf:ברכות',
       );
       expect(
-        IndexingRepository.buildIndexedBookFilePath(
+        BookIdentity.indexedFilePath(
           masechet(r'C:\Users\dovid\otzaria\תלמוד בבלי\ברכות.pdf'),
         ),
         'ext:talmud-pdf:ברכות',
       );
       expect(
-        IndexingRepository.buildIndexedBookFilePath(
+        BookIdentity.indexedFilePath(
           TextBook(id: 42, title: 'ברכות'),
         ),
         'id:42',
@@ -448,11 +449,11 @@ void main() {
 
       for (final book in [withExternalId, pathKeyed]) {
         expect(
-          IndexingRepository.indexedPdfFilePath(
+          BookIdentity.indexedPdfFilePath(
             externalLibraryId: book.externalLibraryId,
             filePath: book.path,
           ),
-          IndexingRepository.buildIndexedBookFilePath(book),
+          BookIdentity.indexedFilePath(book),
           reason: 'שני המפתחות מפצלים את הספר לשתי זהויות אם הם נפרדים',
         );
       }
@@ -460,7 +461,7 @@ void main() {
 
     test('ספר DOCX עם מזהה חיצוני מאונדקס לפי המזהה', () {
       expect(
-        IndexingRepository.buildIndexedBookFilePath(
+        BookIdentity.indexedFilePath(
           DocxBook(
             title: 'אבן הבורר',
             path: r'D:\build\library\אבן הבורר.docx',
@@ -497,7 +498,7 @@ void main() {
     Set<String> keysOf(List<Book> books) => {
       for (final book in books)
         if (IndexingRepository.isIndexableBook(book))
-          IndexingRepository.buildIndexedBookFilePath(book),
+          BookIdentity.indexedFilePath(book),
     };
 
     test('כל ספר בחבילה מאונדקס, ולכן אין אינדוקס אצל המשתמש', () {
@@ -516,7 +517,7 @@ void main() {
       );
       expect(
         keysOf(shippedLibraryAt('/ci/full_installer/books')),
-        isNot(contains(IndexingRepository.buildIndexedBookFilePath(added))),
+        isNot(contains(BookIdentity.indexedFilePath(added))),
       );
     });
   });
@@ -560,7 +561,7 @@ void main() {
       final engine = _RecordingSearchEngine()..failCommit = true;
       final provider = _RecordingTantivyDataProvider(engine);
       final book = TextBook(id: 5, title: 'שבת');
-      final key = IndexingRepository.buildIndexedBookFilePath(book);
+      final key = BookIdentity.indexedFilePath(book);
       provider.indexedFilePaths.add(key);
       engine.committedFilePaths = [key];
       final repository = IndexingRepository(provider);
@@ -582,7 +583,7 @@ void main() {
         final engine = _RecordingSearchEngine()..failCommit = true;
         final provider = _RecordingTantivyDataProvider(engine);
         final book = TextBook(id: 5, title: 'שבת');
-        final key = IndexingRepository.buildIndexedBookFilePath(book);
+        final key = BookIdentity.indexedFilePath(book);
         provider.indexedFilePaths.add(key);
         // המחיקה כן נחתמה בדיסק — המצב החתום כבר בלי הספר.
         engine.committedFilePaths = [];
@@ -606,7 +607,7 @@ void main() {
       final provider = _RecordingTantivyDataProvider(engine);
       final book = TextBook(id: 5, title: 'שבת');
       provider.indexedFilePaths.add(
-        IndexingRepository.buildIndexedBookFilePath(book),
+        BookIdentity.indexedFilePath(book),
       );
       final repository = IndexingRepository(provider);
 
@@ -622,8 +623,8 @@ void main() {
       final official = TextBook(id: 5, title: 'שבת');
       final personal = TextBook(id: 5, title: 'שבת', source: BookSource.user);
       provider.indexedFilePaths.addAll([
-        IndexingRepository.buildIndexedBookFilePath(official),
-        IndexingRepository.buildIndexedBookFilePath(personal),
+        BookIdentity.indexedFilePath(official),
+        BookIdentity.indexedFilePath(personal),
       ]);
       final repository = IndexingRepository(provider);
 
@@ -643,7 +644,7 @@ void main() {
       library.books.add(existing);
 
       provider.indexedFilePaths.addAll({
-        IndexingRepository.buildIndexedBookFilePath(existing), // בספרייה
+        BookIdentity.indexedFilePath(existing), // בספרייה
         'uid:99', // ספר אישי שנמחק
         'id:7', // רשמי חסר — לא נוגעים (טעינה חלקית אסור שתמחק)
         'ext:abc', // חיצוני חסר — לא נוגעים
@@ -656,7 +657,7 @@ void main() {
       expect(engine.removedFilePaths, ['uid:99']);
       expect(engine.commitCount, 1);
       expect(provider.indexedFilePaths, {
-        IndexingRepository.buildIndexedBookFilePath(existing),
+        BookIdentity.indexedFilePath(existing),
         'id:7',
         'ext:abc',
       });
@@ -787,7 +788,7 @@ void main() {
         final existing = TextBook(id: 1, title: 'שבת', source: BookSource.user);
         final library = _buildLibrary(bavliBooks: const []);
         library.books.add(existing);
-        final existingKey = IndexingRepository.buildIndexedBookFilePath(
+        final existingKey = BookIdentity.indexedFilePath(
           existing,
         );
         provider.indexedFilePaths.addAll({existingKey, 'uid:99'});
@@ -820,8 +821,7 @@ void main() {
       await indexDir.delete(recursive: true);
     });
 
-    String keyOf(Book book) =>
-        IndexingRepository.buildIndexedBookFilePath(book);
+    String keyOf(Book book) => BookIdentity.indexedFilePath(book);
 
     _RecordingTantivyDataProvider providerWith(
       _CancellationRecordingEngine engine,
@@ -1565,8 +1565,8 @@ void main() {
       final pdf = PdfBook(title: 'סרוק', path: r'C:\pdfs\a.pdf');
       final engine = _RecordingSearchEngine()
         ..fingerprints = {
-          IndexingRepository.buildIndexedBookFilePath(personal): BigInt.one,
-          IndexingRepository.buildIndexedBookFilePath(pdf): BigInt.zero,
+          BookIdentity.indexedFilePath(personal): BigInt.one,
+          BookIdentity.indexedFilePath(pdf): BigInt.zero,
         };
 
       expect(await detect(engine, [personal, pdf]), isEmpty);
@@ -1712,7 +1712,7 @@ void main() {
               categoryId: 7,
               source: source,
             );
-            final key = IndexingRepository.buildIndexedBookFilePath(emptied);
+            final key = BookIdentity.indexedFilePath(emptied);
             final library = Library(categories: [])..books.add(emptied);
             engine.fingerprints = {key: BigInt.from(42)};
             provider.indexedFilePaths.add(key);
@@ -1746,7 +1746,7 @@ void main() {
         final engine = _RecordingSearchEngine();
         final provider = _RecordingTantivyDataProvider(engine);
         final emptied = TextBook(id: 7, title: 'ספר שהתרוקן', categoryId: 7);
-        final key = IndexingRepository.buildIndexedBookFilePath(emptied);
+        final key = BookIdentity.indexedFilePath(emptied);
         // הסמן שנכתב בהחלפה הקודמת: טביעת הטקסט הריק.
         engine.fingerprints = {
           key: await _fakeContentFingerprint(text: const []),
@@ -1775,7 +1775,7 @@ void main() {
             categoryId: 7,
             source: BookSource.user,
           );
-          final key = IndexingRepository.buildIndexedBookFilePath(missing);
+          final key = BookIdentity.indexedFilePath(missing);
           final library = Library(categories: [])..books.add(missing);
           engine.fingerprints = {key: BigInt.from(42)};
           provider.indexedFilePaths.add(key);
@@ -1800,7 +1800,7 @@ void main() {
         final missing = _ReconcileTextBook(
           source: BookSource.attached('missing-db'),
         );
-        final key = IndexingRepository.buildIndexedBookFilePath(missing);
+        final key = BookIdentity.indexedFilePath(missing);
         final library = Library(categories: [])..books.add(missing);
         engine.fingerprints = {key: BigInt.from(42)};
         provider.indexedFilePaths.add(key);
@@ -1825,7 +1825,7 @@ void main() {
         source: BookSource.attached('unreadable-db'),
         failure: const CorruptedDocumentException(),
       );
-      final key = IndexingRepository.buildIndexedBookFilePath(unreadable);
+      final key = BookIdentity.indexedFilePath(unreadable);
       final library = Library(categories: [])..books.add(unreadable);
       engine.fingerprints = {key: BigInt.from(42)};
       provider.indexedFilePaths.add(key);
@@ -1865,20 +1865,19 @@ void main() {
         ]);
 
         engine.fingerprints = {
-          IndexingRepository.buildIndexedBookFilePath(unchanged): BigInt.from(
+          BookIdentity.indexedFilePath(unchanged): BigInt.from(
             11,
           ),
-          IndexingRepository.buildIndexedBookFilePath(changed): BigInt.from(21),
-          IndexingRepository.buildIndexedBookFilePath(unverifiable):
-              BigInt.zero,
-          IndexingRepository.buildIndexedBookFilePath(unloadable): BigInt.from(
+          BookIdentity.indexedFilePath(changed): BigInt.from(21),
+          BookIdentity.indexedFilePath(unverifiable): BigInt.zero,
+          BookIdentity.indexedFilePath(unloadable): BigInt.from(
             55,
           ),
           // notIndexed בכוונה חסר — ספר חדש שמטופל במסלול הרגיל.
         };
         for (final b in [unchanged, changed, unverifiable, unloadable]) {
           provider.indexedFilePaths.add(
-            IndexingRepository.buildIndexedBookFilePath(b),
+            BookIdentity.indexedFilePath(b),
           );
         }
 
@@ -1927,8 +1926,8 @@ void main() {
       final library = _buildLibrary(bavliBooks: const []);
       library.books.addAll([scanned, skipped]);
       engine.fingerprints = {
-        IndexingRepository.buildIndexedBookFilePath(scanned): BigInt.from(1),
-        IndexingRepository.buildIndexedBookFilePath(skipped): BigInt.from(2),
+        BookIdentity.indexedFilePath(scanned): BigInt.from(1),
+        BookIdentity.indexedFilePath(skipped): BigInt.from(2),
       };
 
       final repository = _ReindexProbeRepository(provider);
@@ -1958,7 +1957,7 @@ void main() {
       final library = _buildLibrary(bavliBooks: const []);
       library.books.add(b);
       engine.fingerprints = {
-        IndexingRepository.buildIndexedBookFilePath(b): BigInt.from(7),
+        BookIdentity.indexedFilePath(b): BigInt.from(7),
       };
 
       final repository = _ReindexProbeRepository(provider);
@@ -2047,7 +2046,7 @@ void main() {
       library.books.addAll([book(1, 'שבת'), book(2, 'עירובין')]);
       engine.fingerprints = {
         for (final b in library.books)
-          IndexingRepository.buildIndexedBookFilePath(b): BigInt.from(9),
+          BookIdentity.indexedFilePath(b): BigInt.from(9),
       };
 
       final repository = _ReindexProbeRepository(provider);
@@ -2358,7 +2357,7 @@ void main() {
       final indexedFilePaths = library
           .getAllBooks()
           .where(IndexingRepository.isIndexableBook)
-          .map(IndexingRepository.buildIndexedBookFilePath)
+          .map(BookIdentity.indexedFilePath)
           .toSet();
       final provider = FakeTantivyDataProvider(
         indexedFilePaths: indexedFilePaths,
@@ -2459,7 +2458,7 @@ void main() {
       final indexedFilePaths = library
           .getAllBooks()
           .where(IndexingRepository.isIndexableBook)
-          .map(IndexingRepository.buildIndexedBookFilePath)
+          .map(BookIdentity.indexedFilePath)
           .toSet();
       final provider = FakeTantivyDataProvider(
         indexedFilePaths: indexedFilePaths,
@@ -2554,7 +2553,7 @@ void main() {
             );
             addTearDown(() => temp.delete(recursive: true));
             provider.activeIndexPath = '${temp.path}/index';
-            final key = IndexingRepository.buildIndexedBookFilePath(
+            final key = BookIdentity.indexedFilePath(
               indexedText1,
             );
             engine.committedFilePaths = [key];
@@ -2607,7 +2606,7 @@ void main() {
         library.books.addAll([...texts, ...pdfs]);
         // ספרי הטקסט מדולגים — נותנים ללולאה "זמן טקסטים" שבו החילוצים רצים.
         provider.indexedFilePaths.addAll(
-          texts.map(IndexingRepository.buildIndexedBookFilePath),
+          texts.map(BookIdentity.indexedFilePath),
         );
         final repository = _FakeExtractionRepository(provider);
 
@@ -2728,7 +2727,7 @@ void main() {
           IndexingFailureKind.passwordProtected,
         );
         expect(firstRun.retryableFailures, isEmpty);
-        final filePath = IndexingRepository.buildIndexedBookFilePath(book);
+        final filePath = BookIdentity.indexedFilePath(book);
         expect(provider.indexedFilePaths, contains(filePath));
         expect(
           engine.addedDocuments,
@@ -2752,7 +2751,7 @@ void main() {
         final provider = _RecordingTantivyDataProvider(engine)
           ..activeIndexPath = p.join(tempDir.path, 'index');
         final crasher = TextBook(id: 1, title: 'קורס', source: BookSource.user);
-        final crasherKey = IndexingRepository.buildIndexedBookFilePath(crasher);
+        final crasherKey = BookIdentity.indexedFilePath(crasher);
         io.File(
           '${provider.activeIndexPath}.in_flight.json',
         ).writeAsStringSync(jsonEncode({crasherKey: 2}));
@@ -2780,7 +2779,7 @@ void main() {
           final provider = _RecordingTantivyDataProvider(engine)
             ..activeIndexPath = '${temp.path}/index';
           final book = TextBook(id: 1, title: 'קורס', source: BookSource.user);
-          final key = IndexingRepository.buildIndexedBookFilePath(book);
+          final key = BookIdentity.indexedFilePath(book);
           final file = io.File('${provider.activeIndexPath}.in_flight.json');
           file.writeAsStringSync(jsonEncode({key: 2}));
           final library = Library(categories: [])..books.add(book);
@@ -2809,7 +2808,7 @@ void main() {
           ..activeIndexPath = '${temp.path}/index';
         final visible = TextBook(id: 1, title: 'גלוי', source: BookSource.user);
         final hidden = TextBook(id: 2, title: 'מוסתר', source: BookSource.user);
-        final hiddenKey = IndexingRepository.buildIndexedBookFilePath(hidden);
+        final hiddenKey = BookIdentity.indexedFilePath(hidden);
         final file = io.File('${provider.activeIndexPath}.in_flight.json');
         file.writeAsStringSync(jsonEncode({hiddenKey: 1, 'removed-book': 1}));
         final library = Library(categories: [])
@@ -2855,7 +2854,7 @@ void main() {
             title: 'תקין',
             source: BookSource.user,
           );
-          final key = IndexingRepository.buildIndexedBookFilePath(crasher);
+          final key = BookIdentity.indexedFilePath(crasher);
           final engine = _RecordingSearchEngine()
             ..failAddForTitle = crasher.title;
           final provider = _RecordingTantivyDataProvider(engine)
@@ -2897,10 +2896,10 @@ void main() {
           source: BookSource.user,
         );
         final healthy = TextBook(id: 3, title: 'חדש', source: BookSource.user);
-        final speculativeKey = IndexingRepository.buildIndexedBookFilePath(
+        final speculativeKey = BookIdentity.indexedFilePath(
           speculative,
         );
-        final committedKey = IndexingRepository.buildIndexedBookFilePath(
+        final committedKey = BookIdentity.indexedFilePath(
           committed,
         );
         final engine = _RecordingSearchEngine()
@@ -2944,7 +2943,7 @@ void main() {
       expect(result.failures.single.isRetryable, isFalse);
       expect(
         provider.indexedFilePaths,
-        contains(IndexingRepository.buildIndexedBookFilePath(book)),
+        contains(BookIdentity.indexedFilePath(book)),
       );
       expect(await repository.hasUnindexedBooks(library), isFalse);
     });
@@ -2966,7 +2965,7 @@ void main() {
       expect(result.retryableFailures, isNotEmpty);
       expect(
         provider.indexedFilePaths,
-        isNot(contains(IndexingRepository.buildIndexedBookFilePath(book))),
+        isNot(contains(BookIdentity.indexedFilePath(book))),
       );
     });
 
@@ -3365,8 +3364,8 @@ void main() {
       final pdf2 = PdfBook(title: 'ב', path: r'C:\pdfs\ב.pdf');
       library.books.addAll([indexedText1, indexedText2, pdf1, pdf2]);
       provider.indexedFilePaths.addAll([
-        IndexingRepository.buildIndexedBookFilePath(indexedText1),
-        IndexingRepository.buildIndexedBookFilePath(indexedText2),
+        BookIdentity.indexedFilePath(indexedText1),
+        BookIdentity.indexedFilePath(indexedText2),
       ]);
       final repository = _FakeExtractionRepository(provider);
 
@@ -3536,8 +3535,8 @@ void main() {
       final first = TextBook(id: 101, title: 'ראשון');
       final second = TextBook(id: 102, title: 'שני');
       final library = Library(categories: [])..books.addAll([first, second]);
-      final firstKey = IndexingRepository.buildIndexedBookFilePath(first);
-      final secondKey = IndexingRepository.buildIndexedBookFilePath(second);
+      final firstKey = BookIdentity.indexedFilePath(first);
+      final secondKey = BookIdentity.indexedFilePath(second);
       engine.onTextAdded = (title) {
         if (title == second.title) provider.isIndexing.value = false;
       };
@@ -3592,8 +3591,8 @@ void main() {
       final first = TextBook(id: 103, title: 'ראשון');
       final pdf = PdfBook(title: 'שני', path: r'C:\pdfs\second.pdf');
       final library = Library(categories: [])..books.addAll([first, pdf]);
-      final firstKey = IndexingRepository.buildIndexedBookFilePath(first);
-      final pdfKey = IndexingRepository.buildIndexedBookFilePath(pdf);
+      final firstKey = BookIdentity.indexedFilePath(first);
+      final pdfKey = BookIdentity.indexedFilePath(pdf);
       engine.onPdfAdded = (_) => provider.isIndexing.value = false;
 
       final cancelled = await repository.runIndexing(
@@ -3622,8 +3621,8 @@ void main() {
       final first = TextBook(id: 104, title: 'ראשון');
       final second = TextBook(id: 105, title: 'שני');
       final library = Library(categories: [])..books.addAll([first, second]);
-      final firstKey = IndexingRepository.buildIndexedBookFilePath(first);
-      final secondKey = IndexingRepository.buildIndexedBookFilePath(second);
+      final firstKey = BookIdentity.indexedFilePath(first);
+      final secondKey = BookIdentity.indexedFilePath(second);
       engine.onTextAdded = (title) {
         if (title == second.title) provider.isIndexing.value = false;
       };
@@ -3645,8 +3644,8 @@ void main() {
       final first = TextBook(id: 106, title: 'ראשון');
       final pdf = PdfBook(title: 'שני', path: r'C:\pdfs\second.pdf');
       final library = Library(categories: [])..books.addAll([first, pdf]);
-      final firstKey = IndexingRepository.buildIndexedBookFilePath(first);
-      final pdfKey = IndexingRepository.buildIndexedBookFilePath(pdf);
+      final firstKey = BookIdentity.indexedFilePath(first);
+      final pdfKey = BookIdentity.indexedFilePath(pdf);
       engine.onPdfAdded = (_) => provider.isIndexing.value = false;
 
       final result = await repository.indexAllBooks(
@@ -3676,9 +3675,9 @@ void main() {
           middle,
           pdf,
         ]);
-      final firstKey = IndexingRepository.buildIndexedBookFilePath(first);
-      final middleKey = IndexingRepository.buildIndexedBookFilePath(middle);
-      final pdfKey = IndexingRepository.buildIndexedBookFilePath(pdf);
+      final firstKey = BookIdentity.indexedFilePath(first);
+      final middleKey = BookIdentity.indexedFilePath(middle);
+      final pdfKey = BookIdentity.indexedFilePath(pdf);
       provider.indexedFilePaths.add(middleKey);
       engine.onTextAdded = (_) => releasePdfExtraction.complete();
       engine.onPdfAdded = (_) => provider.isIndexing.value = false;
@@ -3753,7 +3752,7 @@ void main() {
     });
   });
 
-  group('IndexingRepository.catalogueOrderKey', () {
+  group('BookIdentity.keyOf', () {
     test('מבדיל בין קבצי PDF עם אותו שם לפי הנתיב בפועל', () {
       final first = PdfBook(
         title: 'שבת',
@@ -3767,8 +3766,8 @@ void main() {
       );
 
       expect(
-        IndexingRepository.catalogueOrderKey(first),
-        isNot(IndexingRepository.catalogueOrderKey(second)),
+        BookIdentity.keyOf(first),
+        isNot(BookIdentity.keyOf(second)),
       );
     });
 
@@ -3781,8 +3780,8 @@ void main() {
         source: BookSource.user,
       );
 
-      expect(IndexingRepository.catalogueOrderKey(official), 'id:5');
-      expect(IndexingRepository.catalogueOrderKey(userBook), 'uid:5');
+      expect(BookIdentity.keyOf(official), 'id:5');
+      expect(BookIdentity.keyOf(userBook), 'uid:5');
     });
 
     test('ספר ממסד מצורף ממופתח db:<slug>:<id>, בלי לשנות את השאר', () {
@@ -3798,11 +3797,11 @@ void main() {
         externalLibraryId: 'oh:9',
       );
 
-      expect(IndexingRepository.catalogueOrderKey(attached), 'db:lib:5');
+      expect(BookIdentity.keyOf(attached), 'db:lib:5');
       // מסד מצורף קובע את ה-externalLibraryId בעצמו — אסור שיתנגש ברשמי.
-      expect(IndexingRepository.catalogueOrderKey(external), 'db:lib:5');
+      expect(BookIdentity.keyOf(external), 'db:lib:5');
       expect(
-        IndexingRepository.catalogueOrderKeyFromParts(title: 'שבת', bookId: 5),
+        BookIdentity.fromParts(title: 'שבת', bookId: 5),
         'id:5',
       );
     });
@@ -3832,7 +3831,7 @@ void main() {
       ];
 
       for (final book in books) {
-        IndexingRepository.catalogueOrderKey(book);
+        BookIdentity.keyOf(book);
       }
 
       // המפתח נבנה לכל ספר בכל מעבר על הספרייה (אינדוקס, חיפוש, הפעלה).
@@ -3859,8 +3858,8 @@ void main() {
 
       for (final book in books) {
         expect(
-          IndexingRepository.catalogueOrderKey(book),
-          IndexingRepository.catalogueOrderKeyFromParts(
+          BookIdentity.keyOf(book),
+          BookIdentity.fromParts(
             title: book.title,
             externalLibraryId: book.externalLibraryId,
             bookId: book.id,
@@ -3875,7 +3874,7 @@ void main() {
     });
   });
 
-  group('IndexingRepository.buildIndexedBookFilePath', () {
+  group('BookIdentity.indexedFilePath', () {
     test('PdfBook ממופה לנתיב הקובץ, ספר טקסט למפתח הקטלוג', () {
       // המפתח הזה הוא שדה filePath של המסמכים באינדקס, ולכן הוא הבסיס
       // לשחזור מצב האינדוקס מהאינדקס עצמו (getIndexedFilePaths).
@@ -3886,10 +3885,10 @@ void main() {
       );
       final text = TextBook(title: 'בראשית');
 
-      expect(IndexingRepository.buildIndexedBookFilePath(pdf), pdf.path);
+      expect(BookIdentity.indexedFilePath(pdf), pdf.path);
       expect(
-        IndexingRepository.buildIndexedBookFilePath(text),
-        IndexingRepository.catalogueOrderKey(text),
+        BookIdentity.indexedFilePath(text),
+        BookIdentity.keyOf(text),
       );
     });
   });
@@ -4016,8 +4015,8 @@ void main() {
         categoryId: 7,
       );
       expect(
-        IndexingRepository.catalogueOrderKey(docx),
-        IndexingRepository.catalogueOrderKey(docx.toTextBook()),
+        BookIdentity.keyOf(docx),
+        BookIdentity.keyOf(docx.toTextBook()),
       );
     });
 
@@ -4033,8 +4032,8 @@ void main() {
           categoryPath: 'ספרים אישיים',
         );
         expect(
-          IndexingRepository.catalogueOrderKey(docx),
-          IndexingRepository.catalogueOrderKey(docx.toTextBook()),
+          BookIdentity.keyOf(docx),
+          BookIdentity.keyOf(docx.toTextBook()),
         );
       },
     );
@@ -4253,7 +4252,7 @@ void main() {
               .getAllBooks()
               .where((book) => !book.source.isUser)
               .where(IndexingRepository.isIndexableBook)
-              .map(IndexingRepository.buildIndexedBookFilePath),
+              .map(BookIdentity.indexedFilePath),
         );
 
         expect(
@@ -4305,8 +4304,8 @@ void main() {
       provider.indexedFilePaths.addAll({
         'id:7',
         'ext:abc',
-        IndexingRepository.buildIndexedBookFilePath(personalText),
-        IndexingRepository.buildIndexedBookFilePath(personalPdf),
+        BookIdentity.indexedFilePath(personalText),
+        BookIdentity.indexedFilePath(personalPdf),
         'uid:99', // ספר מתיקייה מוסתרת — אינו בעץ
         hiddenFolderPdf,
         nestedLibraryPdf,

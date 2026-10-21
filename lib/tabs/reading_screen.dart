@@ -462,7 +462,7 @@ class _ReadingScreenState extends State<ReadingScreen>
                       ],
                     )
                   : KeyedSubtree(
-                      key: tourReadingScreenTargetKey,
+                      key: TourTargetKeys.of(context).readingScreen,
                       child: SizedBox.fromSize(
                         size: MediaQuery.of(context).size,
                         child: _wrapWithDesktopTabSwipe(

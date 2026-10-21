@@ -24,9 +24,19 @@ void main() {
       SearchDefaults.initialResultGroupingForNewSearch(),
       ResultGroupingMode.none,
     );
+    expect(SearchDefaults.initialSemanticIncludeLexicalForNewSearch(), isTrue);
+    expect(SearchDefaults.initialSemanticGroupIdenticalForNewSearch(), isTrue);
   });
 
   test('שמירת העדפה בלי אתחול אינה זורקת', () {
+    expect(
+      () => SearchDefaults.saveSemanticIncludeLexicalDefault(false),
+      returnsNormally,
+    );
+    expect(
+      () => SearchDefaults.saveSemanticGroupIdenticalDefault(false),
+      returnsNormally,
+    );
     expect(
       () => SearchDefaults.saveResultGroupingDefault(
         ResultGroupingMode.sameSection,

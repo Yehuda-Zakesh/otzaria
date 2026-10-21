@@ -58,3 +58,29 @@ Future<int> additionalDownloadBytes({
   }
   return needed;
 }
+
+/// האם נשמר קובץ חלקי של הנכס שהמוריד ימשיך ממנו (ראו [additionalDownloadBytes]).
+Future<bool> hasReusableDownload({
+  required String destPath,
+  required String identity,
+  required int size,
+  SplitAsset? split,
+}) async {
+  if (split == null) {
+    return await reusableDownloadBytes(destPath, identity, size) > 0;
+  }
+  final joinedIdentity = '$identity|joined:${split.sha256}';
+  if (await reusableDownloadBytes(destPath, joinedIdentity, split.size) > 0) {
+    return true;
+  }
+  for (var i = 0; i < split.parts.length; i++) {
+    final part = split.parts[i];
+    final partBytes = await reusableDownloadBytes(
+      PatchDownloader.splitPartPath(destPath, i),
+      '$identity|${part.name}|${part.sha256}',
+      part.size,
+    );
+    if (partBytes > 0) return true;
+  }
+  return false;
+}

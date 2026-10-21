@@ -134,13 +134,14 @@ class BookOpenCoordinator {
     // הספרייה מעבירה את הדיפולט הזה. רק כשהמתקשר מעביר ערך שונה מהדיפולט מדובר
     // במיקום מפורש שיש לכבד; אחרת נופלים לשחזור המיקום מההיסטוריה.
     final int defaultIndex = book is PdfBook ? 1 : 0;
-    final initialIndex =
-        (ignoreHistory ||
+    final useHistoryPosition =
+        !(ignoreHistory ||
             hasAnyHighlight ||
             explicitIndex ||
-            index != defaultIndex)
-        ? index
-        : (lastOpened?.index ?? defaultIndex);
+            index != defaultIndex);
+    final initialIndex = useHistoryPosition
+        ? (lastOpened?.index ?? defaultIndex)
+        : index;
     // סמנטיקה של [initialCommentators]:
     //   null   → ברירת מחדל: נופלים להיסטוריה (commentatorsToShow).
     //   []     → bypass מפורש: פתיחה בלי מפרשים, גם אם בעבר נשמרו ב-history.
@@ -171,6 +172,9 @@ class BookOpenCoordinator {
     return OpenedTab.fromBook(
       book,
       initialIndex,
+      initialReadingAnchor: useHistoryPosition
+          ? lastOpened?.readingAnchor
+          : null,
       searchText: searchQuery,
       highlightText: effectiveHighlightText,
       permanentHighlightLine: effectivePermanentHighlightLine,

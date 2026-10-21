@@ -1,5 +1,6 @@
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/foundation.dart';
+import 'package:otzaria/core/messages/library_messages.dart';
 import 'package:otzaria/library_update/bloc/library_update_bloc.dart';
 import 'package:otzaria/work_status/work_status_item.dart';
 
@@ -60,7 +61,9 @@ WorkStatusItem? libraryUpdateWorkStatusItem(
       id: kLibraryUpdateWorkStatusId,
       title: 'עדכון ספרייה',
       message: _messageWithErrorDetail(state),
-      detail: 'לחץ לניסיון חוזר',
+      detail: state.canResumeDownload
+          ? LibraryMessages.tapToResumeDownload
+          : 'לחץ לניסיון חוזר',
       kind: WorkStatusKind.failed,
       onTap: onRetry,
       autoDismissAfter: state.isCheckFailure ? kCheckFailureAutoDismiss : null,

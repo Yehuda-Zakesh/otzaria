@@ -506,4 +506,46 @@ void main() {
       expect(result, [1, 2, 4]);
     });
   });
+  group('פריטים בנויים בגלילה ארוכה', () {
+    // ספר בלי TOC: כל פסקה ממוזגת מחזיקה עותק של טקסט שורותיה.
+    final lines = [for (var i = 0; i < 2000; i++) 'שורה $i של הספר'];
+    List<int> breaks() => [for (var i = 0; i < lines.length; i += 3) i];
+
+    test('מעבר על כל הפריטים אינו שומר את כולם', () {
+      final segments = buildReadingSegments(
+        lines,
+        continuous: true,
+        breakLines: breaks(),
+      );
+      for (var i = 0; i < segments.length; i++) {
+        segments[i];
+      }
+      expect(segments.length, greaterThan(kMaxBuiltReadingSegments));
+      expect(segments.debugBuiltCount, kMaxBuiltReadingSegments);
+    });
+
+    test('פריט שנבנה מחדש זהה לבנייה הראשונה, ופריט שבשימוש נשמר', () {
+      final segments = buildReadingSegments(
+        lines,
+        continuous: true,
+        breakLines: breaks(),
+      );
+      final first = segments[1];
+      final kept = segments[2];
+      for (var i = 3; i < segments.length; i++) {
+        segments[i];
+        expect(identical(segments[2], kept), isTrue);
+      }
+      final rebuilt = segments[1];
+      expect(identical(rebuilt, first), isFalse);
+      expect(rebuilt.text, first.text);
+      expect(rebuilt.sourceLineIndices, first.sourceLineIndices);
+      expect(
+        [for (final r in rebuilt.lineRanges) (r.lineIndex, r.start, r.end)],
+        [for (final r in first.lineRanges) (r.lineIndex, r.start, r.end)],
+      );
+      expect(rebuilt.isHeader, first.isHeader);
+      expect(rebuilt.isLoaded, first.isLoaded);
+    });
+  });
 }

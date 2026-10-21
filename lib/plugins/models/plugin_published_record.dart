@@ -39,19 +39,5 @@ class PluginPublishedRecord {
     );
   }
 
-  Map<String, dynamic> toDbMap() {
-    return {
-      'plugin_id': pluginId,
-      'type': type,
-      'scope': scope,
-      'record_key': key,
-      'payload_json': payloadJson,
-      'version': version,
-      'created_at': createdAt.toIso8601String(),
-      'updated_at': updatedAt.toIso8601String(),
-      'expires_at': expiresAt?.toIso8601String(),
-    };
-  }
-
   dynamic get decodedPayload => jsonDecode(payloadJson);
 }

@@ -1866,13 +1866,6 @@ class SeforimRepository {
     db.execute(sql);
   }
 
-  // FTS5 removed - rebuildFts5Index function no longer needed
-  // Future<void> rebuildFts5Index() async {
-  //   _logger.fine('Rebuilding FTS5 index for line_search table');
-  //   await executeRawQuery('INSERT INTO line_search(line_search) VALUES(\'rebuild\')');
-  //   _logger.fine('FTS5 index rebuilt successfully');
-  // }
-
   /// Gets all books from the database.
   ///
   /// @return A list of all books
@@ -1923,7 +1916,6 @@ class SeforimRepository {
     int categoryId,
     String fileType,
   ) async {
-    //_logger.fine('Checking if book exists in category with file type: $title (categoryId: $categoryId, fileType: $fileType)');
     return await _database.bookDao.getBookByTitleCategoryAndFileType(
       title,
       categoryId,

@@ -1,13 +1,7 @@
-// גלילה לקטע המפרש שעוגן-אות מקשר אליו (לחיצה על (א) בשולחן ערוך וכד').
-//
-// שני באגים שהבדיקות כאן מקבעות:
-//  1. היעד היה שם המפרש בלבד, ולכן כשלמפרש כמה קטעים על אותה שורה הרשימה
-//     נעצרה תמיד על הראשון — לא על הקטע שהעוגן הצביע אליו.
-//  2. הגלילה בוצעה בניסיון יחיד. גובה קטע מפרש נקבע רק אחרי ש-link.content
-//     נפתר, ולכן ככל שיש יותר מפרשים על הקטע כך הגלילה נעצרה מוקדם יותר —
-//     "לפני" המפרש המקושר.
+// ניווט לקטע מפרש מדויק נשמר גם בטעינה מאוחרת ובהחלפת סדר הקבוצות.
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,15 +22,11 @@ import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/models/commentary_scroll_request.dart';
 import 'package:otzaria/book_common/models/commentator_group.dart';
 import 'package:otzaria/text_book/view/commentary_list_base.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
 
-/// די מפרשים כדי שהיעד יהיה מחוץ למסך — זה בדיוק התנאי של הבאג — אך עדיין
-/// בתוך ה-cacheExtent של הרשימה. הגבול מכוון: מעבר לו
-/// `ScrollablePositionedList` עובר למסלול שתי-הרשימות, שנופל בסביבת בדיקה
-/// headless מתוך `getOffsetToReveal`. המסלול שבו הבאג חי הוא ממילא הישיר —
-/// `animateTo` לאופסט פיקסלים שחושב מהפריסה שברגע ההתחלה.
+/// די מפרשים כדי שהיעד יהיה מחוץ למסך — זה התנאי של הבאג.
 const int _commentatorCount = 6;
 
 /// כמה קטעים לכל מפרש על אותה שורת מקור. שניים ומעלה הם התנאי לבאג הראשון.
@@ -254,6 +244,42 @@ void main() {
       );
     });
 
+    testWidgets('גלילת משתמש מבטלת יעד שממתין לפריים', (tester) async {
+      final key = await _pump(tester);
+      await _settleAnchorScroll(tester);
+      key.currentState!.scrollToCommentator('מפרש 4');
+      final rect = tester.getRect(_listFinder);
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: rect.center,
+          scrollDelta: const Offset(0, 120),
+        ),
+      );
+      await _settleAnchorScroll(tester);
+      expect(_isNearTop(tester, find.text('מפרש 4')), isFalse);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('בקשת איפוס ישנה אינה דורסת ניווט משתמש לפני הפריים', (
+      tester,
+    ) async {
+      final key = await _pump(tester);
+      await _settleAnchorScroll(tester);
+      key.currentState!.scrollToCommentator('מפרש 2');
+      await _settleAnchorScroll(tester);
+      key.currentState!.scrollToTop();
+      final rect = tester.getRect(_listFinder);
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: rect.center,
+          scrollDelta: const Offset(0, 80),
+        ),
+      );
+      await _settleAnchorScroll(tester);
+      expect(_isNearTop(tester, find.text(_commentators.first)), isFalse);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('בקשה שנייה גוברת על הראשונה', (tester) async {
       final key = await _pump(tester);
       await _settleAnchorScroll(tester);
@@ -269,6 +295,74 @@ void main() {
     });
   });
 
+  testWidgets('בניית UI שומרת מיפוי ומיקום; שינוי הרחבה מעדכן אותם', (
+    tester,
+  ) async {
+    final key = await _pump(tester, surfaceSize: const Size(800, 300));
+    await _settleAnchorScroll(tester);
+    final target = _link(title: 'מפרש 3', segment: 1);
+    final targetKey = ValueKey(commentaryLinkKey(target));
+    key.currentState!.scrollToCommentator(
+      'מפרש 3',
+      linkKey: commentaryLinkKey(target),
+    );
+    await _settleAnchorScroll(tester);
+    final revision = key.currentState!.debugFlatItemsRevision;
+    final offset = _offsetOf(tester, targetKey);
+    final state = _lastBloc!.state as TextBookLoaded;
+    _lastBloc!.emitState(state.copyWith(fontSize: state.fontSize + 1));
+    await _settleAnchorScroll(tester);
+    expect(key.currentState!.debugFlatItemsRevision, revision);
+    expect(_offsetOf(tester, targetKey), closeTo(offset!, .1));
+    key.currentState!.toggleAllExpanded();
+    await _settleAnchorScroll(tester);
+    expect(key.currentState!.debugFlatItemsRevision, greaterThan(revision));
+    expect(
+      tester.widget<ScrollablePositionedList>(_listFinder).itemCount,
+      _commentatorCount,
+    );
+    final next = _link(title: 'מפרש 2', segment: 1);
+    key.currentState!.scrollToCommentator(
+      'מפרש 2',
+      linkKey: commentaryLinkKey(next),
+    );
+    await _settleAnchorScroll(tester);
+    expect(_isNearTop(tester, ValueKey(commentaryLinkKey(next))), isTrue);
+    expect(
+      tester.widget<ScrollablePositionedList>(_listFinder).itemCount,
+      _commentatorCount + _segmentsPerCommentator,
+    );
+  });
+
+  testWidgets('שינוי סדר מפרשים שומר את הרשימה ואת מצב הקטעים', (tester) async {
+    await _pump(tester);
+    await _settleAnchorScroll(tester);
+    final listState = tester.state(_listFinder);
+    final item = find.byKey(
+      ValueKey(
+        commentaryLinkKey(
+          _link(title: _commentators.first, segment: 0),
+        ),
+      ),
+    );
+    final itemState = tester.state(item.first);
+    _lastBloc!.emitState(
+      _loadedState(
+        commentatorsOrder: [
+          _commentators[1],
+          _commentators[0],
+          ..._commentators.skip(2),
+        ],
+      ),
+    );
+    await tester.pump();
+    expect(tester.state(_listFinder), same(listState));
+    await _settleAnchorScroll(tester);
+    expect(tester.state(_listFinder), same(listState));
+    expect(tester.state(item.first), same(itemState));
+    expect(tester.takeException(), isNull);
+  });
+
   group('מרוץ מול איפוס הקטע', () {
     // לחיצה על עוגן-אות שולחת קודם `UpdateSelectedIndex(sourceLine)`. שינוי
     // הקטע גורם ל-`_syncSectionScroll` (שרץ בתוך ה-build) לתזמן `scrollToTop`,
@@ -276,9 +370,7 @@ void main() {
     // כאילו נפתח הקטע הראשון של המפרש — שהוא גם הקטע שהעוגן הראשון (א)
     // מצביע אליו, ומכאן הרושם ש"רק א עובד".
     //
-    // הכלל נבדק כפונקציה טהורה ולא דרך הווידג'ט: גלילה בזמן שהרשימה מחליפה
-    // קטע מפילה את ScrollablePositionedList בפריסה בלתי-חסומה בסביבת בדיקה
-    // headless, כך שבדיקת ווידג'ט כאן מודדת את הקריסה ולא את הכלל.
+    // הכלל נבדק כפונקציה טהורה, בלי תלות בתזמון הגלילה בזמן החלפת הקטע.
     test('בקשת עוגן ממתינה מבטלת את איפוס הקטע', () {
       expect(
         shouldResetScrollForSectionChange(hasPendingAnchorScroll: true),
@@ -310,15 +402,6 @@ void main() {
   });
 
   group('רצף לחיצות', () {
-    // ⚠️ הבדיקות כאן מכסות את ההתנהגות (בקשות רצופות נענות, בקשה באמצע
-    // סבב נאספת), אבל **אינן משחזרות** את התקיעה שנצפתה בשדה: ה-Future של
-    // `ScrollablePositionedList.scrollTo` אינו מושלם לעולם כשהרשימה נבנית
-    // מחדש באמצע המעבר, ובסביבת הבדיקה הוא כן מושלם. אומת שהן עוברות גם
-    // עם ה-await החוסם, ולכן אינן ראיה לתיקון.
-    //
-    // הראיה לתקיעה היא לוג מהאפליקציה: 17 בקשות רצופות בלי אף שורת ניסיון
-    // גלילה, אחרי שבקשה #2 נכנסה ל-await. התיקון מסיר את ההמתנה החיצונית
-    // לגמרי, כך שהלולאה אינה יכולה להיתלות ב-SPL ללא קשר לפנימיותו.
     testWidgets('לחיצות רצופות ממשיכות להיענות', (tester) async {
       final key = await _pump(tester);
       await _settleAnchorScroll(tester);
@@ -358,8 +441,7 @@ void main() {
         promoted,
         linkKey: commentaryLinkKey(target),
       );
-      // באמצע המעבר: המפרש שנלחץ עולה לראש, ה-key של SPL מתחלף, והרשימה
-      // נבנית מחדש — המצב שבו ה-Future של scrollTo אינו מושלם לעולם.
+      // הסדר משתנה בזמן שהניווט לקטע עדיין מתבצע.
       await tester.pump(const Duration(milliseconds: 60));
       _lastBloc!.emitState(
         _loadedState(
@@ -370,6 +452,8 @@ void main() {
         ),
       );
       await _settleAnchorScroll(tester);
+
+      expect(_isNearTop(tester, ValueKey(commentaryLinkKey(target))), isTrue);
 
       // הדרישה: בקשה *נוספת* אחרי ההחלפה עדיין נענית. אם הרץ נתקע, שום
       // לחיצה לא תעבוד יותר — וזה מה שנצפה בשדה.
@@ -490,11 +574,7 @@ void main() {
 
 final Finder _listFinder = find.byType(ScrollablePositionedList);
 
-/// מריץ את לולאת הגלילה עד סופה.
-///
-/// `pumpAndSettle` לבדו אינו מספיק: בין ניסיון לניסיון הלולאה ממתינה
-/// ב-`Future.delayed` ואין פריים מתוזמן, ולכן הוא חוזר באמצע. קידום השעון
-/// המפורש מפעיל את הטיימר, וה-`scrollTo` שאחריו מתזמן את הפריים הבא.
+/// מאפשר גם לתוכן אסינכרוני לשנות גובה לאחר הניווט.
 Future<void> _settleAnchorScroll(WidgetTester tester) async {
   for (var i = 0; i < 12; i++) {
     await tester.pump(const Duration(milliseconds: 300));

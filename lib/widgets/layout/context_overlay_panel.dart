@@ -1,4 +1,4 @@
-// lib/widgets/context_overlay_panel.dart
+// lib/widgets/layout/context_overlay_panel.dart
 //
 // ContextOverlayPanel — פאנל הגדרות overlay שצף מעל התוכן
 //

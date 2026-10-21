@@ -312,20 +312,23 @@ class _PersonalBooksImportPanelState extends State<PersonalBooksImportPanel> {
           isExpanded: _isExpanded,
           onTap: () => setState(() => _isExpanded = !_isExpanded),
           hasContent: _importedFiles.isNotEmpty,
+          // ExpandableSection מתעלם מהילדים כשהוא סגור; בונים שורה לכל ספר
+          // רק כשהרשימה פתוחה.
           children: [
-            Container(
-              margin: const EdgeInsets.only(right: 16, left: 16, bottom: 8),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: AppTokens.borderRadiusAll,
+            if (_isExpanded)
+              Container(
+                margin: const EdgeInsets.only(right: 16, left: 16, bottom: 8),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: AppTokens.borderRadiusAll,
+                ),
+                child: Column(
+                  children: [
+                    for (final file in _importedFiles)
+                      _buildFileItem(file, isBusy),
+                  ],
+                ),
               ),
-              child: Column(
-                children: [
-                  for (final file in _importedFiles)
-                    _buildFileItem(file, isBusy),
-                ],
-              ),
-            ),
           ],
         );
       },

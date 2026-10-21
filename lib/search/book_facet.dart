@@ -1,8 +1,8 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/data/data_providers/book_database_resolver.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
-import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
 import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
@@ -44,7 +44,7 @@ class BookFacet {
       topics: topics,
     );
 
-    final bookKey = IndexingRepository.catalogueOrderKeyFromParts(
+    final bookKey = BookIdentity.fromParts(
       title: title,
       externalLibraryId: externalLibraryId,
       bookId: bookId,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -10,7 +12,12 @@ import 'package:otzaria/plugins/models/plugin_manifest.dart';
 import 'package:otzaria/plugins/models/plugin_permission_grant.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/plugins/services/plugin_installer_service.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_client.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_owner.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_store.dart';
 import 'package:otzaria/tools/calendar/services/notification_service.dart';
+
+import '../../tools/calendar/support/calendar_alerts_fakes.dart';
 
 InstalledPlugin _plugin(String id) => InstalledPlugin(
   pluginId: id,
@@ -55,6 +62,16 @@ class _FakeRepo implements PluginRegistryRepository {
   Future<String?> getKV(String id, String ns, String key) async =>
       ns == '_internal' && key == 'notification_ids' ? ids[id] : null;
   @override
+  Future<void> setKV(String id, String ns, String key, String value) async {
+    if (ns == '_internal' && key == 'notification_ids') ids[id] = value;
+  }
+
+  @override
+  Future<void> removeKV(String id, String ns, String key) async {
+    if (ns == '_internal' && key == 'notification_ids') ids.remove(id);
+  }
+
+  @override
   Future<List<PluginPermissionGrant>> getPluginPermissions(String id) async =>
       [];
   @override
@@ -91,6 +108,8 @@ void main({bool initializeNotifications = true, bool resetFirst = false}) {
   final calls = <MethodCall>[];
   final cancelled = <Object?>[];
   String? failureMethod;
+  Completer<void>? scheduleGate;
+  late CalendarAlertsOwner owner;
 
   setUpAll(() async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
@@ -99,6 +118,7 @@ void main({bool initializeNotifications = true, bool resetFirst = false}) {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           calls.add(call);
+          if (call.method == 'zonedSchedule') await scheduleGate?.future;
           if (call.method == failureMethod) {
             throw PlatformException(code: 'unavailable');
           }
@@ -117,13 +137,27 @@ void main({bool initializeNotifications = true, bool resetFirst = false}) {
     calls.clear();
     cancelled.clear();
     failureMethod = null;
+    scheduleGate = null;
   });
 
   PluginSystemBloc blocFor(_FakeRepo repo) {
+    final created = owner = CalendarAlertsOwner(
+      store: MemoryAlertsStore(),
+      notifications: NotificationService(),
+      pluginIds: RegistryPluginNotificationIdStore(repo),
+      pluginEvents: () async => const [],
+      broadcast: (_) {},
+      dedupeDuplicates: false,
+    );
     final bloc = PluginSystemBloc(
       repository: repo,
       installerService: _StubInstaller(repo),
+      alertsClient: LocalCalendarAlertsClient(owner),
     );
+    addTearDown(() async {
+      await created.idle;
+      created.dispose();
+    });
     addTearDown(bloc.close);
     return bloc;
   }
@@ -182,6 +216,33 @@ void main({bool initializeNotifications = true, bool resetFirst = false}) {
       expect(repo.plugins.containsKey('p1'), isTrue);
       expect(repo.ids['p1'], '[7]');
       expect(repo.ids['p2'], '[99]');
+    });
+  }
+
+  if (initializeNotifications) {
+    test('הסרה בזמן שתזמון ראשון בדרך מבטלת גם אותו', () async {
+      final repo = _FakeRepo()..ids.remove('p1');
+      final bloc = blocFor(repo);
+      scheduleGate = Completer<void>();
+      final scheduled = owner.execute('pluginSchedule', {
+        'pluginId': 'p1',
+        'id': 5,
+        'title': 't',
+        'body': 'b',
+        'at': DateTime.now().add(const Duration(hours: 2)).toIso8601String(),
+      });
+      await pumpEventQueue();
+      expect(calls.map((call) => call.method), ['zonedSchedule']);
+
+      bloc.add(const UninstallPluginRequested('p1'));
+      await pumpEventQueue();
+      scheduleGate!.complete();
+      expect((await scheduled)['ok'], isTrue);
+      await expectLater(bloc.stream, emitsThrough(isA<PluginSystemLoaded>()));
+
+      expect(cancelled, [5]);
+      expect(repo.plugins.containsKey('p1'), isFalse);
+      expect(repo.ids.containsKey('p1'), isFalse);
     });
   }
 

@@ -1,3 +1,4 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/library/models/library.dart';
@@ -40,7 +41,7 @@ void main() {
           entry.filePath: entry.catalogueOrder,
       };
       int orderOf(String title) =>
-          order[IndexingRepository.buildIndexedBookFilePath(
+          order[BookIdentity.indexedFilePath(
             library.getAllBooks().singleWhere((book) => book.title == title),
           )]!;
 

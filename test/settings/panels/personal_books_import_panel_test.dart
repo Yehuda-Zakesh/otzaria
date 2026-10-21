@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/data/data_providers/database_library_provider.dart';
 import 'package:otzaria/library/bloc/library_event.dart';
 import 'package:otzaria/migration/sync/file_sync_service.dart';
 import 'package:otzaria/settings/panels/personal_books_import_panel.dart';
@@ -46,7 +47,7 @@ class _FakeImportService extends PersonalBooksImportService {
 
   @override
   Future<List<File>> listImportedFiles() async => [
-    for (final name in fileNames) File(p.join(_folderPath, name)),
+    for (final name in fileNames) _CountingFile(p.join(_folderPath, name)),
   ];
 
   @override
@@ -61,6 +62,23 @@ class _FakeImportService extends PersonalBooksImportService {
     fileNames.addAll(copiedPaths.map(p.basename));
     return PersonalBooksImportResult(copied: copiedPaths.length);
   }
+}
+
+/// סופר קריאות של path, כדי לזהות בנייה של שורת ספר.
+class _CountingFile implements File {
+  _CountingFile(this._path);
+
+  static int pathReads = 0;
+  final String _path;
+
+  @override
+  String get path {
+    pathReads++;
+    return _path;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 class _FakeFolderImport extends AndroidFolderImportChannel {
@@ -197,6 +215,27 @@ void main() {
     await settle(tester);
 
     expect(find.text('מסילת ישרים'), findsOneWidget);
+  });
+
+  testWidgets('רשימה סגורה אינה בונה שורה לכל ספר', (tester) async {
+    service.fileNames.addAll(['מסילת ישרים.txt', 'שערי תשובה.pdf']);
+    final bloc = buildBloc(folderRegistered: true, syncCalls: []);
+
+    await pumpPanel(tester, bloc: bloc);
+    expect(find.text('2 ספרים מיובאים'), findsOneWidget);
+
+    _CountingFile.pathReads = 0;
+    final busy = DatabaseLibraryProvider.operationQueue.busyCount;
+    busy.value++;
+    await tester.pump();
+    busy.value--;
+    await tester.pump();
+    expect(_CountingFile.pathReads, 0);
+
+    await tester.tap(find.text('הספרים שלי'));
+    await settle(tester);
+    expect(find.text('מסילת ישרים'), findsOneWidget);
+    expect(find.text('שערי תשובה'), findsOneWidget);
   });
 
   testWidgets('ייבוא מעתיק את הקובץ ומפעיל סריקה כשהתיקייה כבר רשומה', (

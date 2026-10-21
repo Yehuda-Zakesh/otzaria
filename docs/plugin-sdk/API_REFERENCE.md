@@ -315,7 +315,7 @@ if (response.success) {
 | `database.batchQuery` | 0.9.89 |
 | `shortcut.create` | 0.9.94 |
 
-> מקור-האמת לאכיפה הוא המפה `_methodMinVersion` ב-`lib/plugins/services/plugin_extended_validator.dart`. הטבלה כאן נגזרת ממנה ו-`test/plugins/plugin_method_versions_test.dart` מוודא ששתיהן זהות.
+> מקור האמת לאכיפה הוא הקטלוג `pluginApiMethods` ב-`lib/plugins/models/plugin_api_catalog.dart`. הטבלה כאן תואמת לגרסאות הקטלוג, ו-`test/plugins/plugin_method_versions_test.dart` מוודא שהן זהות.
 
 ---
 
@@ -4132,6 +4132,7 @@ const { data } = await Otzaria.call('notifications.sendSystem', {
 
 **הערות:**
 - אם לא מצוין `id`, המערכת תיצור מזהה אוטומטי
+- `id` שבשימוש התראה של לוח השנה נדחה עם `error.invalid_params: id is in use`
 - ההתראה תופיע במרכז ההתראות של מערכת ההפעלה
 - דורש הרשאות מערכת (המשתמש יתבקש לאשר בפעם הראשונה)
 
@@ -4154,6 +4155,7 @@ const { data } = await Otzaria.call('notifications.scheduleSystem', {
 - `scheduledTime` חייב להיות בפורמט ISO 8601
 - הזמן חייב להיות בעתיד
 - ההתראה תישלח אוטומטית בזמן שנקבע
+- `id` שבשימוש התראה של לוח השנה נדחה עם `error.invalid_params: id is in use`
 
 ### `notifications.cancel`
 **הרשאה:** `notifications.system`
@@ -4166,6 +4168,8 @@ const { data } = await Otzaria.call('notifications.cancel', {
 });
 // true
 ```
+
+**הערה:** רק התראה שהתוסף עצמו שלח או תזמן מבוטלת. `id` שאינו של התוסף מחזיר `true` ואינו משנה דבר.
 
 ### `notifications.cancelAll`
 **הרשאה:** `notifications.system`

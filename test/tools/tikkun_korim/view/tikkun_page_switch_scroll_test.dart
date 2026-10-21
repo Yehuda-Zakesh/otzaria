@@ -12,7 +12,7 @@ import 'package:otzaria/tools/tikkun_korim/repository/tikkun_korim_repository.da
 import 'package:otzaria/tools/tikkun_korim/settings/tikkun_settings.dart';
 import 'package:otzaria/tools/tikkun_korim/view/tikkun_korim_screen.dart';
 import 'package:otzaria/tools/tikkun_korim/view/widgets/reader_page.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 import '../support/tikkun_fakes.dart';
 
@@ -132,10 +132,7 @@ void main() {
     return positions..sort((a, b) => a.index.compareTo(b.index));
   }
 
-  // מעבר-הדהייה של החבילה בונה רשימה שנייה מעל הראשונה.
-  final innerLists = find.byWidgetPredicate(
-    (w) => w.runtimeType.toString() == 'PositionedList',
-  );
+  final innerLists = find.byType(SuperSliverList);
 
   /// מוודא שבמשך זמן אנימציית הגלילה התצוגה נשארת במקומה, בלי רשימה שנייה.
   Future<void> expectStillFor300ms(WidgetTester tester) async {

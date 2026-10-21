@@ -1,4 +1,4 @@
-import 'package:otzaria/indexing/repository/indexing_repository.dart';
+import 'package:otzaria/data/book_identity.dart';
 import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/utils/file/document_format.dart';
@@ -22,18 +22,12 @@ class PluginBookIdentity {
   static String typeOf(Book book) => switch (book) {
     PdfBook() => 'pdf',
     ExternalLibraryBook() => 'external',
-    // אותו ספר מגיע לכאן גם כמחלקת המסמך שלו וגם כ-`TextBook` (דרך
-    // `toTextBook()` בחיפוש ובאינדוקס); שני המסלולים חייבים לחלוק את אותו
-    // חישוב, אחרת אותו ספר מקבל שתי זהויות.
+    // מסמך ועטיפת ה-TextBook שלו חייבים לחלוק את אותו סוג זהות.
     ConvertibleDocumentBook() || TextBook() => _formatIdentity(book.fileType),
     _ => 'text',
   };
 
-  /// הזהות היא הסיומת הקנונית עצמה — כך פורמט חדש מקבל identity יציב בלי
-  /// ענף נוסף, וזהות ה-DOCX/EPUB הקיימת נשמרת בדיוק.
-  ///
-  /// פורמט שממודל כ-TextBook (טקסט, Markdown) הוא `text`, כפי שהיה: שינוי
-  /// הזהות שלו היה מייתם את הנתונים ששמרו עליו תוספים קיימים.
+  // שינוי סוג הזהות של TextBook מייתם נתוני תוספים קיימים.
   static String _formatIdentity(String? fileType) {
     final format = documentFormatFromFileType(fileType);
     return format != null && format.isDocumentBook ? format.extension : 'text';
@@ -53,11 +47,8 @@ class PluginBookIdentity {
     OfficialBookSource() => 'library',
   };
 
-  /// מזהה ספר יציב חוצה-ספקים, יציב בין עדכוני ספרייה והעברת ספרייה.
-  ///
-  /// זהו בדיוק המפתח שמנוע החיפוש כבר משתמש בו — נגזר מ-`book.id` + תיוג
-  /// המקור, ולכן שורד שינויי כותרת. תוסף מומלץ לאחסן ערך זה במקום כותרת.
-  static String uidOf(Book book) => IndexingRepository.catalogueOrderKey(book);
+  /// מזהה ספר משותף לחיפוש ולתוספים, יציב בין עדכוני ספרייה והעברתה.
+  static String uidOf(Book book) => BookIdentity.keyOf(book);
 
   static PluginBookIdentityKey keyOf(Book book) => (
     bookId: book.title,
@@ -91,9 +82,7 @@ class PluginBookIdentity {
       'external': {'provider': external.provider, 'id': external.id},
   };
 
-  /// כמו [toJson] בתוספת `bookUid`. משמש את שכבת ה-bridge שחושפת את המזהה
-  /// היציב; [toJson] עצמו נשאר רזה כי צרכנים אחרים (למשל round-trip דקלרטיבי
-  /// עם רשימת שדות מותרת) אינם מכירים את השדה.
+  /// מוסיף `bookUid` לחוזה ה-bridge; [toJson] נשמר לתאימות צרכנים קיימים.
   static Map<String, dynamic> toJsonWithUid(Book book) => {
     ...toJson(book),
     'bookUid': uidOf(book),

@@ -47,9 +47,6 @@ class BiographiesDownloader {
     if (_ownsClient) _client.close();
   }
 
-  /// נתיב הקובץ המקומי, קיים או לא.
-  Future<String> destinationPath() => _destinationProvider();
-
   /// מוודא שהגרסה האחרונה מותקנת: מוריד רק אם חסר קובץ מקומי או שהתג
   /// השמור שונה מהתג של ה-release האחרון.
   ///

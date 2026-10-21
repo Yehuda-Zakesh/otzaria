@@ -8,7 +8,7 @@
 - `lib/tour/models/tour_steps.dart` - רשימת השלבים, הטקסטים והסדר.
 - `lib/tour/models/tour_shortcuts.dart` - הטקסט שממלא את `{shortcut}` בגוף שלב.
 - `lib/tour/bloc/tour_cubit.dart` - התחלה, מעבר שלבים, דילוג, סיום ו-autoplay.
-- `lib/tour/tour_target_keys.dart` - מזהי `GlobalKey` לאלמנטים שמסומנים בחלון השקוף.
+- `lib/tour/tour_target_keys.dart` - `TourTargetKeys`: מזהי `GlobalKey` פר-חלון לאלמנטים שמסומנים בחלון השקוף.
 - `lib/tour/view/tour_overlay_screen.dart` - ציור ה-overlay, מיקום הכרטיס וחישוב rects.
 - `lib/navigation/main_window_screen.dart` - ביצוע פעולות לפני שלב: ניווט, פתיחת דיאלוג, פתיחת תפריט, בחירת טאב.
 
@@ -91,10 +91,10 @@ const TourStep(
 
 ### הוספת key
 
-הוסף key ב-`lib/tour/tour_target_keys.dart`:
+הוסף שדה ל-`TourTargetKeys` ב-`lib/tour/tour_target_keys.dart`. המפתחות הם פר-חלון, ונשלפים דרך `TourTargetKeys.of(context)`:
 
 ```dart
-final GlobalKey tourMyButtonTargetKey = GlobalKey(
+final GlobalKey myButton = GlobalKey(
   debugLabel: 'tour_my_button_target',
 );
 ```
@@ -103,7 +103,7 @@ final GlobalKey tourMyButtonTargetKey = GlobalKey(
 
 ```dart
 IconButton(
-  key: tourMyButtonTargetKey,
+  key: TourTargetKeys.of(context).myButton,
   icon: const Icon(FluentIcons.search_24_regular),
   onPressed: _handleSearch,
 )
@@ -113,7 +113,7 @@ IconButton(
 
 ```dart
 IconButton(
-  key: widget.enableTourTargets ? tourMyButtonTargetKey : null,
+  key: widget.enableTourTargets ? TourTargetKeys.of(context).myButton : null,
   icon: const Icon(FluentIcons.search_24_regular),
   onPressed: _handleSearch,
 )
@@ -137,7 +137,7 @@ IconButton(
 
 ```dart
 KeyedSubtree(
-  key: tourMyPanelTargetKey,
+  key: TourTargetKeys.of(context).myPanel,
   child: MyPanel(...),
 )
 ```
@@ -168,7 +168,7 @@ class MySharedButton extends StatelessWidget {
 
 ```dart
 MySharedButton(
-  tourTargetKey: enableTourTargets ? tourMyButtonTargetKey : null,
+  tourTargetKey: enableTourTargets ? TourTargetKeys.of(context).myButton : null,
 )
 ```
 
@@ -180,14 +180,14 @@ MySharedButton(
 
 ```dart
 case 'my_new_button':
-  return _rectForGlobalKey(tourMyButtonTargetKey);
+  return _rectForGlobalKey(_windowKeys.tour.myButton);
 ```
 
 אם רק שלב ספציפי דורש חישוב מיוחד, הוסף override לפי `step.id` לפני ה-`switch` הכללי:
 
 ```dart
 if (step.id == 'my_special_step') {
-  return _rectForGlobalKey(tourSpecialTargetKey);
+  return _rectForGlobalKey(_windowKeys.tour.special);
 }
 ```
 
@@ -195,8 +195,8 @@ if (step.id == 'my_special_step') {
 
 ```dart
 if (step.id == 'my_complex_step') {
-  final firstRect = _rectForGlobalKey(tourFirstTargetKey);
-  final secondRect = _rectForGlobalKey(tourSecondTargetKey);
+  final firstRect = _rectForGlobalKey(_windowKeys.tour.first);
+  final secondRect = _rectForGlobalKey(_windowKeys.tour.second);
   return [
     if (firstRect != null) firstRect,
     if (secondRect != null) secondRect,
@@ -212,7 +212,7 @@ if (step.id == 'my_complex_step') {
 
 ```dart
 Rect? _myDialogTourRect() {
-  final contentRect = _rectForGlobalKey(tourMyDialogContentKey, inflate: 0);
+  final contentRect = _rectForGlobalKey(_windowKeys.tour.myDialogContent, inflate: 0);
   if (contentRect == null) return null;
 
   return Rect.fromLTRB(
@@ -238,7 +238,7 @@ Rect? _myDialogTourRect() {
 ```dart
 Rect? _navItemTourRect(int index) {
   return _rectForGlobalKey(
-    tourMainNavigationItemTargetKeys[index],
+    _windowKeys.tour.mainNavigationItems[index],
     inflate: 2,
   );
 }
@@ -306,11 +306,12 @@ _scheduleTourTargetRebuilds(remainingFrames: 4);
 - `AppContextMenuRegion` מקבל `menuItemKeysByLabel`.
 
 ```dart
+final tourKeys = TourTargetKeys.of(context);
 ResponsiveActionBar(
-  overflowButtonKey: tourOverflowTargetKey,
+  overflowButtonKey: tourKeys.myOverflow,
   menuItemKeysByTooltip: {
-    'חיפוש': tourOverflowSearchTargetKey,
-    'הדפסה': tourOverflowPrintTargetKey,
+    'חיפוש': tourKeys.myOverflowSearch,
+    'הדפסה': tourKeys.myOverflowPrint,
   },
   actions: actions,
   alwaysInMenu: menuActions,

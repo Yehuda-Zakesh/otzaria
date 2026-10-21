@@ -107,13 +107,15 @@ Future<({TextBookTab tab, _TestTextBookBloc bloc})> _mount(
           BlocProvider<SettingsBloc>.value(value: settings),
         ],
         child: Scaffold(
-          body: CombinedView(
-            data: initial.content,
-            openBookCallback: (_) {},
-            openLeftPaneTab: (_, {searchText}) {},
-            textSize: 18,
-            showCommentaryAsExpansionTiles: true,
-            tab: tab,
+          body: BlocBuilder<TextBookBloc, TextBookState>(
+            builder: (context, state) => CombinedView(
+              data: (state as TextBookLoaded).content,
+              openBookCallback: (_) {},
+              openLeftPaneTab: (_, {searchText}) {},
+              textSize: 18,
+              showCommentaryAsExpansionTiles: true,
+              tab: tab,
+            ),
           ),
         ),
       ),
@@ -258,17 +260,44 @@ void main() {
     fixture.bloc.emitForTest(warmed);
     await tester.idle();
     await tester.pump();
-    final target = fixture.tab.index;
-    fixture.bloc.emitForTest(
-      warmed.copyWith(continuousReadingMode: false),
+    final target = fixture.tab.lines.captureAnchor()!;
+    final beforeSegments = readingSegmentsOf(warmed);
+    final beforePosition = fixture
+        .tab
+        .lines
+        .positionsListener
+        .itemPositions
+        .value
+        .singleWhere(
+          (p) => p.index == beforeSegments.layout.itemForLine(target.line),
+        );
+    final beforeEdges = lineEdgesInViewport(
+      beforeSegments,
+      target.line,
+      beforePosition,
+      measure: fixture.tab.lines.itemBoxes.lineExtent,
     );
+    expect(beforeEdges.trailing, greaterThan(beforeEdges.leading));
+    final regular = warmed.copyWith(continuousReadingMode: false);
+    fixture.bloc.emitForTest(regular);
     await tester.pumpAndSettle();
     final position = fixture.tab.lines.positionsListener.itemPositions.value
-        .singleWhere((p) => p.index == target);
-    expect(
-      position.itemLeadingEdge,
-      closeTo(kReadingAnchorAlignment, kAnchorLandingEpsilon),
+        .singleWhere(
+          (p) => p.index == readingLayoutOf(regular).itemForLine(target.line),
+        );
+    final edges = lineEdgesInViewport(
+      readingSegmentsOf(regular),
+      target.line,
+      position,
+      measure: fixture.tab.lines.itemBoxes.lineExtent,
     );
+    expect(edges.trailing, greaterThan(edges.leading));
+    expect(
+      edges.leading +
+          target.intraLineFraction * (edges.trailing - edges.leading),
+      closeTo(target.alignment, kAnchorLandingEpsilon),
+    );
+    expect(fixture.tab.lines.captureAnchor()!.line, target.line);
     expect(tester.takeException(), isNull);
   });
 

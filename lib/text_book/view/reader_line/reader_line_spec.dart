@@ -77,6 +77,25 @@ final RegExp _blockMarkup = RegExp(
   caseSensitive: false,
 );
 
+/// מספר ניסיונות ההתאמה של [_blockMarkup]; נספר רק במצב debug.
+int debugReaderBlockMarkupChecks = 0;
+
+/// [_blockMarkup] אינו רגיש לרישיות, ולכן סריקתו על שורה שלמה איטית; מנסים
+/// אותו רק במיקומי `<` שאחריהם אות פתיחה של אחד התגים.
+bool _hasBlockMarkup(String line) {
+  for (var i = line.indexOf('<'); i >= 0; i = line.indexOf('<', i + 1)) {
+    if (i + 1 >= line.length) break;
+    final initial = line.codeUnitAt(i + 1) | 0x20;
+    if (!'bdhiotpu'.codeUnits.contains(initial)) continue;
+    assert(() {
+      debugReaderBlockMarkupChecks++;
+      return true;
+    }());
+    if (_blockMarkup.matchAsPrefix(line, i) != null) return true;
+  }
+  return false;
+}
+
 final RegExp _leadingBlockElement = RegExp(
   r'^\s*<(?:div|p|center|li)\b',
   caseSensitive: false,
@@ -87,8 +106,7 @@ bool isReaderBlockLine(String rawLine) =>
     isAlignedBlockLine(rawLine) ||
     rawLine.contains(kMarkdownBlockClass) ||
     (rawLine.contains('<') &&
-        (_blockMarkup.hasMatch(rawLine) ||
-            _leadingBlockElement.hasMatch(rawLine)));
+        (_hasBlockMarkup(rawLine) || _leadingBlockElement.hasMatch(rawLine)));
 
 /// טקסט כותרות הנושא שמוצג בתוך פסקה ממוזגת לפני השורה שהן פותחות.
 String? readerInlineHeading(List<String>? headings) =>

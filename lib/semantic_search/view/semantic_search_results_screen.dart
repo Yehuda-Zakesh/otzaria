@@ -215,9 +215,10 @@ class _SemanticSearchResultsScreenState
         matchPolicy: SearchMatchPolicy.smart,
       );
 
-  /// מילים להדגשה בספר; תוצאה לפי עניין בלבד נפתחת בלי הדגשת מילים.
-  String _searchTextFor(SemanticResultItem? item) =>
-      item == null || item.isSemanticOnly ? '' : widget.tab.options.query;
+  /// גם תוצאה לפי עניין בלבד נפתחת עם השאילתה, כדי שהחיפוש בספר ידגיש את
+  /// המילים היכן שהן מופיעות; הקטע שלה אינו התאמה, ולכן אינו מסומן כשורת תוצאה.
+  bool _marksResultLine(SemanticResultItem? item) =>
+      !(item?.isSemanticOnly ?? false);
 
   Future<void> _openItem(
     int index,
@@ -237,7 +238,7 @@ class _SemanticSearchResultsScreenState
       segment: item.segment,
       isPdf: item.isPdf,
       filePath: item.filePath,
-      searchText: _searchTextFor(item),
+      marksResultLine: _marksResultLine(item),
       inBackground: inBackground,
     );
     if (opened == null ||
@@ -279,7 +280,7 @@ class _SemanticSearchResultsScreenState
     required int segment,
     required bool isPdf,
     required String filePath,
-    required String searchText,
+    required bool marksResultLine,
     bool inBackground = false,
   }) async {
     final resolution = await widget.tab.searchBloc.resolveBookForIndexedPath(
@@ -299,12 +300,13 @@ class _SemanticSearchResultsScreenState
       segment: segment,
       isPdf: isPdf,
       filePath: filePath,
-      searchText: searchText,
+      searchText: widget.tab.options.query,
       searchOptions: const {},
       alternativeWords: const {},
       spacingValues: const {},
       inBook: _inBookParameters,
       inBackground: inBackground,
+      markResultLine: marksResultLine,
     );
   }
 
@@ -815,7 +817,8 @@ class _SemanticSearchResultsScreenState
                 initialPdfPage: target != null && target.isPdf
                     ? target.segment + 1
                     : null,
-                searchText: _searchTextFor(_previewItem),
+                initialTextIsSearchResult: _marksResultLine(_previewItem),
+                searchText: widget.tab.options.query,
                 searchMode: inBook.searchMode,
                 searchDistance: inBook.distance,
                 matchPolicy: inBook.matchPolicy,
@@ -829,7 +832,7 @@ class _SemanticSearchResultsScreenState
                       segment: openTarget.segment,
                       isPdf: openTarget.isPdf,
                       filePath: openTarget.filePath,
-                      searchText: _searchTextFor(_previewItem),
+                      marksResultLine: _marksResultLine(_previewItem),
                     ),
                   );
                 },

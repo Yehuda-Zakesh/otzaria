@@ -40,7 +40,7 @@ import 'package:otzaria/shortcuts/shortcut_validator.dart';
 import 'package:otzaria/tabs/bloc/tabs_state.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
-import 'package:otzaria/tools/calendar/services/notification_service.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_client.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -88,7 +88,9 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     Stream<TabsState>? readerStates,
     TabsState? initialReaderState,
     PluginInstallResultsLog? installResultsLog,
-  }) : _installResultsLog =
+    CalendarAlertsClient? alertsClient,
+  }) : _alertsOverride = alertsClient,
+       _installResultsLog =
            installResultsLog ?? PluginInstallResultsLog.instance,
        _installerService =
            installerService ?? PluginInstallerService(repository: repository),
@@ -714,6 +716,7 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       PluginNewTabPageRegistry.instance.remove(event.pluginId);
       await _cancelPluginNotifications(event.pluginId);
       await _installerService.uninstallPlugin(event.pluginId);
+      _pluginCalendarEventsRemoved();
       PluginNewTabPageRegistry.instance.remove(event.pluginId);
       PluginNewTabPageService.broadcastChanged();
       add(LoadPlugins());
@@ -744,6 +747,7 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       PluginLibraryBooksRegistry.instance.clearBooks(event.pluginId);
       await _cancelPluginNotifications(event.pluginId);
       await _installerService.resetPluginData(event.pluginId);
+      _pluginCalendarEventsRemoved();
       PluginRuntimeDispatcher.instance.invalidatePlugin(event.pluginId);
       PluginNetworkPolicy.notifyChanged(event.pluginId);
       await PluginRuntimeDispatcher.instance.reloadPlugin(event.pluginId);
@@ -767,19 +771,23 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     }
   }
 
-  /// מבטל את התראות המערכת שהתוסף תזמן — מזהיהן נשמרים ב-KV הפנימי של הגשר
-  /// (`_internal/notification_ids`), ונמחקים יחד עם שאר הנתונים מיד אחר כך.
+  final CalendarAlertsClient? _alertsOverride;
+
+  late final CalendarAlertsClient _alerts =
+      _alertsOverride ?? CalendarAlertsClient.forCurrentWindow();
+
+  /// מבטל אצל הבעלים את התראות המערכת שהתוסף תזמן. כשל זורק, כדי שהמזהים
+  /// לא יימחקו עם שאר הנתונים לפני שההתראות בוטלו.
   Future<void> _cancelPluginNotifications(String pluginId) async {
-    final raw = await repository.getKV(
-      pluginId,
-      '_internal',
-      'notification_ids',
-    );
-    if (raw == null) return;
-    final notifications = NotificationService();
-    final ids = (jsonDecode(raw) as List).whereType<int>();
-    await notifications.cancelNotifications(ids);
+    final ack = await _alerts.send('pluginCancelAll', {'pluginId': pluginId});
+    if (!ack.ok) {
+      throw StateError(ack.error ?? 'Plugin notifications were not cancelled');
+    }
   }
+
+  /// אירועי הלוח של התוסף נמחקו עם נתוניו; תזכורותיהם מבוטלות אצל הבעלים.
+  void _pluginCalendarEventsRemoved() =>
+      unawaited(_alerts.send('pluginEventsChanged'));
 
   Future<void> _onEnablePluginRequested(
     EnablePluginRequested event,

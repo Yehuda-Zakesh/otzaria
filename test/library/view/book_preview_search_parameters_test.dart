@@ -73,6 +73,27 @@ void main() {
       expect(tab.matchPolicy.proximityScope, SearchScope.sameParagraph);
     });
 
+    test('יעד שאינו התאמה מילולית: נושא חיפוש בלי לסמן שורת תוצאה', () {
+      final tab = buildPreviewTextTab(
+        book: _book(),
+        targetIndex: 7,
+        markResultLine: false,
+        searchText: 'אבל',
+      );
+
+      expect(tab.searchText, 'אבל');
+      expect(tab.index, 7);
+      expect(tab.initialSearchResultLines, isNull);
+      expect(
+        buildPreviewTextTab(
+          book: _book(),
+          targetIndex: 7,
+          searchText: 'אבל',
+        ).initialSearchResultLines,
+        {7},
+      );
+    });
+
     test('תצוגה מקדימה ללא תוצאה נבחרת אינה נושאת חיפוש', () {
       final tab = buildPreviewTextTab(
         book: _book(),

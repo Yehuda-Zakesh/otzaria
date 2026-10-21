@@ -24,7 +24,6 @@ import 'package:otzaria/divine_names/models/divine_name_spans.dart';
 import 'package:otzaria/text_book/models/book_notes.dart';
 import 'package:otzaria/migration/database/daos/book_dao.dart';
 import 'package:otzaria/migration/database/daos/category_dao.dart';
-import 'package:otzaria/migration/database/daos/database.dart';
 import 'package:otzaria/migration/database/db_capabilities.dart';
 import 'package:otzaria/migration/database/line_content_codec.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
@@ -46,7 +45,7 @@ import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/text_book/utils/inline_section_markers.dart';
 import 'package:otzaria/migration/models/category.dart' as db_models;
 import 'package:otzaria/migration/models/book.dart' as db_models;
-import 'package:otzaria/migration/models/toc_entry.dart' as db_models;
+import 'package:otzaria/migration/services/external_book_import.dart';
 import 'package:otzaria/utils/file/file_hidden_utils.dart';
 import 'package:otzaria/migration/models/alt_toc_structure.dart';
 import 'package:otzaria/migration/models/alt_toc_entry.dart';
@@ -175,69 +174,21 @@ class _PendingAttachedCatalog {
   bool timedOut = false;
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// Isolate helpers for scanning external-book folders.
-// All types must be sendable across isolate ports (no native handles,
-// no platform-channel objects, no closures with non-sendable captures).
-// ──────────────────────────────────────────────────────────────────────────
-
-/// Sendable flat representation of a single TOC entry.
-/// Parent/child references use 0-based indices into the flat list.
-class _RawTocEntry {
-  final String text;
-  final int level;
-  final int lineIndex;
-
-  /// 0-based index of the parent entry; null for root entries.
-  final int? parentIndex;
-
-  const _RawTocEntry({
-    required this.text,
-    required this.level,
-    required this.lineIndex,
-    this.parentIndex,
-  });
-}
-
-/// Sendable description of a discovered book file, returned from the
-/// background isolate to the main isolate.
 class _DiscoveredBook {
-  final String path;
-  final String title;
-  final String fileType; // 'txt' | 'docx' | 'epub' | 'pdf'
-  final int fileSize;
-  final int lastModified;
-  final List<String> categoryPath;
-
-  /// Pre-parsed TOC for every textual format (parsed inside the isolate).
-  /// null for PDF (platform channel) or for metadata-update-only books.
-  final List<_RawTocEntry>? tocEntries;
-
-  /// Non-null when the book already exists in the DB but its file metadata
-  /// (size or mtime) changed. Phase 2 only updates metadata; no insert needed.
-  final int? existingBookId;
-
-  /// Non-null when the document conversion failed (corrupt/encrypted file).
-  /// Books with this field set are counted as failures and not inserted.
-  final String? conversionError;
-
   const _DiscoveredBook({
-    required this.path,
-    required this.title,
-    required this.fileType,
-    required this.fileSize,
-    required this.lastModified,
+    required this.book,
     required this.categoryPath,
-    this.tocEntries,
     this.existingBookId,
     this.conversionError,
   });
+
+  final PreparedExternalBook book;
+  final List<String> categoryPath;
+  final int? existingBookId;
+  final String? conversionError;
 }
 
-/// Entry point for [Isolate.run]: scans [folderPath] recursively,
-/// filters out already-indexed unchanged books via a direct sqlite3 read,
-/// and parses the TOC of every textual format for genuinely NEW books.
-/// PDF TOC is intentionally skipped here (pdfrx uses platform channels).
+/// מסננת קבצים ללא שינוי ומכינה כותרות טקסטואליות מחוץ ל-UI isolate.
 Future<List<_DiscoveredBook>> _scanExternalFolderInIsolate(
   (String folderPath, String folderName, String dbPath) args,
 ) async {
@@ -321,41 +272,23 @@ Future<void> _collectBookFilesRecursive(
         }
         // ──────────────────────────────────────────────────────────────────
 
-        // New or changed book — parse the TOC of every textual format.
-        // PDF: rawToc stays null — parsed on the main isolate from its outline.
-        List<_RawTocEntry>? rawToc;
+        var book = PreparedExternalBook(
+          filePath: entity.path,
+          title: title,
+          fileType: fileType,
+          fileSize: fileSize,
+          lastModified: lastModified,
+        );
         String? conversionError;
-        if (format.isTextual) {
-          try {
-            final bytes = await entity.readAsBytes();
-            // Synchronous call — we are already in a background isolate.
-            final content = convertDocumentBytesSync(
-              bytes,
-              title,
-              format: format,
-              embedImages: false,
-              path: entity.path,
-            );
-            try {
-              final parsed = TocParser.parseEntriesFromContent(content);
-              rawToc = _flattenTocToRaw(parsed);
-            } catch (_) {
-              // TOC parse failure is non-fatal — book still inserted without TOC.
-            }
-          } catch (e) {
-            conversionError = e.toString();
-          }
+        try {
+          book = PreparedExternalBook.prepare(entity.path, stat, format);
+        } catch (e) {
+          conversionError = e.toString();
         }
-
         books.add(
           _DiscoveredBook(
-            path: entity.path,
-            title: title,
-            fileType: fileType,
-            fileSize: fileSize,
-            lastModified: lastModified,
+            book: book,
             categoryPath: categoryPath,
-            tocEntries: rawToc,
             conversionError: conversionError,
             existingBookId: existingBookId,
           ),
@@ -384,37 +317,8 @@ Future<List<Map<String, Object?>>> scanExternalFolderForTest(
     dbPath,
   ));
   return result
-      .map((b) => {'path': b.path, 'existingBookId': b.existingBookId})
+      .map((b) => {'path': b.book.filePath, 'existingBookId': b.existingBookId})
       .toList();
-}
-
-/// Converts a hierarchical [TocEntry] tree into a flat, sendable list.
-/// Uses pre-order (depth-first) traversal so each parent precedes its children.
-List<_RawTocEntry> _flattenTocToRaw(List<TocEntry> roots) {
-  final flat = <_RawTocEntry>[];
-  _flattenRawRecursive(roots, flat, null);
-  return flat;
-}
-
-void _flattenRawRecursive(
-  List<TocEntry> entries,
-  List<_RawTocEntry> flat,
-  int? parentIndex,
-) {
-  for (final entry in entries) {
-    final myIndex = flat.length;
-    flat.add(
-      _RawTocEntry(
-        text: entry.text,
-        level: entry.level,
-        lineIndex: entry.index,
-        parentIndex: parentIndex,
-      ),
-    );
-    if (entry.children.isNotEmpty) {
-      _flattenRawRecursive(entry.children, flat, myIndex);
-    }
-  }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -3354,7 +3258,6 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
     _attachCatalogBookVersions(library);
 
     // NOTE: Sorting is now done during build (like Kotlin), no need for post-sort
-    // _sortLibraryRecursive(library); // Removed - sorting happens in _buildCatalogCategoryRecursiveOptimized
 
     // Mark titles as cached
     _titlesCached = true;
@@ -3370,73 +3273,7 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
     return library;
   }
 
-  /// Gets or creates a category in the database for the given path.
-  /// Returns the category ID.
-  /// Implements the logic from CATEGORY_SYNC_PLAN.md - Step 3
-  ///
-  /// [repository] — ה-repository שאליו רושמים את הקטגוריות (יכול להיות
-  /// user_books או seforim, תלוי בזרימה הקוראת).
-  Future<int> _getOrCreateCategoryInDb(
-    List<String> categoryPath,
-    SeforimRepository repository,
-  ) async {
-    if (categoryPath.isEmpty) {
-      // Return default category
-      final defaultCategory = await repository.getCategoryByTitle(
-        kUncategorizedCategoryTitle,
-      );
-      if (defaultCategory != null) {
-        return defaultCategory.id;
-      }
-      // Create default category if it doesn't exist
-      return await repository.insertCategory(
-        db_models.Category(
-          id: 0,
-          title: kUncategorizedCategoryTitle,
-          parentId: null,
-          level: 0,
-        ),
-      );
-    }
-
-    // Start from root (parentId = null)
-    int? parentId;
-    int currentLevel = 0;
-
-    // Walk through each level of the category hierarchy
-    for (final categoryName in categoryPath) {
-      // Try to find existing category with this name under the current parent
-      final existingCategory = await repository.getCategoryByTitleAndParent(
-        categoryName,
-        parentId,
-      );
-
-      if (existingCategory != null) {
-        // Category exists - use it as parent for next level
-        parentId = existingCategory.id;
-        currentLevel = existingCategory.level + 1;
-      } else {
-        // Category doesn't exist - create it
-        final newCategoryId = await repository.insertCategory(
-          db_models.Category(
-            id: 0, // Will be auto-generated
-            title: categoryName,
-            parentId: parentId,
-            level: currentLevel,
-          ),
-        );
-
-        // Use the new category as parent for next level
-        parentId = newCategoryId;
-        currentLevel++;
-      }
-    }
-
-    // Return the ID of the final (deepest) category
-    return parentId!;
-  }
-
-  /// Parses PDF outline and converts to TocEntry format.
+  /// קוראת outline ב-isolate הראשי, שבו PDFium זמין.
   Future<List<TocEntry>> _parsePdfOutline(File file) async {
     PdfDocument? document;
     try {
@@ -3492,44 +3329,6 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
       }
 
       entries.add(entry);
-    }
-  }
-
-  /// Recursively converts TocEntry objects to DB format.
-  void _convertTocEntriesToDb(
-    List<TocEntry> entries,
-    List<db_models.TocEntry> dbEntries,
-    int bookId,
-    int? parentId,
-  ) {
-    for (int i = 0; i < entries.length; i++) {
-      final entry = entries[i];
-      final isLastChild = i == entries.length - 1;
-      final hasChildren = entry.children.isNotEmpty;
-      final localEntryId = dbEntries.length + 1;
-
-      final dbEntry = db_models.TocEntry(
-        id: localEntryId,
-        bookId: bookId,
-        parentId: parentId,
-        text: entry.text,
-        level: entry.level,
-        lineId: null, // No line table entry for external books
-        lineIndex: entry.index, // Store the index directly for external books
-        isLastChild: isLastChild,
-        hasChildren: hasChildren,
-      );
-
-      dbEntries.add(dbEntry);
-
-      if (hasChildren) {
-        _convertTocEntriesToDb(
-          entry.children,
-          dbEntries,
-          bookId,
-          localEntryId,
-        );
-      }
     }
   }
 
@@ -4129,6 +3928,8 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
     _AttachedCatalogBuild build,
   ) {
     final slug = build.source.slug;
+    // כל הספרים כאן באותה קטגוריה — הנתיב מחושב פעם אחת ולא לכל ספר.
+    final categoryPathInfo = _categoryPathInfo(category);
     for (final row in rows) {
       final id = row['id'] as int? ?? 0;
       final book = _convertMinimalBookMapToBook(
@@ -4145,6 +3946,7 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
         idOverride: id,
         categoryIdOverride: categoryId,
         remapMovedPath: false,
+        categoryPathInfo: categoryPathInfo,
       );
       if (book == null) continue;
       category.books.add(book);
@@ -4377,6 +4179,7 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
     int? idOverride,
     int? categoryIdOverride,
     bool remapMovedPath = true,
+    ({String categoryPath, String topics})? categoryPathInfo,
   }) {
     final title = bookMap['title'] as String;
     final id = idOverride ?? (bookMap['id'] as int? ?? 0);
@@ -4390,31 +4193,8 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
         categoryIdOverride ?? (bookMap['categoryId'] as int? ?? 0);
 
     final bookMeta = metadata[title];
-
-    // Build category path from the Category object
-    String getCategoryPath(Category? cat) {
-      final List<String> path = [];
-      final Set<Category> visited = {};
-      while (cat != null && !visited.contains(cat)) {
-        if (cat.title == 'ספריית אוצריא') break;
-        visited.add(cat);
-        path.insert(0, cat.title);
-        cat = cat.parent;
-      }
-      return path.join(', ');
-    }
-
-    final categoryPath = getCategoryPath(category);
-
-    // Use metadata for topics (no junction table data available)
-    String topics = '';
-    if (categoryPath.isNotEmpty) {
-      topics = categoryPath
-          .split(',')
-          .map((p) => p.trim())
-          .where((p) => p.isNotEmpty)
-          .join(', ');
-    }
+    final (:categoryPath, :topics) =
+        categoryPathInfo ?? _categoryPathInfo(category);
 
     final author = authorFromDatabase ?? (bookMeta?['author'] as String?);
     final pubDate = bookMeta?['pubDate'] as String?;
@@ -4452,6 +4232,31 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
       categoryId: categoryId,
       source: source,
     );
+  }
+
+  static ({String categoryPath, String topics}) _categoryPathInfo(
+    Category? category,
+  ) {
+    final List<String> path = [];
+    final Set<Category> visited = {};
+    while (category != null && !visited.contains(category)) {
+      if (category.title == 'ספריית אוצריא') break;
+      visited.add(category);
+      path.insert(0, category.title);
+      category = category.parent;
+    }
+    final categoryPath = path.join(', ');
+
+    // Use metadata for topics (no junction table data available)
+    String topics = '';
+    if (categoryPath.isNotEmpty) {
+      topics = categoryPath
+          .split(',')
+          .map((p) => p.trim())
+          .where((p) => p.isNotEmpty)
+          .join(', ');
+    }
+    return (categoryPath: categoryPath, topics: topics);
   }
 
   @visibleForTesting
@@ -5205,22 +5010,11 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
     );
   }
 
-  /// This is called when a new custom folder is added.
-  ///
-  /// Fires the scan in the background and returns immediately.
-  /// סורקת תיקייה חיצונית ומוסיפה ספרים ל-DB.
-  ///
-  /// מחזירה [Future<ScanResult>] עם ספירות ותוצאה. הסריקות מסודרות בתור
-  /// פנימי — סריקה חדשה מתחילה רק אחרי שהקודמת מסיימת, כך שאין
-  /// כתיבות מקביליות ל-DB גם אם ה-UI לא חוסם.
-  ///
-  /// [folderPath] - הנתיב המלא לתיקייה לסריקה
-  /// [folderName] - שם התצוגה של התיקייה
-  /// [repository] - ה-repository לפעולות DB
+  /// מכינה ספרים ברקע ומחילה את השינויים בתור הכתיבה לספרים האישיים.
   Future<ScanResult> scanAndAddExternalBooksFromFolder(
     String folderPath,
     String folderName,
-    dynamic repository,
+    SeforimRepository repository,
   ) {
     // _doScan never throws; operationQueue handles busyCount and serialization.
     return operationQueue.enqueue(
@@ -5231,7 +5025,7 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
   Future<ScanResult> _doScan(
     String folderPath,
     String folderName,
-    dynamic repository,
+    SeforimRepository repository,
   ) async {
     debugPrint('📁 Scanning custom folder for external books: $folderPath');
 
@@ -5248,12 +5042,7 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
         return const ScanResult(fatalError: 'התיקייה לא נמצאה');
       }
 
-      // Phase 1 (background isolate): scan directory, check DB existence via a
-      // direct sqlite3 read-only connection, and parse the TOC only for
-      // genuinely new books. Unchanged books are filtered out here.
-      //
-      // ה-DB שאליו משווים בסריקה הוא `user_books.db` (לא `seforim.db`),
-      // כי הסריקה הזו טוענת ספרים מתיקיות מותאמות אישית בלבד.
+      // הוספת תיקייה משווה רק ל-user_books.db; האוסף כולו רץ ברקע.
       final dbPath = await UserBooksDatabaseHolder.resolveDbPath();
       final discovered = await Isolate.run(
         () => _scanExternalFolderInIsolate((folderPath, folderName, dbPath)),
@@ -5262,100 +5051,53 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
         '📁 Isolate found ${discovered.length} books to process in $folderPath',
       );
 
-      // Phase 2 (main isolate): only metadata updates + new-book inserts.
-      // This is deliberately light: unchanged books were already filtered in
-      // Phase 1, so no TOC parse or DB read happens here for them.
-      // source פר-תיקייה (Personal::<נתיב>) — זהה לזה שמסלול הסנכרון/מחיקה
-      // מצפה לו, כדי שה-prune והמחיקה יזהו את הספרים לפי שם ה-source.
       final folderSourceName = CustomFolderSource.nameForFolder(folderPath);
       int? scanSourceId;
-      for (final book in discovered) {
-        // ה-insert סינכרוני (sqlite3 חוסם את ה-thread); משחררים את לולאת
-        // האירועים לפני כל ספר כדי שה-UI יגיב גם בתיקייה עם ספרים רבים.
+      for (final discoveredBook in discovered) {
+        // הכתיבה סינכרונית: מאפשרים ל-UI להגיב בין ספרים.
         await Future<void>.delayed(Duration.zero);
-        if (book.conversionError != null) {
-          debugPrint(
-            '⚠️ המרת מסמך נכשלה — ${book.title} (${book.fileType}): '
-            '${book.conversionError}',
-          );
-          failedDetails.add((book.title, book.conversionError!));
+        final book = discoveredBook.book;
+        if (discoveredBook.conversionError != null) {
+          failedDetails.add((book.title, discoveredBook.conversionError!));
           failed++;
           continue;
         }
         try {
-          if (book.existingBookId != null) {
-            // חותמת הקובץ מתעדכנת אחרי ה-TOC, כדי שכשל יאפשר ניסיון חוזר.
-            if (book.tocEntries != null) {
-              await repository.replaceExternalBookToc(
-                book.existingBookId!,
-                _rawTocToDbEntries(book.tocEntries!),
-              );
-            }
-            await repository.updateExternalBookMetadata(
-              book.existingBookId!,
-              book.fileSize,
-              book.lastModified,
-            );
-            debugPrint(
-              '📁 Updated external book (metadata+TOC): ${book.title}',
-            );
+          if (discoveredBook.existingBookId != null) {
+            await book.update(repository, discoveredBook.existingBookId!);
             updated++;
-            updatedBookIds.add(book.existingBookId!);
+            updatedBookIds.add(discoveredBook.existingBookId!);
             continue;
           }
-
-          // New book: create category, parse PDF outline, insert.
-          // Re-check authoritatively before inserting (guards against Phase-1
-          // fallback duplicates and concurrent-scan races).
           if (await _recheckBeforeInsert(
             repository,
-            book.path,
+            book.filePath,
             book.fileSize,
             book.lastModified,
           )) {
             continue;
           }
-
-          final categoryId = await _getOrCreateCategoryInDb(
-            book.categoryPath,
+          final category = await findOrCreateBookCategoryChain(
             repository,
+            discoveredBook.categoryPath,
           );
-
-          List<db_models.TocEntry>? tocEntries;
-          if (book.tocEntries != null && book.tocEntries!.isNotEmpty) {
-            // כל פורמט טקסטואלי: כבר נפרסר בתוך ה-isolate.
-            tocEntries = _rawTocToDbEntries(book.tocEntries!);
-          } else if (book.fileType == 'pdf') {
-            // PDF: parse outline here — pdfrx serializes everything through a
-            // single global worker, so there is no gain in parallelizing.
-            final pdfToc = await _parsePdfOutline(File(book.path));
-            if (pdfToc.isNotEmpty) {
-              final dbEntries = <db_models.TocEntry>[];
-              _convertTocEntriesToDb(pdfToc, dbEntries, 0, null);
-              tocEntries = dbEntries.isNotEmpty ? dbEntries : null;
-            }
-          }
-
+          // PDFium נשאר ב-isolate הראשי; סנכרון הרקע משמר outline קיים.
+          final pdfToc = book.fileType == 'pdf'
+              ? externalBookTocEntries(
+                  await _parsePdfOutline(File(book.filePath)),
+                )
+              : null;
           scanSourceId ??= await repository.insertSource(folderSourceName, -1);
-          await repository.insertExternalContentBook(
-            categoryId: categoryId,
-            title: book.title,
-            filePath: book.path,
-            fileType: book.fileType,
-            fileSize: book.fileSize,
-            lastModified: book.lastModified,
-            heShortDesc: null,
-            orderIndex: 999.0,
-            isPersonal: true,
-            tocEntries: tocEntries,
+          await book.insert(
+            repository,
+            categoryId: category.categoryId,
             sourceId: scanSourceId,
-          );
-          debugPrint(
-            '📁 Inserted external book to DB: ${book.title} (type: ${book.fileType})',
+            isPersonal: true,
+            pdfTocEntries: pdfToc,
           );
           added++;
         } catch (e) {
-          debugPrint('⚠️ Failed to process book: ${book.path} - $e');
+          debugPrint('⚠️ Failed to process book: ${book.filePath} - $e');
           failed++;
         }
       }
@@ -5363,7 +5105,7 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
       // קובצי הכותרות והגרסאות שבתיקייה נקלטים אחרי הספרים — הם מזוהים
       // לפי נתיב הקובץ, שקיים ב-DB רק מכאן ואילך.
       for (final error in await UserSidecarSync.applyForFolder(
-        userDb: repository.database as MyDatabase,
+        userDb: repository.database,
         folderPath: folderPath,
         officialRepository: _sqliteProvider.repository,
       )) {
@@ -5387,11 +5129,7 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
     }
   }
 
-  /// Authoritative pre-insert recheck.
-  ///
-  /// Returns `true` if [filePath] is already in the DB — the caller must skip
-  /// the insert. Returns `false` if the file is genuinely new.
-  /// When found and metadata has changed, the DB row is updated in-place.
+  /// בדיקה חוזרת מול המסד הכותב מונעת הוספה כפולה לאחר סריקת הרקע.
   Future<bool> _recheckBeforeInsert(
     dynamic repository,
     String filePath,
@@ -5412,11 +5150,7 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
     return true;
   }
 
-  /// Exposes [_recheckBeforeInsert] for unit tests via a duck-typed [repository].
-  ///
-  /// The [repository] only needs to implement:
-  ///   - `Future<T?> getExternalBookByFilePath(String path)`
-  ///   - `Future<void> updateExternalBookMetadata(int id, int size, int mtime)`
+  /// בדיקת הקיום נפרדת כדי לאמת את גיבוי הסריקה גם ללא מסד פתוח.
   @visibleForTesting
   static Future<bool> recheckBeforeInsertForTest({
     required dynamic repository,
@@ -5430,38 +5164,5 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
       fileSize,
       lastModified,
     );
-  }
-
-  /// Converts a flat [_RawTocEntry] list (produced by the background isolate)
-  /// into [db_models.TocEntry] objects ready for DB insertion.
-  ///
-  /// The flat list uses 0-based [_RawTocEntry.parentIndex]; the DB model uses
-  /// 1-based local IDs that are resolved by [SeforimRepository._insertTocEntriesForExternalBookSync].
-  List<db_models.TocEntry> _rawTocToDbEntries(List<_RawTocEntry> raw) {
-    // For each parentIndex value, record the last entry that has it so we can
-    // flag isLastChild correctly.
-    final lastChildOf = <int?, int>{};
-    for (int i = 0; i < raw.length; i++) {
-      lastChildOf[raw[i].parentIndex] = i;
-    }
-
-    return List.generate(raw.length, (i) {
-      final r = raw[i];
-      // In pre-order traversal a node has children iff its immediate successor
-      // has this node's index as its parentIndex.
-      final hasChildren = (i + 1 < raw.length) && (raw[i + 1].parentIndex == i);
-      return db_models.TocEntry(
-        id: i + 1, // 1-based local ID; resolved during insertion
-        bookId:
-            0, // placeholder; overridden in _insertTocEntriesForExternalBookSync
-        parentId: r.parentIndex != null ? r.parentIndex! + 1 : null,
-        text: r.text,
-        level: r.level,
-        lineId: null,
-        lineIndex: r.lineIndex,
-        isLastChild: lastChildOf[r.parentIndex] == i,
-        hasChildren: hasChildren,
-      );
-    });
   }
 }

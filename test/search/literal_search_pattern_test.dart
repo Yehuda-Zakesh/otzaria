@@ -110,4 +110,41 @@ Future<void> main() async {
       expect(pattern.hasMatch('ויאמר מלך'), isTrue);
     });
   }, skip: engineReady ? false : searchEngineSkipReason);
+
+  group('buildLiteralPattern — מילה שלמה בודקת את הביטוי לפני הגבול', () {
+    const queries = ['שבת', 'אמר רבי', 'ויש אומרים', 'רשי', 'מלך', 'ה׳', 'א'];
+    const lines = [
+      'אמר רבי יוחנן שבת שבתון ובשבת',
+      'וְיֵשׁ אוֹמְרִים שֶׁבַּשַּׁבָּת אָמַר רַבִּי',
+      'שיטת רש״י ורשי ורש"י, ורשי\'',
+      'ויאמר המלך מלכים מלך־ישראל',
+      'ה׳ אלקים וה\' ה״ א אא א־ב',
+      '<b>שבת</b> שב<i>ת</i> ש"בת',
+    ];
+
+    test('הביטוי נבדק לפני ה-lookbehind', () {
+      for (final q in queries) {
+        final p = buildLiteralPattern(q)!;
+        expect(p.source, startsWith('(?='), reason: q);
+        expect(p.regExp.pattern, p.source, reason: q);
+      }
+    });
+
+    test('ההתאמות זהות לתבנית המנוע המקורית', () {
+      for (final q in queries) {
+        final source = buildLiteralPattern(q)!.source;
+        final original = source.substring(source.indexOf('(?<!'));
+        expect(stripWordBoundaryWrapper(original), isNotNull, reason: q);
+        List<(int, int)> spans(RegExp re) => [
+          for (final line in lines)
+            for (final m in re.allMatches(line)) (m.start, m.end),
+        ];
+        expect(
+          spans(compileLiteralPattern(source)),
+          spans(compileLiteralPattern(original)),
+          reason: q,
+        );
+      }
+    });
+  }, skip: engineReady ? false : searchEngineSkipReason);
 }

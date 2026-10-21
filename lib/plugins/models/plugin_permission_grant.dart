@@ -19,13 +19,4 @@ class PluginPermissionGrant {
       grantedAt: DateTime.parse(map['granted_at'] as String),
     );
   }
-
-  Map<String, dynamic> toDbMap() {
-    return {
-      'plugin_id': pluginId,
-      'permission': permission,
-      'granted': granted ? 1 : 0,
-      'granted_at': grantedAt.toIso8601String(),
-    };
-  }
 }

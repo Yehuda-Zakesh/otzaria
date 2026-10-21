@@ -1,4 +1,4 @@
-// lib/widgets/floating_panel.dart
+// lib/widgets/layout/floating_panel.dart
 //
 // FloatingPanel — פאנל צף בסגנון Material 3.
 //

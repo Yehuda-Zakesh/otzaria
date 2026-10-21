@@ -1,3 +1,4 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -212,7 +213,7 @@ Future<void> main() async {
 
         // רק הספר שעבר קטגוריה מוחלף: שכנו שזז ברצף ממוין לפי המיפוי.
         final changed = await refreshBetween(before, after);
-        expect(changed?.map(IndexingRepository.catalogueOrderKey), ['uid:5']);
+        expect(changed?.map(BookIdentity.keyOf), ['uid:5']);
         final result = await indexer.runIndexing(
           after,
           books: const [],
@@ -238,7 +239,7 @@ Future<void> main() async {
         expect(await refreshBetween(after, after), isNull);
 
         final reversed = await refreshBetween(after, before);
-        expect(reversed?.map(IndexingRepository.catalogueOrderKey), ['uid:5']);
+        expect(reversed?.map(BookIdentity.keyOf), ['uid:5']);
         await indexer.runIndexing(
           before,
           books: const [],

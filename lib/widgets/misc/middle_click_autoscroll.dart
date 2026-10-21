@@ -74,9 +74,8 @@ class _MiddleClickAutoScrollState extends State<MiddleClickAutoScroll>
   /// ציר הגלילה של האזור שנתפס, לציור החיצים ולנטרול הציר השני.
   Axis? _axis;
 
-  /// כל ה-[Scrollable]־ים שנבנו מתחת לעטיפה, לפי ה-RenderObject שדרכו הם
-  /// מופיעים בנתיב הפגיעה. מאפשר לדעת אם ליעד שנלחץ יש בכלל לאן לגלול.
-  final Map<RenderObject, ScrollableState> _scrollables = {};
+  // מפתחות חלשים אינם משאירים רשימות שהוסרו בחיים עד לחיצת הגלגל הבאה.
+  final Expando<ScrollableState> _scrollables = Expando();
 
   bool get _isActive => _anchor != null;
 
@@ -113,7 +112,6 @@ class _MiddleClickAutoScrollState extends State<MiddleClickAutoScroll>
     if (event.kind != PointerDeviceKind.mouse) return;
     if (event.buttons != kMiddleMouseButton) return;
 
-    _scrollables.removeWhere((_, state) => !state.mounted);
     final result = HitTestResult();
     GestureBinding.instance.hitTestInView(result, event.position, event.viewId);
     final target = _resolveTarget(result);

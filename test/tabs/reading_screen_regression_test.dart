@@ -22,7 +22,7 @@ import 'package:otzaria/tabs/reading_screen.dart';
 import 'package:otzaria/tabs/view/split_pane_view.dart';
 import 'package:otzaria/widgets/layout/adaptive_side_pane.dart';
 import 'package:provider/provider.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 import '../helpers/memory_settings_cache.dart';
 
@@ -466,22 +466,20 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(800, 600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
-      // שלב 1: עליית ה-SPL לבדה.
+      // שלב 1: עליית הרשימה לבדה.
       await tester.pumpWidget(
         buildTree(wrapperKey: wrapperKey, showPageView: false),
       );
       await tester.pumpAndSettle();
 
-      // שלב 2: גלילה שמפעילה
-      // `PageStorage.of(context).writeState(context, itemPosition)`
-      // (שורה 646 בחבילת scrollable_positioned_list — כותב `ItemPosition`).
+      // שלב 2: גלילה — רשימה שכותבת את מיקומה ל-PageStorage כותבת אותו כאן.
       await tester.drag(find.text('item-0'), const Offset(0, -200));
       await tester.pumpAndSettle();
 
       // שלב 3: הוספת ה-PageView לעץ — fresh mount. הבנאי של
       // `_PagePosition` קורא `restoreScrollOffset` שמושך מ-PageStorage
       // ומבצע cast ל-`double?`. אם הנתיב של ה-PageView מתנגש עם זה של
-      // ה-SPL, התא מכיל `ItemPosition` והקריסה מתרחשת כאן.
+      // הרשימה, התא מכיל מיקום של רשימה והקריסה מתרחשת כאן.
       await tester.pumpWidget(
         buildTree(wrapperKey: wrapperKey, showPageView: true),
       );
@@ -491,7 +489,7 @@ void main() {
     }
 
     testWidgets(
-      'עטיפה עם ValueKey לא קורסת לאחר כתיבת ItemPosition ל-PageStorage',
+      'עטיפה עם ValueKey לא קורסת אחרי גלילת הרשימה',
       (tester) async {
         final exception = await scrollListThenMountPageView(
           tester,
@@ -501,29 +499,22 @@ void main() {
           exception,
           isNull,
           reason:
-              'ValueKey לא משתתפת בנתיב PageStorage, לכן ה-SPL '
+              'ValueKey לא משתתפת בנתיב PageStorage, לכן הרשימה '
               'וה-PageView הפנימי לא חולקים תא ולא מתרחשת התנגשות',
         );
       },
     );
 
     testWidgets(
-      'עטיפה עם PageStorageKey מובילה ל-cast error (תרחיש הרגרסיה)',
+      'עטיפה עם PageStorageKey אינה קורסת — הרשימה אינה כותבת ל-PageStorage',
       (tester) async {
-        // טסט "שלילה" — מתעד בדיוק את הסיבה ש-PageStorageKey הוחלף ב-ValueKey.
-        // אם מישהו יחזיר את העטיפה ל-PageStorageKey, הטסט בכוונה ינפץ.
+        // רשימה בלי restorePosition אינה כותבת את מיקומה, ולכן אין תא משותף
+        // עם ה-PageView שה-cast שלו ל-double? היה נכשל.
         final exception = await scrollListThenMountPageView(
           tester,
           wrapperKey: const PageStorageKey('tab-1'),
         );
-        expect(
-          exception,
-          isA<TypeError>(),
-          reason:
-              'PageStorageKey יוצרת נתיב PageStorage משותף בין SPL '
-              'ל-PageView הפנימי → ItemPosition נקרא במקום double?',
-        );
-        expect(exception.toString(), contains('ItemPosition'));
+        expect(exception, isNull);
       },
     );
   });

@@ -192,15 +192,18 @@ class _CommentaryContentState extends State<CommentaryContent>
                   // לספור את מה שנצבע (issue #1055).
                   partialWordMatch: true,
                 );
+                final onCount = widget.onSearchResultsCountChanged;
+                final onSnippets = widget.onSearchSnippetsChanged;
+                final query = widget.searchQuery;
+                final profile = widget.displayProfile;
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  widget.onSearchResultsCountChanged?.call(searchCount);
-                  if (widget.onSearchSnippetsChanged != null &&
-                      searchCount > 0) {
-                    widget.onSearchSnippetsChanged!.call([
+                  onCount?.call(searchCount);
+                  if (onSnippets != null && searchCount > 0) {
+                    onSnippets([
                       buildCommentarySearchSnippet(
                         content: data,
-                        query: widget.searchQuery,
-                        displayProfile: widget.displayProfile,
+                        query: query,
+                        displayProfile: profile,
                       ),
                     ]);
                   }

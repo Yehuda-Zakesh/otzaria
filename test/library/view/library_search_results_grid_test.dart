@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
@@ -77,6 +79,7 @@ Future<void> _pumpLibraryBrowser(
   double textScale = 1,
   bool showPreview = true,
   bool isLibraryEmpty = false,
+  Stream<LibraryState> states = const Stream.empty(),
 }) async {
   final libraryBloc = _MockLibraryBloc();
   final settingsBloc = _MockSettingsBloc();
@@ -84,11 +87,7 @@ Future<void> _pumpLibraryBrowser(
   final libraryUpdateBloc = _MockLibraryUpdateBloc();
   final calendarCubit = _StubCalendarCubit(CalendarState.initial());
 
-  whenListen(
-    libraryBloc,
-    const Stream<LibraryState>.empty(),
-    initialState: state,
-  );
+  whenListen(libraryBloc, states, initialState: state);
   whenListen(
     settingsBloc,
     const Stream<SettingsState>.empty(),
@@ -415,6 +414,62 @@ void main() {
       expect(find.byType(LibraryOverflowTooltipText), findsOneWidget);
     });
   }
+
+  testWidgets('הקלדה בשדה אינה בונה מחדש את כרטיסי התוצאות (perf)', (
+    tester,
+  ) async {
+    final library = Library(categories: []);
+    final results = [for (var i = 0; i < 5; i++) TextBook(title: 'ספר $i')];
+    final state = LibraryState(
+      library: library,
+      currentCategory: library,
+      searchResults: results,
+      searchQuery: 'ספר',
+    );
+    final states = StreamController<LibraryState>.broadcast();
+    addTearDown(states.close);
+    await _pumpLibraryBrowser(
+      tester,
+      state,
+      size: const Size(1200, 800),
+      states: states.stream,
+    );
+    final card = tester.widget(find.byType(BookGridItem).first);
+
+    states.add(state.copyWith(searchQuery: 'ספר ', searchResults: results));
+    await tester.pump();
+    await tester.pump();
+
+    expect(tester.widget(find.byType(BookGridItem).first), same(card));
+  });
+
+  testWidgets('הודעת המצב הריק מתעדכנת בכל הקלדה', (tester) async {
+    final controller = FocusRepository().librarySearchController..text = 'אבג';
+    addTearDown(controller.clear);
+    final library = Library(categories: []);
+    final state = LibraryState(
+      library: library,
+      currentCategory: library,
+      searchResults: const [],
+      searchQuery: 'אבג',
+    );
+    final states = StreamController<LibraryState>.broadcast();
+    addTearDown(states.close);
+    await _pumpLibraryBrowser(
+      tester,
+      state,
+      size: const Size(1200, 800),
+      states: states.stream,
+    );
+    expect(find.text('אין תוצאות עבור "אבג"'), findsOneWidget);
+
+    controller.text = 'אבגד';
+    states.add(state.copyWith(searchQuery: 'אבגד', searchResults: const []));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('אין תוצאות עבור "אבגד"'), findsOneWidget);
+  });
 
   testWidgets(
     '"פתח חיפוש טקסט" מהמצב הריק מכבד את ברירות המחדל (issue #2360)',

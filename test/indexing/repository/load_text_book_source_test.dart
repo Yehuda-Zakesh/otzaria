@@ -1,3 +1,4 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -108,7 +109,7 @@ void main() {
     int? libraryDbBookId, {
     int? userBooksDbBookId,
   }) => IndexingRepository.textStorageFor(
-    filePath: IndexingRepository.buildIndexedBookFilePath(book),
+    filePath: BookIdentity.indexedFilePath(book),
     libraryDbBookId: libraryDbBookId,
     userBooksDbBookId: userBooksDbBookId,
     hostApiReady: true,

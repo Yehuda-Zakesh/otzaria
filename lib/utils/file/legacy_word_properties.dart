@@ -182,12 +182,6 @@ class LegacyWordProperties {
   final _RangeTable<LegacyParagraphProperties> _paragraphs;
   final _RangeTable<LegacyCharacterProperties> _characters;
 
-  /// שכבה ריקה — כשהמבנים חסרים או פגומים. הממיר ממשיך לחלץ טקסט.
-  static final LegacyWordProperties empty = LegacyWordProperties._(
-    _RangeTable.empty(),
-    _RangeTable.empty(),
-  );
-
   /// קורא את השכבה. **אינו זורק**: מסמך בלי FKP או עם FKP פגום מאבד עיצוב
   /// בלבד, והטקסט עצמו כבר נקרא בהצלחה מה-piece table.
   static LegacyWordProperties parse(

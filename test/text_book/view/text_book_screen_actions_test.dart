@@ -59,7 +59,7 @@ import 'package:otzaria/text_display/text_display_exports.dart';
 import 'package:provider/provider.dart';
 // ignore: depend_on_referenced_packages
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

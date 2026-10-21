@@ -187,11 +187,4 @@ class PluginConditionEvaluator extends ChangeNotifier {
     _settingsRevision.value++;
     notifyListeners();
   }
-
-  @visibleForTesting
-  void resetForTesting() {
-    _storage.clear();
-    _trackedKeys.clear();
-    _dynamicKeys.clear();
-  }
 }

@@ -8,7 +8,7 @@ import 'package:otzaria/widgets/widgets_exports.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 
 /// The "דיווחים" card in System settings: a summary of saved and sent reports
-/// of every kind, with the reports dialog behind "הצג דיווחים".
+/// of every kind, with the reports dialog behind "הדיווחים ששלחתי".
 class ReportsCard extends StatefulWidget {
   const ReportsCard({
     super.key,
@@ -80,7 +80,12 @@ class _ReportsCardState extends State<ReportsCard> {
       '{count} נשלחו',
       args: {'count': counts.sent},
     );
-    return '$pending · $sent';
+    // Only app problems are reported from here, so the card says where the
+    // other kinds are sent from.
+    final elsewhere = context.settingsText(
+      'על טעות בספר מדווחים מתוך הספר, ועל תוסף מתוך התוסף',
+    );
+    return '$pending · $sent\n$elsewhere';
   }
 
   @override
@@ -91,17 +96,17 @@ class _ReportsCardState extends State<ReportsCard> {
       children: [
         SettingsActionTile.text(
           icon: OtzariaIcons.task_list_24_regular,
-          title: context.settingsText('טעויות בספרים, תקלות בתוכנה ותוספים'),
+          title: context.settingsText('הדיווחים שלך'),
           subtitle: _summary(context),
           actions: [
             ActionButton.neutral(
               key: const ValueKey('reports-card-open-app-report'),
-              text: context.settingsText('דווח על תקלה'),
+              text: context.settingsText('דווח על תקלה בתוכנה'),
               onPressed: _openReportForm,
             ),
             ActionButton.recommended(
               key: const ValueKey('reports-card-manage'),
-              text: context.settingsText('הצג דיווחים'),
+              text: context.settingsText('הדיווחים ששלחתי'),
               onPressed: _openDialog,
             ),
           ],

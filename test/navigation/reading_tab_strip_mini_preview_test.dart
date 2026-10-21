@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/windowing/tab_drag_preview.dart';
 import 'package:otzaria/navigation/view/reading_tab_strip.dart';
 import 'package:otzaria/tabs/models/tab.dart';
@@ -76,7 +77,7 @@ void main() {
             ),
             Expanded(
               child: RepaintBoundary(
-                key: windowContentBoundaryKey,
+                key: AppWindowKeys.current.windowContentBoundary,
                 child: PageView(
                   controller: controller,
                   children: [

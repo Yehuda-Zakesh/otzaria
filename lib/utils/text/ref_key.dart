@@ -8,6 +8,7 @@ library;
 
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:otzaria/utils/text/text_manipulation.dart';
 
 /// מילות מיקום שאינן חלק מערכי ההפניה ("פרק לג פסוק ה" ↔ "לג ה").
@@ -128,6 +129,20 @@ String? buildRefKey(String ref) {
   return tokens.isEmpty ? null : tokens.join(' ');
 }
 
+String? _lastTitle;
+List<String> _lastTitleTokens = const [];
+
+/// [refKeyTokens] של כותרת. כל שורות הספר נבדקות מול אותה כותרת, ולכן
+/// הטוקנים של האחרונה נשמרים.
+@visibleForTesting
+List<String> titleTokens(String title) {
+  if (title != _lastTitle) {
+    _lastTitleTokens = List.unmodifiable(refKeyTokens(title));
+    _lastTitle = title;
+  }
+  return _lastTitleTokens;
+}
+
 /// המפתח הקנוני של שורה: [heRef] לאחר קיצוץ הקידומת שהיא כותרת הספר.
 ///
 /// [titleAliases] הן צורות הכותרת המוכרות; כשאף אחת אינה קידומת של ה-heRef
@@ -141,7 +156,7 @@ String? buildLineRefKey(String heRef, Iterable<String> titleAliases) {
 
   List<String>? longestMatch;
   for (final alias in titleAliases) {
-    final aliasTokens = refKeyTokens(alias);
+    final aliasTokens = titleTokens(alias);
     if (aliasTokens.isEmpty || aliasTokens.length > tokens.length) continue;
     var matches = true;
     for (var i = 0; i < aliasTokens.length; i++) {

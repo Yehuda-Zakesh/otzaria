@@ -67,7 +67,9 @@ void main() {
     }
   });
 
-  Future<FileSyncResult> sync() async {
+  Future<FileSyncResult> sync({
+    void Function(double progress, String message)? onProgress,
+  }) async {
     final service = await FileSyncService.getInstance(
       repository,
       userBooksRepository: repository,
@@ -75,6 +77,7 @@ void main() {
     return service!.syncCustomFoldersWithInputs(
       libraryPath: libraryPath,
       customFolders: folders,
+      onProgress: onProgress,
     );
   }
 
@@ -101,6 +104,111 @@ void main() {
     File(
       path.join(booksDir.path, name),
     ).writeAsStringSync('<html><body>$body</body></html>');
+  }
+
+  for (final addToDatabase in [false, true]) {
+    test(
+      'התקדמות נשלחת פעם אחת לכל ספר שנוסף או עודכן '
+      '(שמירה במסד: $addToDatabase)',
+      () async {
+        final files = [
+          for (final extension in ['txt', 'text'])
+            File(path.join(booksDir.path, 'טקסט.$extension'))
+              ..writeAsStringSync('<h1>כותרת</h1>\nתוכן'),
+          File(path.join(booksDir.path, 'מסמך.docx'))..writeAsBytesSync(
+            buildDocx(document: documentXml(para('תוכן מסמך'))),
+          ),
+          File(path.join(booksDir.path, 'סרוק.pdf'))
+            ..writeAsStringSync('%PDF-1.4\n%%EOF'),
+        ];
+        void configure(bool storeLines) {
+          folders = [
+            CustomFolder(
+              path: booksDir.path,
+              addToDatabase: storeLines,
+              addedAt: DateTime(2026),
+            ),
+          ];
+        }
+
+        final messages = <String>[];
+        Future<FileSyncResult> syncWithProgress() {
+          messages.clear();
+          return sync(onProgress: (_, message) => messages.add(message));
+        }
+
+        void expectBookProgress(int count) {
+          expect(messages, hasLength(count + 2));
+          expect(messages.first, 'סורק תיקיות מותאמות אישית...');
+          expect(messages.last, 'הסנכרון הושלם');
+          expect(
+            messages.skip(1).take(count),
+            everyElement(contains('ספר: ')),
+          );
+        }
+
+        configure(addToDatabase);
+        final added = await syncWithProgress();
+        expect(added.errors, isEmpty);
+        expect(added.addedBooks, files.length);
+        expectBookProgress(files.length);
+        // לשתי סיומות הטקסט אותה כותרת, וכל אחת חייבת לדווח בנפרד.
+        expect(messages.where((m) => m.contains('ספר: טקסט')), hasLength(2));
+        for (final title in ['מסמך', 'סרוק']) {
+          expect(
+            messages.where((m) => m.contains('ספר: $title')),
+            hasLength(1),
+          );
+        }
+        final ids = {
+          for (final book in await repository.getAllBooksLean())
+            book.fileType: book.id,
+        };
+
+        final skipped = await syncWithProgress();
+        expect(skipped.skippedFiles, files.length);
+        expect(skipped.errors, isEmpty);
+        expectBookProgress(0);
+
+        for (final file in files) {
+          file.setLastModifiedSync(DateTime(2030));
+        }
+        final updated = await syncWithProgress();
+        expect(updated.errors, isEmpty);
+        expect(updated.updatedBooks, files.length);
+        expect(updated.updatedBookIds, unorderedEquals(ids.values));
+        expectBookProgress(files.length);
+
+        configure(!addToDatabase);
+        final moved = await syncWithProgress();
+        expect(moved.errors, isEmpty);
+        expect(moved.updatedBooks, 2);
+        expect(moved.skippedFiles, 2);
+        expectBookProgress(2);
+        for (final extension in ['txt', 'text']) {
+          final book = await repository.getBook(ids[extension]!);
+          expect(book!.isFileBacked, addToDatabase);
+          expect(
+            await repository.getLineContents(book.id),
+            addToDatabase ? isEmpty : hasLength(2),
+          );
+          expect(await repository.getBookToc(book.id), isNotEmpty);
+        }
+
+        files[2].writeAsStringSync('not a DOCX');
+        File(
+          path.join(booksDir.path, 'פגום.docx'),
+        ).writeAsStringSync('not a DOCX');
+        final failed = await syncWithProgress();
+        expect(failed.errors, hasLength(2));
+        expect(failed.skippedFiles, 3);
+        expectBookProgress(0);
+        expect(
+          (await repository.getAllBooksLean()).map((book) => book.id),
+          unorderedEquals(ids.values),
+        );
+      },
+    );
   }
 
   test('כל הפורמטים נסרקים ונשמרים עם fileType נכון', () async {

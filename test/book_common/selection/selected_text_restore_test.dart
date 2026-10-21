@@ -303,6 +303,28 @@ void main() {
         expect(restored.startLine, 1, reason: mark);
       }
     });
+
+    test('שחזור סלחני מתחיל בסיומת השורה הארוכה ביותר שהבחירה פותחת בה', () {
+      final restored = restoreSelectedTextLineBreaks(
+        selectedText: 'דאבXהוז',
+        visibleLines: const ['אבגדאב', 'הוז'],
+      );
+
+      expect(restored, 'דאב\nX\nהוז');
+    });
+
+    test('בחירה שאינה בשורה ארוכה אינה ריבועית באורך השורה', () {
+      final line = 'והנה בשולחן ערוך כתב המחבר ' * 8000;
+      final stopwatch = Stopwatch()..start();
+      final restored = restoreSelectedTextLineBreaks(
+        selectedText: 'טקסט שאינו בשורה',
+        visibleLines: [line],
+      );
+      stopwatch.stop();
+
+      expect(restored, 'טקסט שאינו בשורה');
+      expect(stopwatch.elapsedMilliseconds, lessThan(500));
+    });
   });
 
   group('buildSelectionWindow', () {

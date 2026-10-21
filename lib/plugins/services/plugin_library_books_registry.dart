@@ -393,15 +393,4 @@ class PluginLibraryBooksRegistry extends ChangeNotifier {
     ]);
     super.notifyListeners();
   }
-
-  @visibleForTesting
-  void clear() {
-    _providers.clear();
-    _books.clear();
-    _entries.clear();
-    _pending.clear();
-    _revisions.clear();
-    _visibleProviders = const {};
-    _visibleBooks = const [];
-  }
 }

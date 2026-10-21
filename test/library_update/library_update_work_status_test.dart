@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/core/messages/library_messages.dart';
 import 'package:otzaria/library_update/bloc/library_update_bloc.dart';
 import 'package:otzaria/library_update/library_update_work_status.dart';
 import 'package:otzaria/work_status/work_status_item.dart';
@@ -41,6 +42,19 @@ void main() {
       expect(result.kind, WorkStatusKind.failed);
       expect(result.message, 'שגיאה בבדיקת עדכונים');
       expect(result.detail, 'לחץ לניסיון חוזר');
+      expect(result.onTap, isNotNull);
+    });
+
+    test('הורדה שנעצרה עם קובץ חלקי מציעה המשך', () {
+      final result = item(
+        const LibraryUpdateState(
+          status: LibraryUpdateStatus.error,
+          message: LibraryMessages.downloadPausedResumable,
+          canResumeDownload: true,
+        ),
+      )!;
+
+      expect(result.detail, LibraryMessages.tapToResumeDownload);
       expect(result.onTap, isNotNull);
     });
 

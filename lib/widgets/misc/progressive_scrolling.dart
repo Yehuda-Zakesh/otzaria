@@ -1,145 +1,283 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'dart:math';
+import 'dart:math' as math;
 
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
+
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 class ProgressiveScroll extends StatefulWidget {
   final Widget child;
-  final ScrollOffsetController scrollController;
+  final ItemScrollController scrollController;
+
+  /// המהירות המרבית בפיקסלים לשנייה.
   final double maxSpeed;
+
+  /// המהירות ההתחלתית בפיקסלים לשנייה, לפני ההאצה המעריכית.
   final double accelerationFactor;
   final double curve;
   final FocusNode? focusNode;
   final bool autofocus;
+
+  /// מודיע פעם אחת בתחילת החזקת חץ, לפני שהמיקום משתנה.
+  final VoidCallback? onNavigationStart;
   // קיצורי התוכן מקבלים קדימות על פני גלילת החיצים.
   final FocusOnKeyEventCallback? onKeyEvent;
-  // ItemScrollController חושף isAttached ומונע גלילה כשהרשימה אינה מחוברת.
-  final ItemScrollController? itemScrollController;
 
   const ProgressiveScroll({
     super.key,
     required this.child,
     required this.scrollController,
     this.maxSpeed = 5000.0,
-    this.accelerationFactor = 0.1,
+    this.accelerationFactor = 6.25,
     this.curve = 2.0,
     this.focusNode,
     this.autofocus = false,
-    this.itemScrollController,
+    this.onNavigationStart,
     this.onKeyEvent,
-  });
+  }) : assert(maxSpeed >= 0 && maxSpeed < double.infinity),
+       assert(accelerationFactor >= 0 && accelerationFactor < double.infinity),
+       assert(curve > -double.infinity && curve < double.infinity);
 
   @override
   State<ProgressiveScroll> createState() => _ProgressiveScrollState();
 }
 
-class _ProgressiveScrollState extends State<ProgressiveScroll> {
-  double _scrollSpeed = 0;
-  bool _isKeyPressed = false;
-  int _scrollDirection = 0; // 1 for down, -1 for up, 0 for no scroll
+class _ProgressiveScrollState extends State<ProgressiveScroll>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  int _scrollDirection = 0;
   double _timePressedInSeconds = 0;
-  Timer? _scrollTickTimer;
-  late final FocusNode _focusNode;
-  bool _isLocalFocusNode = false;
+  late final Ticker _ticker;
+  Duration? _lastFrameTime;
+  FocusNode? _ownFocusNode;
 
-  // גלילה אפשרית רק כשה-ScrollablePositionedList מחובר; אחרת animateScroll זורק.
-  bool get _canScroll => widget.itemScrollController?.isAttached ?? false;
+  FocusNode get _focusNode =>
+      widget.focusNode ?? (_ownFocusNode ??= FocusNode());
+
+  ScrollPosition? get _position {
+    final controller = widget.scrollController.scrollController;
+    if (controller == null || controller.positions.length != 1) return null;
+    final position = controller.position;
+    return position.hasContentDimensions && position.hasPixels
+        ? position
+        : null;
+  }
+
+  bool get _isEditingText =>
+      FocusManager.instance.primaryFocus?.context
+          ?.findAncestorWidgetOfExactType<EditableText>() !=
+      null;
 
   @override
   void initState() {
     super.initState();
-    if (widget.focusNode == null) {
-      _focusNode = FocusNode();
-      _isLocalFocusNode = true;
-    } else {
-      _focusNode = widget.focusNode!;
+    _ticker = createTicker(_onTick);
+    WidgetsBinding.instance.addObserver(this);
+    _requestFocus();
+  }
+
+  void _requestFocus() {
+    if (!widget.autofocus) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.autofocus) _focusNode.requestFocus();
+    });
+  }
+
+  @override
+  void didUpdateWidget(ProgressiveScroll oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusNode != widget.focusNode ||
+        oldWidget.scrollController != widget.scrollController ||
+        widget.maxSpeed == 0 ||
+        widget.accelerationFactor == 0) {
+      _stopScrolling();
     }
-    // בקשת פוקוס מפורשת — Focus.autofocus לא יורה כשכבר יש primaryFocus
-    // ב-scope (כמו ה-Focus של ה-Scaffold בכרטיסיית המפרשים).
-    if (widget.autofocus) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _focusNode.requestFocus();
-      });
+    if (oldWidget.focusNode != widget.focusNode) {
+      if (widget.focusNode != null) {
+        _ownFocusNode?.dispose();
+        _ownFocusNode = null;
+      }
+      _requestFocus();
+    } else if (!oldWidget.autofocus && widget.autofocus) {
+      _requestFocus();
     }
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!TickerMode.valuesOf(context).enabled) _stopScrolling();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _stopScrolling();
+  }
+
+  @override
   void dispose() {
-    _scrollTickTimer?.cancel();
-    if (_isLocalFocusNode) {
-      _focusNode.dispose();
-    }
+    WidgetsBinding.instance.removeObserver(this);
+    _stopScrolling();
+    _ticker.dispose();
+    _ownFocusNode?.dispose();
     super.dispose();
   }
 
-  // הטיימר רץ רק בזמן לחיצת חץ, כדי שאיבוד KeyUp לא יגרום לגלילה אינסופית.
-  void _startScrolling() {
-    if (_scrollTickTimer?.isActive ?? false) return;
-    _scrollTickTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
-      if (!_isKeyPressed) {
-        _stopScrolling();
-        return;
-      }
-      _timePressedInSeconds += 0.016; // 16 milliseconds in seconds
-      double curvedT = exp(widget.curve * _timePressedInSeconds);
-      _scrollSpeed = (curvedT * widget.accelerationFactor * _scrollDirection)
-          .clamp(-widget.maxSpeed, widget.maxSpeed);
-
-      if (_scrollSpeed != 0 && _canScroll) {
-        widget.scrollController.animateScroll(
-          offset: _scrollSpeed,
-          duration: const Duration(milliseconds: 16),
+  void _startScrolling(int direction) {
+    if (widget.maxSpeed == 0 ||
+        widget.accelerationFactor == 0 ||
+        !TickerMode.valuesOf(context).enabled) {
+      return;
+    }
+    if (_scrollDirection == 0) {
+      widget.onNavigationStart?.call();
+      widget.scrollController.listController?.cancelPositioning();
+      final position = _position;
+      if (position != null) {
+        position.jumpTo(
+          position.pixels.clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          ),
         );
       }
-    });
+    }
+    if (_scrollDirection != direction) {
+      _timePressedInSeconds = 0;
+      _lastFrameTime = SchedulerBinding.instance.currentSystemFrameTimeStamp;
+    }
+    _scrollDirection = direction;
+    final position = _position;
+    if (position == null ||
+        (direction > 0 && position.pixels >= position.maxScrollExtent) ||
+        (direction < 0 && position.pixels <= position.minScrollExtent)) {
+      _ticker.stop();
+      return;
+    }
+    if (!_ticker.isActive) {
+      _lastFrameTime = SchedulerBinding.instance.currentSystemFrameTimeStamp;
+      _ticker.start();
+    }
+  }
+
+  void _onTick(Duration _) {
+    if (_isEditingText) {
+      _stopScrolling();
+      return;
+    }
+    final now = SchedulerBinding.instance.currentSystemFrameTimeStamp;
+    final previous = _lastFrameTime;
+    _lastFrameTime = now;
+    final position = _position;
+    if (position == null) {
+      _ticker.stop();
+      return;
+    }
+    if (previous == null || _scrollDirection == 0) return;
+    final seconds = ((now - previous).inMicroseconds / 1000000).clamp(0.0, 0.1);
+    if (seconds == 0) return;
+    final distance = _distanceForInterval(seconds);
+    _timePressedInSeconds += seconds;
+    if (distance > 0) {
+      final target = (position.pixels + distance * _scrollDirection).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      if (target != position.pixels) position.jumpTo(target);
+      if (target == position.minScrollExtent ||
+          target == position.maxScrollExtent) {
+        _ticker.stop();
+      }
+    }
+  }
+
+  double _distanceForInterval(double seconds) {
+    // אינטגרציה של המהירות שומרת מרחק זהה גם בקצבי פריימים שונים.
+    final initial = widget.accelerationFactor;
+    final maximum = widget.maxSpeed;
+    if (initial == 0 || maximum == 0) return 0;
+    final curve = widget.curve;
+    if (curve == 0) return math.min(initial, maximum) * seconds;
+    final start = initial * math.exp(curve * _timePressedInSeconds);
+    final end = initial * math.exp(curve * (_timePressedInSeconds + seconds));
+    if (start >= maximum && end >= maximum) return maximum * seconds;
+    if (start <= maximum && end <= maximum) return (end - start) / curve;
+    final cappedAt = math.log(maximum / initial) / curve;
+    if (curve > 0) {
+      return (maximum - start) / curve +
+          maximum * (_timePressedInSeconds + seconds - cappedAt);
+    }
+    return maximum * (cappedAt - _timePressedInSeconds) +
+        (end - maximum) / curve;
   }
 
   void _stopScrolling() {
-    _scrollTickTimer?.cancel();
-    _scrollTickTimer = null;
-    _isKeyPressed = false;
+    _ticker.stop();
     _scrollDirection = 0;
-    _scrollSpeed = 0;
     _timePressedInSeconds = 0;
+    _lastFrameTime = null;
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     final result =
         widget.onKeyEvent?.call(node, event) ?? KeyEventResult.ignored;
-    if (result != KeyEventResult.ignored) return result;
+    if (result != KeyEventResult.ignored) {
+      if (event is KeyUpEvent) _stopScrolling();
+      return result;
+    }
+
+    final modified =
+        HardwareKeyboard.instance.isShiftPressed ||
+        HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isAltPressed ||
+        HardwareKeyboard.instance.isMetaPressed;
+    if (modified) _stopScrolling();
 
     final isArrowDown = event.logicalKey == LogicalKeyboardKey.arrowDown;
     final isArrowUp = event.logicalKey == LogicalKeyboardKey.arrowUp;
     if (!isArrowDown && !isArrowUp) return KeyEventResult.ignored;
     // קיצורי העריכה יושבים בשורש האפליקציה, ולכן החץ מגיע לכאן לפני שדה טקסט מקונן.
-    if (FocusManager.instance.primaryFocus?.context
-            ?.findAncestorWidgetOfExactType<EditableText>() !=
-        null) {
+    if (_isEditingText) {
+      _stopScrolling();
       return KeyEventResult.ignored;
     }
 
     // Shift+חץ שמור לבחירת טקסט, ושאר הצירופים לקיצורים — לא מתערבים בהם.
-    if (HardwareKeyboard.instance.isShiftPressed ||
-        HardwareKeyboard.instance.isControlPressed ||
-        HardwareKeyboard.instance.isAltPressed ||
-        HardwareKeyboard.instance.isMetaPressed) {
+    if (modified) {
       return KeyEventResult.ignored;
     }
 
+    final direction = isArrowDown ? 1 : -1;
     if (event is KeyUpEvent) {
-      if (_canScroll && _scrollDirection != 0) {
-        widget.scrollController.animateScroll(
-          offset: 100.0 * _scrollDirection,
-          duration: const Duration(milliseconds: 150),
-        );
+      if (_scrollDirection == direction) {
+        final other = isArrowDown
+            ? LogicalKeyboardKey.arrowUp
+            : LogicalKeyboardKey.arrowDown;
+        if (HardwareKeyboard.instance.logicalKeysPressed.contains(other)) {
+          _startScrolling(-direction);
+        } else {
+          final position = _position;
+          if (position != null) {
+            final target = (position.pixels + 100 * direction).clamp(
+              position.minScrollExtent,
+              position.maxScrollExtent,
+            );
+            if (target != position.pixels) {
+              unawaited(
+                position.animateTo(
+                  target,
+                  duration: const Duration(milliseconds: 150),
+                  curve: Curves.linear,
+                ),
+              );
+            }
+          }
+          _stopScrolling();
+        }
       }
-      _stopScrolling();
     } else {
-      _isKeyPressed = true;
-      _scrollDirection = isArrowDown ? 1 : -1;
-      _startScrolling();
+      _startScrolling(direction);
     }
     // בולעים את החץ כדי שלא יגלול גם Scrollable שמעל — כש"מפרשים מתחת"
     // מקונן בתוך גלילת גוף הטקסט הראשי, אחרת שניהם היו גוללים יחד.

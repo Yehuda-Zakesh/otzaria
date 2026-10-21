@@ -11,7 +11,7 @@ import 'package:otzaria/tabs/models/commentators_tab.dart';
 import 'package:otzaria/tabs/models/pdf_commentators_tab.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/models/books.dart';
-import 'package:otzaria/text_book/bloc/text_book_state.dart';
+import 'package:otzaria/text_book/utils/reading_position.dart';
 
 abstract class OpenedTab {
   String title;
@@ -23,145 +23,15 @@ abstract class OpenedTab {
   /// Override this method to perform cleanup.
   void dispose() {}
 
-  /// Returns a fresh independent copy of this tab.
-  ///
-  /// מופשטת בכוונה: ברירת מחדל `=> this` החזירה alias במקום עותק, ותת-מחלקה
-  /// חדשה קיבלה אותה בשקט. כך שיכפול טאב או מעבר בין שולחנות עבודה יצרו שני
-  /// ערכים ברשימה שמצביעים על אותו אובייקט — ו-`dispose` של האחד סגר את
-  /// ה-BLoC והבקרים של השני.
+  /// מחזיר עותק עצמאי עם בקרים ומחזור חיים נפרדים.
   OpenedTab clone();
 
-  factory OpenedTab.from(OpenedTab tab) {
-    if (tab is TextBookTab) {
-      bool? splitedView;
-      bool? showPageShapeView;
-      List<String>? commentators = tab.commentators;
-      // ערכי ברירת מחדל לוקחים את ה‑pinpoint שאיתו נבנה הטאב המקורי. אם
-      // ה‑bloc כבר נטען, נעדיף את הערכים המעודכנים מה‑state — כדי לתפוס שינויים
-      // (למשל ניקוי ה‑pinpoint עם חיפוש ידני חדש).
-      String? pinpointText = tab.pinpointHighlight;
-      int? pinpointSectionIndex = tab.pinpointHighlightSectionIndex;
-      // קונפיגורציית החיפוש נלקחת מה-state המעודכן: בלעדיה שכפול ושחזור
-      // מחזירים את החיפוש בספר למסלול המחרוזת הרצופה.
-      String searchText = tab.searchText;
-      var searchOptions = tab.searchOptions;
-      var alternativeWords = tab.alternativeWords;
-      var spacingValues = tab.spacingValues;
-      var searchMode = tab.searchMode;
-      var searchDistance = tab.searchDistance;
-      var matchPolicy = tab.matchPolicy;
-      // שלושת שדות ההדגשה קשורי-המקור: `?mark` deep link (highlightText,
-      // permanentHighlightLine) ושורות התוצאה שהחיפוש הגלובלי מצא. בלעדיהם
-      // שכפול טאב ומעבר בין שולחנות עבודה מחזירים ספר בלי ההדגשה שהמשתמש
-      // רואה — ובלי סימון שורות התוצאה שהמנוע החזיר.
-      String highlightText = tab.highlightText;
-      int? permanentHighlightLine = tab.permanentHighlightLine;
-      Set<int>? searchResultLines = tab.initialSearchResultLines;
-      final state = tab.blocState;
-      if (state is TextBookLoaded) {
-        splitedView = state.showSplitView;
-        showPageShapeView = state.showPageShapeView;
-        commentators = state.activeCommentators;
-        pinpointText = state.pinpointHighlightText;
-        pinpointSectionIndex = state.pinpointHighlightIndex;
-        searchText = state.searchText;
-        searchOptions = state.searchOptions;
-        alternativeWords = state.alternativeWords;
-        spacingValues = state.spacingValues;
-        searchMode = state.searchMode;
-        searchDistance = state.searchDistance;
-        matchPolicy = state.matchPolicy;
-        // `_onLoadContent` זורע את שלושת השדות ל-Loaded מכל מסלול (מ-Initial
-        // או משימור Loaded קודם), ולכן ה-state סמכותי — קריאה ללא נפילה חזרה
-        // לשדות הטאב. נפילה כזו הייתה מחזירה שורות תוצאה שנוקו במפורש
-        // (`clearSearchResultLines`) עם חיפוש ידני חדש בתוך הספר.
-        highlightText = state.highlightText;
-        permanentHighlightLine = state.permanentHighlightLine;
-        // ב-Loaded השדה נקרא searchResultLines; ב-Initial אותו נתון עצמו
-        // נקרא initialSearchResultLines.
-        searchResultLines = state.searchResultLines;
-      } else if (state is TextBookInitial) {
-        // טאב ששמור בשולחן עבודה לא-פעיל מעולם לא נטען — בלי הענף הזה
-        // צורת הדף והתצוגה המפוצלת מתאפסות בכל החלפת שולחן עבודה.
-        splitedView = state.splitedView;
-        showPageShapeView = state.showPageShapeView;
-        searchText = state.searchText;
-        searchOptions = state.searchOptions;
-        alternativeWords = state.alternativeWords;
-        spacingValues = state.spacingValues;
-        searchMode = state.searchMode;
-        searchDistance = state.searchDistance;
-        matchPolicy = state.matchPolicy;
-      }
-      return TextBookTab(
-        index: tab.index,
-        book: tab.book,
-        searchText: searchText,
-        searchOptions: searchOptions,
-        alternativeWords: alternativeWords,
-        spacingValues: spacingValues,
-        searchMode: searchMode,
-        searchDistance: searchDistance,
-        matchPolicy: matchPolicy,
-        highlightText: highlightText,
-        permanentHighlightLine: permanentHighlightLine,
-        // עותק של ה-Set: בלעדיו המקור והשכפול מצביעים על אותו אוסף,
-        // ושינוי באחד היה משנה את השני.
-        initialSearchResultLines: searchResultLines == null
-            ? null
-            : Set<int>.of(searchResultLines),
-        commentators: commentators,
-        openLeftPane: state.showLeftPane,
-        splitedView: splitedView,
-        showPageShapeView: showPageShapeView,
-        isPinned: tab.isPinned,
-        dedupeKey: tab.dedupeKey,
-        pinpointHighlight: pinpointText,
-        pinpointHighlightSectionIndex: pinpointSectionIndex,
-      );
-    } else if (tab is PdfBookTab) {
-      final copy = PdfBookTab(
-        book: tab.book,
-        pageNumber: tab.pageNumber,
-        openLeftPane: tab.showLeftPane.value,
-        // ה-BLoC מסנכרן את שדות החיפוש של הטאב, ולכן הם המצב המעודכן.
-        searchText: tab.searchText,
-        searchOptions: tab.searchOptions,
-        alternativeWords: tab.alternativeWords,
-        spacingValues: tab.spacingValues,
-        searchMode: tab.searchMode,
-        searchDistance: tab.searchDistance,
-        matchPolicy: tab.matchPolicy,
-        isPinned: tab.isPinned,
-        dedupeKey: tab.dedupeKey,
-        requiresStableLayout: tab.requiresStableLayout,
-        // `ExternalBookMatches` מחזיק `List.unmodifiable` בלבד, ולכן שיתוף
-        // המופע בטוח.
-        externalMatches: tab.externalMatches.value,
-      );
-      // ⚠️ שדות שנקבעים **אחרי** הבנייה, ולכן אינם עוברים בפרמטרים.
-      // בלעדיהם שיכפול כרטיסיה, מעבר שולחן עבודה ופיצול לשתי חלוניות
-      // איפסו את המפרשים הפעילים ואת התקריב — אף שאותם שדות שורדים
-      // `toJson`/`fromJson`. `PdfCommentatorsTab.clone` העתיק אותם ידנית
-      // כדי לעקוף בדיוק את הפער הזה.
-      copy.activeCommentators = Set<String>.of(tab.activeCommentators);
-      copy.savedZoom = tab.savedZoom;
-      copy.savedLayoutMode = tab.savedLayoutMode;
-      return copy;
-    } else if (tab is CombinedTab) {
-      return CombinedTab(
-        rightTab: OpenedTab.from(tab.rightTab),
-        leftTab: OpenedTab.from(tab.leftTab),
-        splitRatio: tab.splitRatio,
-        isPinned: tab.isPinned,
-      );
-    }
-    return tab.clone();
-  }
+  factory OpenedTab.from(OpenedTab tab) => tab.clone();
 
   factory OpenedTab.fromBook(
     Book book,
     int index, {
+    ReadingAnchor? initialReadingAnchor,
     String searchText = '',
     String highlightText = '',
     int? permanentHighlightLine,
@@ -192,6 +62,7 @@ abstract class OpenedTab {
       return TextBookTab(
         book: book.toTextBook(),
         index: index,
+        initialReadingAnchor: initialReadingAnchor,
         searchText: searchText,
         highlightText: highlightText,
         permanentHighlightLine: permanentHighlightLine,
@@ -207,6 +78,7 @@ abstract class OpenedTab {
       return TextBookTab(
         book: book,
         index: index,
+        initialReadingAnchor: initialReadingAnchor,
         searchText: searchText,
         highlightText: highlightText,
         permanentHighlightLine: permanentHighlightLine,

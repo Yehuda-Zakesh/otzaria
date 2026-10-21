@@ -26,3 +26,20 @@ bool shouldRebuildReader(TextBookState previous, TextBookState current) {
       ) !=
       current.copyWith(clearSelectedText: true);
 }
+
+/// כמו [shouldRebuildReader], אבל בחירת שורה בטקסט הראשי אינה בונה מחדש.
+/// לעצים שאינם נגזרים מהבחירה: שלד צורת הדף וטורי המפרשים.
+bool shouldRebuildIgnoringSelection(
+  TextBookState previous,
+  TextBookState current,
+) {
+  if (previous is! TextBookLoaded || current is! TextBookLoaded) return true;
+  return shouldRebuildReader(
+    previous,
+    current.copyWith(
+      selectedIndex: previous.selectedIndex,
+      clearSelectedIndex: previous.selectedIndex == null,
+      selectedIndices: previous.selectedIndices,
+    ),
+  );
+}

@@ -1,4 +1,4 @@
-// lib/widgets/app_top_bar.dart
+// lib/widgets/navigation/app_top_bar.dart
 //
 // AppTopBar — סרגל עליון בסגנון Chrome / M3.
 //
@@ -62,7 +62,7 @@ class AppTopBar extends StatefulWidget {
   final int scrollDebounceMs;
 
   /// override נקודתי לצבע הסרגל — נועד למסך הקריאה בלבד, כדי להתאים את
-  /// הטופ-בר לרקע הקריאה שנבחר (ראו [AppSurfaces.readerTopBarBackground]).
+  /// הטופ-בר לרקע הקריאה שנבחר.
   /// כשלא מועבר, נשאר `null` וחוזרים לברירת המחדל [AppSurfaces.topBarBackground].
   final Color? backgroundColor;
 

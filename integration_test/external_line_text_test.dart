@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:otzaria/data/data_providers/book_text_reader.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
+import 'package:otzaria/data/book_identity.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/migration/database/line_content_encoder.dart';
 import 'package:otzaria/search/library_line_source.dart';
@@ -175,7 +176,7 @@ void main() {
       db.close();
     }
     final cleaned = await IndexingRepository.cleanDataUrisOffFrame(read.bytes);
-    final filePath = IndexingRepository.officialBookKey(book.id);
+    final filePath = BookIdentity.officialBookKey(book.id);
     final storage =
         override ??
         IndexingRepository.textStorageFor(
@@ -454,8 +455,8 @@ void main() {
     await LibraryLineSource.configureUserBooks(userBooksPath);
     expect(LibraryLineSource.userBooksConfigured, isTrue);
 
-    final personalKey = IndexingRepository.userBookKey(personalId);
-    final officialKey = IndexingRepository.officialBookKey(personalId);
+    final personalKey = BookIdentity.userBookKey(personalId);
+    final officialKey = BookIdentity.officialBookKey(personalId);
 
     // מסלול האפליקציה: בייטים מפוענחים מהמסד, וההחלטה של textStorageFor.
     Future<BookContentBytes> readBytes(String dbPath, BookTextKey book) async {

@@ -7,9 +7,6 @@ import 'package:otzaria/models/links.dart';
 int linkSegmentCount(Link link) =>
     (link.index2End ?? link.index2) - link.index2 + 1;
 
-int linksSegmentCount(Iterable<Link> links) =>
-    links.fold(0, (sum, link) => sum + linkSegmentCount(link));
-
 /// מספר השורות בטקסט שנבחר, כשטווח השורות במקור אינו ידוע.
 int countTextSegments(String text) {
   final count = text.split('\n').where((line) => line.trim().isNotEmpty).length;

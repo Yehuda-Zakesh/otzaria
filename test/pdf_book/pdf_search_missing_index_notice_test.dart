@@ -1,7 +1,7 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/messages/pdf_messages.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
-import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/pdf_book/view/pdf_search_screen.dart';
 
 void main() {
@@ -70,7 +70,7 @@ void main() {
       const stableKey = 'ext:talmud-pdf:ברכות';
       expect(
         PdfBookSearchView.missingFromIndexNotice(
-          indexedFilePath: IndexingRepository.indexedPdfFilePath(
+          indexedFilePath: BookIdentity.indexedPdfFilePath(
             externalLibraryId:
                 DatabaseConstants.talmudBavliPdfExternalLibraryId('ברכות'),
             filePath: r'C:\otzaria\תלמוד בבלי\ברכות.pdf',

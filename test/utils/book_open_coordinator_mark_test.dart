@@ -19,6 +19,7 @@ import 'package:otzaria/tabs/tabs_repository.dart';
 import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 import 'package:otzaria/utils/navigation/open_book.dart';
 import '../helpers/memory_settings_cache.dart';
+import 'package:otzaria/text_book/utils/reading_position.dart';
 
 // ─── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -111,6 +112,36 @@ PdfBook _makePdfBook(String title) =>
 void main() {
   setUpAll(() async {
     await Settings.init(cacheProvider: MemorySettingsCache());
+  });
+
+  test('פתיחה מהספרייה משחזרת שבר מההיסטוריה; יעד מפורש מקבל קדימות', () async {
+    final book = _makeBook('ספר בדיקה');
+    const anchor = ReadingAnchor(
+      line: 12,
+      intraLineFraction: 0.8,
+      alignment: 0.2,
+    );
+    final history = await _makeLoadedHistory([
+      Bookmark(ref: 'פרק א', book: book, index: 12, readingAnchor: anchor),
+    ]);
+    final tabs = _CapturingTabsBloc();
+    final navigation = _FakeNavigationBloc();
+    addTearDown(history.close);
+    addTearDown(tabs.close);
+    addTearDown(navigation.close);
+    final coordinator = _makeCoordinator(
+      tabsBloc: tabs,
+      historyBloc: history,
+      navigationBloc: navigation,
+    );
+    final restored = coordinator.buildTab(book, 0, '') as TextBookTab;
+    final explicit =
+        coordinator.buildTab(book, 0, '', explicitIndex: true) as TextBookTab;
+    addTearDown(restored.dispose);
+    addTearDown(explicit.dispose);
+    expect(restored.readingAnchor, anchor);
+    expect(explicit.readingAnchor.line, 0);
+    expect(explicit.readingAnchor.intraLineFraction, 0);
   });
 
   testWidgets('openPreparedTab פותח ResolvingTab בלי לצמצם ל-TextBookTab', (

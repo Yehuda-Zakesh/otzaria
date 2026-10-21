@@ -1,7 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/text_book/utils/reading_position.dart';
 import 'package:otzaria/text_book/utils/reading_segment_navigation.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:otzaria/text_book/utils/reading_segments.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 import '../../test_helpers/reading_toc.dart';
 
@@ -76,6 +77,51 @@ void main() {
     expect(anchor.line, 4);
     expect(anchor.alignment, kReadingAnchorAlignment);
     expect(anchor.intraLineFraction, closeTo(0.25, 0.05));
+  });
+
+  test('שורה בודדת נמדדת בלי באנר או כרטיס שמגדילים את הפריט', () {
+    final single = buildReadingSegments(['פסקה'], continuous: false);
+    ({double top, double bottom})? measure(int item, int line) =>
+        (top: 0.2, bottom: 0.6);
+    final position = _pos(0, -0.55, 1.45);
+    final edges = lineEdgesInViewport(single, 0, position, measure: measure);
+    expect(edges.leading, closeTo(-0.15, 1e-8));
+    expect(edges.trailing, closeTo(0.65, 1e-8));
+    final anchor = readingAnchorFromItems(single, [
+      position,
+    ], measure: measure)!;
+    expect(anchor.line, 0);
+    expect(anchor.intraLineFraction, closeTo(0.25, 1e-8));
+    expect(
+      lineFractionInItem(
+        single,
+        0,
+        0,
+        intraLineFraction: 0.25,
+        measure: measure,
+      ),
+      closeTo(0.3, 1e-8),
+    );
+  });
+
+  test('כרטיס מעל שורת טקסט גלויה אינו מחזיק את המיקום בשורה הקודמת', () {
+    ({double top, double bottom})? measure(int item, int line) =>
+        (top: 0, bottom: item == 1 ? 1 / 6 : 1);
+    final positions = [_pos(1, -0.45, 0.15), _pos(2, 0.15, 0.8)];
+    final position = readingPositionFromItems(
+      normal,
+      positions,
+      measure: measure,
+    )!;
+    expect(position.topLine, 2);
+    expect(position.visibleLines, [2]);
+    expect(
+      readingPositionFromItems(normal, [
+        positions.first,
+      ], measure: measure)!.topLine,
+      1,
+      reason: 'כשהמסך כולו כרטיס נשמר ההקשר של שורת המקור שלו',
+    );
   });
 
   test('חלון הטעינה כולל פריט בשולי התצוגה שסונן מהשורות הגלויות', () {

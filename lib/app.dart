@@ -12,9 +12,9 @@ import 'package:otzaria/core/diagnostics/frame_stats_overlay.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/windowing/dock_progress_listener.dart';
 import 'package:otzaria/core/windowing/mac_menu_bar.dart';
-import 'package:otzaria/core/ui_snack.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:otzaria/navigation/view/main_window_screen.dart';
 import 'package:otzaria/settings/settings_exports.dart';
@@ -54,7 +54,7 @@ class App extends StatelessWidget {
           valueListenable: DeveloperDiagnostics.instance.performanceOverlay,
           builder: (context, showPerformanceOverlay, _) => MaterialApp(
             showPerformanceOverlay: showPerformanceOverlay,
-            navigatorKey: navigatorKey,
+            navigatorKey: AppWindowKeys.of(context).navigator,
             localizationsDelegates: const [
               GlobalCupertinoLocalizations.delegate,
               GlobalMaterialLocalizations.delegate,
@@ -129,7 +129,9 @@ class App extends StatelessWidget {
                 child: content,
               );
             },
-            home: MainWindowScreen(key: mainWindowScreenKey),
+            home: MainWindowScreen(
+              key: AppWindowKeys.of(context).mainWindowScreen,
+            ),
           ),
         );
       },

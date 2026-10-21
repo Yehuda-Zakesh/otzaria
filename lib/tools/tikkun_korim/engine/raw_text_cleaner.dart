@@ -1,6 +1,7 @@
 /// ניקוי הטקסט הגולמי שמגיע מהספרייה והפיכתו לרצף מילים עם סמני מבנה.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:otzaria/tools/tikkun_korim/models/tikkun_models.dart';
 
 const Map<String, int> _gematriaValues = {
@@ -141,9 +142,16 @@ final _ashkenazMegillahNote = RegExp(
 );
 
 /// בוחר את חילופי הנוסח המסומנים במקור כמנהג מגילות אשכנז.
-String applyMegillahNusach(String raw, String nusach) => nusach == 'ashkenaz'
-    ? raw.replaceAllMapped(_ashkenazMegillahNote, (m) => m[2]!)
-    : raw;
+String applyMegillahNusach(String raw, String nusach) {
+  // הביטוי סורק כל אות בספר, וההערה קיימת רק במגילות.
+  if (nusach != 'ashkenaz' || !raw.contains('(במגילות אשכנז ')) return raw;
+  variantNoteScans++;
+  return raw.replaceAllMapped(_ashkenazMegillahNote, (m) => m[2]!);
+}
+
+/// מספר הסריקות בביטויי חילופי הנוסח.
+@visibleForTesting
+int variantNoteScans = 0;
 
 final RegExp _bigTag = RegExp(r'<big[^>]*>([\s\S]*?)</big>');
 final RegExp _smallTag = RegExp(r'<small[^>]*>([\s\S]*?)</small>');
@@ -223,7 +231,9 @@ String cleanRawText(String raw, {TikkunTradition? tradition}) {
     return ' {${m[1]}:${excluded.id}} ';
   });
 
-  if (tradition != null) {
+  // הביטויים סורקים כל אות בספר, ורוב ספרי הנביאים בלי הערת חילוף.
+  if (tradition != null && text.contains('(בספרי ')) {
+    variantNoteScans++;
     // יש הערות חילוף לפני המילה; מאחדים את מקומן לפני בחירת החלופה.
     text = text.replaceAllMapped(
       _leadingVariantNote,

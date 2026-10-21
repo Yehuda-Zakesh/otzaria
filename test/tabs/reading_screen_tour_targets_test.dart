@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/bookmarks/bloc/bookmark_bloc.dart';
@@ -137,7 +138,7 @@ void main() {
     expect(
       find.descendant(
         of: viewerOf(tabs[1]),
-        matching: find.byKey(textBookNavigationTourTargetKey),
+        matching: find.byKey(AppWindowKeys.current.tour.textBookNavigation),
         skipOffstage: false,
       ),
       findsOneWidget,
@@ -146,7 +147,7 @@ void main() {
     expect(
       find.descendant(
         of: viewerOf(tabs[0]),
-        matching: find.byKey(textBookNavigationTourTargetKey),
+        matching: find.byKey(AppWindowKeys.current.tour.textBookNavigation),
         skipOffstage: false,
       ),
       findsNothing,

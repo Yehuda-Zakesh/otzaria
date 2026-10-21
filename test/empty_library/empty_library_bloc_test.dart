@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:otzaria/core/foreground_work.dart';
+import 'package:otzaria/core/messages/library_messages.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/empty_library/bloc/empty_library_bloc.dart';
 import 'package:otzaria/empty_library/bloc/empty_library_event.dart';
@@ -13,6 +15,7 @@ import 'package:otzaria/empty_library/bloc/empty_library_state.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/search/magic_dictionary_downloader.dart';
 import 'package:path/path.dart' as path;
+import 'package:seforim_library_updater/seforim_library_updater.dart';
 
 import 'library_release_test_support.dart';
 
@@ -2592,7 +2595,215 @@ void main() {
         );
       },
     );
+
+    group('שירות חזית בהורדה הראשונית', () {
+      const seforimUrl = 'https://example.com/releases/seforim.db.zst';
+      late Directory tempDir;
+      late _FakeForegroundPlatform platform;
+      late ForegroundWork foregroundWork;
+      late List<Object> loggedErrors;
+
+      setUp(() async {
+        tempDir = await Directory.systemTemp.createTemp('otzaria-fgs-');
+        await _cleanDownloadTemps();
+        await Settings.init(cacheProvider: _MemoryCacheProvider());
+        await Settings.setValue<String>(SettingsRepository.keyLibraryPath, '');
+        platform = _FakeForegroundPlatform();
+        loggedErrors = [];
+        foregroundWork = ForegroundWork(
+          platform: platform,
+          isAndroid: true,
+          logFailure: (_, _, _) {},
+        );
+      });
+      tearDown(() async {
+        await _cleanDownloadTemps();
+        if (await tempDir.exists()) await tempDir.delete(recursive: true);
+      });
+
+      /// [seforimBody] — גוף ה-GET של ה-DB; [onSeforimHead] נקרא ב-HEAD שלו.
+      EmptyLibraryBloc build({
+        required Stream<List<int>> Function() seforimBody,
+        void Function()? onSeforimHead,
+        bool failExtract = false,
+      }) {
+        final client = MockClient.streaming((request, _) async {
+          if (request.url.path.endsWith('/releases/latest')) {
+            return http.StreamedResponse(
+              Stream.value(
+                utf8.encode(
+                  jsonEncode({
+                    'assets': [
+                      {
+                        'name': 'seforim.db.zst',
+                        'browser_download_url': seforimUrl,
+                      },
+                    ],
+                  }),
+                ),
+              ),
+              200,
+              headers: const {'content-type': 'application/json'},
+            );
+          }
+          if (request.url.toString() == seforimUrl) {
+            if (request.method == 'HEAD') {
+              onSeforimHead?.call();
+              return http.StreamedResponse(
+                const Stream.empty(),
+                200,
+                contentLength: 100,
+                headers: const {'etag': '"seforim-v1"'},
+              );
+            }
+            return http.StreamedResponse(
+              seforimBody(),
+              200,
+              contentLength: 100,
+              headers: const {'etag': '"seforim-v1"'},
+            );
+          }
+          if (request.url.host == 'github.com') {
+            return http.StreamedResponse(
+              Stream.value(List.filled(10, 7)),
+              200,
+              contentLength: 10,
+            );
+          }
+          return http.StreamedResponse(const Stream.empty(), 404);
+        });
+        final bloc = EmptyLibraryBloc(
+          httpClient: client,
+          defaultLibraryPathOverride: tempDir.path,
+          foregroundWork: foregroundWork,
+          logError: (_, error, _) => loggedErrors.add(error),
+          extractCompressedDatabase:
+              (archivePath, outputPath, onProgress) async {
+                if (failExtract &&
+                    path.basename(archivePath) == 'otzaria_seforim.db.zst') {
+                  throw Exception('החילוץ נכשל');
+                }
+                await File(outputPath).writeAsBytes(const [1], flush: true);
+              },
+          extractTarArchive: (archivePath, outputDir, onProgress) async {},
+        );
+        addTearDown(bloc.close);
+        return bloc;
+      }
+
+      Stream<List<int>> fullBody() => Stream.value(List.filled(100, 4));
+
+      test('הורדה שהצליחה: השירות עולה בתחילתה ונעצר בסופה', () async {
+        final bloc = build(seforimBody: fullBody);
+        final done = bloc.stream
+            .where((s) => s is EmptyLibraryDirectorySelected)
+            .first;
+        bloc.add(DownloadLibraryRequested());
+        await done.timeout(const Duration(seconds: 10));
+        await foregroundWork.settled;
+        expect(platform.calls, ['start', 'stop']);
+        expect(platform.permissionRequests, [true]);
+        expect(loggedErrors, isEmpty);
+      });
+
+      test('כשל שאינו קטיעה: נעצר, וההודעה אינה מבטיחה המשך', () async {
+        final bloc = build(seforimBody: fullBody, failExtract: true);
+        final failed = bloc.stream
+            .where((s) => s is EmptyLibraryError)
+            .cast<EmptyLibraryError>()
+            .first;
+        bloc.add(DownloadLibraryRequested());
+        final state = await failed.timeout(const Duration(seconds: 10));
+        await foregroundWork.settled;
+        expect(platform.calls, ['start', 'stop']);
+        expect(state.errorMessage, startsWith('שגיאה בהורדה:'));
+        expect(
+          state.errorMessage,
+          isNot(contains(LibraryMessages.downloadPausedResumable)),
+        );
+      });
+
+      test(
+        'מכסת הזמן באמצע ההורדה: נעצרת, והקובץ החלקי מוצע להמשך',
+        () async {
+          Stream<List<int>> interruptedBody() async* {
+            yield List.filled(40, 4);
+            platform.timeout();
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+            yield List.filled(60, 4);
+          }
+
+          final bloc = build(seforimBody: interruptedBody);
+          final failed = bloc.stream
+              .where((s) => s is EmptyLibraryError)
+              .cast<EmptyLibraryError>()
+              .first;
+          bloc.add(DownloadLibraryRequested());
+          final state = await failed.timeout(const Duration(seconds: 10));
+          expect(
+            state.errorMessage,
+            '${LibraryMessages.downloadPausedResumable}\n'
+            '${LibraryMessages.backgroundTimeLimitReached}',
+          );
+          final temp = File(
+            path.join(Directory.systemTemp.path, 'otzaria_seforim.db.zst'),
+          );
+          expect(temp.existsSync(), isTrue);
+          expect(
+            loggedErrors,
+            [isA<PatchDownloadCancelled>()],
+            reason: 'ההודעה הקצרה אינה מציגה את החריגה — היא חייבת להירשם',
+          );
+          await foregroundWork.settled;
+          expect(platform.calls, ['start'], reason: 'המערכת כבר עצרה אותו');
+        },
+      );
+
+      test('מכסת הזמן לפני שירד בייט: אין הבטחת המשך', () async {
+        final bloc = build(
+          seforimBody: fullBody,
+          onSeforimHead: () => platform.timeout(),
+        );
+        final failed = bloc.stream
+            .where((s) => s is EmptyLibraryError)
+            .cast<EmptyLibraryError>()
+            .first;
+        bloc.add(DownloadLibraryRequested());
+        final state = await failed.timeout(const Duration(seconds: 10));
+        expect(
+          state.errorMessage,
+          isNot(contains(LibraryMessages.downloadPausedResumable)),
+        );
+      });
+    });
   });
+}
+
+class _FakeForegroundPlatform implements ForegroundWorkPlatform {
+  final calls = <String>[];
+  void Function()? _onTimeout;
+
+  void timeout() => _onTimeout!();
+
+  @override
+  void setHandlers({
+    required void Function() onTimeout,
+    required void Function(String reason) onStartFailed,
+  }) => _onTimeout = onTimeout;
+
+  final permissionRequests = <bool>[];
+
+  @override
+  Future<void> start(
+    ForegroundWorkNotice notice, {
+    required bool requestPermission,
+  }) async {
+    calls.add('start');
+    permissionRequests.add(requestPermission);
+  }
+
+  @override
+  Future<void> stop() async => calls.add('stop');
 }
 
 /// מוחק שרידי קבצי temp של הורדות קודמות כדי שבדיקות resume לא יושפעו מהם.

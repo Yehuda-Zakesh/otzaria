@@ -4,15 +4,17 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/tools/calendar/bloc/calendar_cubit.dart';
-import 'package:otzaria/tools/calendar/services/notification_service.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_client.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_owner.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_store.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
+
+import '../support/calendar_alerts_fakes.dart';
 
 final _now = DateTime(2026, 10, 2);
 
 class _Settings implements SettingsRepository {
   String notificationIds = '[]';
-  final firstScheduleSaved = Completer<void>();
-  final secondScheduleSaved = Completer<void>();
 
   @override
   Future<Map<String, dynamic>> loadSettings() async => {
@@ -49,14 +51,8 @@ class _Settings implements SettingsRepository {
   String getCalendarEventNotificationIdsJson() => notificationIds;
 
   @override
-  Future<void> updateCalendarEventNotificationIdsJson(String value) async {
-    notificationIds = value;
-    if (!firstScheduleSaved.isCompleted) {
-      firstScheduleSaved.complete();
-    } else if (!secondScheduleSaved.isCompleted) {
-      secondScheduleSaved.complete();
-    }
-  }
+  Future<void> updateCalendarEventNotificationIdsJson(String value) async =>
+      notificationIds = value;
 
   @override
   Future<void> updateCalendarEvents(String value) async {}
@@ -84,111 +80,94 @@ class _Plugins implements CalendarPluginSource {
   }) async => events;
 }
 
-class _Notifications implements NotificationService {
-  final cancellationStarted = Completer<void>();
-  final releaseCancellation = Completer<void>();
-  final scheduled = <({int minutes, bool sound})>[];
-  bool holdCancellation = false;
-  int cancellations = 0;
-
-  @override
-  bool get isInitialized => true;
-
-  @override
-  Future<bool> checkPermissions() async => true;
-
-  @override
-  Future<void> cancelNotification(int id) async {
-    if (holdCancellation && ++cancellations == 1) {
-      cancellationStarted.complete();
-      await releaseCancellation.future;
-    }
-  }
-
-  @override
-  Future<void> scheduleNotification({
-    required int id,
-    required String title,
-    required String body,
-    required DateTime eventDate,
-    required int reminderMinutes,
-    bool soundEnabled = true,
-  }) async => scheduled.add((minutes: reminderMinutes, sound: soundEnabled));
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   tz_data.initializeTimeZones();
 
   late _Settings settings;
-  late _Notifications notifications;
+  late WindowsLikeNotifications notifications;
+  late CalendarAlertsOwner owner;
   late CalendarCubit cubit;
+  late Completer<void> cancellationStarted;
 
   setUp(() async {
     settings = _Settings();
-    notifications = _Notifications();
+    notifications = WindowsLikeNotifications();
+    owner = CalendarAlertsOwner(
+      store: RepositoryCalendarAlertsStore(settings),
+      notifications: notifications,
+      pluginEvents: () async => const [],
+      now: () => _now,
+      broadcast: (_) {},
+      dedupeDuplicates: false,
+    );
     cubit = CalendarCubit(
       settingsRepository: settings,
-      notificationService: notifications,
+      alertsClient: LocalCalendarAlertsClient(owner),
       pluginCalendarAdapter: _Plugins(),
-      now: () => _now,
     );
-    await settings.firstScheduleSaved.future;
+    await cubit.initialized;
+    await owner.restoreIfNeeded();
     notifications.scheduled.clear();
-    notifications.holdCancellation = true;
+    cancellationStarted = Completer<void>();
+    // הריצה הבאה נעצרת בביטול הראשון שלה.
+    notifications.cancelGate = Completer<void>();
+    notifications.onCancel = () {
+      if (!cancellationStarted.isCompleted) cancellationStarted.complete();
+    };
   });
 
   tearDown(() async {
-    if (!notifications.releaseCancellation.isCompleted) {
-      notifications.releaseCancellation.complete();
+    if (!notifications.cancelGate!.isCompleted) {
+      notifications.cancelGate!.complete();
     }
+    await owner.idle;
     await cubit.close();
+    owner.dispose();
   });
 
+  Future<void> release() async {
+    notifications.cancelGate!.complete();
+    await owner.idle;
+  }
+
   test('disabling notifications during cancellation stays disabled', () async {
-    final olderReschedule = cubit.changeCalendarNotificationTime(15);
-    await notifications.cancellationStarted.future;
+    await cubit.changeCalendarNotificationTime(15);
+    await cancellationStarted.future;
     await cubit.changeCalendarNotificationsEnabled(false);
-    notifications.releaseCancellation.complete();
-    await olderReschedule;
+    await release();
 
     expect(cubit.state.calendarNotificationsEnabled, isFalse);
-    expect(notifications.scheduled, isEmpty);
+    expect(notifications.present, isEmpty);
     expect(settings.notificationIds, '[]');
   });
 
   test(
     'deleting an event during cancellation keeps its reminder deleted',
     () async {
-      final olderReschedule = cubit.changeCalendarNotificationTime(15);
-      await notifications.cancellationStarted.future;
+      await cubit.changeCalendarNotificationTime(15);
+      await cancellationStarted.future;
       await cubit.deleteEvent('event');
-      await settings.secondScheduleSaved.future;
-      notifications.releaseCancellation.complete();
-      await olderReschedule;
+      await release();
 
       expect(cubit.state.events, isEmpty);
-      expect(notifications.scheduled, isEmpty);
+      expect(notifications.present, isEmpty);
       expect(settings.notificationIds, '[]');
     },
   );
 
   test('rescheduling after cancellation uses current time and sound', () async {
-    final olderReschedule = cubit.changeCalendarNotificationTime(15);
-    await notifications.cancellationStarted.future;
+    await cubit.changeCalendarNotificationTime(15);
+    await cancellationStarted.future;
     await cubit.changeCalendarNotificationTime(20);
     await cubit.changeCalendarNotificationSound(true);
-    notifications.releaseCancellation.complete();
-    await olderReschedule;
+    await release();
 
     expect(cubit.state.calendarNotificationTime, 20);
     expect(cubit.state.calendarNotificationSound, isTrue);
-    expect(notifications.scheduled, [
-      (minutes: 20, sound: false),
-      (minutes: 20, sound: true),
-    ]);
+    expect(notifications.everyIdAtMostOnce, isTrue);
+    expect(notifications.present, hasLength(1));
+    final last = notifications.scheduled.last;
+    expect((last.minutes, last.sound), (20, true));
   });
 }

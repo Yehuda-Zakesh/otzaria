@@ -112,7 +112,7 @@ class BackupRestoreFlow {
       confirmText: context.settingsText('טען מחדש'),
     );
     if (!context.mounted) return;
-    await resetRuntimeStateForAppRestart();
+    await resetRuntimeStateAfterSettingsReset();
     if (!context.mounted) return;
     MultiWindowService.restartPeers();
     RestartWidget.restartApp(

@@ -34,7 +34,7 @@ Future<Bookmark?> bookmarkFromReadingTab(
   bool useStoredPositionFallback = false,
 }) async {
   if (tab is CommentatorsTab) {
-    final blocState = tab.bloc.state;
+    final blocState = tab.blocState;
     if (blocState is TextBookLoaded && blocState.visibleIndices.isNotEmpty) {
       final index = tab.currentIndex;
       final ref = await _lineRef(
@@ -70,9 +70,10 @@ Future<Bookmark?> bookmarkFromReadingTab(
   }
 
   if (tab is TextBookTab) {
-    final blocState = tab.bloc.state;
+    final blocState = tab.blocState;
+    final anchor = tab.lines.captureAnchor();
+    final index = anchor?.line ?? tab.index;
     if (blocState is TextBookLoaded && blocState.visibleIndices.isNotEmpty) {
-      final index = tab.index;
       final ref = await _lineRef(
         blocState.book,
         index,
@@ -82,6 +83,7 @@ Future<Bookmark?> bookmarkFromReadingTab(
         ref: ref,
         book: blocState.book,
         index: index,
+        readingAnchor: anchor,
         commentatorsToShow: blocState.activeCommentators,
         workspaceName: workspaceName,
       );
@@ -89,13 +91,14 @@ Future<Bookmark?> bookmarkFromReadingTab(
     if (!useStoredPositionFallback) return null;
     final ref = await _lineRef(
       tab.book,
-      tab.index,
+      index,
       () => tab.book.tableOfContents,
     );
     return Bookmark(
       ref: ref,
       book: tab.book,
-      index: tab.index,
+      index: index,
+      readingAnchor: anchor,
       commentatorsToShow: tab.commentators ?? const [],
       workspaceName: workspaceName,
     );
@@ -179,6 +182,7 @@ OpenedTab tabFromBookmark(Bookmark bookmark) {
   return OpenedTab.fromBook(
     bookmark.book,
     bookmark.index,
+    initialReadingAnchor: bookmark.readingAnchor,
     commentators: bookmark.commentatorsToShow,
     openLeftPane: openLeftPane,
   );

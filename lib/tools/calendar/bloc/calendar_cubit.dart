@@ -7,7 +7,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:kosher_dart/kosher_dart.dart';
 import 'package:otzaria/settings/settings_exports.dart';
-import 'package:otzaria/tools/calendar/services/calendar_alert_scheduler.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_client.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_owner.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_store.dart';
 import 'package:otzaria/tools/calendar/services/notification_service.dart';
 import 'package:otzaria/tools/calendar/repository/google_calendar_repository.dart';
 import 'package:otzaria/tools/calendar/services/google_calendar_service.dart';
@@ -61,16 +63,27 @@ class _DefaultPluginSource implements CalendarPluginSource {
 // Calendar Cubit
 class CalendarCubit extends Cubit<CalendarState> {
   final SettingsRepository _settingsRepository;
-  final NotificationService _notificationService;
-  late final _alerts = CalendarAlertScheduler(
-    notifications: _notificationService,
-    settings: _settingsRepository,
-    now: _now,
+
+  /// כל שינוי במצב ההתראות עובר דרך הבעלים; ה-cubit מציג את מה שאישר.
+  final CalendarAlertsClient _alerts;
+  StreamSubscription<CalendarAlertsUpdate>? _alertsUpdates;
+  StreamSubscription<CalendarScheduleStatus>? _scheduleStatuses;
+
+  /// הערכים האחרונים שהבעלים אישר; אליהם חוזרים כשפקודה נדחית.
+  Map<String, Object?>? _confirmedValues;
+
+  /// revision של הפקודה האחרונה מהחלון הזה, שתוצאת התזמון שלה טרם דווחה.
+  int? _awaitedScheduleRevision;
+
+  List<CustomEvent> _pluginEvents = const [];
+  ({String? workspaceId, String? bookId, String? bookUid}) _pluginScope = (
+    workspaceId: null,
+    bookId: null,
+    bookUid: null,
   );
   final GoogleCalendarRepository _googleCalendar;
   final IcsCalendarService _icsCalendarService;
   final CalendarPluginSource _pluginCalendarAdapter;
-  final DateTime Function() _now;
   final Completer<void> _initializationCompleter = Completer<void>();
   Timer? _todayRefreshTimer;
   int _pluginRefreshGeneration = 0;
@@ -96,23 +109,42 @@ class CalendarCubit extends Cubit<CalendarState> {
     if (_calendarWidgetCount == 0) resetSelectionToTodayIfNeeded();
   }
 
+  /// [settingsRepository] או [notificationService] בלי [alertsClient] יוצרים
+  /// בעלים פרטי מעליהם (בדיקות); אחרת הבעלים של החלון.
   CalendarCubit({
     SettingsRepository? settingsRepository,
     NotificationService? notificationService,
+    CalendarAlertsClient? alertsClient,
     GoogleCalendarService? googleCalendarService,
     IcsCalendarService? icsCalendarService,
     CalendarPluginSource? pluginCalendarAdapter,
     DateTime Function()? now,
   }) : _settingsRepository = settingsRepository ?? SettingsRepository(),
-       _notificationService = notificationService ?? NotificationService(),
+       _alerts =
+           alertsClient ??
+           (settingsRepository == null && notificationService == null
+               ? CalendarAlertsClient.forCurrentWindow()
+               : LocalCalendarAlertsClient(
+                   CalendarAlertsOwner(
+                     store: settingsRepository == null
+                         ? const SettingsCalendarAlertsStore()
+                         : RepositoryCalendarAlertsStore(settingsRepository),
+                     notifications: notificationService,
+                     pluginEvents: () =>
+                         (pluginCalendarAdapter ?? const _DefaultPluginSource())
+                             .loadAndMergePluginEvents(const []),
+                     now: now,
+                   ),
+                 )),
        _googleCalendar = GoogleCalendarRepository(
          googleCalendarService ?? GoogleCalendarService(),
        ),
        _icsCalendarService = icsCalendarService ?? IcsCalendarService(),
        _pluginCalendarAdapter =
            pluginCalendarAdapter ?? const _DefaultPluginSource(),
-       _now = now ?? DateTime.now,
        super(CalendarState.initial()) {
+    _alertsUpdates = _alerts.updates.listen(_onAlertsUpdate);
+    _scheduleStatuses = _alerts.scheduleStatuses.listen(_onScheduleStatus);
     _initializeCalendar(resetSelectedToToday: true);
   }
 
@@ -175,26 +207,23 @@ class CalendarCubit extends Cubit<CalendarState> {
     final Map<String, ZmanAlertPreference> zmanAlerts =
         _parseZmanAlertPreferences(zmanAlertsJson);
 
-    // טעינת אירועים מהאחסון. פרסור פר-פריט: אירוע פגום אחד לא מאבד
-    // את כל האירועים שהמשתמש שמר.
-    List<CustomEvent> events = [];
-    try {
-      final List<dynamic> eventsList = jsonDecode(eventsJson);
-      for (final eventMap in eventsList) {
-        try {
-          events.add(CustomEvent.fromJson(eventMap));
-        } catch (e) {
-          debugPrint('[Calendar] skipping corrupt saved event: $e');
-        }
-      }
-    } catch (e) {
-      debugPrint('[Calendar] failed to load saved events: $e');
-    }
+    final userEvents = _decodeUserEvents(eventsJson);
+    final loadedValues = <String, Object?>{
+      CalendarAlertsKeys.events: eventsJson,
+      CalendarAlertsKeys.enabled: calendarNotificationsEnabled,
+      CalendarAlertsKeys.time: calendarNotificationTime,
+      CalendarAlertsKeys.sound: calendarNotificationSound,
+      CalendarAlertsKeys.zmanAlerts: zmanAlertsJson,
+      CalendarAlertsKeys.city: selectedCity,
+      CalendarAlertsKeys.icsSubscriptions:
+          settings['calendarIcsSubscriptions'] as String? ?? '[]',
+    };
 
     if (isClosed) return;
 
-    // Add plugin published events via adapter
-    events = await _pluginCalendarAdapter.loadAndMergePluginEvents(events);
+    _pluginEvents = await _pluginCalendarAdapter.loadAndMergePluginEvents(
+      const [],
+    );
 
     if (isClosed) return;
 
@@ -208,7 +237,7 @@ class CalendarCubit extends Cubit<CalendarState> {
         currentJewishDate: currentJewishDate,
         currentGregorianDate: currentGregorianDate,
         todayGregorianDate: today,
-        events: events,
+        events: [...userEvents, ..._pluginEvents],
         inIsrael: inIsrael,
         calendarNotificationsEnabled: calendarNotificationsEnabled,
         calendarNotificationTime: calendarNotificationTime,
@@ -225,15 +254,23 @@ class CalendarCubit extends Cubit<CalendarState> {
         icsSubscriptions: icsSubscriptions,
       ),
     );
+    // עדכון מהבעלים שהגיע בזמן הטעינה חדש מההגדרות שנקראו לפניו.
+    final confirmed = _confirmedValues;
+    if (confirmed == null) {
+      _confirmedValues = loadedValues;
+    } else {
+      emit(_withValues(state, confirmed));
+    }
     if (!_initializationCompleter.isCompleted) {
       _initializationCompleter.complete();
     }
     if (isClosed) return;
-    _updateTimesForDate(selectedGregorianDate, selectedCity);
-    await _rescheduleNotifications();
-    if (isClosed) return;
-    await _rescheduleZmanAlerts();
-    if (isClosed) return;
+    _updateTimesForDate(state.selectedGregorianDate, state.selectedCity);
+    // ההגדרות של חלון משני הן עותק; הבעלים מחזיר את המצב העדכני.
+    if (_alerts.needsSnapshot) {
+      await _alerts.send('snapshot');
+      if (isClosed) return;
+    }
     await _refreshGoogleConnectionStatus();
     if (isClosed) return;
     if (googleCalendarEnabled) {
@@ -261,6 +298,11 @@ class CalendarCubit extends Cubit<CalendarState> {
   }) async {
     // בולע קריאות ישנות: רק הקריאה האחרונה שמסיימת מורשית ל-emit.
     final generation = ++_pluginRefreshGeneration;
+    _pluginScope = (
+      workspaceId: currentWorkspaceId,
+      bookId: currentBookId,
+      bookUid: currentBookUid,
+    );
 
     final pluginEvents = await _pluginCalendarAdapter.loadAndMergePluginEvents(
       [],
@@ -273,9 +315,126 @@ class CalendarCubit extends Cubit<CalendarState> {
 
     // קריאת אירועי המשתמש מה-state הנוכחי (אחרי ה-await, כדי לא לדרוס אירועים
     // שנטענו ב-_initializeCalendar בזמן שהמתנו לתשובת ה-DB)
-    final userEvents = state.events.where((e) => !e.id.contains(':')).toList();
-    emit(state.copyWith(events: [...userEvents, ...pluginEvents]));
+    _pluginEvents = pluginEvents;
+    emit(state.copyWith(events: [..._userEvents, ...pluginEvents]));
   }
+
+  List<CustomEvent> get _userEvents =>
+      state.events.where((e) => !e.id.contains(':')).toList();
+
+  /// אירועי המשתמש מה-JSON השמור. אירוע פגום אחד לא מאבד את כל השאר,
+  /// ואירועי תוספים שנשמרו בטעות נטענים רק מהמסד.
+  static List<CustomEvent> _decodeUserEvents(Object? eventsJson) {
+    final events = <CustomEvent>[];
+    try {
+      final decoded = jsonDecode(eventsJson as String? ?? '[]');
+      for (final eventMap in decoded as List) {
+        try {
+          final event = CustomEvent.fromJson(eventMap);
+          if (!event.id.contains(':')) events.add(event);
+        } catch (e) {
+          debugPrint('[Calendar] skipping corrupt saved event: $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('[Calendar] failed to load saved events: $e');
+    }
+    return events;
+  }
+
+  void _onAlertsUpdate(CalendarAlertsUpdate update) {
+    if (isClosed) return;
+    _confirmedValues = update.values;
+    emit(_withValues(state, update.values));
+    if (update.pluginEventsChanged) {
+      unawaited(
+        refreshPluginEvents(
+          currentWorkspaceId: _pluginScope.workspaceId,
+          currentBookId: _pluginScope.bookId,
+          currentBookUid: _pluginScope.bookUid,
+        ),
+      );
+    }
+  }
+
+  void _onScheduleStatus(CalendarScheduleStatus status) {
+    final awaited = _awaitedScheduleRevision;
+    if (isClosed || awaited == null || status.revision < awaited) return;
+    _awaitedScheduleRevision = null;
+    if (!status.ok) {
+      UiSnack.showWarning(ToolsMessages.calendarAlertsScheduleFailed);
+    }
+  }
+
+  /// [current] עם הערכים שבבעלות הבעלים.
+  CalendarState _withValues(
+    CalendarState current,
+    Map<String, Object?> values,
+  ) {
+    var next = current.copyWith(
+      events: [
+        ..._decodeUserEvents(values[CalendarAlertsKeys.events]),
+        ..._pluginEvents,
+      ],
+      calendarNotificationsEnabled:
+          values[CalendarAlertsKeys.enabled] as bool? ??
+          current.calendarNotificationsEnabled,
+      calendarNotificationTime:
+          values[CalendarAlertsKeys.time] as int? ??
+          current.calendarNotificationTime,
+      calendarNotificationSound:
+          values[CalendarAlertsKeys.sound] as bool? ??
+          current.calendarNotificationSound,
+      zmanAlerts: _parseZmanAlertPreferences(
+        values[CalendarAlertsKeys.zmanAlerts] as String? ?? '{}',
+      ),
+      icsSubscriptions: IcsSubscription.listFromJson(
+        values[CalendarAlertsKeys.icsSubscriptions] as String? ?? '[]',
+      ),
+    );
+    final city = values[CalendarAlertsKeys.city];
+    if (city is String && city != next.selectedCity) {
+      next = _stateForCity(next, city);
+    }
+    return next;
+  }
+
+  /// שולח פקודה לבעלים. בדחייה חוזרים לערכים המאושרים ומוצגת הודעה;
+  /// בפקיעת זמן המצב האופטימי נשאר עד העדכון הבא.
+  Future<CalendarAlertsAck> _send(
+    String op, [
+    Map<String, Object?> args = const {},
+  ]) async {
+    final ack = await _alerts.send(op, args);
+    if (isClosed) return ack;
+    switch (ack.failure) {
+      case null:
+        final revision = ack.update?.revision;
+        if (revision != null) _awaitedScheduleRevision = revision;
+      case CalendarAlertsFailure.timeout:
+        UiSnack.showWarning(ToolsMessages.calendarMainWindowSlow);
+      case CalendarAlertsFailure.noOwner:
+      case CalendarAlertsFailure.rejected:
+        final confirmed = _confirmedValues;
+        if (confirmed != null) emit(_withValues(state, confirmed));
+        UiSnack.showError(ToolsMessages.calendarMainWindowUnavailable);
+    }
+    return ack;
+  }
+
+  Future<bool> _ensurePermission() async {
+    final ack = await _alerts.send('ensurePermission');
+    return ack.ok && ack.value == true;
+  }
+
+  void _warnIfCityUnknown(String city) {
+    if (state.zmanAlerts.isNotEmpty && _getCityData(city) == null) {
+      UiSnack.showError(ToolsMessages.cityDataNotFound);
+    }
+  }
+
+  static Map<String, Object?> _eventJson(CustomEvent event) =>
+      Map<String, Object?>.from(jsonDecode(jsonEncode(event.toJson())) as Map);
 
   /// מפענח את רשימת מזהי הזמנים המופעלים. מחרוזת ריקה/לא תקינה →
   /// ברירת המחדל מתוך רישום הזמנים.
@@ -327,14 +486,17 @@ class CalendarCubit extends Cubit<CalendarState> {
   }
 
   /// שולח התראת בדיקה למערכת ההפעלה. מחזיר האם השליחה הצליחה.
-  Future<bool> sendTestNotification() => _alerts.sendTestNotification();
+  Future<bool> sendTestNotification() async {
+    final ack = await _alerts.send('sendTest');
+    return ack.ok && ack.value == true;
+  }
 
   Future<void> setZmanAlertPreference({
     required String timeId,
     required String displayName,
     required int minutesBefore,
   }) async {
-    if (!await _alerts.ensurePermission()) {
+    if (!await _ensurePermission()) {
       String message;
 
       if (Platform.isMacOS) {
@@ -349,17 +511,19 @@ class CalendarCubit extends Cubit<CalendarState> {
       return;
     }
 
-    final updated = Map<String, ZmanAlertPreference>.from(state.zmanAlerts);
-    updated[timeId] = ZmanAlertPreference(
+    final pref = ZmanAlertPreference(
       minutesBefore: minutesBefore,
       displayName: displayName,
     );
+    final updated = Map<String, ZmanAlertPreference>.from(state.zmanAlerts);
+    updated[timeId] = pref;
     emit(state.copyWith(zmanAlerts: updated));
-    await _settingsRepository.updateCalendarZmanAlertsJson(
-      jsonEncode(updated.map((k, v) => MapEntry(k, v.toJson()))),
-    );
-
-    await _rescheduleZmanAlerts();
+    final ack = await _send('setZmanAlert', {
+      'timeId': timeId,
+      'pref': pref.toJson(),
+    });
+    if (!ack.ok) return;
+    _warnIfCityUnknown(state.selectedCity);
     UiSnack.show(ToolsMessages.zmanAlertEnabled(displayName));
   }
 
@@ -372,21 +536,9 @@ class CalendarCubit extends Cubit<CalendarState> {
     final updated = Map<String, ZmanAlertPreference>.from(state.zmanAlerts);
     updated.remove(timeId);
     emit(state.copyWith(zmanAlerts: updated));
-    await _settingsRepository.updateCalendarZmanAlertsJson(
-      jsonEncode(updated.map((k, v) => MapEntry(k, v.toJson()))),
-    );
-
-    await _alerts.cancelZmanAlert(timeId);
-
+    final ack = await _send('setZmanAlert', {'timeId': timeId, 'pref': null});
+    if (!ack.ok) return;
     UiSnack.show(ToolsMessages.zmanAlertCancelled(existing.displayName));
-  }
-
-  Future<void> _rescheduleZmanAlerts() async {
-    await _alerts.rescheduleZmanAlerts(
-      state.zmanAlerts,
-      state.selectedCity,
-      onCityNotFound: () => UiSnack.showError(ToolsMessages.cityDataNotFound),
-    );
   }
 
   void _updateTimesForDate(DateTime date, String city) {
@@ -480,45 +632,44 @@ class CalendarCubit extends Cubit<CalendarState> {
   }
 
   Future<void> changeCity(String newCity) async {
-    final bool inIsrael = _isCityInIsrael(newCity);
+    emit(_stateForCity(state, newCity));
+    await _send('setCity', {'city': newCity});
+    if (isClosed) return;
+    // זמני היום תלויים בעיר; הבעלים מתזמן אותם מחדש.
+    _warnIfCityUnknown(newCity);
+    _scheduleTodayRefresh();
+  }
+
+  CalendarState _stateForCity(CalendarState current, String newCity) {
     final wasViewingToday = _isSameDateOnly(
-      state.selectedGregorianDate,
-      state.todayGregorianDate,
+      current.selectedGregorianDate,
+      current.todayGregorianDate,
     );
     final today = resolveCalendarDayForTransition(
       now: DateTime.now(),
       city: newCity,
-      transition: state.dayTransition,
+      transition: current.dayTransition,
     );
     final jewishToday = JewishDate.fromDateTime(today);
-    final selectedDate = wasViewingToday ? today : state.selectedGregorianDate;
-    final newTimes = _calculateDailyTimes(selectedDate, newCity);
-    emit(
-      state.copyWith(
-        selectedCity: newCity,
-        dailyTimes: newTimes,
-        inIsrael: inIsrael,
-        todayGregorianDate: today,
-        selectedGregorianDate: wasViewingToday
-            ? today
-            : state.selectedGregorianDate,
-        selectedJewishDate: wasViewingToday
-            ? jewishToday
-            : state.selectedJewishDate,
-        currentGregorianDate: wasViewingToday
-            ? today
-            : state.currentGregorianDate,
-        currentJewishDate: wasViewingToday
-            ? jewishToday
-            : state.currentJewishDate,
-      ),
+    final selectedDate = wasViewingToday
+        ? today
+        : current.selectedGregorianDate;
+    return current.copyWith(
+      selectedCity: newCity,
+      dailyTimes: _calculateDailyTimes(selectedDate, newCity),
+      inIsrael: _isCityInIsrael(newCity),
+      todayGregorianDate: today,
+      selectedGregorianDate: selectedDate,
+      selectedJewishDate: wasViewingToday
+          ? jewishToday
+          : current.selectedJewishDate,
+      currentGregorianDate: wasViewingToday
+          ? today
+          : current.currentGregorianDate,
+      currentJewishDate: wasViewingToday
+          ? jewishToday
+          : current.currentJewishDate,
     );
-    // שמור את הבחירה בהגדרות
-    await _settingsRepository.updateSelectedCity(newCity);
-
-    // Times shift with city, so reschedule zman alerts.
-    await _rescheduleZmanAlerts();
-    _scheduleTodayRefresh();
   }
 
   Future<void> changeCalendarType(CalendarType type) async {
@@ -571,6 +722,8 @@ class CalendarCubit extends Cubit<CalendarState> {
   @override
   Future<void> close() {
     _todayRefreshTimer?.cancel();
+    unawaited(_alertsUpdates?.cancel());
+    unawaited(_scheduleStatuses?.cancel());
     if (!_initializationCompleter.isCompleted) {
       _initializationCompleter.complete();
     }
@@ -921,7 +1074,7 @@ class CalendarCubit extends Cubit<CalendarState> {
         clearGoogleCalendarSyncError: true,
       ),
     );
-    await _saveEventsToStorage(remaining);
+    await _send('removeSourceEvents', {'kind': 'google'});
   }
 
   Future<void> syncGoogleCalendar({required bool interactive}) async {
@@ -937,8 +1090,9 @@ class CalendarCubit extends Cubit<CalendarState> {
     try {
       // Calculate date range for sync
       final now = DateTime.now();
+      List<CustomEvent> existing = const [];
       final events = await _googleCalendar.fetchEvents(
-        existingEvents: () => state.events,
+        existingEvents: () => existing = _userEvents,
         calendarIds: () => state.googleCalendarSelectedIds,
         timeMin: now.subtract(Duration(days: state.googleCalendarSyncPastDays)),
         timeMax: now.add(Duration(days: state.googleCalendarSyncFutureDays)),
@@ -957,9 +1111,16 @@ class CalendarCubit extends Cubit<CalendarState> {
 
       try {
         final syncTime = DateTime.now();
+        // רק מה שגוגל הוסיף או שינה: רשימה מלאה הייתה מחזירה אירוע שנמחק
+        // בחלון אחר בזמן הסנכרון.
+        final before = {for (final e in existing) e.id: e};
+        final changed = [
+          for (final e in events)
+            if (before[e.id] != e) e,
+        ];
         emit(
           state.copyWith(
-            events: events,
+            events: [..._upsertedUserEvents(changed), ..._pluginEvents],
             googleCalendarConnected: true,
             googleCalendarSyncInProgress: false,
             googleCalendarLastSync: syncTime,
@@ -969,7 +1130,12 @@ class CalendarCubit extends Cubit<CalendarState> {
         await _settingsRepository.updateGoogleCalendarLastSync(
           syncTime.millisecondsSinceEpoch,
         );
-        await _saveEventsToStorage(events);
+        if (changed.isNotEmpty) {
+          await _send('replaceSourceEvents', {
+            'kind': 'google',
+            'events': [for (final e in changed) _eventJson(e)],
+          });
+        }
       } catch (e) {
         _emitGoogleSyncError(e);
       }
@@ -1006,14 +1172,18 @@ class CalendarCubit extends Cubit<CalendarState> {
   Future<int> importIcsContent(String content) async {
     final parsed = IcsCalendarService.parseIcs(content);
     if (parsed.isEmpty) return 0;
-    final newIds = parsed.map((e) => e.id).toSet();
-    final events = [
-      ...state.events.where((e) => !newIds.contains(e.id)),
-      ...parsed,
-    ];
-    emit(state.copyWith(events: events));
-    await _saveEventsToStorage(events);
-    return parsed.length;
+    emit(
+      state.copyWith(
+        events: [..._upsertedUserEvents(parsed), ..._pluginEvents],
+      ),
+    );
+    final ack = await _send('replaceSourceEvents', {
+      'kind': 'file',
+      'events': [for (final e in parsed) _eventJson(e)],
+    });
+    return ack.ok || ack.failure == CalendarAlertsFailure.timeout
+        ? parsed.length
+        : 0;
   }
 
   /// מוסיף מנוי ליומן מקישור ICS ומייבא את האירועים ממנו.
@@ -1045,9 +1215,13 @@ class CalendarCubit extends Cubit<CalendarState> {
           icsRefreshInProgress: false,
         ),
       );
-      await _saveIcsSubscriptions(subscriptions);
-      await _saveEventsToStorage(events);
-      return parsed.length;
+      final ack = await _send('addIcsSubscription', {
+        'subscription': subscription.toJson(),
+        'events': [for (final e in parsed) _eventJson(e)],
+      });
+      return ack.ok || ack.failure == CalendarAlertsFailure.timeout
+          ? parsed.length
+          : null;
     } catch (e) {
       if (!isClosed) {
         emit(
@@ -1076,8 +1250,7 @@ class CalendarCubit extends Cubit<CalendarState> {
         clearIcsSyncError: true,
       ),
     );
-    await _saveIcsSubscriptions(subscriptions);
-    await _saveEventsToStorage(events);
+    await _send('removeIcsSubscription', {'id': subscriptionId});
   }
 
   /// מרענן את אירועי המנויים מהקישורים. מנוי שנכשל שומר את אירועיו הקיימים.
@@ -1104,14 +1277,21 @@ class CalendarCubit extends Cubit<CalendarState> {
           ...state.events.where((e) => e.icsSourceId != subscription.id),
           ...parsed,
         ];
+        final refreshedAt = DateTime.now();
         final subscriptions = state.icsSubscriptions
             .map(
               (s) => s.id == subscription.id
-                  ? s.copyWith(lastRefresh: DateTime.now())
+                  ? s.copyWith(lastRefresh: refreshedAt)
                   : s,
             )
             .toList();
         emit(state.copyWith(events: events, icsSubscriptions: subscriptions));
+        await _send('replaceSourceEvents', {
+          'kind': 'ics',
+          'sourceId': subscription.id,
+          'events': [for (final e in parsed) _eventJson(e)],
+          'lastRefresh': refreshedAt.millisecondsSinceEpoch,
+        });
       } catch (e) {
         error =
             'רענון "${subscription.name}" נכשל: '
@@ -1121,16 +1301,16 @@ class CalendarCubit extends Cubit<CalendarState> {
     }
 
     emit(state.copyWith(icsRefreshInProgress: false, icsSyncError: error));
-    await _saveIcsSubscriptions(state.icsSubscriptions);
-    await _saveEventsToStorage(state.events);
   }
 
-  Future<void> _saveIcsSubscriptions(
-    List<IcsSubscription> subscriptions,
-  ) async {
-    await _settingsRepository.updateCalendarIcsSubscriptions(
-      jsonEncode(subscriptions.map((s) => s.toJson()).toList()),
-    );
+  /// אירועי המשתמש אחרי החלפת [updates] לפי מזהה.
+  List<CustomEvent> _upsertedUserEvents(List<CustomEvent> updates) {
+    final byId = {for (final e in updates) e.id: e};
+    return [
+      for (final e in _userEvents)
+        if (!byId.containsKey(e.id)) e,
+      ...updates,
+    ];
   }
 
   Future<void> _refreshGoogleConnectionStatus() async {
@@ -1157,13 +1337,16 @@ class CalendarCubit extends Cubit<CalendarState> {
     return cityData['timezone'] as String? ?? 'Asia/Jerusalem';
   }
 
-  void _replaceEventWithGoogleId(String eventId, String googleEventId) {
+  Future<void> _replaceEventWithGoogleId(
+    String eventId,
+    String googleEventId,
+  ) async {
     final events = List<CustomEvent>.from(state.events);
     final index = events.indexWhere((e) => e.id == eventId);
     if (index == -1) return;
     events[index] = events[index].copyWith(googleEventId: googleEventId);
     emit(state.copyWith(events: events));
-    _saveEventsToStorage(events);
+    await _send('setEventGoogleId', {'id': eventId, 'googleId': googleEventId});
   }
 
   // --- ניהול אירועים ---
@@ -1219,12 +1402,16 @@ class CalendarCubit extends Cubit<CalendarState> {
     );
     final updated = List<CustomEvent>.from(state.events)..add(newEvent);
     emit(state.copyWith(events: updated));
-    _saveEventsToStorage(updated);
+    final ack = await _send('upsertEvent', {'event': _eventJson(newEvent)});
+    if (ack.failure == CalendarAlertsFailure.noOwner ||
+        ack.failure == CalendarAlertsFailure.rejected) {
+      return;
+    }
 
     if (state.googleCalendarEnabled) {
       final googleId = await _upsertGoogleEvent(newEvent);
       if (googleId != null) {
-        _replaceEventWithGoogleId(newEvent.id, googleId);
+        await _replaceEventWithGoogleId(newEvent.id, googleId);
       }
     }
   }
@@ -1235,12 +1422,18 @@ class CalendarCubit extends Cubit<CalendarState> {
     if (index != -1) {
       events[index] = updatedEvent;
       emit(state.copyWith(events: events));
-      _saveEventsToStorage(events);
+      final ack = await _send('upsertEvent', {
+        'event': _eventJson(updatedEvent),
+      });
+      if (ack.failure == CalendarAlertsFailure.noOwner ||
+          ack.failure == CalendarAlertsFailure.rejected) {
+        return;
+      }
 
       if (state.googleCalendarEnabled) {
         final googleId = await _upsertGoogleEvent(updatedEvent);
         if (googleId != null && googleId != updatedEvent.googleEventId) {
-          _replaceEventWithGoogleId(updatedEvent.id, googleId);
+          await _replaceEventWithGoogleId(updatedEvent.id, googleId);
         }
       }
     }
@@ -1257,7 +1450,11 @@ class CalendarCubit extends Cubit<CalendarState> {
     final events = List<CustomEvent>.from(state.events)
       ..removeWhere((e) => e.id == eventId);
     emit(state.copyWith(events: events));
-    _saveEventsToStorage(events);
+    final ack = await _send('deleteEvent', {'id': eventId});
+    if (ack.failure == CalendarAlertsFailure.noOwner ||
+        ack.failure == CalendarAlertsFailure.rejected) {
+      return;
+    }
 
     if (state.googleCalendarEnabled && existing != null) {
       await _deleteGoogleEvent(existing);
@@ -1298,68 +1495,31 @@ class CalendarCubit extends Cubit<CalendarState> {
       ..sort(compareCalendarEventsChronologically);
   }
 
-  // שמירת אירועים לאחסון קבוע
-  Future<void> _saveEventsToStorage(List<CustomEvent> events) async {
-    try {
-      final eventsJson = jsonEncode(events.map((e) => e.toJson()).toList());
-      await _settingsRepository.updateCalendarEvents(eventsJson);
-      await _rescheduleNotifications();
-    } catch (e) {
-      // במקרה של שגיאה, נדפיס הודעה לקונסול
-      debugPrint('שגיאה בשמירת אירועים: $e');
-    }
-  }
-
   // --- Notification Settings ---
   Future<void> changeCalendarNotificationsEnabled(bool enabled) async {
-    if (enabled) {
-      // בקש הרשאות לפני הפעלת התראות
-      final notificationService = _notificationService;
-      if (!notificationService.isInitialized) {
-        await notificationService.init();
-      }
-      // בדוק תחילה אם ההרשאות כבר ניתנו
-      bool hasPermission = await notificationService.checkPermissions();
-
-      // אם אין הרשאות, בקש אותן
-      if (!hasPermission) {
-        hasPermission = await notificationService.requestPermissions();
-      }
-
-      // אם אין הרשאה, אל תפעיל את ההתראות והצג הודעה למשתמש
-      if (!hasPermission) {
-        emit(state.copyWith(calendarNotificationsEnabled: false));
-        await _settingsRepository.updateCalendarNotificationsEnabled(false);
-
-        // הצג הודעת שגיאה למשתמש עם הוראות מפורטות
-        UiSnack.showWarning(
-          ToolsMessages.notificationsPermissionRequired,
-          duration: const Duration(seconds: 8),
-        );
-        return;
-      }
+    // אם אין הרשאה, אל תפעיל את ההתראות והצג הודעה למשתמש
+    if (enabled && !await _ensurePermission()) {
+      emit(state.copyWith(calendarNotificationsEnabled: false));
+      await _send('setNotificationPrefs', {'enabled': false});
+      UiSnack.showWarning(
+        ToolsMessages.notificationsPermissionRequired,
+        duration: const Duration(seconds: 8),
+      );
+      return;
     }
 
     emit(state.copyWith(calendarNotificationsEnabled: enabled));
-    await _settingsRepository.updateCalendarNotificationsEnabled(enabled);
-    // Reschedule only if enabling/disabling notifications
-    await _rescheduleNotifications();
+    await _send('setNotificationPrefs', {'enabled': enabled});
   }
 
   Future<void> changeCalendarNotificationTime(int time) async {
-    final oldTime = state.calendarNotificationTime;
     emit(state.copyWith(calendarNotificationTime: time));
-    await _settingsRepository.updateCalendarNotificationTime(time);
-    // Reschedule only if time actually changed and notifications are enabled
-    if (oldTime != time && state.calendarNotificationsEnabled) {
-      await _rescheduleNotifications();
-    }
+    await _send('setNotificationPrefs', {'time': time});
   }
 
   Future<void> changeCalendarNotificationSound(bool enabled) async {
     emit(state.copyWith(calendarNotificationSound: enabled));
-    await _settingsRepository.updateCalendarNotificationSound(enabled);
-    // No need to reschedule for sound changes - it only affects new notifications
+    await _send('setNotificationPrefs', {'sound': enabled});
   }
 
   Future<void> changeCalendarNotificationMode(
@@ -1380,14 +1540,6 @@ class CalendarCubit extends Cubit<CalendarState> {
         await changeCalendarNotificationsEnabled(false);
     }
   }
-
-  Future<void> _rescheduleNotifications() =>
-      _alerts.rescheduleEventNotifications(
-        events: () => state.events,
-        enabled: () => state.calendarNotificationsEnabled,
-        defaultMinutes: () => state.calendarNotificationTime,
-        soundEnabled: () => state.calendarNotificationSound,
-      );
 }
 
 // --- Helper logic for robust Jewish month navigation ---

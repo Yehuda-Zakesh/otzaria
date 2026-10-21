@@ -68,6 +68,10 @@ class LibraryUpdateState extends Equatable {
   /// שם החיווי נסגר מעצמו, וכפתור עדכון הספרייה נשאר כעוגן לניסיון חוזר.
   final bool isCheckFailure;
 
+  /// `true` כשה-[LibraryUpdateStatus.error] הוא קטיעת רשת, וההורדה הבאה
+  /// תמשיך מהקובץ החלקי שנשמר.
+  final bool canResumeDownload;
+
   /// תגי ה-releases שהוחלו על ה-DB בריצה הזו (גם בעדכון חלקי) — ל"מה חדש
   /// בספרים".
   final List<String> appliedReleaseTags;
@@ -87,6 +91,7 @@ class LibraryUpdateState extends Equatable {
     this.errorMessage,
     this.isCheckFailure = false,
     this.appliedReleaseTags = const [],
+    this.canResumeDownload = false,
   });
 
   bool get isBusy =>
@@ -166,5 +171,6 @@ class LibraryUpdateState extends Equatable {
     errorMessage,
     isCheckFailure,
     appliedReleaseTags,
+    canResumeDownload,
   ];
 }

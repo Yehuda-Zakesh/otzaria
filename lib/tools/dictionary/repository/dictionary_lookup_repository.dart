@@ -369,11 +369,8 @@ class DictionaryLookupRepository {
   Map<String, Map<int, List<LaazDictionaryEntry>>> _laazByRashiLine =
       <String, Map<int, List<LaazDictionaryEntry>>>{};
 
-  bool get isLoaded =>
-      _areAcronymsLoaded && _areAramaicLoaded && _areLaazLoaded;
   bool get areAcronymsLoaded => _areAcronymsLoaded;
   bool get areAramaicLoaded => _areAramaicLoaded;
-  bool get areLaazLoaded => _areLaazLoaded;
   bool get areLaazLinksLoaded => _areLaazLinksLoaded;
 
   /// טוען את כל המילונים פעם אחת ומשאיר אותם בזיכרון.
@@ -610,11 +607,6 @@ class DictionaryLookupRepository {
       ...exact,
       ...containsAsWord,
     ];
-  }
-
-  /// מחזיר את כל רשומות מילון לעזי רש"י.
-  List<LaazDictionaryEntry> getAllLaazEntries() {
-    return List<LaazDictionaryEntry>.unmodifiable(_laazEntries);
   }
 
   Future<void> _loadAcronymsInternal() async {

@@ -215,6 +215,7 @@ void main() {
         SettingsRepository.keyDatabasesPath,
         '${root.path}/databases',
       );
+      await database.database;
       return root;
     }))!;
     try {

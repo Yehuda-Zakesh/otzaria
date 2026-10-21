@@ -31,6 +31,7 @@ import 'package:otzaria/personal_notes/view/personal_notes_screen.dart';
 import 'package:otzaria/personal_notes/widgets/personal_note_content_view.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
+import 'package:otzaria/widgets/lists/nav_tree_tile.dart';
 import '../test_helpers/memory_cache_provider.dart';
 
 final class _ImportFile extends PlatformFile {
@@ -895,6 +896,34 @@ void main() {
       expect(provider.calls, ['ספר א', 'ספר ב']);
     },
   );
+
+  testWidgets('הקלדה בחיפוש מסננת את ההערות בלי לבנות מחדש את העץ', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    await pumpScreenWithManyNotes(tester, books: 3, count: 2);
+    final cards = find.byType(PersonalNoteContentView, skipOffstage: false);
+    final tree = tester.widget(find.byType(NavTreeHeader));
+    expect(cards, findsNWidgets(6));
+
+    final field = find.byType(EditableText).first;
+    await tester.enterText(field, 'מספר 1');
+    await tester.pump();
+    expect(cards, findsNWidgets(3));
+    expect(identical(tester.widget(find.byType(NavTreeHeader)), tree), isTrue);
+
+    await tester.enterText(field, 'אין כזה');
+    await tester.pump();
+    expect(cards, findsNothing);
+    expect(find.text('אין הערות להצגה'), findsOneWidget);
+
+    await tester.enterText(field, '');
+    await tester.pump();
+    expect(cards, findsNWidgets(6));
+  });
 
   testWidgets('כרטיסי ההערות נשארים שלושה בשורה ובסדר השורות', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);

@@ -4,11 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:otzaria/core/messages/common_messages.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/theme/theme_exports.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 
-/// מפתח גלובלי לניווט - חובה לחבר ל-MaterialApp
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+/// מפתח הניווט של החלון הנוכחי ([AppWindowKeys.current]) — חובה לחבר ל-MaterialApp.
+/// קוד שיש לו `BuildContext` משתמש ב-[AppWindowKeys.of].
+GlobalKey<NavigatorState> get navigatorKey => AppWindowKeys.current.navigator;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // טוקנים פנימיים

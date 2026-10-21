@@ -1,3 +1,4 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -106,7 +107,7 @@ class IndexFreshnessWarner {
     _invalidateOnGenerationChange(engineGeneration, libraryGeneration);
     final token = _invalidationToken;
 
-    final key = IndexingRepository.buildIndexedBookFilePath(book);
+    final key = BookIdentity.indexedFilePath(book);
     try {
       // ה-revision מזהה שינוי בקובץ המקור עצמו: ספר file-backed נקרא
       // ישירות מהדיסק, ואין רענון ספרייה שיסמן עריכה חיצונית שלו.

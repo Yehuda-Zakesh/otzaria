@@ -207,7 +207,8 @@ processLinksForState({
   final estimatedLinkCount =
       (replaceExisting ? 0 : existingLinks.length) + incomingLinks.length;
 
-  if (estimatedLinkCount <= asyncProcessingThreshold) {
+  // אותו חישוב בשני המסלולים; רק מעל הסף הוא עובר ל-isolate נפרד.
+  process() {
     final links = mergeLinksByIdentity(
       replaceExisting ? const [] : existingLinks,
       incomingLinks,
@@ -226,24 +227,8 @@ processLinksForState({
     );
   }
 
-  return Isolate.run(() {
-    final links = mergeLinksByIdentity(
-      replaceExisting ? const [] : existingLinks,
-      incomingLinks,
-    );
-    final linksByLine = buildLinksByLineMap(links);
-    final visibleLinks = computeVisibleLinks(
-      links: links,
-      visibleIndices: visibleIndices,
-      selectedIndices: selectedIndices,
-      linksByLine: linksByLine,
-    );
-    return (
-      links: links,
-      linksByLine: linksByLine,
-      visibleLinks: visibleLinks,
-    );
-  });
+  if (estimatedLinkCount <= asyncProcessingThreshold) return process();
+  return Isolate.run(process);
 }
 
 List<String> buildPreviewLines(String previewContent, int previewStartLine) {

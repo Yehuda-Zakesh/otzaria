@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/theme/app_surfaces.dart';
 import 'package:otzaria/theme/app_tokens.dart';
 import 'package:flutter/services.dart';
@@ -176,8 +177,10 @@ class _SearchDialogState extends State<SearchDialog> {
   late final Map<String, bool> _persistedPluginSelections;
 
   bool _semanticSelected = false;
-  bool _semanticIncludeLexical = true;
-  bool _semanticGroupIdentical = true;
+  bool _semanticIncludeLexical =
+      SearchDefaults.initialSemanticIncludeLexicalForNewSearch();
+  bool _semanticGroupIdentical =
+      SearchDefaults.initialSemanticGroupIdenticalForNewSearch();
   bool _semanticSubmitted = false;
   SemanticSearchBloc? _semanticBloc;
   TabsBloc? _tabsBloc;
@@ -437,8 +440,11 @@ class _SearchDialogState extends State<SearchDialog> {
                 text: context.settingsText('הגדרות ספרייה'),
                 icon: FluentIcons.settings_24_regular,
                 onPressed: () {
+                  final mainScreen = AppWindowKeys.of(
+                    context,
+                  ).mainWindowScreen.currentState;
                   Navigator.of(context).pop();
-                  mainWindowScreenKey.currentState?.handleInternalDeepLink(
+                  mainScreen?.handleInternalDeepLink(
                     'otzaria://open/settings/library',
                   );
                 },
@@ -1098,39 +1104,12 @@ class _SearchDialogState extends State<SearchDialog> {
       ),
     );
 
-    // העתקת כל ההגדרות מהטאב הנוכחי לטאב החדש
-    newSearchTab.searchOptions.addAll(
-      _searchTab.searchOptions.map(
-        (key, value) => MapEntry(key, Map<String, bool>.from(value)),
-      ),
+    _copyDialogParametersTo(
+      newSearchTab,
+      query: query,
+      negativeQuery: negativeQuery,
+      effectiveAlternatives: effectiveAlternatives,
     );
-    newSearchTab.globalSearchOptions.addAll(_searchTab.globalSearchOptions);
-    newSearchTab.useGlobalSearchOptions.value =
-        _searchTab.useGlobalSearchOptions.value;
-    newSearchTab.negativeQueryController.text = negativeQuery;
-    newSearchTab.negativeSearchOptions.addAll(
-      _searchTab.negativeSearchOptions.map(
-        (key, value) => MapEntry(key, Map<String, bool>.from(value)),
-      ),
-    );
-    newSearchTab.negativeGlobalSearchOptions.addAll(
-      _searchTab.negativeGlobalSearchOptions,
-    );
-    newSearchTab.useGlobalNegativeSearchOptions.value =
-        _searchTab.useGlobalNegativeSearchOptions.value;
-    // חלופות שמורות שמוזגו הופכות לחלק מהטאב — נשמרות ומשוחזרות איתו
-    newSearchTab.alternativeWords.addAll(
-      effectiveAlternatives.map(
-        (key, value) => MapEntry(key, List<String>.from(value)),
-      ),
-    );
-    newSearchTab.spacingValues.addAll(_searchTab.spacingValues);
-    newSearchTab.negativeAlternativeWords.addAll(
-      _searchTab.negativeAlternativeWords.map(
-        (key, value) => MapEntry(key, List<String>.from(value)),
-      ),
-    );
-    newSearchTab.negativeSpacingValues.addAll(_searchTab.negativeSpacingValues);
 
     // מעבירים את ה-scope במפורש להיסטוריה — SetFacetsWithoutSearch מעדכן את
     // state אסינכרונית, ובלי זה החיפוש היה נשמר בלי ה-scope שנבחר.
@@ -1273,11 +1252,20 @@ class _SearchDialogState extends State<SearchDialog> {
       scopeSelection: _scopeSelection,
       onScopeChanged: _onScopeChanged,
       includeLexical: _semanticIncludeLexical,
-      onIncludeLexicalChanged: (value) =>
-          setState(() => _semanticIncludeLexical = value),
+      onIncludeLexicalChanged: (value) {
+        setState(() => _semanticIncludeLexical = value);
+        // עריכת כרטיסייה קיימת אינה משנה את ברירת המחדל לחיפוש חדש.
+        if (widget.editTab == null) {
+          SearchDefaults.saveSemanticIncludeLexicalDefault(value);
+        }
+      },
       groupIdenticalText: _semanticGroupIdentical,
-      onGroupIdenticalTextChanged: (value) =>
-          setState(() => _semanticGroupIdentical = value),
+      onGroupIdenticalTextChanged: (value) {
+        setState(() => _semanticGroupIdentical = value);
+        if (widget.editTab == null) {
+          SearchDefaults.saveSemanticGroupIdenticalDefault(value);
+        }
+      },
       onSubmit: _performSearch,
       onGrantConsent: _grantSemanticConsent,
       onDeclineConsent: _declineSemanticConsent,
@@ -1364,20 +1352,15 @@ class _SearchDialogState extends State<SearchDialog> {
     for (final entry in values.entries) entry.key.toString(): entry.value,
   };
 
-  /// מחיל את פרמטרי הדיאלוג על טאב התוצאות הנערך ומריץ בו את החיפוש מחדש.
-  void _applyEditToTarget({
+  /// מעתיק ל-[target] את השאילתות ואת הגדרות המילים שנערכו בדיאלוג.
+  /// חלופות שמורות שמוזגו ([effectiveAlternatives]) הופכות לחלק מהטאב —
+  /// נשמרות ומשוחזרות איתו.
+  void _copyDialogParametersTo(
+    SearchingTab target, {
     required String query,
     required String negativeQuery,
-    required SearchMode mode,
-    required int distance,
-    required SearchConfiguration configuration,
-    required List<String> facetsToSearch,
     required Map<int, List<String>> effectiveAlternatives,
-    required SearchModeScopedParameters normalizedParameters,
-    required SearchModeScopedParameters normalizedNegativeParameters,
   }) {
-    final target = widget.editTab!;
-
     target.queryController.text = query;
     target.negativeQueryController.text = negativeQuery;
     target.searchOptions
@@ -1424,6 +1407,27 @@ class _SearchDialogState extends State<SearchDialog> {
     target.negativeSpacingValues
       ..clear()
       ..addAll(_searchTab.negativeSpacingValues);
+  }
+
+  /// מחיל את פרמטרי הדיאלוג על טאב התוצאות הנערך ומריץ בו את החיפוש מחדש.
+  void _applyEditToTarget({
+    required String query,
+    required String negativeQuery,
+    required SearchMode mode,
+    required int distance,
+    required SearchConfiguration configuration,
+    required List<String> facetsToSearch,
+    required Map<int, List<String>> effectiveAlternatives,
+    required SearchModeScopedParameters normalizedParameters,
+    required SearchModeScopedParameters normalizedNegativeParameters,
+  }) {
+    final target = widget.editTab!;
+    _copyDialogParametersTo(
+      target,
+      query: query,
+      negativeQuery: negativeQuery,
+      effectiveAlternatives: effectiveAlternatives,
+    );
     target.updateTitleFromAppliedQuery(query);
 
     target.searchBloc.add(SetSearchModeWithoutSearch(mode));
@@ -1688,7 +1692,7 @@ class _SearchDialogState extends State<SearchDialog> {
   /// היקף החיפוש ופקד המרווח/המרחק.
   Widget _buildQueryRow() {
     final searchField = EnhancedSearchField(
-      key: enhancedSearchFieldKey,
+      key: AppWindowKeys.of(context).enhancedSearchField,
       widget: _SearchDialogWrapper(tab: _searchTab),
       onSubmit: _performSearch,
       trailingAction: _buildHistoryButton(),
@@ -2091,7 +2095,7 @@ class _SearchDialogState extends State<SearchDialog> {
             return KeyEventResult.ignored;
           },
           child: SizedBox(
-            key: tourSearchDialogTargetKey,
+            key: TourTargetKeys.of(context).searchDialog,
             width: dialogWidth,
             height: dialogHeight,
             child: Column(

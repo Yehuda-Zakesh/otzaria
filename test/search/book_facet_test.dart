@@ -1,5 +1,5 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/search/book_facet.dart';
@@ -194,7 +194,7 @@ void main() {
       test('${book.title} (${book.id ?? 'ללא id'})', () {
         expect(
           facetPathOf(book),
-          endsWith('/${IndexingRepository.catalogueOrderKey(book)}'),
+          endsWith('/${BookIdentity.keyOf(book)}'),
         );
       });
     }

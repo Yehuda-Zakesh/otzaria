@@ -23,7 +23,13 @@ import 'package:window_manager/window_manager.dart';
 /// הנפילה-לאחור ל-`FindWindowW` לפי כותרת נשארה שם עבור מופע שרץ מבנייה
 /// קודמת, והיא best-effort — אין להישען עליה.
 class WindowTitleSync {
-  WindowTitleSync._();
+  WindowTitleSync({Future<void> Function(String title)? setTitle})
+    : _setTitle = setTitle ?? windowManager.setTitle;
+
+  /// הכותרת של החלון שה-isolate הזה מציג; היום כל חלון הוא isolate משלו.
+  static final WindowTitleSync current = WindowTitleSync();
+
+  final Future<void> Function(String title) _setTitle;
 
   /// שם התוכנה, שנשאר בסוף הכותרת בכל מצב.
   ///
@@ -34,8 +40,8 @@ class WindowTitleSync {
   static bool get _isSupported =>
       !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
-  /// הכותרת שנשלחה לאחרונה — מונע קריאת ערוץ בכל שינוי state.
-  static String? _lastSent;
+  /// הכותרת שנשלחה לאחרונה לחלון הזה — מונע קריאת ערוץ בכל שינוי state.
+  String? _lastSent;
 
   /// בונה את הכותרת לכרטיסיה הפעילה.
   ///
@@ -50,14 +56,19 @@ class WindowTitleSync {
     return '$trimmed$suffix — $appName';
   }
 
-  /// מעדכן את כותרת החלון, אם היא שונה מזו שנשלחה.
+  /// מעדכן את כותרת החלון של ה-isolate הזה, אם היא שונה מזו שנשלחה.
   static Future<void> update(String? activeTabTitle, {int tabCount = 0}) async {
     if (!_isSupported) return;
+    await current.sync(activeTabTitle, tabCount: tabCount);
+  }
+
+  /// מעדכן את כותרת החלון הזה, אם היא שונה מזו שנשלחה אליו.
+  Future<void> sync(String? activeTabTitle, {int tabCount = 0}) async {
     final title = titleFor(activeTabTitle, tabCount: tabCount);
     if (title == _lastSent) return;
     _lastSent = title;
     try {
-      await windowManager.setTitle(title);
+      await _setTitle(title);
     } catch (e) {
       // כותרת אינה שווה קריסה, ואינה שווה גם הודעה למשתמש.
       debugPrint('setTitle failed: $e');

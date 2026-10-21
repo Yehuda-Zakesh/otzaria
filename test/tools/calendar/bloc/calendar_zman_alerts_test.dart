@@ -1,9 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/tools/calendar/bloc/calendar_cubit.dart';
-import 'package:otzaria/tools/calendar/services/notification_service.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_client.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_owner.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_store.dart';
 import 'package:timezone/data/latest_all.dart' as tz_data;
 import 'package:timezone/timezone.dart' as tz;
+
+import '../support/calendar_alerts_fakes.dart';
 
 class _Settings implements SettingsRepository {
   @override
@@ -37,62 +41,39 @@ class _Settings implements SettingsRepository {
   dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
-class _Scheduled {
-  _Scheduled(this.id, this.title, this.body, this.eventDate, this.minutes);
-
-  final int id;
-  final String title;
-  final String body;
-  final DateTime eventDate;
-  final int minutes;
-}
-
-class _RecordingNotifications implements NotificationService {
-  final scheduled = <_Scheduled>[];
-  final cancelled = <int>[];
-
-  @override
-  bool get isInitialized => true;
-
-  @override
-  Future<bool> checkPermissions() async => true;
-
-  @override
-  Future<void> cancelNotification(int id) async => cancelled.add(id);
-
-  @override
-  Future<void> scheduleNotification({
-    required int id,
-    required String title,
-    required String body,
-    required DateTime eventDate,
-    required int reminderMinutes,
-    bool soundEnabled = true,
-  }) async {
-    scheduled.add(_Scheduled(id, title, body, eventDate, reminderMinutes));
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation i) => super.noSuchMethod(i);
-}
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   tz_data.initializeTimeZones();
 
-  late _RecordingNotifications notifications;
+  final today = DateTime.now();
+  late WindowsLikeNotifications notifications;
+  late CalendarAlertsOwner owner;
   late CalendarCubit cubit;
 
   setUp(() async {
-    notifications = _RecordingNotifications();
-    cubit = CalendarCubit(
-      settingsRepository: _Settings(),
-      notificationService: notifications,
+    notifications = WindowsLikeNotifications();
+    final settings = _Settings();
+    owner = CalendarAlertsOwner(
+      store: RepositoryCalendarAlertsStore(settings),
+      notifications: notifications,
+      pluginEvents: () async => const [],
+      // לפני הנץ, כדי שגם היום הראשון בחלון יתוזמן.
+      now: () => DateTime(today.year, today.month, today.day, 0, 1),
+      broadcast: (_) {},
+      dedupeDuplicates: false,
     );
-    await Future<void>.delayed(const Duration(milliseconds: 100));
+    cubit = CalendarCubit(
+      settingsRepository: settings,
+      alertsClient: LocalCalendarAlertsClient(owner),
+    );
+    await cubit.initialized;
   });
 
-  tearDown(() => cubit.close());
+  tearDown(() async {
+    await owner.idle;
+    await cubit.close();
+    owner.dispose();
+  });
 
   test('a zman alert is scheduled for each day of the window', () async {
     await cubit.setZmanAlertPreference(
@@ -100,6 +81,7 @@ void main() {
       displayName: 'הנץ החמה',
       minutesBefore: 15,
     );
+    await owner.idle;
 
     final scheduled = notifications.scheduled;
     expect(scheduled.length, 46);
@@ -109,11 +91,10 @@ void main() {
     expect(scheduled.first.body, startsWith('בעוד 15 דקות הנץ החמה ('));
 
     final first = scheduled.first.eventDate as tz.TZDateTime;
-    final now = DateTime.now();
     expect(first.location.name, 'Asia/Jerusalem');
     expect(
       DateTime(first.year, first.month, first.day),
-      DateTime(now.year, now.month, now.day),
+      DateTime(today.year, today.month, today.day),
     );
   });
 
@@ -123,12 +104,14 @@ void main() {
       displayName: 'הנץ החמה',
       minutesBefore: 15,
     );
-    final ids = notifications.scheduled.map((s) => s.id).toSet();
-    notifications.cancelled.clear();
+    await owner.idle;
+    final ids = notifications.present;
 
     await cubit.cancelZmanAlertPreference(timeId: 'sunrise');
+    await owner.idle;
 
-    expect(notifications.cancelled.toSet(), ids);
+    expect(ids, hasLength(46));
+    expect(notifications.present, isEmpty);
     expect(cubit.state.zmanAlerts, isEmpty);
   });
 }

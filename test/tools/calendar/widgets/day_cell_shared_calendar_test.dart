@@ -267,7 +267,7 @@ class _FakeNotificationService implements NotificationService {
   }) async {}
 
   @override
-  Future<void> cancelNotification(int id) async {}
+  Future<void> cancelNotifications(Iterable<int> ids) async {}
 
   @override
   dynamic noSuchMethod(Invocation invocation) {

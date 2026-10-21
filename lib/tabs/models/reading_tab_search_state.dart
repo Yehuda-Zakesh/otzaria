@@ -1,10 +1,6 @@
 import 'package:otzaria/search/models/search_configuration.dart';
 
-/// קונפיגורציית החיפוש של טאב קריאה, בצורה שנשמרת לדיסק.
-///
-/// משותפת לטאב טקסט ולטאב PDF. בלעדיה שמירת שולחן עבודה ויציאה מהאפליקציה
-/// מאפסות את החיפוש, והספר נפתח מחדש במסלול המחרוזת הרצופה — "אין תוצאות"
-/// על מה שהחיפוש הגלובלי כן מצא.
+/// תצורת חיפוש של טאב קריאה, לשכפול ולשמירה.
 class ReadingTabSearchState {
   const ReadingTabSearchState({
     this.searchText = '',
@@ -23,6 +19,23 @@ class ReadingTabSearchState {
   final SearchMode searchMode;
   final int searchDistance;
   final SearchMatchPolicy matchPolicy;
+
+  /// מעתיק גם אוספים פנימיים כדי שטאבים לא יחלקו הגדרות ניתנות לשינוי.
+  ReadingTabSearchState copy({String? searchText}) => ReadingTabSearchState(
+    searchText: searchText ?? this.searchText,
+    searchOptions: {
+      for (final entry in searchOptions.entries)
+        entry.key: Map<String, bool>.of(entry.value),
+    },
+    alternativeWords: {
+      for (final entry in alternativeWords.entries)
+        entry.key: List<String>.of(entry.value),
+    },
+    spacingValues: Map<String, String>.of(spacingValues),
+    searchMode: searchMode,
+    searchDistance: searchDistance,
+    matchPolicy: matchPolicy,
+  );
 
   /// שדות ה-JSON נוספים למפת הטאב הקיימת, ולכן השמות מקודמת `search`.
   /// שאילתה ריקה אינה נשמרת בכלל — טאב בלי חיפוש נשאר עם אותו JSON כמו קודם.

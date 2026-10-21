@@ -2,6 +2,7 @@ import 'package:otzaria/models/books.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/utils/file/hive_utils.dart';
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
+import 'package:otzaria/text_book/utils/reading_position.dart';
 
 /// מחזירה מזהה יציב לספר לצורך השוואה בין סימניות/טאבים.
 ///
@@ -83,6 +84,7 @@ class Bookmark {
   /// מועד יצירת הסימניה — משמש למיון "לפי תאריך הוספה".
   /// null בסימניות ישנות שנשמרו לפני הוספת השדה.
   final DateTime? createdAt;
+  final ReadingAnchor? readingAnchor;
 
   /// A stable key for history management, unique per [bookIdentity].
   ///
@@ -122,6 +124,7 @@ class Bookmark {
     this.targetKind = BookmarkTargetKind.book,
     this.label,
     this.createdAt,
+    this.readingAnchor,
   });
 
   /// מחזיר עותק עם שדות מעודכנים. [clearLabel] מאפס את [label] ל-null
@@ -152,6 +155,7 @@ class Bookmark {
       targetKind: targetKind,
       label: clearLabel ? null : (label ?? this.label),
       createdAt: createdAt,
+      readingAnchor: readingAnchor,
     );
   }
 
@@ -160,6 +164,7 @@ class Bookmark {
     return Bookmark(
       ref: json['ref'] as String,
       index: json['index'] as int,
+      readingAnchor: ReadingAnchor.tryFromJson(json['readingAnchor']),
       book: Book.fromJson(castMap(json['book'])),
       commentatorsToShow: (rawCommentators ?? [])
           .map((e) => e.toString())
@@ -260,6 +265,7 @@ class Bookmark {
       'ref': ref,
       'book': book.toJson(),
       'index': index,
+      if (readingAnchor != null) 'readingAnchor': readingAnchor!.toJson(),
       'commentatorsToShow': commentatorsToShow,
       'isSearch': isSearch,
       'searchOptions': searchOptions,

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/bookmarks/bloc/bookmark_bloc.dart';
 import 'package:otzaria/bookmarks/bloc/bookmark_state.dart';
 import 'package:otzaria/core/focus_repository.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/library/models/library.dart';
@@ -25,7 +26,6 @@ import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/text_book/view/text_book_screen.dart';
 import 'package:otzaria/text_book/view/text_book_search_screen.dart';
 import 'package:otzaria/text_book/view/toc_navigator_screen.dart';
-import 'package:otzaria/text_book/view/widgets/nav_panel_tour_target.dart';
 import 'package:otzaria/tools/shamor_zachor/providers/shamor_zachor_data_provider.dart';
 import 'package:otzaria/tools/shamor_zachor/providers/shamor_zachor_progress_provider.dart';
 import 'package:otzaria/tour/bloc/tour_cubit.dart';
@@ -59,7 +59,7 @@ void main() {
     bookmarkBloc = _TestBookmarkBloc();
     personalNotesBloc = PersonalNotesBloc();
     tourCubit = TourCubit();
-    activeTextBookNavPanelTourTargetKey = null;
+    AppWindowKeys.current.tour.activeTextBookNavPanel = null;
   });
 
   tearDown(() async {
@@ -209,7 +209,7 @@ void main() {
   testWidgets('יעד הסיור מצביע על חלונית הניווט של הטאב הפעיל', (tester) async {
     final controller = await pumpScreen(tester);
 
-    final key = activeTextBookNavPanelTourTargetKey;
+    final key = AppWindowKeys.current.tour.activeTextBookNavPanel;
     expect(key, isNotNull);
     expect(
       find.descendant(of: find.byKey(key!), matching: find.byType(TocViewer)),
@@ -220,8 +220,11 @@ void main() {
     await controller.setActive(false);
     await controller.setActive(true);
 
-    expect(activeTextBookNavPanelTourTargetKey, isNotNull);
-    expect(activeTextBookNavPanelTourTargetKey!.currentContext, isNotNull);
+    expect(AppWindowKeys.current.tour.activeTextBookNavPanel, isNotNull);
+    expect(
+      AppWindowKeys.current.tour.activeTextBookNavPanel!.currentContext,
+      isNotNull,
+    );
   });
 }
 

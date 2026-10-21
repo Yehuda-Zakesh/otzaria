@@ -93,7 +93,7 @@ class AttachedLibrariesBloc
     );
   }
 
-  /// מריץ [operation] עם חיווי עבודה, ומציג את [success] או את השגיאה.
+  /// מריץ [operation] עם חיווי עבודה, ומציג את ההודעה שהחזירה או את השגיאה.
   Future<void> _run(
     Emitter<AttachedLibrariesState> emit,
     Future<AttachedLibrariesNotice?> Function() operation,

@@ -11,6 +11,9 @@ import 'package:otzaria/core/windowing/window_manager_app_window_controller.dart
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 
+/// שמירה ושחזור של גבולות החלון של ה-isolate הזה.
+///
+/// חזית סטטית בלי מצב: המצב יושב ב-[WindowPersistenceBinding] של החלון.
 class WindowPersistence {
   static const _kLeft = 'window_bounds_left';
   static const _kTop = 'window_bounds_top';
@@ -18,30 +21,6 @@ class WindowPersistence {
   static const _kHeight = 'window_bounds_height';
   static const _kDpr = 'window_bounds_dpr';
   static const _kIsMaximized = 'window_is_maximized';
-
-  /// הגבולות של החלון הזה מהסשן שלו; בהיעדרם — מפתחות ההגדרות הישנים,
-  /// שבהם נשמרו גבולות החלון היחיד לפני שכל חלון קיבל סשן.
-  static Future<WindowBounds> _loadSavedBounds() async {
-    final slot = UserStateSlot.current;
-    // בהפעלה ראשונה אין עדיין ספרייה, ופתיחת המסד הייתה יוצרת אותו במיקום
-    // ברירת מחדל לפני שהמשתמש בחר; גם אין שם גבולות לקרוא.
-    final hasLibrary =
-        (Settings.getValue<String>(SettingsRepository.keyLibraryPath) ?? '')
-            .isNotEmpty;
-    if (slot != null && hasLibrary) {
-      final session = await WindowSessionStore.instance.load(slot);
-      final bounds = WindowBounds.decode(session?.boundsJson);
-      if (bounds != null) return bounds;
-    }
-    return WindowBounds(
-      left: Settings.getValue<double>(_kLeft),
-      top: Settings.getValue<double>(_kTop),
-      width: Settings.getValue<double>(_kWidth),
-      height: Settings.getValue<double>(_kHeight),
-      dpr: Settings.getValue<double>(_kDpr),
-      maximized: Settings.getValue<bool>(_kIsMaximized) ?? false,
-    );
-  }
 
   static const double _minWidth = 420;
   static const double _minHeight = 400;
@@ -52,41 +31,151 @@ class WindowPersistence {
   /// דורשת שהרצועה הזו — לא סתם פינת חלון — תהיה על מסך חי, אחרת אין מה לגרור.
   static const double _grabStripExtent = 32;
 
-  static Timer? _debounce;
-  static bool _restored = false;
-  static bool _isRestoring = false;
-  static bool _pendingMaximize = false;
-  static bool _pendingFullscreen = false;
+  /// החלון שה-isolate הזה מציג; היום כל חלון הוא isolate משלו.
+  static final WindowPersistenceBinding current = WindowPersistenceBinding();
+
+  static set splashMode(bool value) => current.splashMode = value;
+
+  /// קושר את החלון של ה-isolate הזה. נקרא פעם אחת מ-`main`, עם אותו מופע
+  /// שנכנס ל-[AppWindowScope] — כדי שיהיה מקור אמת אחד.
+  static void bindWindow({
+    required AppWindowController controller,
+    required AppWindowGeometry geometry,
+  }) => current.bindWindow(controller: controller, geometry: geometry);
+
+  static bool get isRestoring => current.isRestoring;
+
+  static Future<void> restoreIfAny() => current.restoreIfAny();
+
+  static Future<void> applyRestoredBounds() => current.applyRestoredBounds();
+
+  static Future<void> applyPendingMaximize() => current.applyPendingMaximize();
+
+  static Future<void> applyPendingFullscreen() =>
+      current.applyPendingFullscreen();
+
+  static void scheduleSave() => current.scheduleSave();
+
+  /// ה-DPR שאיתו window_manager ממיר לוגי→פיזי (window.devicePixelRatio);
+  /// שימוש באותו מקור מבטיח שההמרות מתבטלות במדויק.
+  static double _currentDevicePixelRatio() {
+    final dpr = PlatformDispatcher.instance.implicitView?.devicePixelRatio;
+    return (dpr != null && dpr > 0) ? dpr : 1.0;
+  }
+
+  static Rect _scaleRect(Rect rect, double factor) => Rect.fromLTWH(
+    rect.left * factor,
+    rect.top * factor,
+    rect.width * factor,
+    rect.height * factor,
+  );
+
+  /// האם רצועת האחיזה — [stripExtent] העליונים של [bounds] — מונחת במלואה
+  /// (לגובהה) ולרוחב [stripExtent] לפחות על אחד מ-[displayRects]. גבולות
+  /// שנשמרו בטעות כשהחלון ממוזער (חניה ב--32000, ראה `_saveNow`), מסך שנותק,
+  /// או חלון שרק תחתיתו מציצה למסך — נכשלים כאן.
+  @visibleForTesting
+  static bool titleStripReachableOnAnyDisplay(
+    Rect bounds,
+    List<Rect> displayRects,
+    double stripExtent,
+  ) {
+    final strip = Rect.fromLTWH(
+      bounds.left,
+      bounds.top,
+      bounds.width,
+      stripExtent,
+    );
+    for (final displayRect in displayRects) {
+      final overlap = strip.intersect(displayRect);
+      if (overlap.width >= stripExtent && overlap.height >= stripExtent) {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+/// שמירה ושחזור של גבולות חלון אחד, עם המצב של החלון הזה בלבד.
+///
+/// המשבצת נקבעת בכל קריאה, כי החלון תופס אותה רק אחרי שהמופע נוצר.
+class WindowPersistenceBinding {
+  WindowPersistenceBinding({
+    AppWindowController controller = const WindowManagerAppWindowController(),
+    this._geometry = const WindowManagerAppWindowController(),
+    int? Function()? slot,
+    this._sessions,
+    double Function()? devicePixelRatio,
+  }) : _window = controller,
+       _slot = slot ?? (() => UserStateSlot.current),
+       _devicePixelRatio =
+           devicePixelRatio ?? WindowPersistence._currentDevicePixelRatio;
+
+  final int? Function() _slot;
+
+  /// ה-DPR של התצוגה שהחלון הזה מוצג בה; ברירת המחדל היא ה-implicit view.
+  final double Function() _devicePixelRatio;
+  final WindowSessionStore? _sessions;
+
+  WindowSessionStore get _store => _sessions ?? WindowSessionStore.instance;
+
+  /// הגבולות של החלון הזה מהסשן שלו; בהיעדרם — מפתחות ההגדרות הישנים,
+  /// שבהם נשמרו גבולות החלון היחיד לפני שכל חלון קיבל סשן.
+  Future<WindowBounds> _loadSavedBounds() async {
+    final slot = _slot();
+    // בהפעלה ראשונה אין עדיין ספרייה, ופתיחת המסד הייתה יוצרת אותו במיקום
+    // ברירת מחדל לפני שהמשתמש בחר; גם אין שם גבולות לקרוא.
+    final hasLibrary =
+        (Settings.getValue<String>(SettingsRepository.keyLibraryPath) ?? '')
+            .isNotEmpty;
+    if (slot != null && hasLibrary) {
+      final session = await _store.load(slot);
+      final bounds = WindowBounds.decode(session?.boundsJson);
+      if (bounds != null) return bounds;
+    }
+    return WindowBounds(
+      left: Settings.getValue<double>(WindowPersistence._kLeft),
+      top: Settings.getValue<double>(WindowPersistence._kTop),
+      width: Settings.getValue<double>(WindowPersistence._kWidth),
+      height: Settings.getValue<double>(WindowPersistence._kHeight),
+      dpr: Settings.getValue<double>(WindowPersistence._kDpr),
+      maximized:
+          Settings.getValue<bool>(WindowPersistence._kIsMaximized) ?? false,
+    );
+  }
+
+  Timer? _debounce;
+  bool _restored = false;
+  bool _isRestoring = false;
+  bool _pendingMaximize = false;
+  bool _pendingFullscreen = false;
 
   /// גבולות החלון השמורים **בפיקסלים פיזיים**, נקראים ב-[restoreIfAny] ומוחלים
   /// ב-[applyRestoredBounds] — מוקדם, בעוד החלון מוסתר וה-splash מוצג (כדי
   /// ששינוי ה-DPI אפשרי יתייצב לפני החשיפה). null = אין גבולות שמורים
   /// (הפעלה ראשונה) → יוחל גודל ברירת מחדל.
-  static Rect? _restoredPhysicalBounds;
+  Rect? _restoredPhysicalBounds;
 
   /// ה-devicePixelRatio של רגע השמירה — הגבולות נשמרים לוגיים (כפי ש-getBounds
   /// מחזיר), וה-DPR הזה מאפשר לשחזר את הפיזי במדויק גם אם ה-DPR הנוכחי שונה.
-  static double? _restoredDpr;
+  double? _restoredDpr;
 
   /// בזמן מסך הפתיחה החלון קטן/שקוף; אסור לשמור את גודלו (אחרת ההפעלה הבאה
   /// "תשחזר" חלון זעיר). כשהדגל דלוק, [scheduleSave] הוא no-op.
   /// זהו גם המנגנון שמונע שמירת גודל ה-splash מלכתחילה — ולכן אין צורך ב-clamp
   /// "שפיות" בשחזור (שפגע בחלונות קטנים חוקיים כמו 500x420).
-  static bool _splashMode = false;
-  static set splashMode(bool value) => _splashMode = value;
+  bool _splashMode = false;
+  set splashMode(bool value) => _splashMode = value;
 
-  /// החלון שהמחלקה פועלת עליו.
+  /// החלון שהמופע פועל עליו.
   ///
-  /// [WindowPersistence] היא מחלקה `static` ואין לה `BuildContext`, ולכן
-  /// החלון מוזרק פעם אחת מ-`main` במקום לעבור כפרמטר לכל מתודה. ברירת
-  /// המחדל היא החלון הראשי, כדי שקריאה מוקדמת ומהבדיקות תמשיך לעבוד בלי
-  /// הזרקה.
-  static AppWindowController _window = const WindowManagerAppWindowController();
-  static AppWindowGeometry _geometry = const WindowManagerAppWindowController();
+  /// ברירת המחדל היא החלון הראשי, כדי שקריאה מוקדמת ומהבדיקות תמשיך לעבוד
+  /// בלי הזרקה.
+  AppWindowController _window;
+  AppWindowGeometry _geometry;
 
-  /// קושר את המחלקה לחלון. נקרא פעם אחת מ-`main`, עם אותו מופע שנכנס
-  /// ל-[AppWindowScope] — כדי שיהיה מקור אמת אחד.
-  static void bindWindow({
+  /// קושר את המופע לחלון, עם אותו מופע שנכנס ל-[AppWindowScope].
+  void bindWindow({
     required AppWindowController controller,
     required AppWindowGeometry geometry,
   }) {
@@ -94,9 +183,9 @@ class WindowPersistence {
     _geometry = geometry;
   }
 
-  static bool get isRestoring => _isRestoring;
+  bool get isRestoring => _isRestoring;
 
-  static Future<void> restoreIfAny() async {
+  Future<void> restoreIfAny() async {
     if (_restored) return;
     _restored = true;
     _isRestoring = true;
@@ -126,6 +215,7 @@ class WindowPersistence {
         return;
       }
 
+      const minSize = WindowPersistence.minSize;
       final clampedWidth = width < minSize.width ? minSize.width : width;
       final clampedHeight = height < minSize.height ? minSize.height : height;
 
@@ -133,7 +223,7 @@ class WindowPersistence {
       // הנוכחי). ההשוואה למסכים וההצבה נעשות בפיזי, אחיד לכל המסכים.
       final dpr = (savedDpr != null && savedDpr > 0)
           ? savedDpr
-          : _currentDevicePixelRatio();
+          : _devicePixelRatio();
       _restoredDpr = dpr;
       _restoredPhysicalBounds = Rect.fromLTWH(
         left * dpr,
@@ -152,7 +242,7 @@ class WindowPersistence {
   /// מחילה את גבולות החלון השמורים (או גודל ברירת מחדל ממורכז בהפעלה ראשונה).
   /// נקראת מוקדם, מיד לאחר [restoreIfAny], בעוד החלון מוסתר — כדי ששינוי DPI
   /// אפשרי (מעבר מסך) יתייצב הרבה לפני שהחלון יוצג ב-[presentMainWindow].
-  static Future<void> applyRestoredBounds() async {
+  Future<void> applyRestoredBounds() async {
     _isRestoring = true;
     try {
       // חלון גלוי = main רץ שוב על חלון חי (hot restart). setBounds על חלון
@@ -161,7 +251,7 @@ class WindowPersistence {
       final physicalBounds = _restoredPhysicalBounds;
       // setBounds מכפיל את הערכים ב-DPR הנוכחי — חלוקה בו נותנת הצבה פיזית
       // מדויקת גם כשהחלון נשמר על מסך עם קנה מידה שונה מהמסך הראשי.
-      final currentDpr = _currentDevicePixelRatio();
+      final currentDpr = _devicePixelRatio();
       if (physicalBounds == null) {
         // אין גבולות שמורים (הפעלה ראשונה) — גודל ברירת מחדל ממורכז.
         await _geometry.setSize(const Size(1280, 720));
@@ -171,7 +261,7 @@ class WindowPersistence {
         // ה-splash לעולם לא נשמר (splashMode) — לכן מכבדים כל גודל חוקי שנשמר,
         // כולל חלונות קטנים שהמשתמש בחר במכוון.
         await _geometry.setBounds(
-          _scaleRect(physicalBounds, 1 / currentDpr),
+          WindowPersistence._scaleRect(physicalBounds, 1 / currentDpr),
         );
       } else {
         // גבולות מחוץ לכל מסך (מסך שנותק, עיוות DPI בין מסכים) — החלון היה
@@ -186,25 +276,9 @@ class WindowPersistence {
     }
   }
 
-  /// ה-DPR שאיתו window_manager ממיר לוגי→פיזי (window.devicePixelRatio);
-  /// שימוש באותו מקור מבטיח שההמרות מתבטלות במדויק.
-  static double _currentDevicePixelRatio() {
-    final dpr = PlatformDispatcher.instance.implicitView?.devicePixelRatio;
-    return (dpr != null && dpr > 0) ? dpr : 1.0;
-  }
-
-  static Rect _scaleRect(Rect rect, double factor) => Rect.fromLTWH(
-    rect.left * factor,
-    rect.top * factor,
-    rect.width * factor,
-    rect.height * factor,
-  );
-
   /// האם רצועת האחיזה של [physicalBounds] נגישה על מסך מחובר כלשהו. כשל
   /// בקריאת רשימת המסכים לא חוסם את השחזור — עדיף שחזור רגיל ממירכוז מיותר.
-  static Future<bool> _isReachableOnConnectedDisplay(
-    Rect physicalBounds,
-  ) async {
+  Future<bool> _isReachableOnConnectedDisplay(Rect physicalBounds) async {
     try {
       final displays = await screenRetriever.getAllDisplays();
       // screen_retriever מחזיר קואורדינטות לוגיות פר-מסך (מחולקות ב-scale של
@@ -212,51 +286,26 @@ class WindowPersistence {
       final displayRects = [
         for (final display in displays)
           if (display.visiblePosition != null && display.visibleSize != null)
-            _scaleRect(
+            WindowPersistence._scaleRect(
               display.visiblePosition! & display.visibleSize!,
               (display.scaleFactor ?? 1).toDouble(),
             ),
       ];
       if (displayRects.isEmpty) return true;
-      return titleStripReachableOnAnyDisplay(
+      return WindowPersistence.titleStripReachableOnAnyDisplay(
         physicalBounds,
         displayRects,
-        _grabStripExtent * (_restoredDpr ?? 1),
+        WindowPersistence._grabStripExtent * (_restoredDpr ?? 1),
       );
     } catch (_) {
       return true;
     }
   }
 
-  /// האם רצועת האחיזה — [stripExtent] העליונים של [bounds] — מונחת במלואה
-  /// (לגובהה) ולרוחב [stripExtent] לפחות על אחד מ-[displayRects]. גבולות
-  /// שנשמרו בטעות כשהחלון ממוזער (חניה ב--32000, ראה [_saveNow]), מסך שנותק,
-  /// או חלון שרק תחתיתו מציצה למסך — נכשלים כאן.
-  @visibleForTesting
-  static bool titleStripReachableOnAnyDisplay(
-    Rect bounds,
-    List<Rect> displayRects,
-    double stripExtent,
-  ) {
-    final strip = Rect.fromLTWH(
-      bounds.left,
-      bounds.top,
-      bounds.width,
-      stripExtent,
-    );
-    for (final displayRect in displayRects) {
-      final overlap = strip.intersect(displayRect);
-      if (overlap.width >= stripExtent && overlap.height >= stripExtent) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   /// Applies a maximize that was deferred from `restoreIfAny` until after
   /// `windowManager.show()` was called. Must be invoked after show() —
   /// otherwise the maximize is undone by Windows' SW_SHOWNORMAL semantics.
-  static Future<void> applyPendingMaximize() async {
+  Future<void> applyPendingMaximize() async {
     if (!_pendingMaximize) return;
     _pendingMaximize = false;
     _isRestoring = true;
@@ -273,7 +322,7 @@ class WindowPersistence {
   /// (ואחרי [applyPendingMaximize], כדי שיציאה עתידית ממסך מלא תחזיר את החלון
   /// למצב הממוקסם אם זה היה מצבו). חובה לקרוא רק כשהחלון גלוי: setFullScreen
   /// על חלון מוסתר מצלם סגנון ללא WS_VISIBLE, וביציאה ממסך מלא החלון נעלם.
-  static Future<void> applyPendingFullscreen() async {
+  Future<void> applyPendingFullscreen() async {
     if (!_pendingFullscreen) return;
     _pendingFullscreen = false;
     _isRestoring = true;
@@ -299,11 +348,11 @@ class WindowPersistence {
     }
   }
 
-  static void scheduleSave() {
+  void scheduleSave() {
     // אין לשמור את גודל חלון ה-splash הקטן.
     if (_splashMode) return;
     _debounce?.cancel();
-    _debounce = Timer(_debounceDuration, () {
+    _debounce = Timer(WindowPersistence._debounceDuration, () {
       // Fire-and-forget; any failure here shouldn't crash the app.
       unawaited(_saveNow());
     });
@@ -311,8 +360,8 @@ class WindowPersistence {
 
   /// שומר לסשן של החלון הזה. חלון בלי משבצת אינו שומר — ובשום מצב אינו
   /// כותב על הגבולות של חלון אחר.
-  static Future<void> _saveNow() async {
-    final slot = UserStateSlot.current;
+  Future<void> _saveNow() async {
+    final slot = _slot();
     if (slot == null) return;
     // חלון ממוזער "חונה" ב-(-32000,-32000) ו-isMaximized מחזיר בו false —
     // שמירה במצב הזה מרעילה גם את הגבולות וגם את דגל המיקסום. לא שומרים.
@@ -320,7 +369,7 @@ class WindowPersistence {
 
     final isFullscreen = await _window.isFullScreen();
     final isMaximized = await _window.isMaximized();
-    final store = WindowSessionStore.instance;
+    final store = _store;
     var next =
         (WindowBounds.decode((await store.load(slot))?.boundsJson) ??
                 const WindowBounds())
@@ -339,7 +388,7 @@ class WindowPersistence {
         top: bounds.top,
         width: bounds.width,
         height: bounds.height,
-        dpr: _currentDevicePixelRatio(),
+        dpr: _devicePixelRatio(),
       );
     }
     await store.saveBounds(slot, next.encode());

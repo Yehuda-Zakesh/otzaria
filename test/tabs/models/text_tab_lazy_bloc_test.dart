@@ -3,6 +3,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/models/books.dart';
+import 'package:otzaria/bookmarks/utils/bookmark_from_tab.dart';
+import 'package:otzaria/tabs/models/commentators_tab.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
@@ -78,6 +80,29 @@ void main() {
     await pumpEventQueue();
     expect(bloc.isClosed, isTrue);
   });
+
+  for (final commentary in [false, true]) {
+    test(
+      'בדיקת היסטוריה לטאב ${commentary ? 'מפרשים' : 'טקסט'} אינה בונה bloc',
+      () async {
+        final previousObserver = Bloc.observer;
+        final counter = _TextBookBlocCounter();
+        Bloc.observer = counter;
+        addTearDown(() => Bloc.observer = previousObserver);
+        final source = TextBookTab(book: TextBook(title: 'בראשית'), index: 0);
+        addTearDown(source.dispose);
+        final OpenedTab tab;
+        if (commentary) {
+          tab = CommentatorsTab(sourceTab: source);
+          addTearDown(tab.dispose);
+        } else {
+          tab = source;
+        }
+        expect(await bookmarkFromReadingTab(tab), isNull);
+        expect(counter.created, 0);
+      },
+    );
+  }
 }
 
 class _TextBookBlocCounter extends BlocObserver {

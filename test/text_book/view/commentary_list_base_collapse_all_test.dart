@@ -170,6 +170,62 @@ void main() {
     await tester.pump();
     expect(find.text('מפרש בדיקה'), findsOneWidget);
   });
+
+  testWidgets(
+    'מפרש לשורה קבועה אינו נבנה מחדש בגלילה, והרשימה הכללית כן (perf)',
+    (tester) async {
+      Future<int> rebuildsOnScroll({List<int>? indexes}) async {
+        final base = _loadedStateA();
+        textBookBloc.emitStateForTest(base);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: MultiBlocProvider(
+              providers: [
+                BlocProvider<TextBookBloc>.value(value: textBookBloc),
+                BlocProvider<SettingsBloc>.value(value: settingsBloc),
+              ],
+              child: Scaffold(
+                body: CommentaryListBase(
+                  key: ValueKey(indexes),
+                  indexes: indexes,
+                  openBookCallback: _noopOpenBook,
+                  fontSize: 18,
+                  showSearch: false,
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.textContaining('זהו פירוש לבדיקה'), findsOneWidget);
+
+        var builds = 0;
+        debugOnRebuildDirtyWidget = (element, _) {
+          if (element.widget is BlocBuilder<TextBookBloc, TextBookState>) {
+            builds++;
+          }
+        };
+        addTearDown(() => debugOnRebuildDirtyWidget = null);
+        for (final visible in const [
+          [0, 1],
+          [1],
+          [0],
+        ]) {
+          textBookBloc.emitStateForTest(
+            base.copyWith(visibleIndices: visible),
+          );
+          await tester.pump();
+        }
+        debugOnRebuildDirtyWidget = null;
+        await tester.pumpAndSettle();
+        expect(find.textContaining('זהו פירוש לבדיקה'), findsOneWidget);
+        return builds;
+      }
+
+      expect(await rebuildsOnScroll(indexes: const [0]), 0);
+      expect(await rebuildsOnScroll(), greaterThan(0));
+    },
+  );
 }
 
 void _noopOpenBook(dynamic _) {}

@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/book_common/utils/link_anchor_markers.dart';
 import 'package:otzaria/divine_names/models/divine_name_spans.dart';
@@ -372,6 +374,116 @@ void main() {
     test('סמן שתוכנו השתנה ואינו תואם — מוצג ככתבו', () {
       final html = '${divineNameMarkerOpen(DivineNameKind.shaddai)}שלום</span>';
       expect(resolve(html), 'שלום');
+    });
+  });
+
+  group('שורה עם מופעים רבים', () {
+    test('שני שמות רחוקים מקצים מפה לפי הגבולות המבוקשים', () {
+      final line = ' אל ${'טקסט ' * 200000} אל ';
+      final spans = [
+        (start: 1, end: 3, kind: DivineNameKind.el),
+        (start: line.length - 3, end: line.length - 1, kind: DivineNameKind.el),
+      ];
+      debugVisibleScanCount = 0;
+      debugVisibleMapEntryCount = 0;
+      expect(
+        wrapDivineNameSpans(line, spans),
+        ' ${divineNameMarkerOpen(DivineNameKind.el)}אל</span> '
+        '${'טקסט ' * 200000} '
+        '${divineNameMarkerOpen(DivineNameKind.el)}אל</span> ',
+      );
+      expect(debugVisibleScanCount, 1);
+      expect(debugVisibleMapEntryCount, lessThanOrEqualTo(4));
+    });
+
+    test('גבולות חוזרים, הפוכים וחריגים לצד תג לא סגור', () {
+      const line = '<b>אל</b>&amp; שדי 😀 יה<broken';
+      expect(
+        wrapDivineNameSpans(line, [
+          (start: 11, end: 13, kind: DivineNameKind.yah),
+          (start: -1, end: 2, kind: DivineNameKind.el),
+          (start: 4, end: 7, kind: DivineNameKind.shaddai),
+          (start: 0, end: 2, kind: DivineNameKind.el),
+          (start: 0, end: 2, kind: DivineNameKind.el),
+          (start: 12, end: 11, kind: DivineNameKind.yah),
+          (start: 1, end: -1, kind: DivineNameKind.el),
+          (start: 0, end: 7, kind: DivineNameKind.el),
+          (start: 11, end: 100, kind: DivineNameKind.yah),
+        ]),
+        '<b>${divineNameMarkerOpen(DivineNameKind.el)}אל</span></b>&amp; '
+        '${divineNameMarkerOpen(DivineNameKind.shaddai)}שדי</span> 😀 '
+        '${divineNameMarkerOpen(DivineNameKind.yah)}יה</span><broken',
+      );
+    });
+
+    const names = [
+      ('אלהים', DivineNameKind.elohim),
+      ('אֱלֹהִים', DivineNameKind.elohim),
+      ('יהוה', DivineNameKind.hvyh),
+      ('שדי', DivineNameKind.shaddai),
+      ('אל', DivineNameKind.el),
+      ('צבאות', DivineNameKind.tzevaot),
+    ];
+    // [raw, מספר התווים הגלויים בו]
+    const separators = [
+      (' ', 1),
+      (' <b>', 1),
+      ('</b> ', 1),
+      (' &amp; ', 3),
+      (' & ', 3),
+      ('<br>', 0),
+      (' שלום ישראל ', 12),
+    ];
+
+    ({String line, List<DivineNameSpan> spans}) buildLine(int seed, int n) {
+      final random = Random(seed);
+      final raw = StringBuffer();
+      final spans = <DivineNameSpan>[];
+      var visible = 0;
+      for (var i = 0; i < n; i++) {
+        final (sep, sepVisible) = separators[random.nextInt(separators.length)];
+        raw.write(sep);
+        visible += sepVisible;
+        if (random.nextBool()) {
+          raw.write('ו');
+          visible++;
+        }
+        final (name, kind) = names[random.nextInt(names.length)];
+        // מדי פעם סוג שאינו תואם — המופע נסרק ומושמט.
+        final spanKind = random.nextInt(8) == 0 ? DivineNameKind.yah : kind;
+        spans.add((start: visible, end: visible + name.length, kind: spanKind));
+        raw.write(name);
+        visible += name.length;
+      }
+      raw.write(' סוף');
+      spans.add((start: visible, end: visible + 99, kind: DivineNameKind.el));
+      return (line: raw.toString(), spans: spans);
+    }
+
+    test('כמו עטיפת כל מופע בנפרד', () {
+      for (var seed = 0; seed < 50; seed++) {
+        final (:line, :spans) = buildLine(seed, 60);
+        final oneByOne = spans.reversed.fold(
+          line,
+          (html, span) => wrapDivineNameSpans(html, [span]),
+        );
+        expect(oneByOne, isNot(line));
+        expect(wrapDivineNameSpans(line, spans), oneByOne, reason: '$seed');
+        expect(
+          wrapDivineNameSpans(line, spans.reversed.toList()),
+          oneByOne,
+          reason: 'reversed $seed',
+        );
+      }
+    });
+
+    test('השורה אינה נסרקת מתחילתה לכל מופע', () {
+      final (:line, :spans) = buildLine(1, 300);
+      debugVisibleScanCount = 0;
+      debugVisibleMapEntryCount = 0;
+      wrapDivineNameSpans(line, spans);
+      expect(debugVisibleScanCount, lessThanOrEqualTo(1));
+      expect(debugVisibleMapEntryCount, lessThanOrEqualTo(spans.length * 2));
     });
   });
 }

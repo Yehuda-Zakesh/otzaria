@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
@@ -537,7 +538,9 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
       if (toolShortcut.isNotEmpty &&
           ShortcutHelper.matchesShortcut(event, toolShortcut)) {
         if (!closeOverlayRoutes()) return KeyEventResult.handled;
-        mainWindowScreenKey.currentState?.handleInternalDeepLink(
+        AppWindowKeys.of(
+          context,
+        ).mainWindowScreen.currentState?.handleInternalDeepLink(
           'otzaria://open/tool/${entry.value}',
         );
         return KeyEventResult.handled;
@@ -553,7 +556,9 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
           ShortcutHelper.matchesShortcut(event, pluginShortcut)) {
         final pluginId = ShortcutValidator.pluginIdFromShortcutKey(pluginKey);
         if (!closeOverlayRoutes()) return KeyEventResult.handled;
-        mainWindowScreenKey.currentState?.handleInternalDeepLink(
+        AppWindowKeys.of(
+          context,
+        ).mainWindowScreen.currentState?.handleInternalDeepLink(
           'otzaria://open/plugin/$pluginId',
         );
         return KeyEventResult.handled;

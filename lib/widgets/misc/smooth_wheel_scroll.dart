@@ -37,7 +37,9 @@ class _SmoothWheelScrollState extends State<SmoothWheelScroll>
   _SmoothWheelActivity? _activity;
   final Set<ScrollableState> _nestedScrollables = {};
 
-  double _target = 0.0;
+  // מרחק ולא יעד מוחלט: הרשימה מתקנת את ההיסט כשגובה משוער נמדד או כשהרוחב
+  // משתנה, ויעד בפיקסלים היה נוחת אז במקום אחר.
+  double _remaining = 0.0;
 
   @override
   void initState() {
@@ -111,7 +113,7 @@ class _SmoothWheelScrollState extends State<SmoothWheelScroll>
     // בקצה אין מה להחליק, ובלי תפיסה המסלול המקורי גם מעביר לאב אם יש.
     // בזמן החלקה היעד והמיקום נמצאים במקומות שונים, ומספיק שלאחד מהם יש
     // מקום לזוז: היעד לבדו חוסם את יתרת הדרך, המיקום לבדו חוסם היפוך כיוון.
-    final target = _activity == null ? position.pixels : _target;
+    final target = position.pixels + (_activity == null ? 0.0 : _remaining);
     return delta > 0
         ? math.min(position.pixels, target) <
               position.maxScrollExtent - _epsilon
@@ -139,17 +141,19 @@ class _SmoothWheelScrollState extends State<SmoothWheelScroll>
 
     final wasActive = _activity != null;
     if (!wasActive) {
-      _target = position.pixels;
+      _remaining = 0.0;
       if (!_beginActivity(position)) {
         position.pointerScroll(event.scrollDelta.dy);
         event.respond(allowPlatformDefault: false);
         return;
       }
     }
-    _target = (_target + event.scrollDelta.dy).clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    );
+    _remaining =
+        (position.pixels + _remaining + event.scrollDelta.dy).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ) -
+        position.pixels;
     event.respond(allowPlatformDefault: false);
 
     // אירועים נוספים רק מעדכנים יעד; התנועה עצמה מתבצעת פעם אחת בכל פריים.
@@ -178,13 +182,14 @@ class _SmoothWheelScrollState extends State<SmoothWheelScroll>
     final activity = _activity;
     if (activity == null) return false;
 
-    _target = _target.clamp(
+    final target = (position.pixels + _remaining).clamp(
       position.minScrollExtent,
       position.maxScrollExtent,
     );
-    final remaining = _target - position.pixels;
+    final remaining = target - position.pixels;
     if (remaining.abs() <= _epsilon) {
-      activity.moveTo(_target, velocity: 0.0);
+      activity.moveTo(target, velocity: 0.0);
+      _remaining = 0.0;
       return false;
     }
 
@@ -194,7 +199,8 @@ class _SmoothWheelScrollState extends State<SmoothWheelScroll>
         remaining * (1 - math.exp(-SmoothWheelScroll.decayRatePerMs * frameMs));
     // צעד תת-פיקסלי כבר אינו נראה כתנועה אלא כרעד — נוחתים ומסיימים.
     if (step.abs() <= _epsilon) {
-      activity.moveTo(_target, velocity: 0.0);
+      activity.moveTo(target, velocity: 0.0);
+      _remaining = 0.0;
       return false;
     }
 
@@ -203,6 +209,7 @@ class _SmoothWheelScrollState extends State<SmoothWheelScroll>
       before + step,
       velocity: step / frameMs * 1000,
     );
+    _remaining = remaining - (position.pixels - before);
     final moved = (position.pixels - before).abs() > _epsilon;
     if (!moved && overscroll.abs() > _epsilon) return false;
     return true;

@@ -171,6 +171,37 @@ class SearchDefaults {
     _sessionSemantic = semantic;
   }
 
+  // ── אפשרויות החיפוש החכם ───────────────────────────────────────────
+
+  static const _semanticIncludeLexicalKey =
+      'key-search-semantic-include-lexical';
+  static const _semanticGroupIdenticalKey =
+      'key-search-semantic-group-identical';
+
+  /// האם "התאמה מילולית" פעילה בחיפוש חכם חדש — בחירת המשתמש האחרונה.
+  static bool initialSemanticIncludeLexicalForNewSearch() {
+    if (!Settings.isInitialized) return true;
+    return Settings.getValue<bool>(_semanticIncludeLexicalKey) ?? true;
+  }
+
+  /// שומר את "התאמה מילולית" כברירת מחדל לחיפושים חכמים הבאים.
+  static void saveSemanticIncludeLexicalDefault(bool includeLexical) {
+    if (!Settings.isInitialized) return;
+    Settings.setValue<bool>(_semanticIncludeLexicalKey, includeLexical);
+  }
+
+  /// האם "איחוד טקסטים זהים" פעיל בחיפוש חכם חדש — בחירת המשתמש האחרונה.
+  static bool initialSemanticGroupIdenticalForNewSearch() {
+    if (!Settings.isInitialized) return true;
+    return Settings.getValue<bool>(_semanticGroupIdenticalKey) ?? true;
+  }
+
+  /// שומר את "איחוד טקסטים זהים" כברירת מחדל לחיפושים חכמים הבאים.
+  static void saveSemanticGroupIdenticalDefault(bool groupIdentical) {
+    if (!Settings.isInitialized) return;
+    Settings.setValue<bool>(_semanticGroupIdenticalKey, groupIdentical);
+  }
+
   // ── מרווח בין מילים (חיפוש רגיל/מתקדם) ─────────────────────────────
 
   /// ברירת המחדל השמורה (בין הפעלות) למרווח בין מילים.

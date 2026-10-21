@@ -10,15 +10,44 @@ bool textOverflows({
   TextAlign textAlign = TextAlign.start,
   TextDirection? textDirection,
 }) {
+  final direction = textDirection ?? Directionality.of(context);
+  final textScaler = MediaQuery.textScalerOf(context);
+  final key = (
+    text,
+    style,
+    maxLines,
+    maxWidth,
+    textAlign,
+    direction,
+    textScaler,
+  );
+  final cached = _overflowCache.remove(key);
+  if (cached != null) return _overflowCache[key] = cached;
+  debugTextOverflowLayouts++;
   final textPainter = TextPainter(
     text: TextSpan(text: text, style: style),
     textAlign: textAlign,
-    textDirection: textDirection ?? Directionality.of(context),
+    textDirection: direction,
     maxLines: maxLines,
-    textScaler: MediaQuery.textScalerOf(context),
+    textScaler: textScaler,
   )..layout(maxWidth: maxWidth);
-  return textPainter.didExceedMaxLines;
+  final overflows = textPainter.didExceedMaxLines;
+  textPainter.dispose();
+  if (_overflowCache.length >= 2000) {
+    _overflowCache.remove(_overflowCache.keys.first);
+  }
+  return _overflowCache[key] = overflows;
 }
+
+// שורות עץ הניווט נבנות מחדש בכל גלילה ומודדות שוב אותו טקסט; גופן שנטען משנה מדידה.
+final Map<Object, bool> _overflowCache = () {
+  final cache = <Object, bool>{};
+  PaintingBinding.instance.systemFonts.addListener(cache.clear);
+  return cache;
+}();
+
+@visibleForTesting
+int debugTextOverflowLayouts = 0;
 
 /// ווידג'ט טקסט שעוטף את עצמו ב-[Tooltip] אך ורק כאשר הטקסט נקטע ([TextOverflow.ellipsis]).
 ///

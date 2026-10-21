@@ -95,8 +95,6 @@ class ReaderSectionContentTracker {
     });
   }
 
-  void clear() => _snapshots.clear();
-
   void _trimCache() {
     while (_snapshots.length > maxSnapshots) {
       _snapshots.remove(_snapshots.keys.first);

@@ -3,6 +3,7 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/core/internet_connectivity.dart';
+import 'package:otzaria/core/foreground_work.dart';
 import 'package:otzaria/core/messages/library_messages.dart';
 import 'package:otzaria/core/update_source_reachability.dart';
 import 'package:otzaria/library_update/services/companion_assets_service.dart';
@@ -15,7 +16,7 @@ import '../repository/library_update_repository.dart';
 part 'library_update_event.dart';
 part 'library_update_state.dart';
 
-/// מנהל את תהליך עדכון ספריית הספרים החדש (מחליף את `FileSyncBloc`).
+/// מנהל את תהליך עדכון ספריית הספרים.
 ///
 /// בודק זמינות עדכון, מחיל מסלול דלתא אוטומטית, ומבקש אישור להורדה מלאה.
 /// אינו מפעיל אינדוקס/ריענון ספרייה ישירות — ה-UI מאזין ל-state ומפעיל
@@ -44,6 +45,16 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
 
   /// שעון — ניתן להזרקה לבדיקות ויסות ההתקדמות.
   final DateTime Function() _now;
+
+  /// שירות חזית שמגן על ההורדה מפני מגבלות עבודה ברקע באנדרואיד.
+  final ForegroundWork _foregroundWork;
+  bool _holdsForeground = false;
+
+  // התוכנית של הריצה הפעילה — לבדיקת קובץ חלקי כשהמערכת עוצרת את השירות.
+  LibraryUpdatePlan? _activePlan;
+
+  // הריצה הפעילה נפתחה בלחיצת משתמש — רק אז מבקשים הרשאת התראות.
+  bool _userInitiated = false;
 
   // מזהה הריצה הפעילה. כל התחלה/ביטול/איפוס מגדילים אותו, כך שריצה ישנה
   // (Future שעדיין לא הסתיים) מזוהה כמבוטלת ולא פולטת state או מחליפה DB.
@@ -81,7 +92,9 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
     this.isSourceReachable = isUpdateSourceReachable,
     this.onCheckSucceeded,
     DateTime Function()? now,
+    ForegroundWork? foregroundWork,
   }) : _now = now ?? DateTime.now,
+       _foregroundWork = foregroundWork ?? ForegroundWork.instance,
        super(const LibraryUpdateState()) {
     on<StartLibraryUpdate>(_onStart);
     on<ConfirmFullDownload>(_onConfirmFull);
@@ -90,6 +103,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
     on<CancelLibraryUpdate>(_onCancel);
     on<ResetLibraryUpdate>(_onReset);
     on<_LibraryUpdateProgressed>(_onProgressed);
+    on<_ForegroundWorkTimedOut>(_onForegroundTimeout);
   }
 
   /// הקצב המרבי של עדכוני התקדמות שוטפים (בייטים/אחוז) אל ה-state.
@@ -139,6 +153,74 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
     super.onChange(change);
     // hasUpdate נפלט ⇒ ה-UI מריץ ריענון/אינדוקס שמכסים גם שינוי נלווים שמור.
     if (change.nextState.hasUpdate) _unreportedAssetsChange = false;
+    _syncForeground(change.nextState);
+  }
+
+  @override
+  Future<void> close() {
+    if (_holdsForeground) _foregroundWork.release(this);
+    _holdsForeground = false;
+    return super.close();
+  }
+
+  // בדיקה בלבד אינה מפעילה את השירות (גם לא בעלייה); מרגע שעלה הוא מוחזק עד
+  // סוף הריצה, כי הפעלה מחדש מהרקע אסורה באנדרואיד 12+.
+  void _syncForeground(LibraryUpdateState next) {
+    final hold =
+        next.isBusy &&
+        (_holdsForeground || next.status != LibraryUpdateStatus.checking);
+    if (hold == _holdsForeground) return;
+    _holdsForeground = hold;
+    if (!hold) {
+      _foregroundWork.release(this);
+      return;
+    }
+    _foregroundWork.acquire(
+      this,
+      notice: (
+        channelName: LibraryMessages.libraryDownloadNotificationChannel,
+        title: LibraryMessages.libraryDownloadNotificationTitle,
+        text: LibraryMessages.libraryDownloadNotificationText,
+      ),
+      onTimeout: () {
+        if (!isClosed) add(const _ForegroundWorkTimedOut());
+      },
+      userInitiated: _userInitiated,
+    );
+  }
+
+  /// המערכת עצרה את שירות החזית: עוצרים את ההורדה כמו בביטול, כך שהקובץ
+  /// החלקי נשמר וההודעה מציעה להמשיך ממנו.
+  Future<void> _onForegroundTimeout(
+    _ForegroundWorkTimedOut event,
+    Emitter<LibraryUpdateState> emit,
+  ) async {
+    if (!state.isBusy || !_canCancel(state)) return;
+    final opId = ++_operationId;
+    final pending = _pendingCompleted;
+    _pendingCompleted = null;
+    if (pending != null) {
+      emit(pending);
+      return;
+    }
+    final plan = _activePlan;
+    final canResume =
+        plan != null && await repository.hasResumableDownload(plan);
+    if (isClosed || _isStale(opId)) return;
+    emit(
+      LibraryUpdateState(
+        status: LibraryUpdateStatus.error,
+        message: canResume
+            ? LibraryMessages.downloadPausedResumable
+            : LibraryMessages.backgroundTimeLimitStopped,
+        hasUpdate: state.hasUpdate,
+        changedBookIds: state.changedBookIds,
+        requiresFullIndexRefresh: state.requiresFullIndexRefresh,
+        appliedReleaseTags: state.appliedReleaseTags,
+        errorMessage: LibraryMessages.backgroundTimeLimitReached,
+        canResumeDownload: canResume,
+      ),
+    );
   }
 
   Future<void> _onStart(
@@ -158,6 +240,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
 
     final opId = ++_operationId;
     _heavyDeltaNotice = false;
+    _userInitiated = !event.automatic;
     _resetProgressThrottle();
     emit(
       const LibraryUpdateState(
@@ -273,6 +356,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
     int opId,
   ) async {
     _deltaWriteStarted = false;
+    _activePlan = plan;
     try {
       final deltaResult = await repository.applyDeltaPlan(
         plan,
@@ -352,12 +436,16 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
           return;
         }
       }
+      final canResume = await _canResumeAfter(applyError, plan);
+      if (isClosed || _isStale(opId)) return;
       emit(
         LibraryUpdateState(
           status: LibraryUpdateStatus.error,
           // חוסר מקום אינו כשל החלה: הוא נבדק לפני ההורדה, ולכן גם אינו מציע
           // הורדה מלאה — היא דורשת עוד יותר מקום.
-          message: applyError is LibraryUpdateDiskSpaceException
+          message: canResume
+              ? LibraryMessages.downloadPausedResumable
+              : applyError is LibraryUpdateDiskSpaceException
               ? LibraryMessages.updateDiskSpaceError
               : 'שגיאה בהחלת העדכון',
           hasUpdate: partial?.hasDatabaseChanges ?? false,
@@ -365,12 +453,18 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
           requiresFullIndexRefresh: requiresFullIndexRefresh,
           appliedReleaseTags: appliedTags,
           errorMessage: _errorDetail(applyError),
+          canResumeDownload: canResume,
         ),
       );
     } finally {
       _deltaWriteStarted = false;
     }
   }
+
+  /// הבטחת המשך רק כשהכשל הוא קטיעת רשת והמוריד אכן ימשיך מקובץ חלקי.
+  Future<bool> _canResumeAfter(Object error, LibraryUpdatePlan plan) async =>
+      PatchDownloader.isTransientNetworkError(error) &&
+      await repository.hasResumableDownload(plan);
 
   String _applyMismatchReason(PatchApplyException error) {
     if (!error.isContentMismatch) return LibraryMessages.deltaApplyFailed;
@@ -398,6 +492,8 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
     final opId = ++_operationId;
     _heavyDeltaNotice = false;
     _fullDownloadDbReplaced = false;
+    _activePlan = plan;
+    _userInitiated = true;
     _resetProgressThrottle();
     emit(
       state.copyWith(
@@ -431,10 +527,14 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
       if (_isStale(opId)) return;
       _logUpdateError('applyFullDownload', e, st);
       final dbReplaced = _fullDownloadDbReplaced;
+      final canResume = !dbReplaced && await _canResumeAfter(e, plan);
+      if (isClosed || _isStale(opId)) return;
       emit(
         LibraryUpdateState(
           status: LibraryUpdateStatus.error,
-          message: e is LibraryUpdateDiskSpaceException
+          message: canResume
+              ? LibraryMessages.downloadPausedResumable
+              : e is LibraryUpdateDiskSpaceException
               ? LibraryMessages.updateDiskSpaceError
               : 'שגיאה בהורדה המלאה',
           // fallback אחרי דלתא חלקית: ההורדה המלאה נכשלה, אבל הצעדים שכבר
@@ -449,6 +549,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
               ? _withFullDbTag(plan)
               : state.appliedReleaseTags,
           errorMessage: _errorDetail(e),
+          canResumeDownload: canResume,
         ),
       );
     } finally {
@@ -468,6 +569,7 @@ class LibraryUpdateBloc extends Bloc<LibraryUpdateEvent, LibraryUpdateState> {
     }
     final opId = ++_operationId;
     _heavyDeltaNotice = plan.isHeavyDelta;
+    _userInitiated = true;
     _resetProgressThrottle();
     emit(
       state.copyWith(

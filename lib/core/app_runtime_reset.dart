@@ -2,6 +2,7 @@ import 'package:otzaria/attached_libraries/repository/attached_library_registry.
 import 'package:otzaria/attached_libraries/repository/external_link_repository.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/library/hidden/hidden_library_store.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/data/cache/acronyms_cache.dart';
@@ -26,9 +27,40 @@ import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/services/commentary_service.dart';
 import 'package:otzaria/services/target_line_links_service.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_client.dart';
+import 'package:otzaria/tools/calendar/services/calendar_alerts_owner.dart';
+import 'package:otzaria/tools/calendar/services/notification_service.dart';
 
 /// מאפס מצב runtime מקומי כדי שהאפליקציה תוכל להיבנות מחדש בלי סגירת תהליך.
 Future<void> resetRuntimeStateForAppRestart({
+  String? correctionStorageMoveRequestId,
+}) async {
+  await _prepareLibraryRuntimeReset(
+    correctionStorageMoveRequestId: correctionStorageMoveRequestId,
+  );
+  await UserBooksDatabaseHolder.instance.close();
+  await AttachedLibraryRegistry.instance.reset();
+  await CacheDatabaseHolder.instance.close();
+  await PersonalNotesDatabase.instance.close();
+  await PluginSystemDatabase.instance.close();
+  await UserStateDatabase.instance.reopen();
+
+  final libraryPath = await AppPaths.getLibraryPath();
+  FileSystemData.instance.libraryPath = libraryPath;
+  _invalidateLibraryRuntimeCaches();
+  DataRepository.instance.invalidateExternalBooksCache();
+
+  // תיקיות אישיות ששוחזרו מגיבוי צריכות להיסרק שוב לאחר הבנייה מחדש.
+  BackgroundSyncInitializer.resetForAppRestart();
+}
+
+/// מאפס משאבים תלויי מקור ומטמוני ספרייה, בלי לסגור מסדי משתמש עצמאיים.
+Future<void> resetLibraryRuntimeState() async {
+  await _prepareLibraryRuntimeReset();
+  _invalidateLibraryRuntimeCaches();
+}
+
+Future<void> _prepareLibraryRuntimeReset({
   String? correctionStorageMoveRequestId,
 }) async {
   MultiWindowService.clearVisibilityRequestsForRestart();
@@ -38,33 +70,20 @@ Future<void> resetRuntimeStateForAppRestart({
   await const HiddenLibraryStore().resetRuntimeStateForAppRestart();
   await PluginRuntimeDispatcher.instance.prepareForAppRestart();
   await SqliteDataProvider.instance.dispose();
-  await UserBooksDatabaseHolder.instance.close();
-  await AttachedLibraryRegistry.instance.reset();
+}
+
+void _invalidateLibraryRuntimeCaches() {
   ExternalLinkRepository.instance.resetRuntime();
-  await CacheDatabaseHolder.instance.close();
-  await PersonalNotesDatabase.instance.close();
-  await PluginSystemDatabase.instance.close();
-  await UserStateDatabase.instance.reopen();
-
-  final libraryPath = await AppPaths.getLibraryPath();
-  FileSystemData.instance.libraryPath = libraryPath;
   FileSystemData.instance.clearBookCache();
-
   LibraryProviderManager.instance.resetRuntimeState();
   DataRepository.instance.invalidateLibraryCache();
-  DataRepository.instance.invalidateExternalBooksCache();
-
-  // בלי זה סריקת התיקיות האישיות לא תרוץ שוב אחרי הבנייה מחדש, ותיקיות
-  // ספרים ששוחזרו מגיבוי יישארו בלי ספרים עד ההפעלה הבאה.
-  BackgroundSyncInitializer.resetForAppRestart();
 
   ReferenceBooksCache.instance.clear();
   BooksCache.instance.clear();
   AcronymsCache.instance.clear();
   GenerationCache.instance.clear();
   BookFacetMetadataCache.instance.clear();
-  // ה-FindRefRepository מחזיק caches פנימיים (מפרשים, AltToc שטוח) שלא
-  // ניזונים מהקאשים שלמעלה. בלי איפוס יזום הם ישרדו עד restart מלא.
+  // מטמוני המפרשים וה-AltToc של האיתור נפרדים מהמטמונים המשותפים.
   FindRefRepository.clearAllCaches();
   FindRefBloc.clearAllSearches();
   CommentaryService.clearEraCache();
@@ -73,7 +92,21 @@ Future<void> resetRuntimeStateForAppRestart({
   BookNotesRepository.instance.clear();
 }
 
-/// תאימות לשם הישן במסלול איפוס הגדרות.
+/// אחרי איפוס הגדרות או שחזור גיבוי: בעל ההתראות מתיישר עם הערכים השמורים,
+/// וחלון משני מקבל ממנו מחדש את המצב שנמחק אצלו.
 Future<void> resetRuntimeStateAfterSettingsReset() async {
   await resetRuntimeStateForAppRestart();
+  if (WindowRole.isSecondary) {
+    RemoteCalendarAlertsClient.instance.forgetAppliedRevision();
+    return;
+  }
+  try {
+    await CalendarAlertsOwner.instance.handleSettingsReset();
+  } catch (error, stackTrace) {
+    NotificationService.logFailure(
+      'יישור ההתראות אחרי איפוס נכשל',
+      error,
+      stackTrace,
+    );
+  }
 }

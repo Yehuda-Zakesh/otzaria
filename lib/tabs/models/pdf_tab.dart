@@ -12,11 +12,7 @@ import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
 import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 
-/// Represents a tab with a PDF book.
-///
-/// The [PdfBookTab] class contains information about the PDF book,
-/// such as its [book] and the current [pageNumber].
-/// It also contains a [pdfViewerController] to control the viewer.
+/// כרטיסיית קורא PDF עם מצב המשתמש ובקר התצוגה שלה.
 class PdfBookTab extends OpenedTab {
   /// The PDF book.
   final PdfBook book;
@@ -89,17 +85,13 @@ class PdfBookTab extends OpenedTab {
   /// Links for the current book
   List<Link> links = [];
 
-  /// האם [links] מכיל את *כל* קישורי הספר. במסך ה-PDF נטען רק חלון קישורים
-  /// סביב המיקום הנוכחי (false); כרטיסיית המפרשים העצמאית משדרגת לרשימה
-  /// המלאה וקובעת true — ומאותו רגע טעינת החלון מפסיקה לגעת ברשימה.
+  /// true כשהכרטיסייה מחזיקה את כל קישורי הספר, כדי שטעינת חלון לא תדרוס אותם.
   bool linksAreComplete = false;
 
   /// Active commentators to show
   Set<String> activeCommentators = <String>{};
 
-  /// מצב טעינת הקישורים/המפרשים עבור ה-PDF המשותף.
-  /// משמש גם את כרטסיית המפרשים העצמאית כדי להציג "טוען מפרשים..."
-  /// בדיוק כמו הפאנל הראשי.
+  /// מצב הטעינה שמשותף לקורא ולכרטיסיית המפרשים.
   final ValueNotifier<bool> linksLoadingNotifier = ValueNotifier<bool>(true);
 
   /// Current line number in text (based on PDF heading)
@@ -114,15 +106,10 @@ class PdfBookTab extends OpenedTab {
   /// Saved layout mode for restoration after rebuild
   PdfLayoutMode? savedLayoutMode;
 
-  /// כשפתיחה ישירה לעמוד גבוה — מבטל progressive loading כדי למנוע קפיצות
-  /// ויזואליות שנובעות מעדכון ממדי עמודים שנטענים ברקע. תמורת כך הפתיחה
-  /// איטית יותר. נכון רק לתרחישי פתיחה ישירה (דף יומי, מעבר מטקסט ל-PDF).
+  /// מבטל טעינה הדרגתית בפתיחה ישירה לעמוד גבוה, כדי שעדכון ממדי העמודים
+  /// לא יזיז את המיקום הנראה. הפתיחה עצמה עשויה להיות איטית יותר.
   final bool requiresStableLayout;
 
-  /// Creates a new instance of [PdfBookTab].
-  ///
-  /// The [book] parameter represents the PDF book, and the [pageNumber]
-  /// parameter represents the current page number.
   PdfBookTab({
     required this.book,
     required this.pageNumber,
@@ -150,15 +137,8 @@ class PdfBookTab extends OpenedTab {
     pinLeftPane.value = Settings.getValue<bool>('key-pin-sidebar') ?? false;
   }
 
-  /// `OpenedTab.from` מטפל ב-[PdfBookTab] בענף ייעודי ואינו מגיע לכאן;
-  /// המימוש קיים כדי שהחוזה המופשט של [OpenedTab.clone] יתקיים.
-  ///
-  /// הענף שם מעתיק גם [activeCommentators], [savedZoom] ו-[savedLayoutMode]
-  /// — שדות שנקבעים אחרי הבנייה. [pdfHeadings], [currentTextLineNumber]
-  /// ו-[currentTextLineNumberEnd] הם מצב נגזר שנטען מחדש, ומי שצריך אותם
-  /// משכפל אותם בעצמו (ראו `PdfCommentatorsTab.clone`).
   @override
-  OpenedTab clone() => OpenedTab.from(this);
+  OpenedTab clone() => PdfReadingSnapshot._capture(this).createTab();
 
   /// מחיל תצורת חיפוש חיצונית בלי לחשוף שאילתה לתצורה הישנה.
   void applyIncomingSearchConfiguration(ReadingTabSearchState configuration) {
@@ -176,9 +156,7 @@ class PdfBookTab extends OpenedTab {
     }
   }
 
-  /// Creates a new instance of [PdfBookTab] from a JSON map.
-  ///
-  /// The JSON map should have 'path' and 'pageNumber' keys.
+  /// משחזר כרטיסייה בפורמט הקיים, כולל שמירות ללא נתוני ספר מקוננים.
   factory PdfBookTab.fromJson(Map<String, dynamic> json) {
     final bool shouldOpenLeftPane = resolveRestoredReadingLeftPaneState(json);
 
@@ -216,11 +194,6 @@ class PdfBookTab extends OpenedTab {
     );
 
     tab.savedLayoutMode = savedLayoutMode;
-    // ⚠️ אחרי הבנייה, כי אינם פרמטרי קונסטרוקטור. `PdfCommentatorsTab`
-    // שומר את `activeCommentators` במפורש — כלומר זהו מצב משתמש אמיתי —
-    // וב-`PdfBookTab` הוא נפל בין הכיסאות: הוא לא נשמר, ולכן העברת
-    // כרטיסיה לחלון אחר (וגם סגירת התוכנה) איפסה את בחירת המפרשים ואת
-    // מפלס התקריב.
     final active = (json['activeCommentators'] as List?)?.cast<String>();
     if (active != null) tab.activeCommentators = active.toSet();
     tab.savedZoom = (json['savedZoom'] as num?)?.toDouble();
@@ -246,48 +219,100 @@ class PdfBookTab extends OpenedTab {
     super.dispose();
   }
 
-  /// Converts the [PdfBookTab] instance into a JSON map.
-  ///
-  /// The JSON map contains 'path', 'pageNumber' and 'type' keys.
   @override
-  Map<String, dynamic> toJson() {
-    // שמירת מספר העמוד הנוכחי - אם ה-controller מוכן, נשתמש בו, אחרת נשתמש ב-pageNumber השמור
-    int currentPage = pageNumber;
-    try {
-      if (pdfViewerController.isReady) {
-        currentPage = pdfViewerController.pageNumber ?? pageNumber;
-      }
-    } catch (e) {
-      // אם יש שגיאה בגישה ל-controller, נשתמש ב-pageNumber השמור
-      currentPage = pageNumber;
-    }
+  Map<String, dynamic> toJson() => PdfReadingSnapshot._capture(this).toJson();
+}
 
+/// מצב המשתמש בקורא PDF; קישורים ומיפויי טקסט נגזרים נטענים בנפרד.
+class PdfReadingSnapshot {
+  PdfReadingSnapshot._capture(PdfBookTab tab)
+    : _book = tab.book,
+      _pageNumber = tab.pageNumber,
+      _persistedPageNumber = tab.pageNumber,
+      _showLeftPane = tab.showLeftPane.value,
+      _isPinned = tab.isPinned,
+      _dedupeKey = tab.dedupeKey,
+      _requiresStableLayout = tab.requiresStableLayout,
+      _externalMatches = tab.externalMatches.value,
+      _activeCommentators = Set.of(tab.activeCommentators),
+      _savedZoom = tab.savedZoom,
+      _savedLayoutMode = tab.savedLayoutMode,
+      _persistedSearchText = tab.searchController.text,
+      _search = ReadingTabSearchState(
+        searchText: tab.searchText,
+        searchOptions: tab.searchOptions,
+        alternativeWords: tab.alternativeWords,
+        spacingValues: tab.spacingValues,
+        searchMode: tab.searchMode,
+        searchDistance: tab.searchDistance,
+        matchPolicy: tab.matchPolicy,
+      ).copy() {
+    // השמירה קוראת את העמוד החי; לשכפול מספיק העמוד המסונכרן של הטאב.
+    try {
+      if (tab.pdfViewerController.isReady) {
+        _persistedPageNumber =
+            tab.pdfViewerController.pageNumber ?? _pageNumber;
+      }
+    } catch (_) {
+      _persistedPageNumber = _pageNumber;
+    }
+  }
+
+  final PdfBook _book;
+  final int _pageNumber;
+  int _persistedPageNumber;
+  final bool _showLeftPane;
+  final bool _isPinned;
+  final String? _dedupeKey;
+  final bool _requiresStableLayout;
+  final ExternalBookMatches? _externalMatches;
+  final Set<String> _activeCommentators;
+  final double? _savedZoom;
+  final PdfLayoutMode? _savedLayoutMode;
+  final String _persistedSearchText;
+  final ReadingTabSearchState _search;
+
+  /// יוצר טאב עם בקרים משלו, בלי להעתיק מצב נגזר של המסמך.
+  PdfBookTab createTab() {
+    final search = _search.copy();
+    return PdfBookTab(
+        book: _book,
+        pageNumber: _pageNumber,
+        openLeftPane: _showLeftPane,
+        searchText: search.searchText,
+        searchOptions: search.searchOptions,
+        alternativeWords: search.alternativeWords,
+        spacingValues: search.spacingValues,
+        searchMode: search.searchMode,
+        searchDistance: search.searchDistance,
+        matchPolicy: search.matchPolicy,
+        isPinned: _isPinned,
+        dedupeKey: _dedupeKey,
+        requiresStableLayout: _requiresStableLayout,
+        externalMatches: _externalMatches,
+      )
+      ..activeCommentators = Set.of(_activeCommentators)
+      ..savedZoom = _savedZoom
+      ..savedLayoutMode = _savedLayoutMode;
+  }
+
+  /// השדה החי נשמר גם כשהחיפוש נוקה, בלי להחזיר טקסט ישן מהטאב.
+  Map<String, dynamic> toJson() {
     return {
-      'path': book.path,
-      'book': book.toJson(),
-      'pageNumber': currentPage,
-      'showLeftPane': showLeftPane.value,
-      'isPinned': isPinned,
+      'path': _book.path,
+      'book': _book.toJson(),
+      'pageNumber': _persistedPageNumber,
+      'showLeftPane': _showLeftPane,
+      'isPinned': _isPinned,
       'type': 'PdfBookTab',
-      'requiresStableLayout': requiresStableLayout,
-      if (externalMatches.value case final matches?)
+      'requiresStableLayout': _requiresStableLayout,
+      if (_externalMatches case final matches?)
         'externalMatches': matches.toJson(),
-      if (savedLayoutMode != null) 'savedLayoutMode': savedLayoutMode!.name,
-      // בחירת המפרשים ומפלס התקריב הם מצב משתמש, ולא נגזרת של הספר.
-      if (activeCommentators.isNotEmpty)
-        'activeCommentators': activeCommentators.toList(),
-      'savedZoom': ?savedZoom,
-      // שדה החיפוש עצמו הוא המצב המעודכן (הבנאי מאתחל אותו מ-searchText):
-      // נפילה חזרה ל-searchText הייתה מחזירה חיפוש שהמשתמש כבר ניקה.
-      ...ReadingTabSearchState(
-        searchText: searchController.text,
-        searchOptions: searchOptions,
-        alternativeWords: alternativeWords,
-        spacingValues: spacingValues,
-        searchMode: searchMode,
-        searchDistance: searchDistance,
-        matchPolicy: matchPolicy,
-      ).toJson(),
+      if (_savedLayoutMode != null) 'savedLayoutMode': _savedLayoutMode.name,
+      if (_activeCommentators.isNotEmpty)
+        'activeCommentators': _activeCommentators.toList(),
+      'savedZoom': ?_savedZoom,
+      ..._search.copy(searchText: _persistedSearchText).toJson(),
     };
   }
 }

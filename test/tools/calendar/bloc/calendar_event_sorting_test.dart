@@ -11,7 +11,7 @@ class _FakeNotificationService implements NotificationService {
   bool get isInitialized => true;
 
   @override
-  Future<void> cancelNotification(int id) async {}
+  Future<void> cancelNotifications(Iterable<int> ids) async {}
 
   @override
   Future<bool> checkPermissions() async => false;

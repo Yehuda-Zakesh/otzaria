@@ -57,9 +57,6 @@ const Set<String> kKnownSeforimTables = {
 class DbCapabilities {
   const DbCapabilities._(this._tables, this._columns, this._indexes);
 
-  /// מסד ריק — אין אף טבלה.
-  static const DbCapabilities none = DbCapabilities._({}, {}, {});
-
   final Set<String> _tables;
   final Map<String, Set<String>> _columns;
   final Set<String> _indexes;

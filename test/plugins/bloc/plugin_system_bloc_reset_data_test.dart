@@ -11,6 +11,8 @@ import 'package:otzaria/plugins/services/plugin_external_search_service.dart';
 import 'package:otzaria/plugins/services/plugin_installer_service.dart';
 import 'package:otzaria/plugins/services/plugin_toolbar_registry.dart';
 
+import '../../test_helpers/plugin_alerts_client.dart';
+
 InstalledPlugin _plugin(String id) {
   return InstalledPlugin(
     pluginId: id,
@@ -101,6 +103,7 @@ void main() {
     final installer = _StubInstaller(repo);
     final bloc = PluginSystemBloc(
       repository: repo,
+      alertsClient: pluginAlertsClientFor(repo),
       installerService: installer,
     );
     addTearDown(bloc.close);

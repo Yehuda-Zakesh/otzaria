@@ -15,7 +15,7 @@ import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/text_book/view/toc_navigator_screen.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:otzaria/widgets/lists/nav_tree_tile.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 import '../../support/search_engine_test_init.dart';
 import 'package:otzaria/text_book/view/reading_viewport/line_scroll_controller.dart';
@@ -302,12 +302,11 @@ Future<void> main() async {
     expect(searchIcon, findsNothing);
   });
 
-  testWidgets('ספר עם TOC < סף → משתמש ב-SingleChildScrollView (לא וירטואלי)', (
+  testWidgets('גם עץ של 400 כותרות בונה רק את אזור התצוגה', (
     tester,
   ) async {
-    // עץ קטן, 20 ערכים — מתחת לסף.
     final smallToc = List.generate(
-      20,
+      400,
       (i) => TocEntry(text: 'item $i', index: i, level: 1),
     );
 
@@ -334,12 +333,19 @@ Future<void> main() async {
     );
     await tester.pump();
 
-    // לא משתמש בוירטואליזציה — מסלול רקורסיבי קיים.
     expect(
       find.byType(ScrollablePositionedList),
-      findsNothing,
-      reason: 'ספר קטן לא צריך וירטואליזציה — שומר על מסלול רקורסיבי',
+      findsOneWidget,
     );
+    expect(find.byType(NavTreeTile).evaluate().length, lessThan(100));
+    expect(find.text('item 399'), findsNothing);
+    tester
+        .widget<ScrollablePositionedList>(find.byType(ScrollablePositionedList))
+        .itemScrollController!
+        .jumpTo(index: 400);
+    await tester.pumpAndSettle();
+    expect(find.text('item 399'), findsOneWidget);
+    expect(find.byType(NavTreeTile).evaluate().length, lessThan(100));
   });
 
   testWidgets('כפתור כווץ הכל מסתיר את הפרקים ומחזיר אותם (issue #1438)', (
@@ -620,6 +626,69 @@ Future<void> main() async {
     skip: !engineReady,
   );
 
+  testWidgets(
+    'גלילה בתוך אותה כותרת אינה בונה מחדש את שורות העץ, ומעבר כותרת מעדכן את הסימון',
+    (tester) async {
+      final toc = [
+        TocEntry(text: 'first', index: 0, level: 1),
+        TocEntry(text: 'second', index: 5, level: 1),
+        TocEntry(text: 'third', index: 10, level: 1),
+      ];
+      final bloc = _TestTextBookBloc(
+        _loadedState(toc: toc, visibleIndices: const [5]),
+      );
+      addTearDown(bloc.close);
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+
+      await tester.pumpWidget(
+        _wrap(
+          TocViewer(
+            lines: LineScrollController(),
+            closeLeftPaneCallback: () {},
+            focusNode: focusNode,
+          ),
+          bloc,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      String? selectedTitle() => tester
+          .widgetList<NavTreeTile>(find.byType(NavTreeTile))
+          .where((tile) => tile.isSelected)
+          .map((tile) => tile.title)
+          .singleOrNull;
+      expect(selectedTitle(), 'second');
+
+      var tileRebuilds = 0;
+      debugOnRebuildDirtyWidget = (element, builtOnce) {
+        if (element.widget is NavTreeTile) tileRebuilds++;
+      };
+      addTearDown(() => debugOnRebuildDirtyWidget = null);
+
+      // שורות 6-9 שייכות כולן ל-second.
+      for (var line = 6; line < 10; line++) {
+        bloc.emitState(
+          (bloc.state as TextBookLoaded).copyWith(visibleIndices: [line]),
+        );
+        await tester.pumpAndSettle();
+      }
+      bloc.emitState(
+        (bloc.state as TextBookLoaded).copyWith(selectedIndex: 8),
+      );
+      await tester.pumpAndSettle();
+      expect(tileRebuilds, 0);
+      expect(selectedTitle(), 'second');
+
+      bloc.emitState(
+        (bloc.state as TextBookLoaded).copyWith(selectedIndex: 12),
+      );
+      await tester.pumpAndSettle();
+      expect(tileRebuilds, greaterThan(0));
+      expect(selectedTitle(), 'third');
+    },
+  );
+
   testWidgets('שינוי visibleIndices מעדכן את ה-active highlight בלי קריסה', (
     tester,
   ) async {
@@ -707,8 +776,9 @@ Future<void> main() async {
     await tester.pumpAndSettle();
 
     double tocOffset() => tester
-        .widget<SingleChildScrollView>(find.byType(SingleChildScrollView))
-        .controller!
+        .widget<ScrollablePositionedList>(find.byType(ScrollablePositionedList))
+        .itemScrollController!
+        .scrollController!
         .offset;
 
     // פאנל סגור → אין גלילה.
@@ -756,8 +826,11 @@ Future<void> main() async {
       }
 
       final offset = tester
-          .widget<SingleChildScrollView>(find.byType(SingleChildScrollView))
-          .controller!
+          .widget<ScrollablePositionedList>(
+            find.byType(ScrollablePositionedList),
+          )
+          .itemScrollController!
+          .scrollController!
           .offset;
       expect(offset, greaterThan(0));
     },
@@ -811,7 +884,7 @@ Future<void> main() async {
       );
       await tester.pumpAndSettle();
 
-      final viewport = tester.getRect(find.byType(SingleChildScrollView));
+      final viewport = tester.getRect(find.byType(ScrollablePositionedList));
       final row = tester.getRect(find.text('סעיף 15.3.2'));
       expect(row.top, greaterThanOrEqualTo(viewport.top));
       expect(row.bottom, lessThanOrEqualTo(viewport.bottom));
@@ -850,7 +923,7 @@ Future<void> main() async {
           .where((tile) => tile.isSelected)
           .map((tile) => tile.title);
       expect(selected, ['פרק 45']);
-      final viewport = tester.getRect(find.byType(SingleChildScrollView));
+      final viewport = tester.getRect(find.byType(ScrollablePositionedList));
       final row = tester.getRect(find.text('פרק 45'));
       expect(row.top, greaterThanOrEqualTo(viewport.top));
       expect(row.bottom, lessThanOrEqualTo(viewport.bottom));
@@ -858,10 +931,8 @@ Future<void> main() async {
   );
 
   testWidgets(
-    'ניקוי חיפוש בין תזמון הגלילה לביצועה אינו זורק (מסלול שהוחלף)',
+    'ניקוי חיפוש בין תזמון הגלילה לביצועה אינו זורק או מאבד את היעד',
     (tester) async {
-      // הגלילה מתוזמנת במסלול הרקורסיבי, וניקוי החיפוש לפני ביצועה מחזיר את
-      // הרשימה הוירטואלית ומנתק את בקר הגלילה.
       final toc = List.generate(
         600,
         (i) => TocEntry(
@@ -890,9 +961,9 @@ Future<void> main() async {
 
       await _typeInSearch(tester, 'unique');
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.byType(SingleChildScrollView), findsOneWidget);
+      expect(find.byType(ScrollablePositionedList), findsOneWidget);
 
-      // שינוי הפריט הפעיל מתזמן גלילה במסלול הרקורסיבי.
+      // השינוי מתזמן גלילה לפי הרשימה המסוננת; הניקוי משנה את המספור.
       bloc.emitState(initial.copyWith(selectedIndex: 5));
 
       // ניקוי מיידי — לפני ה-frame שבו הגלילה רצה.
@@ -904,7 +975,8 @@ Future<void> main() async {
       }
 
       expect(tester.takeException(), isNull);
-      expect(find.byType(SingleChildScrollView), findsNothing);
+      expect(find.byType(ScrollablePositionedList), findsOneWidget);
+      expect(find.text('unique-target'), findsOneWidget);
     },
     skip: !engineReady,
   );
@@ -1057,7 +1129,7 @@ Future<void> main() async {
 
     // גרירה עם dragDetails — הודעות ScrollStart/ScrollEnd של גרירה ידנית.
     await tester.drag(
-      find.byType(SingleChildScrollView),
+      find.byType(ScrollablePositionedList),
       const Offset(0, -200),
     );
     await tester.pumpAndSettle();
@@ -1065,7 +1137,7 @@ Future<void> main() async {
     final scrollable = tester.state<ScrollableState>(
       find
           .descendant(
-            of: find.byType(SingleChildScrollView),
+            of: find.byType(ScrollablePositionedList),
             matching: find.byType(Scrollable),
           )
           .first,
@@ -1082,8 +1154,7 @@ Future<void> main() async {
     'קפיצה לערך רחוק בספר גדול אינה בונה שורות כפולות (מיקרופדיה תלמודית)',
     (tester) async {
       final toc = _loadMikropediaToc();
-      // כמאה שורות מתחת לראש: רחוק מהתצוגה, אך בטווח ש-ScrollablePositionedList
-      // בונה בשתי הרשימות של מעבר הגלילה.
+      // כמאה שורות מתחת לראש: רחוק מהתצוגה, כך שהגלילה בונה שורות חדשות.
       final target = toc.single.children[80];
       final initial = _loadedState(toc: toc, visibleIndices: const [0]);
       final bloc = _TestTextBookBloc(initial);
@@ -1205,6 +1276,35 @@ Future<void> main() async {
     expect(find.text('seif 0'), findsNothing);
     expect(find.text('siman 2'), findsOneWidget);
     expectFirstRowAtTop(tester);
+  });
+
+  testWidgets('כיווץ ענף שומר את זהות השורות שמספרן השתנה', (tester) async {
+    final toc = _buildLargeToc(simanim: 3, seifim: 2);
+    final bloc = _TestTextBookBloc(_loadedState(toc: toc, visibleIndices: [0]));
+    final focus = FocusNode();
+    final lines = LineScrollController();
+    addTearDown(bloc.close);
+    addTearDown(focus.dispose);
+    addTearDown(lines.dispose);
+    await tester.pumpWidget(
+      _wrap(
+        TocViewer(
+          lines: lines,
+          closeLeftPaneCallback: () {},
+          focusNode: focus,
+        ),
+        bloc,
+      ),
+    );
+    await tester.pumpAndSettle();
+    final row = find.ancestor(
+      of: find.text('siman 1'),
+      matching: find.byType(NavTreeTile),
+    );
+    final before = tester.element(row);
+    await tester.tap(find.byType(ExpandingChevron).first);
+    await tester.pumpAndSettle();
+    expect(tester.element(row), same(before));
   });
 }
 

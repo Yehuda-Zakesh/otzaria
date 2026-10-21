@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
 import 'package:otzaria/text_book/view/selection/enhanced_gesture_detector.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 // רגרסיה לבאג "טקסט מוסתר נסגר מיד": ב-combined view, בחירת שורה (onSingleTap)
 // העבירה את ה-AnimatedContainer מ-decoration:null ל-BoxDecoration. Container

@@ -9,7 +9,10 @@ sealed class LibraryUpdateEvent extends Equatable {
 /// בקשה לבדוק ולהחיל עדכון. מסלול דלתא מוחל אוטומטית; מסלול הורדה מלאה
 /// עוצר וממתין ל-[ConfirmFullDownload].
 class StartLibraryUpdate extends LibraryUpdateEvent {
-  const StartLibraryUpdate();
+  /// [automatic] — הבדיקה בעלייה, לא לחיצה של המשתמש.
+  const StartLibraryUpdate({this.automatic = false});
+
+  final bool automatic;
 }
 
 /// אישור המשתמש לבצע הורדה מלאה (אחרי שהוצג גודל ההורדה).
@@ -52,4 +55,9 @@ class _LibraryUpdateProgressed extends LibraryUpdateEvent {
     progress.bytesTotal,
     opId,
   ];
+}
+
+/// אירוע פנימי: המערכת עצרה את שירות החזית (מכסת dataSync באנדרואיד 15).
+class _ForegroundWorkTimedOut extends LibraryUpdateEvent {
+  const _ForegroundWorkTimedOut();
 }

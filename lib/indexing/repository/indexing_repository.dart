@@ -1,3 +1,4 @@
+import 'package:otzaria/data/book_identity.dart';
 import 'package:otzaria/data/data_providers/database_library_provider.dart';
 import 'package:otzaria/text_book/utils/inline_notes_utils.dart';
 import 'package:otzaria/text_book/models/book_notes.dart';
@@ -236,7 +237,7 @@ class IndexingRepository {
 
     return IndexingFailure(
       bookTitle: book.title,
-      bookPath: buildIndexedBookFilePath(book),
+      bookPath: BookIdentity.indexedFilePath(book),
       kind: kind,
       error: message,
       stackTrace: stackTrace?.toString(),
@@ -338,7 +339,7 @@ class IndexingRepository {
   }
 
   bool isBookIndexed(Book book) => _tantivyDataProvider.indexedFilePaths
-      .contains(buildIndexedBookFilePath(book));
+      .contains(BookIdentity.indexedFilePath(book));
 
   /// האם האינדקס הקיים דורש איפוס ובנייה מחדש, לפי בדיקת התאימות
   /// של מנוע החיפוש (נקראת מהאינדקס עצמו).
@@ -373,7 +374,7 @@ class IndexingRepository {
     ).any(
       (book) =>
           !isBookIndexed(book) ||
-          pending.contains(buildIndexedBookFilePath(book)),
+          pending.contains(BookIdentity.indexedFilePath(book)),
     );
   }
 
@@ -489,18 +490,19 @@ class IndexingRepository {
       check = IndexCheckScope.books([
         ...check.books,
         for (final book in libraryBooks)
-          if (checkKeys.contains(buildIndexedBookFilePath(book))) book,
+          if (checkKeys.contains(BookIdentity.indexedFilePath(book))) book,
       ]);
     }
     final checkKeys = {
-      for (final book in check.books) buildIndexedBookFilePath(book),
+      for (final book in check.books) BookIdentity.indexedFilePath(book),
     };
     final changedByKey = <String, Book>{
-      for (final book in explicitChanged) buildIndexedBookFilePath(book): book,
+      for (final book in explicitChanged)
+        BookIdentity.indexedFilePath(book): book,
     };
     if (storedPending.isNotEmpty) {
       for (final book in libraryBooks) {
-        final key = buildIndexedBookFilePath(book);
+        final key = BookIdentity.indexedFilePath(book);
         if (storedPending.contains(key)) {
           changedByKey.putIfAbsent(key, () => book);
         }
@@ -526,7 +528,8 @@ class IndexingRepository {
       final seen = <String>{};
       return orderBooksForIndexing([
         for (final book in [...scope, ...changedByKey.values])
-          if (!isBookIndexed(book) && seen.add(buildIndexedBookFilePath(book)))
+          if (!isBookIndexed(book) &&
+              seen.add(BookIdentity.indexedFilePath(book)))
             book,
       ]);
     }
@@ -583,7 +586,8 @@ class IndexingRepository {
         final candidates = [
           for (final book
               in check.wholeLibrary ? libraryBooks : eligible(check.books))
-            if (!changedByKey.containsKey(buildIndexedBookFilePath(book))) book,
+            if (!changedByKey.containsKey(BookIdentity.indexedFilePath(book)))
+              book,
         ];
         final detected = await changeDetector.detectChanged(
           candidates,
@@ -600,7 +604,10 @@ class IndexingRepository {
           );
         }
         for (final book in detected) {
-          changedByKey.putIfAbsent(buildIndexedBookFilePath(book), () => book);
+          changedByKey.putIfAbsent(
+            BookIdentity.indexedFilePath(book),
+            () => book,
+          );
         }
         if (changedByKey.length != pending.length) {
           debugPrint('🔁 בדיקה: ${detected.length} ספרים השתנו — מוחלפים');
@@ -634,7 +641,7 @@ class IndexingRepository {
                   (includePdfBooks
                           ? libraryBooks
                           : eligible(library.getIndexableBooks(), pdf: true))
-                      .map(buildIndexedBookFilePath)
+                      .map(BookIdentity.indexedFilePath)
             : null,
       );
       final canary = IndexingCrashCanary.current;
@@ -714,7 +721,7 @@ class IndexingRepository {
               break bookLoop;
             }
             _recordPartialPdfFailure(readyBook, droppedPages, failures);
-            _markWritten(buildIndexedBookFilePath(readyBook));
+            _markWritten(BookIdentity.indexedFilePath(readyBook));
             actuallyIndexed++;
             commitPolicy.recordBook();
           } catch (e, stackTrace) {
@@ -739,14 +746,16 @@ class IndexingRepository {
               break bookLoop;
             }
           }
-          IndexingCrashCanary.current?.end(buildIndexedBookFilePath(readyBook));
+          IndexingCrashCanary.current?.end(
+            BookIdentity.indexedFilePath(readyBook),
+          );
         }
 
         var bookWasIndexed = false;
         try {
           // ספרי מסמך עוברים אינדוקס דרך זרימת TextBook (העטיפה
           // משמרת id/categoryId כדי ש-`book.text` יחלץ קובץ → text).
-          // catalogueOrderKey של העטוף זהה למקור: כשיש id המפתח הוא
+          // BookIdentity.keyOf של העטוף זהה למקור: כשיש id המפתח הוא
           // 'id:<id>', וכשאין — title+categoryKey+fileType+path
           // (העטיפה מעבירה filePath ?? path, ו-fileType נשמר).
           final TextBook? textBookForIndex = _asTextBookForIndex(book);
@@ -790,7 +799,7 @@ class IndexingRepository {
                   cancelled = true;
                   break;
                 }
-                _markWritten(buildIndexedBookFilePath(book));
+                _markWritten(BookIdentity.indexedFilePath(book));
                 actuallyIndexed++;
                 commitPolicy.recordBook(docs: docs);
                 bookWasIndexed = true;
@@ -827,7 +836,7 @@ class IndexingRepository {
                 break;
               }
               _recordPartialPdfFailure(book, droppedPages, failures);
-              _markWritten(buildIndexedBookFilePath(book));
+              _markWritten(BookIdentity.indexedFilePath(book));
               actuallyIndexed++;
               commitPolicy.recordBook();
               bookWasIndexed = true;
@@ -894,7 +903,7 @@ class IndexingRepository {
           }
         }
 
-        IndexingCrashCanary.current?.end(buildIndexedBookFilePath(book));
+        IndexingCrashCanary.current?.end(BookIdentity.indexedFilePath(book));
         await Future.delayed(Duration.zero);
       }
 
@@ -965,8 +974,8 @@ class IndexingRepository {
     if (replaceKeys.isEmpty) return;
     final keys = [
       for (final book in books)
-        if (replaceKeys.contains(buildIndexedBookFilePath(book)))
-          buildIndexedBookFilePath(book),
+        if (replaceKeys.contains(BookIdentity.indexedFilePath(book)))
+          BookIdentity.indexedFilePath(book),
     ];
     if (keys.isEmpty) return;
     final engine = await _tantivyDataProvider.engine;
@@ -1005,7 +1014,7 @@ class IndexingRepository {
       final engine = await _tantivyDataProvider.engine;
       final title = book.title;
       final topics = _bookTopics(book);
-      final filePath = buildIndexedBookFilePath(book);
+      final filePath = BookIdentity.indexedFilePath(book);
       final engineStopwatch = Stopwatch()..start();
       final extraFacets = _bookExtraFacets(book);
       final textStorage = textStorageFor(
@@ -1067,18 +1076,19 @@ class IndexingRepository {
     final id = book.id;
     if (!hostApiReady || book is! TextBook || id == null) return null;
     if (book.categoryId == null) return null;
-    final key = buildIndexedBookFilePath(book);
+    final key = BookIdentity.indexedFilePath(book);
     return switch (book.source) {
-      OfficialBookSource() when key == officialBookKey(id) =>
+      OfficialBookSource() when key == BookIdentity.officialBookKey(id) =>
         LibraryBookSource.library_,
       // ספר מקובץ: השורות במסד נבנות בסריקה, והתצוגה קוראת את הקובץ.
       UserBookSource()
           when userBooksConfigured &&
-              key == userBookKey(id) &&
+              key == BookIdentity.userBookKey(id) &&
               (book.filePath?.trim().isEmpty ?? true) =>
         LibraryBookSource.userBooks,
       AttachedBookSource(:final slug)
-          when attachedConfigured(slug) && key == attachedBookKey(slug, id) =>
+          when attachedConfigured(slug) &&
+              key == BookIdentity.attachedBookKey(slug, id) =>
         LibraryBookSource.attached,
       _ => null,
     };
@@ -1108,7 +1118,7 @@ class IndexingRepository {
     dbTitle: book.title,
     title: book.title,
     topics: _bookTopics(book),
-    filePath: buildIndexedBookFilePath(book),
+    filePath: BookIdentity.indexedFilePath(book),
     extraFacets: _bookExtraFacets(book),
     textStorage: TextStorage.libraryDb,
     sourceHash: _dbSourceHash(book, sourceHashes),
@@ -1139,7 +1149,7 @@ class IndexingRepository {
       final pickedKeys = <String>{};
       for (var i = start; i < books.length && picked.length < limit; i++) {
         final book = books[i];
-        final key = buildIndexedBookFilePath(book);
+        final key = BookIdentity.indexedFilePath(book);
         if (batches.handled.contains(book) ||
             isBookIndexed(book) ||
             pickedKeys.contains(key)) {
@@ -1187,7 +1197,8 @@ class IndexingRepository {
         try {
           await engine.deleteDocumentsByFilePaths(
             filePaths: [
-              for (final (book, _) in picked) buildIndexedBookFilePath(book),
+              for (final (book, _) in picked)
+                BookIdentity.indexedFilePath(book),
             ],
           );
         } catch (error) {
@@ -1208,7 +1219,7 @@ class IndexingRepository {
         final result = results[i];
         switch (result.status) {
           case LibraryBookStatus.indexed:
-            final key = buildIndexedBookFilePath(book);
+            final key = BookIdentity.indexedFilePath(book);
             _markWritten(key);
             batches.handled.add(book);
             canary?.end(key);
@@ -1350,7 +1361,7 @@ class IndexingRepository {
     final added = await engine.addPdfBook(
       title: book.title,
       topics: _bookTopics(book),
-      filePath: buildIndexedBookFilePath(book),
+      filePath: BookIdentity.indexedFilePath(book),
       extraFacets: _bookExtraFacets(book),
       pages: [
         for (final page in pages)
@@ -1393,7 +1404,7 @@ class IndexingRepository {
           text: '',
           segment: BigInt.zero,
           isPdf: book is PdfBook,
-          filePath: buildIndexedBookFilePath(book),
+          filePath: BookIdentity.indexedFilePath(book),
           extraFacets: _bookExtraFacets(book),
           sourceHash: _dbSourceHash(book, sourceHashes),
           // טביעת הטקסט הריק: כך ספר שנשאר ריק נמצא תואם בבדיקה הבאה.
@@ -1427,7 +1438,7 @@ class IndexingRepository {
       failures.add(
         IndexingFailure(
           bookTitle: book.title,
-          bookPath: buildIndexedBookFilePath(book),
+          bookPath: BookIdentity.indexedFilePath(book),
           kind: IndexingFailureKind.engineWrite,
           error: error.toString(),
           stackTrace: stackTrace.toString(),
@@ -1438,7 +1449,7 @@ class IndexingRepository {
     }
     if (!_tantivyDataProvider.isIndexing.value) return false;
 
-    _markWritten(buildIndexedBookFilePath(book));
+    _markWritten(BookIdentity.indexedFilePath(book));
     return true;
   }
 
@@ -1456,7 +1467,7 @@ class IndexingRepository {
     try {
       final engine = await _tantivyDataProvider.engine;
       await engine.deleteDocumentsByFilePaths(
-        filePaths: [buildIndexedBookFilePath(book)],
+        filePaths: [BookIdentity.indexedFilePath(book)],
       );
       return true;
     } catch (e) {
@@ -1496,7 +1507,9 @@ class IndexingRepository {
 
   // ספר שהפיל את התהליך פעמיים ברצף נזרק, ומסומן ככשל קבוע במקום לנסותו לעד.
   void _beginBook(Book book) {
-    if (IndexingCrashCanary.current?.begin(buildIndexedBookFilePath(book)) ==
+    if (IndexingCrashCanary.current?.begin(
+          BookIdentity.indexedFilePath(book),
+        ) ==
         false) {
       throw const IndexingCrashedBefore();
     }
@@ -2045,10 +2058,11 @@ class IndexingRepository {
     final id = book.id;
     if (book is! TextBook || id == null) return null;
     if (book.filePath?.trim().isNotEmpty ?? false) return null;
-    final key = buildIndexedBookFilePath(book);
+    final key = BookIdentity.indexedFilePath(book);
     final fromDb = switch (book.source) {
-      OfficialBookSource() => key == officialBookKey(id),
-      AttachedBookSource(:final slug) => key == attachedBookKey(slug, id),
+      OfficialBookSource() => key == BookIdentity.officialBookKey(id),
+      AttachedBookSource(:final slug) =>
+        key == BookIdentity.attachedBookKey(slug, id),
       _ => false,
     };
     return fromDb ? hashes.forSource(book.source, id) : null;
@@ -2067,7 +2081,7 @@ class IndexingRepository {
     ]);
     final positions = SearchCatalogueOrderHelper.buildKeyOrderMap<String>(
       library,
-      keyOf: (book) => catalogueOrderKey(book as Book),
+      keyOf: (book) => BookIdentity.keyOf(book as Book),
     );
     final entries = <String, BookOrderEntry>{};
     for (final book in SearchCatalogueOrderHelper.buildOrderedKeys<Book>(
@@ -2075,10 +2089,10 @@ class IndexingRepository {
       keyOf: (book) => book as Book,
     )) {
       if (!isIndexableBook(book)) continue;
-      final key = buildIndexedBookFilePath(book);
+      final key = BookIdentity.indexedFilePath(book);
       entries[key] ??= BookOrderEntry(
         filePath: key,
-        catalogueOrder: _catalogueOrderOf(catalogueOrderKey(book), positions),
+        catalogueOrder: _catalogueOrderOf(BookIdentity.keyOf(book), positions),
         generationOrder: chronologicalOrderForBook(book),
       );
     }
@@ -2139,62 +2153,6 @@ class IndexingRepository {
     }
   }
 
-  /// האם לספר מזהה חיצוני יציב, שאינו תלוי ב-DB ואינו נשען על נתיב הקובץ.
-  static bool _hasExternalIdentity(Book book) =>
-      book.externalLibraryId != null && book.externalLibraryId!.isNotEmpty;
-
-  static String catalogueOrderKey(Book book) {
-    // נתיב הקטגוריה נבנה בהליכה על העץ, ורק מפתח בלי id או מזהה חיצוני זקוק לו.
-    if (book.id != null || _hasExternalIdentity(book)) {
-      return catalogueOrderKeyFromParts(
-        title: book.title,
-        externalLibraryId: book.externalLibraryId,
-        bookId: book.id,
-        source: book.source,
-      );
-    }
-    return catalogueOrderKeyFromParts(
-      title: book.title,
-      source: book.source,
-      categoryKey: book.category?.path ?? book.categoryPath,
-      fileTypeKey: book.fileType ?? book.runtimeType.toString(),
-      pathKey: book is FileBook ? book.path : book.filePath,
-    );
-  }
-
-  /// אותו מפתח מרכיבים גולמיים, למי שאין בידיו [Book] (נתיב ה-facet של
-  /// החיפוש). מקור אמת יחיד — כל סטייה כאן מפצלת ספר לשתי זהויות.
-  static String catalogueOrderKeyFromParts({
-    required String title,
-    String? externalLibraryId,
-    int? bookId,
-    BookSource source = BookSource.official,
-    String? categoryKey,
-    String? fileTypeKey,
-    String? pathKey,
-  }) {
-    // מסד מצורף קובע את externalLibraryId בעצמו — מפתח ext: היה מתנגש בספר רשמי.
-    if (source is AttachedBookSource && bookId != null) {
-      return attachedBookKey(source.slug, bookId);
-    }
-
-    if (externalLibraryId != null && externalLibraryId.isNotEmpty) {
-      return externalIdentityKey(externalLibraryId);
-    }
-
-    if (bookId != null) {
-      // id טבעי חופף בין המסדים — בלי תיוג המקור ספר אישי 'id:5' מתנגש
-      // בספר רשמי 'id:5' ומדולג באינדוקס.
-      return switch (source) {
-        OfficialBookSource() => officialBookKey(bookId),
-        UserBookSource() => userBookKey(bookId),
-        AttachedBookSource(:final slug) => attachedBookKey(slug, bookId),
-      };
-    }
-
-    return '$title|${categoryKey ?? ''}|${fileTypeKey ?? ''}|${pathKey ?? ''}';
-  }
-
   /// [TextStorage.libraryDb] רק לשורות ספר שמפתחו `id:`/`uid:`/`db:<slug>:` של
   /// אותו id, כשהמנוע קורא את המסד הזה; אחרת הטקסט נשמר באינדקס.
   @visibleForTesting
@@ -2209,19 +2167,19 @@ class IndexingRepository {
   }) {
     if (!hostApiReady) return TextStorage.inIndex;
     if (libraryDbBookId != null &&
-        filePath == officialBookKey(libraryDbBookId)) {
+        filePath == BookIdentity.officialBookKey(libraryDbBookId)) {
       return TextStorage.libraryDb;
     }
     if (userBooksConfigured &&
         userBooksDbBookId != null &&
-        filePath == userBookKey(userBooksDbBookId)) {
+        filePath == BookIdentity.userBookKey(userBooksDbBookId)) {
       return TextStorage.libraryDb;
     }
-    final slug = attachedSlugOfKey(filePath);
+    final slug = BookIdentity.attachedSlugOfKey(filePath);
     if (slug != null &&
         attachedDbBookId != null &&
         attachedConfigured(slug) &&
-        filePath == attachedBookKey(slug, attachedDbBookId)) {
+        filePath == BookIdentity.attachedBookKey(slug, attachedDbBookId)) {
       return TextStorage.libraryDb;
     }
     return TextStorage.inIndex;
@@ -2231,68 +2189,6 @@ class IndexingRepository {
 
   static bool _attachedEngineSourceConfigured(String slug) =>
       AttachedLibraryRegistry.instance.isEngineSourceConfigured(slug);
-
-  /// מפתח catalogueOrderKey לספר אישי (user_books.db) לפי id גולמי.
-  static String userBookKey(int id) => 'uid:$id';
-
-  /// מפתח catalogueOrderKey לספר רשמי (seforim.db) לפי id גולמי.
-  static String officialBookKey(int id) => 'id:$id';
-
-  /// מפתח catalogueOrderKey לספר ממסד מצורף [slug] לפי id גולמי.
-  static String attachedBookKey(String slug, int id) => 'db:$slug:$id';
-
-  /// מפתח catalogueOrderKey לספר בעל מזהה חיצוני יציב.
-  static String externalIdentityKey(String externalLibraryId) =>
-      'ext:$externalLibraryId';
-
-  /// מפתח האינדקס של ספר PDF, למי שאין בידיו [Book] (מסך החיפוש בתוך
-  /// PDF). חייב להישאר תואם ל-[buildIndexedBookFilePath] — סטייה כאן
-  /// מפצלת את הספר לשתי זהויות, והחיפוש בתוכו חוזר ריק.
-  static String indexedPdfFilePath({
-    required String? externalLibraryId,
-    required String? filePath,
-    BookSource source = BookSource.official,
-    int? bookId,
-  }) {
-    if (source is AttachedBookSource && bookId != null) {
-      return attachedBookKey(source.slug, bookId);
-    }
-    return externalLibraryId != null && externalLibraryId.isNotEmpty
-        ? externalIdentityKey(externalLibraryId)
-        : (filePath ?? '');
-  }
-
-  static String buildIndexedBookFilePath(Book book) {
-    // PDF בלי מזהה חיצוני: ה-id שלו עשוי להיות שאול מספר הטקסט המקביל
-    // (תלמוד בבלי) ולהתנגש בו, או להיעדר (סריקת תיקייה) — ולכן הנתיב הוא
-    // הזהות היחידה שיש לו.
-    // ל-PDF ממסד מצורף יש id מהמסד; מפתח נתיב היה נמחק כיתום כשהכונן מנותק.
-    if (book is PdfBook &&
-        !_hasExternalIdentity(book) &&
-        !(book.source.isAttached && book.id != null)) {
-      return book.path;
-    }
-    return catalogueOrderKey(book);
-  }
-
-  /// הספר שמסמך האינדקס מתאר, רק אם הקטלוג עדיין מחזיק שם את אותו ספר.
-  static Book? bookForIndexedDocument(
-    Map<String, Book>? booksByIndexedFilePath, {
-    required String indexedFilePath,
-    required String indexedTitle,
-  }) => validatedIndexedBook(
-    booksByIndexedFilePath?[indexedFilePath],
-    indexedTitle: indexedTitle,
-  );
-
-  /// [book] אותר לפי מפתח מסמך האינדקס — מוחזר רק אם הוא עדיין אותו ספר.
-  ///
-  /// המפתח והכותרת נכתבים למסמך יחד מאותו ספר, ולכן כותרת שאינה תואמת
-  /// מעידה שה-DB הוחלף והמזהה שייך כבר לספר אחר.
-  static Book? validatedIndexedBook(
-    Book? book, {
-    required String indexedTitle,
-  }) => book?.title == indexedTitle ? book : null;
 
   /// האם תוכן הספר עדיין תואם את `textHash` שבאינדקס (בלי metadata — #828).
   /// בדיקה רכה: `true` כשאין חתימה או כשהספר אינו בר-אימות.
@@ -2341,16 +2237,6 @@ class IndexingRepository {
     return dbText == null ? null : contentFingerprint(text: const []);
   }
 
-  /// האם רשומת הספר באינדקס מאוחסנת לפי נתיב מוחלט (ולכן תישבר בהעברת
-  /// הספרייה ותדרוש ניקוי). PDF כשאין לו מזהה חיצוני; שאר ספרי הקובץ רק
-  /// כשאין להם id/externalLibraryId יציב — אחרת הם מאונדקסים לפי מפתח
-  /// זהות ושורדים העברה.
-  static bool hasPathKeyedIndexEntry(Book book) {
-    if (book is PdfBook) return !_hasExternalIdentity(book);
-    if (book is! FileBook) return false;
-    return book.id == null && !_hasExternalIdentity(book);
-  }
-
   /// שומר לריצה הבאה את מה שריצה שבוטלה לפני שהתחילה הייתה מחליפה ובודקת.
   Future<void> rememberChangedBooks(
     List<Book> books, {
@@ -2364,7 +2250,7 @@ class IndexingRepository {
     if (store == null) return;
     await store.save({
       ...await store.load(),
-      for (final book in books) buildIndexedBookFilePath(book),
+      for (final book in books) BookIdentity.indexedFilePath(book),
     }, checkLibrary: checkLibrary ? true : null);
   }
 
@@ -2386,12 +2272,12 @@ class IndexingRepository {
   }
 
   /// מסיר מהאינדקס את רשומות הספרים הנתונים — מחיקה מדויקת לפי מפתח
-  /// ה-filePath שהמסמכים נכתבו איתו ([buildIndexedBookFilePath]), כך שספר
+  /// ה-filePath שהמסמכים נכתבו איתו ([BookIdentity.indexedFilePath]), כך שספר
   /// אחר החולק את אותה כותרת אינו נפגע. מחזיר האם המחיקה נקלטה.
   Future<bool> dropBookIndexEntries(Iterable<Book> books) async {
     if (WindowRole.isSecondary) return false;
     final keys = <String>{
-      for (final book in books) buildIndexedBookFilePath(book),
+      for (final book in books) BookIdentity.indexedFilePath(book),
     }..remove('');
     return _deleteIndexedFilePaths(keys);
   }
@@ -2474,11 +2360,11 @@ class IndexingRepository {
     final mode = indexUpdateMode();
     final libraryKeys = <String>{
       for (final book in books)
-        if (mode.admits(book)) buildIndexedBookFilePath(book),
+        if (mode.admits(book)) BookIdentity.indexedFilePath(book),
     };
     final excludedPersonalKeys = <String>{
       for (final book in books)
-        if (!mode.admits(book)) buildIndexedBookFilePath(book),
+        if (!mode.admits(book)) BookIdentity.indexedFilePath(book),
     };
 
     // כונן חיצוני מנותק: השורש אינו קיים, ולכן הקבצים שתחתיו אינם יתומים
@@ -2597,19 +2483,11 @@ class IndexingRepository {
         if (library.isVisibleInLibrary) library.slug,
     };
     return (key) {
-      final slug = attachedSlugOfKey(key);
+      final slug = BookIdentity.attachedSlugOfKey(key);
       if (slug == null) return false;
       if (!registered.contains(slug)) return true;
       return visible.contains(slug) && loaded.contains(slug);
     };
-  }
-
-  /// ה-slug שבמפתח `db:<slug>:<id>`, או null למפתח אחר.
-  static String? attachedSlugOfKey(String key) {
-    if (!key.startsWith('db:')) return null;
-    final separator = key.lastIndexOf(':');
-    if (separator <= 3) return null;
-    return key.substring(3, separator);
   }
 
   /// מפתחות האינדקס של ספרים שקיימים רק בתיקיות שמוסתרות מהעץ.
@@ -2648,7 +2526,7 @@ class IndexingRepository {
             hiddenSources: hiddenSources,
             hiddenFolders: hiddenFolders,
           ))
-            userBookKey(book.id),
+            BookIdentity.userBookKey(book.id),
       };
     } catch (error) {
       debugPrint('⚠️ לא ניתן לזהות ספרי תיקיות מוסתרות באינדקס: $error');
@@ -2777,7 +2655,7 @@ class StampChangeDetector implements IndexChangeDetector {
     final indexed = [
       for (final book in candidates)
         if (stamps.containsKey(
-          IndexingRepository.buildIndexedBookFilePath(book),
+          BookIdentity.indexedFilePath(book),
         ))
           book,
     ];
@@ -2804,7 +2682,7 @@ class StampChangeDetector implements IndexChangeDetector {
     for (final (index, book) in indexed.indexed) {
       await waitWhilePaused();
       if (isCancelled()) return null;
-      final stamp = stamps[IndexingRepository.buildIndexedBookFilePath(book)]!;
+      final stamp = stamps[BookIdentity.indexedFilePath(book)]!;
       final metadata = _metadataFingerprint(
         title: book.title,
         topics: _repository._bookTopics(book),

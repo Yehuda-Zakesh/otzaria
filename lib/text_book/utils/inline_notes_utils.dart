@@ -303,13 +303,13 @@ bool _onlyTagsBetween(String html, int from, int end) {
   return at == end;
 }
 
-/// האינדקס הגולמי אחרי התו הגלוי ה-[visible] (ישות = תו אחד, כמו
-/// `line.charCount`). תגי סגירה צמודים שייכים לתו שלפניהם, למשל `</sup>`.
 final _inlineCloseTag = RegExp(
   r'</(?:b|i|em|strong|u|s|strike|span|sup|sub|small|big|font|del|ins|a|abbr|acronym|cite|code|dfn|kbd|q|samp|tt|var|mark|bdi|bdo|ruby|rt|rp)\s*>',
   caseSensitive: false,
 );
 
+/// האינדקס הגולמי אחרי התו הגלוי ה-[visible] (ישות = תו אחד, כמו
+/// `line.charCount`). תגי סגירה צמודים שייכים לתו שלפניהם, למשל `</sup>`.
 int _rawInsertionPoint(String html, int visible, List<Match> superscripts) {
   var seen = 0;
   var i = 0;

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 /// גובה הפריטים תלוי ברוחב — כמו טקסט שנשבר לשורות נוספות בעמודה צרה.
 Widget _list(double width, ItemScrollController c, ItemPositionsListener l) {

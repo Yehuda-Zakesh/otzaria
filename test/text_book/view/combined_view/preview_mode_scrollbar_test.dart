@@ -19,7 +19,7 @@ import 'package:otzaria/text_book/view/combined_view/combined_book_screen.dart';
 import 'package:otzaria/widgets/feedback/scrollable_positioned_list_scrollbar.dart';
 import 'package:otzaria/widgets/layout/adaptive_side_pane.dart';
 import 'package:otzaria/widgets/layout/resizable_drag_handle.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 import '../../../test_helpers/memory_cache_provider.dart';
 
 /// שורות ספר אמיתיות אינן בגובה אחיד — שורה קצרה לעומת פסקה שנשברת לכמה

@@ -12,7 +12,7 @@ import 'package:otzaria/tools/tikkun_korim/view/tikkun_render_metrics.dart';
 import 'package:otzaria/tools/tikkun_korim/view/widgets/markers_column.dart';
 import 'package:otzaria/tools/tikkun_korim/view/widgets/reader_row.dart';
 import 'package:otzaria/tools/tikkun_korim/view/widgets/special_row.dart';
-import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 /// מה שמוצג בעמודת המסמנים של שורה — מספר הפרק מוצג רק כשהוא חדש.
 class TikkunLineMarkers {

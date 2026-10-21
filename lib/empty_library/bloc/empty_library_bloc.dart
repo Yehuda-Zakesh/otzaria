@@ -6,6 +6,9 @@ import 'dart:isolate';
 import 'dart:math' as math;
 import 'package:bloc/bloc.dart';
 import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/core/error_log_file.dart';
+import 'package:otzaria/core/foreground_work.dart';
+import 'package:otzaria/core/messages/library_messages.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:otzaria/utils/text/byte_size_text.dart';
 import 'package:flutter/foundation.dart';
@@ -60,7 +63,11 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
     this.downloadSpaceChecker,
     LibraryAccessGate? accessGate,
     LibraryPackageImporter? packageImporter,
+    ForegroundWork? foregroundWork,
+    void Function(String title, Object error, StackTrace stackTrace)? logError,
   }) : _httpClient = httpClient ?? http.Client(),
+       _logError = logError ?? _appendToErrorLog,
+       _foregroundWork = foregroundWork ?? ForegroundWork.instance,
        _accessGate = accessGate ?? LibraryAccessGate.instance,
        _packageImporter = packageImporter ?? LibraryPackageImporter(),
        _extractCompressedDatabase = extractCompressedDatabase ?? _extractZst,
@@ -93,6 +100,26 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
 
   /// דגל הביטול של פריסת חבילה שרצה כעת.
   ZstdCancelFlag? _activeImportCancel;
+
+  /// שירות חזית שמגן על ההורדה מפני מגבלות עבודה ברקע באנדרואיד.
+  final ForegroundWork _foregroundWork;
+
+  /// רישום כשל הורדה ל-errors.txt — ההודעה למשתמש קצרה.
+  final void Function(String title, Object error, StackTrace stackTrace)
+  _logError;
+
+  static void _appendToErrorLog(String title, Object error, StackTrace st) {
+    debugPrint('[EmptyLibrary] $title: $error');
+    try {
+      ErrorLogFile.append(title: title, error: error, stackTrace: st);
+    } catch (_) {}
+  }
+
+  /// המערכת עצרה את שירות החזית — ההורדה נעצרת כמו בביטול.
+  bool _foregroundTimedOut = false;
+
+  /// נכסי ההורדה האחרונה — לבדיקת קובץ חלקי אחרי כשל.
+  List<_DownloadAsset> _downloadAssets = const [];
   final Future<void> Function(
     String archivePath,
     String outputPath,
@@ -492,11 +519,19 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
       } else if (backupDir != null) {
         await _restoreDatabaseFiles(backupDir, event.existingLibraryPath);
       }
-    } catch (e) {
+    } catch (e, st) {
+      _logError('Library Redownload Error', e, st);
       if (backupDir != null) {
         await _restoreDatabaseFiles(backupDir, event.existingLibraryPath);
       }
-      emit(_error(errorMessage: 'שגיאה בעדכון הספרייה: $e'));
+      emit(
+        _error(
+          errorMessage: await _downloadFailureMessage(
+            e,
+            'שגיאה בעדכון הספרייה: $e',
+          ),
+        ),
+      );
     } finally {
       if (writeSessionStarted) {
         await SqliteDataProvider.instance.reopenAfterExternalWrite(
@@ -1031,15 +1066,39 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
           _defaultLibraryPathOverride ??
           await AppPaths.getDefaultLibraryPath();
       await _downloadLibrary(libraryPath, emit);
-    } catch (e) {
+    } catch (e, st) {
+      _logError('Library Download Error', e, st);
       // קבצי ה-temp נשמרים בכוונה — ישמשו ל-resume בניסיון הבא
       emit(
         EmptyLibraryError(
-          errorMessage:
-              'שגיאה בהורדה: $e\nניתן ללחוץ שוב כדי להמשיך מהנקודה שנעצרה.',
+          errorMessage: await _downloadFailureMessage(e, 'שגיאה בהורדה: $e'),
         ),
       );
     }
+  }
+
+  /// הבטחת המשך רק כשההורדה נקטעה (רשת או מכסת הרקע) ונשמר קובץ חלקי.
+  Future<String> _downloadFailureMessage(Object error, String fallback) async {
+    final cause = error is PatchDownloadCancelled && _foregroundTimedOut
+        ? LibraryMessages.backgroundTimeLimitReached
+        : PatchDownloader.isTransientNetworkError(error)
+        ? LibraryMessages.updateNetworkInterrupted
+        : null;
+    if (cause == null) return fallback;
+    for (final asset in _downloadAssets) {
+      final identity = asset.identity;
+      if (asset.skipped || identity == null) continue;
+      final resumable = await hasReusableDownload(
+        destPath: path.join(Directory.systemTemp.path, asset.tempFileName),
+        identity: identity,
+        size: asset.compressedSize,
+        split: asset.split,
+      );
+      if (resumable) {
+        return '${LibraryMessages.downloadPausedResumable}\n$cause';
+      }
+    }
+    return fallback;
   }
 
   /// מוריד ומחלץ את חבילת הספרייה המלאה אל [libraryPath]. זורק בכשל אמיתי;
@@ -1048,7 +1107,19 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
     String libraryPath,
     Emitter<EmptyLibraryState> emit,
   ) async {
-    {
+    _foregroundTimedOut = false;
+    _downloadAssets = const [];
+    _foregroundWork.acquire(
+      this,
+      notice: (
+        channelName: LibraryMessages.libraryDownloadNotificationChannel,
+        title: LibraryMessages.libraryDownloadNotificationTitle,
+        text: LibraryMessages.libraryDownloadNotificationText,
+      ),
+      onTimeout: () => _foregroundTimedOut = true,
+      userInitiated: true,
+    );
+    try {
       final latestAsset = await _fetchLatestDatabaseAsset();
 
       // ה-release האחרון של otzaria-library לא תמיד מכיל את התלמוד (יש בו גם
@@ -1126,6 +1197,7 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
           sha256: lexicalRelease?.sha256,
         ),
       ];
+      _downloadAssets = assets;
 
       emit(
         const EmptyLibraryDownloading(progress: 0.0, message: 'מתחבר לשרת...'),
@@ -1229,6 +1301,8 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
       await Settings.setValue(SettingsRepository.keyDbEffectivePath, '');
 
       emit(EmptyLibraryDirectorySelected(selectedPath: libraryPath));
+    } finally {
+      _foregroundWork.release(this);
     }
   }
 
@@ -1312,8 +1386,8 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
   }) async {
     final tempPath = path.join(Directory.systemTemp.path, asset.tempFileName);
     final tempFile = File(tempPath);
-    final identity =
-        asset.identity ?? '${asset.resolvedUrl}|${asset.compressedSize}';
+    final identity = asset.identity ??=
+        '${asset.resolvedUrl}|${asset.compressedSize}';
 
     // הבייטים שהיו כבר על הדיסק כשההורדה חודשה (0 = הורדה חדשה). נקבע סופית
     // אחרי טיפול בקוד התגובה, ומשמש להצגת חיווי "ממשיך הורדה".
@@ -1411,6 +1485,7 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
         destPath: tempPath,
         resumeToken: identity,
         onProgress: (downloaded, _) => onProgress(downloaded),
+        isCancelled: () => _foregroundTimedOut,
       );
     } else {
       await downloader.downloadToFile(
@@ -1420,6 +1495,7 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
         expectedSha256: asset.sha256,
         resumeToken: identity,
         onProgress: (downloaded, _) => onProgress(downloaded),
+        isCancelled: () => _foregroundTimedOut,
       );
     }
     eta.estimator
@@ -1733,6 +1809,7 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
 
   @override
   Future<void> close() {
+    _foregroundWork.release(this);
     HttpClientRegistry.unregister(_httpClient.close);
     _httpClient.close();
     return super.close();

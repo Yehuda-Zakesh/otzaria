@@ -158,14 +158,6 @@ class DataRepository {
     );
   }
 
-  /// Searches for references by relevance to a given reference string
-  ///
-  /// Parameters:
-  ///   - [ref]: The reference string to search for
-  ///   - [limit]: Maximum number of results to return (defaults to 10)
-  ///
-  /// Returns a [Future] that completes with a list of [Ref] objects sorted by relevance
-
   /// Searches for books based on query text and optional filters
   ///
   /// Parameters:

@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 import 'package:otzaria/text_book/models/book_notes.dart';
+import 'package:otzaria/text_book/models/content_line_changes.dart';
 import 'package:otzaria/book_protection/models/book_protection.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/links.dart';
@@ -198,6 +199,7 @@ class TextBookError extends TextBookState {
 class TextBookLoaded extends TextBookState {
   final List<String> content;
   final int contentVersion;
+  final ContentLineChanges? contentChanges;
   final double fontSize;
   final bool showSplitView;
   final bool showPageShapeView;
@@ -313,6 +315,7 @@ class TextBookLoaded extends TextBookState {
     required bool showLeftPane,
     required this.content,
     this.contentVersion = 0,
+    this.contentChanges,
     required this.fontSize,
     required this.showSplitView,
     this.showPageShapeView = false,
@@ -524,6 +527,7 @@ class TextBookLoaded extends TextBookState {
     TextBook? book,
     List<String>? content,
     int? contentVersion,
+    ContentLineChanges? contentChanges,
     double? fontSize,
     bool? showLeftPane,
     bool? showSplitView,
@@ -663,6 +667,14 @@ class TextBookLoaded extends TextBookState {
       book: book ?? this.book,
       content: content ?? this.content,
       contentVersion: contentVersion ?? this.contentVersion,
+      contentChanges:
+          contentChanges ??
+          (content == null &&
+                  contentVersion == null &&
+                  loadedLineFlags == null &&
+                  book == null
+              ? this.contentChanges
+              : null),
       fontSize: fontSize ?? this.fontSize,
       showLeftPane: showLeftPane ?? this.showLeftPane,
       showSplitView: showSplitView ?? this.showSplitView,

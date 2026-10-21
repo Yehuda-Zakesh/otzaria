@@ -62,6 +62,13 @@ String? stripWordBoundaryWrapper(String source) {
   return phrase.isEmpty ? null : phrase;
 }
 
+/// [source] שבודקת את הביטוי לפני גבול-המילה שלפניו. ה-lookbehind באורך משתנה
+/// יקר בכל מיקום, והביטוי נכשל מהר ברובם; ההתאמות זהות.
+String _phraseFirst(String source) {
+  final phrase = stripWordBoundaryWrapper(source);
+  return phrase == null ? source : '(?=$phrase)$source';
+}
+
 final Map<String, LiteralSearchPattern?> _cache = {};
 
 /// אורך השאילתה המינימלי להתאמה בתוך מילה.
@@ -170,7 +177,7 @@ LiteralSearchPattern? buildLiteralPattern(
     if (source != null) {
       final effective = partial
           ? (_partialPhrase(q, source) ?? source)
-          : source;
+          : _phraseFirst(source);
       try {
         result = LiteralSearchPattern(
           effective,
