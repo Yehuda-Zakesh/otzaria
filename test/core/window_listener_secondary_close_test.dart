@@ -30,6 +30,9 @@ import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/window_session_store.dart';
 import 'package:otzaria/core/window_listener.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
+import 'package:otzaria/core/windowing/multiview/view_window_opener.dart';
+import 'package:otzaria/core/windowing/window_opener.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/tabs/tabs_repository.dart';
@@ -165,6 +168,161 @@ void main() {
     expect(PluginCorrectionSessionService.instance.processQuitPending, isFalse);
   });
 
+  test('סגירת הראשי ממתינה למסלול סגירה של חלון Dart', () async {
+    MultiViewMode.debugOverride = true;
+    WindowOpener.debugOverride = _TwoWindowsOpener();
+    addTearDown(() {
+      MultiViewMode.debugOverride = null;
+      WindowOpener.debugOverride = null;
+      WindowTabsSession.current.resume();
+    });
+    WindowBus.instance.register();
+    final released = Completer<void>();
+    final started = Completer<void>();
+    final otherClose = ViewWindowOpener.instance.serializeClose(() async {
+      started.complete();
+      await released.future;
+      return true;
+    });
+    await started.future;
+    var prepared = false;
+    AppWindowListener.prepareUpdateForClose = () async {
+      prepared = true;
+    };
+    final mainClose = AppWindowListener().handleWindowClose();
+    await Future<void>.delayed(Duration.zero);
+    expect(prepared, isFalse);
+    released.complete();
+    await otherClose;
+    await mainClose;
+    expect(prepared, isTrue);
+  });
+
+  testWidgets(
+    'יציאה מה-Dart האחרון מחליפה סגירת ראשי ממתינה גם כשהיציאה בוטלה',
+    (tester) async {
+      MultiViewMode.debugOverride = true;
+      WindowOpener.debugOverride = _TwoWindowsOpener();
+      MultiWindowService.correctionQuitRequestTimeout = const Duration(
+        milliseconds: 10,
+      );
+      addTearDown(() {
+        MultiViewMode.debugOverride = null;
+        WindowOpener.debugOverride = null;
+        WindowTabsSession.current.resume();
+      });
+      WindowBus.instance.register();
+      final peer = _FakeOwner(2, reply: false)..register();
+      addTearDown(peer.dispose);
+      await tester.pumpWidget(
+        BlocProvider<TabsBloc>.value(
+          value: _GuardTabs(
+            ToolTab(toolId: 'p', title: 'טיוטה', instanceId: 'queued-quit'),
+          ),
+          child: MaterialApp(
+            navigatorKey: navigatorKey,
+            home: const SizedBox(),
+          ),
+        ),
+      );
+      var prepared = 0;
+      AppWindowListener.prepareUpdateForClose = () async {
+        prepared++;
+      };
+      await tester.runAsync(() async {
+        final released = Completer<void>();
+        final started = Completer<void>();
+        final dartClose = ViewWindowOpener.instance.serializeClose(() async {
+          started.complete();
+          await released.future;
+          return true;
+        });
+        await started.future;
+        final listener = AppWindowListener();
+        final mainClose = listener.handleWindowClose();
+        await listener.quitFromLastViewWindow();
+        released.complete();
+        await dartClose;
+        await mainClose;
+      });
+      expect(
+        prepared,
+        0,
+        reason: 'אישור יציאה נכשל; סגירה רגילה ישנה אינה רצה אחריו',
+      );
+      expect(runner.closeSelfCalls, 0);
+      expect(WindowTabsSession.current.slot, isNotNull);
+    },
+  );
+
+  test('יציאה מפורשת בזמן סגירה פעילה ממתינה ונבדקת אחריה', () async {
+    MultiViewMode.debugOverride = true;
+    WindowOpener.debugOverride = _TwoWindowsOpener();
+    addTearDown(() {
+      MultiViewMode.debugOverride = null;
+      WindowOpener.debugOverride = null;
+      WindowTabsSession.current.resume();
+    });
+    WindowBus.instance.register();
+    final prepared = Completer<void>();
+    final released = Completer<void>();
+    AppWindowListener.prepareUpdateForClose = () async {
+      prepared.complete();
+      await released.future;
+    };
+    final listener = AppWindowListener();
+    final normal = listener.handleWindowClose();
+    await prepared.future;
+    var quitAttempts = 0;
+    final quit = listener.handleWindowClose(
+      quit: true,
+      canClose: () {
+        quitAttempts++;
+        return false;
+      },
+    );
+    expect(quitAttempts, 0);
+    released.complete();
+    await normal;
+    await quit;
+    expect(quitAttempts, 1);
+    expect(runner.closeSelfCalls, 1);
+  });
+
+  testWidgets('עדכון בריבוי תצוגות מבקש יציאה מלאה ולא מסתיר רק את הראשי', (
+    tester,
+  ) async {
+    MultiViewMode.debugOverride = true;
+    WindowOpener.debugOverride = _TwoWindowsOpener();
+    MultiWindowService.correctionQuitRequestTimeout = const Duration(
+      milliseconds: 10,
+    );
+    addTearDown(() {
+      MultiViewMode.debugOverride = null;
+      WindowOpener.debugOverride = null;
+      WindowTabsSession.current.resume();
+    });
+    WindowBus.instance.register();
+    final peer = _FakeOwner(2, reply: false)..register();
+    addTearDown(peer.dispose);
+    final tab = ToolTab(toolId: 'p', title: 'תוסף', instanceId: 'update');
+    await tester.pumpWidget(
+      BlocProvider<TabsBloc>.value(
+        value: _GuardTabs(tab),
+        child: MaterialApp(navigatorKey: navigatorKey, home: const SizedBox()),
+      ),
+    );
+    MultiWindowService.closePeers();
+    await tester.runAsync(() => AppWindowListener().handleWindowClose());
+    expect(
+      runner.closeSelfCalls,
+      0,
+      reason: 'חלון שלא אישר יציאה מונע את הכיבוי; הראשי נשאר גלוי',
+    );
+    expect(WindowTabsSession.current.slot, isNotNull);
+    expect(MultiWindowService.closingAll, isFalse);
+  });
+
   test('כשל בהכנת העדכון אינו נועל את ניסיון הסגירה הבא', () async {
     WindowBus.instance.register();
     final listener = AppWindowListener();
@@ -221,6 +379,38 @@ void main() {
     expect(runner.closeSelfCalls, 1);
     expect(await sessions.load(slot), isNull);
   });
+
+  test(
+    'ריבוי תצוגות: הראשי מוסתר כשחלונות Dart פתוחים, והסשן שלו מושהה',
+    () async {
+      MultiViewMode.debugOverride = true;
+      WindowOpener.debugOverride = _TwoWindowsOpener();
+      addTearDown(() {
+        MultiViewMode.debugOverride = null;
+        WindowOpener.debugOverride = null;
+        WindowTabsSession.current.resume();
+      });
+      WindowBus.instance.register();
+      final slot = WindowBus.instance.slot!;
+      await TabsRepository().saveTabs(const [], 0);
+      final closedBefore = ViewWindowOpener.instance.closedCountForTest;
+
+      final listener = AppWindowListener();
+      await listener.handleWindowClose();
+
+      expect(runner.closeSelfCalls, 1, reason: 'הסתרה, לא יציאה (D1a)');
+      expect(await sessions.load(slot), isNull);
+      // ה-flush של החלון האחרון אינו כותב את הסשן שנמחק.
+      expect(WindowTabsSession.current.slot, isNull);
+      await TabsRepository().saveTabs(const [], 0);
+      expect(await sessions.load(slot), isNull);
+      expect(ViewWindowOpener.instance.closedCountForTest, closedBefore + 1);
+
+      // הוצג שוב (Ctrl+Shift+T): שומר שוב.
+      listener.onWindowFocus();
+      expect(WindowTabsSession.current.slot, slot);
+    },
+  );
 
   test('סגירה לעדכון כשחלון אחר עוד פתוח: הסשן נשמר (issue #2095)', () async {
     // `closePeers` אינו ממתין, ולכן החלון שמתקין רואה עוד חלון פתוח.
@@ -531,6 +721,12 @@ void main() {
 }
 
 /// ה-runner המדומה. `windowCount` מחזיר שניים כברירת מחדל — "אינך האחרון".
+class _TwoWindowsOpener extends Fake implements WindowOpener {
+  @override
+  Future<({int count, int max, int engines})?> windowCount() async =>
+      (count: 2, max: 8, engines: 1);
+}
+
 class _FakeRunner {
   int closeSelfCalls = 0;
   int windowCount = 2;

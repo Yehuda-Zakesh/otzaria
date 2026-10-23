@@ -221,9 +221,7 @@ class PluginSystemDatabase {
     InstalledPlugin? expectedPlugin,
     Map<String, bool> expectedPermissions = const {},
   }) {
-    const savepoint = 'sp_plugin_install';
-    db.execute('SAVEPOINT $savepoint');
-    try {
+    _inSavepoint(db, 'sp_plugin_install', () {
       // הבדיקה והכתיבה באותה טרנזקציה: הסרה או החלטת משתמש מבטלות שדרוג אוטומטי.
       if (expectedPlugin != null) {
         final rows = db.select(
@@ -273,10 +271,19 @@ class PluginSystemDatabase {
           [plugin.pluginId, pluginNewTabPagePermission],
         );
       }
-      db.execute('RELEASE SAVEPOINT $savepoint');
+    });
+  }
+
+  /// SAVEPOINT ולא BEGIN, כדי שהקריאה תעבוד גם בתוך טרנזקציה חיצונית פתוחה.
+  static T _inSavepoint<T>(Database db, String name, T Function() body) {
+    db.execute('SAVEPOINT $name');
+    try {
+      final result = body();
+      db.execute('RELEASE SAVEPOINT $name');
+      return result;
     } catch (_) {
-      db.execute('ROLLBACK TO SAVEPOINT $savepoint');
-      db.execute('RELEASE SAVEPOINT $savepoint');
+      db.execute('ROLLBACK TO SAVEPOINT $name');
+      db.execute('RELEASE SAVEPOINT $name');
       rethrow;
     }
   }
@@ -293,8 +300,7 @@ class PluginSystemDatabase {
 
   Future<void> deletePlugin(String pluginId) async {
     final db = await database;
-    db.execute('BEGIN TRANSACTION');
-    try {
+    withTransaction(db, () {
       db.execute('DELETE FROM plugin_installation WHERE plugin_id = ?', [
         pluginId,
       ]);
@@ -302,25 +308,14 @@ class PluginSystemDatabase {
         pluginId,
       ]);
       deletePluginDataRows(db, pluginId);
-      db.execute('COMMIT');
-    } catch (_) {
-      db.execute('ROLLBACK');
-      rethrow;
-    }
+    });
   }
 
   /// מוחק את כל הנתונים שהתוסף אגר (KV, רשומות שפורסמו כגון אירועי לוח, לוג),
   /// בלי לגעת ברישום ההתקנה ובהרשאות שהמשתמש אישר.
   Future<void> clearPluginData(String pluginId) async {
     final db = await database;
-    db.execute('BEGIN TRANSACTION');
-    try {
-      deletePluginDataRows(db, pluginId);
-      db.execute('COMMIT');
-    } catch (_) {
-      db.execute('ROLLBACK');
-      rethrow;
-    }
+    withTransaction(db, () => deletePluginDataRows(db, pluginId));
   }
 
   /// שורות הנתונים של [pluginId] בלבד — משותף למחיקת תוסף ולאיפוס נתוניו.
@@ -398,7 +393,7 @@ class PluginSystemDatabase {
       }
       db.execute('RELEASE SAVEPOINT $savepoint');
     } catch (e, stackTrace) {
-      // מתעדים לפני ה-rethrow כדי שלא נאבד את הסיבה
+      // מתעדים לפני ה-ROLLBACK, שעלול להיכשל בעצמו, כדי שלא נאבד את הסיבה
       // (database locked, constraint violation, SQL syntax וכו').
       debugPrint('applyUserOrderUpdates failed: $e\n$stackTrace');
       db.execute('ROLLBACK TO SAVEPOINT $savepoint');
@@ -425,9 +420,7 @@ class PluginSystemDatabase {
     String permission,
     bool granted,
   ) {
-    const savepoint = 'sp_plugin_permission';
-    db.execute('SAVEPOINT $savepoint');
-    try {
+    _inSavepoint(db, 'sp_plugin_permission', () {
       db.execute(
         'INSERT OR REPLACE INTO plugin_permission_grant (plugin_id, permission, granted, granted_at) VALUES (?, ?, ?, ?)',
         [
@@ -444,12 +437,7 @@ class PluginSystemDatabase {
           [pluginId, pluginNewTabPagePermission],
         );
       }
-      db.execute('RELEASE SAVEPOINT $savepoint');
-    } catch (_) {
-      db.execute('ROLLBACK TO SAVEPOINT $savepoint');
-      db.execute('RELEASE SAVEPOINT $savepoint');
-      rethrow;
-    }
+    });
   }
 
   Future<void> clearNewTabPageRegistration(String pluginId) async {
@@ -508,9 +496,7 @@ class PluginSystemDatabase {
     bool allowPreviouslyDenied = true,
     String? expectedOwner,
   }) {
-    const savepoint = 'sp_plugin_new_tab';
-    db.execute('SAVEPOINT $savepoint');
-    try {
+    return _inSavepoint(db, 'sp_plugin_new_tab', () {
       final eligible = db.select(
         'SELECT p.* FROM plugin_installation p '
         'JOIN plugin_permission_grant g ON g.plugin_id = p.plugin_id '
@@ -531,7 +517,6 @@ class PluginSystemDatabase {
           ).manifest.permissions.contains('navigation.write') ||
           denied ||
           readNewTabPageOwner(db) != expectedOwner) {
-        db.execute('RELEASE SAVEPOINT $savepoint');
         return false;
       }
       db.execute(
@@ -547,13 +532,8 @@ class PluginSystemDatabase {
           DateTime.now().toIso8601String(),
         ],
       );
-      db.execute('RELEASE SAVEPOINT $savepoint');
       return true;
-    } catch (_) {
-      db.execute('ROLLBACK TO SAVEPOINT $savepoint');
-      db.execute('RELEASE SAVEPOINT $savepoint');
-      rethrow;
-    }
+    });
   }
 
   Future<bool?> getPermission(String pluginId, String permission) async {
@@ -835,8 +815,7 @@ class PluginSystemDatabase {
     String pluginId,
     Map<String, dynamic> aux,
   ) {
-    db.execute('BEGIN TRANSACTION');
-    try {
+    withTransaction(db, () {
       final previousOwner = readNewTabPageOwner(db);
       db.execute('DELETE FROM plugin_permission_grant WHERE plugin_id = ?', [
         pluginId,
@@ -919,11 +898,7 @@ class PluginSystemDatabase {
           ],
         );
       }
-      db.execute('COMMIT');
-    } catch (_) {
-      db.execute('ROLLBACK');
-      rethrow;
-    }
+    });
   }
 
   /// סוגר ומאפס את חיבור ה-DB כדי לאפשר החלפת תיקיית נתונים בזמן ריצה.

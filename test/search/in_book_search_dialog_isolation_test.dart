@@ -346,7 +346,7 @@ Future<void> _pumpSearchView(
   );
   final focus = FocusNode();
   final controller = TextEditingController(text: 'שלום עולם');
-  final searcher = PdfTextSearcher(_ReadyController());
+  final searcher = PdfTextSearchSession(_ReadyController());
   addTearDown(() async {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();

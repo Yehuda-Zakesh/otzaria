@@ -72,8 +72,12 @@ void main() {
   });
 
   group('בולד אמיתי — מסלול fwfh (HtmlWidget + WidgetFactory)', () {
+    // שורה inline מוצגת בספאנים; מסלול HtmlWidget נבדק כאן בכפייה.
+    setUp(() => SmartTextWidget.debugForceHtmlWidget = true);
+    tearDown(() => SmartTextWidget.debugForceHtmlWidget = false);
+
     testWidgets(
-      'span עם class מפיל ל-fwfh; הספאן המודגש קיבל FontVariation wght 700',
+      'במסלול fwfh הספאן המודגש קיבל FontVariation wght 700',
       (tester) async {
         await tester.pumpWidget(
           _wrap(
@@ -88,7 +92,7 @@ void main() {
         expect(
           find.byType(HtmlWidget),
           findsOneWidget,
-          reason: 'span עם class חייב ליפול למסלול fwfh המלא',
+          reason: 'הבדיקה מכוונת למסלול fwfh המלא',
         );
 
         final richTexts = tester.widgetList<RichText>(find.byType(RichText));

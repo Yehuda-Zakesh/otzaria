@@ -57,9 +57,7 @@ Future<void> main() async {
       expect(richText.text.toPlainText(), 'דיבור המתחיל ביאור הדברים');
     });
 
-    testWidgets('markup מורכב (span עם class) נופל ל-HtmlWidget', (
-      tester,
-    ) async {
+    testWidgets('markup inline עם class נשאר במסלול המהיר', (tester) async {
       await tester.pumpWidget(
         _wrap(
           const SmartTextWidget(
@@ -69,7 +67,29 @@ Future<void> main() async {
         ),
       );
 
-      expect(find.byType(HtmlWidget), findsOneWidget);
+      expect(find.byType(HtmlWidget), findsNothing);
+    });
+
+    testWidgets('markup בלוק או לא נתמך נופל ל-HtmlWidget', (tester) async {
+      for (final html in const [
+        'טקסט <ul><li>פריט</li></ul>',
+        'טקסט <table><tr><td>תא</td></tr></table>',
+        'טקסט <sup style="color: blue">1</sup>',
+        'לפני<h2>כותרת</h2>',
+        '<span style="display: block">בלוק</span>',
+        '<span style="line-height: 3">גובה</span>',
+        '<a id="x" href="y">עוגן</a>',
+      ]) {
+        await tester.pumpWidget(
+          _wrap(
+            SmartTextWidget(
+              text: html,
+              settings: const RenderSettings(fontSize: 20),
+            ),
+          ),
+        );
+        expect(find.byType(HtmlWidget), findsOneWidget, reason: html);
+      }
     });
 
     testWidgets('הדגשת חיפוש נשארת במסלול המהיר וצובעת רק את ההתאמה', (

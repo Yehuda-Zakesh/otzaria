@@ -62,7 +62,6 @@ class SettingsState extends Equatable {
   final double commentaryPaneWidth;
   final String copyWithHeaders;
   final String copyHeaderFormat;
-  final bool isFullscreen;
   final String libraryViewMode;
   final bool libraryShowPreview;
   final bool searchShowPreview;
@@ -131,7 +130,6 @@ class SettingsState extends Equatable {
     required this.commentaryPaneWidth,
     required this.copyWithHeaders,
     required this.copyHeaderFormat,
-    required this.isFullscreen,
     required this.libraryViewMode,
     required this.libraryShowPreview,
     required this.searchShowPreview,
@@ -185,7 +183,6 @@ class SettingsState extends Equatable {
       commentaryPaneWidth: 400,
       copyWithHeaders: 'none',
       copyHeaderFormat: 'same_line_after_brackets',
-      isFullscreen: false,
       libraryViewMode: 'grid',
       libraryShowPreview: true,
       searchShowPreview: true,
@@ -237,7 +234,6 @@ class SettingsState extends Equatable {
     double? commentaryPaneWidth,
     String? copyWithHeaders,
     String? copyHeaderFormat,
-    bool? isFullscreen,
     String? libraryViewMode,
     bool? libraryShowPreview,
     bool? searchShowPreview,
@@ -314,7 +310,6 @@ class SettingsState extends Equatable {
       commentaryPaneWidth: commentaryPaneWidth ?? this.commentaryPaneWidth,
       copyWithHeaders: copyWithHeaders ?? this.copyWithHeaders,
       copyHeaderFormat: copyHeaderFormat ?? this.copyHeaderFormat,
-      isFullscreen: isFullscreen ?? this.isFullscreen,
       libraryViewMode: libraryViewMode ?? this.libraryViewMode,
       libraryShowPreview: libraryShowPreview ?? this.libraryShowPreview,
       searchShowPreview: searchShowPreview ?? this.searchShowPreview,
@@ -390,7 +385,6 @@ class SettingsState extends Equatable {
     commentaryPaneWidth,
     copyWithHeaders,
     copyHeaderFormat,
-    isFullscreen,
     libraryViewMode,
     libraryShowPreview,
     searchShowPreview,

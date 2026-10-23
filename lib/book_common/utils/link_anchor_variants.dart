@@ -83,13 +83,19 @@ final int kLinkAnchorStyleCount = kLinkAnchorVariants.length;
 
 /// הווריאנט לפי מחלקות ה-CSS של האלמנט, או null כשאין מחלקת וריאנט.
 LinkAnchorVariant? linkAnchorVariantFromClasses(Iterable<String> classes) {
-  for (var index = 0; index < kLinkAnchorVariants.length; index++) {
-    if (classes.contains('link-anchor-$index')) {
-      return kLinkAnchorVariants[index];
-    }
+  // מעבר אחד: כל `contains` של `Element.classes` מפרק את המחרוזת מחדש.
+  int? found;
+  for (final name in classes) {
+    final index = _variantIndexByClass[name];
+    if (index != null && (found == null || index < found)) found = index;
   }
-  return null;
+  return found == null ? null : kLinkAnchorVariants[found];
 }
+
+final Map<String, int> _variantIndexByClass = {
+  for (var index = 0; index < kLinkAnchorVariants.length; index++)
+    'link-anchor-$index': index,
+};
 
 /// תרגום הווריאנט להצהרות CSS עבור flutter_widget_from_html.
 Map<String, String> linkAnchorVariantCss(LinkAnchorVariant? variant) {

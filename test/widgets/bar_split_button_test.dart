@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/widgets/controls/bar_split_button.dart';
 import 'package:otzaria/widgets/misc/app_popup_menu.dart';
+import 'package:otzaria/widgets/navigation/responsive_action_bar.dart';
 
 void main() {
   Widget host(Widget child) => MaterialApp(
@@ -84,6 +85,48 @@ void main() {
 
     expect(find.byType(PopupMenuItem<String>), findsNothing);
   });
+
+  testWidgets(
+    'הסרגל החליף את הלחצן המפוצל בזמן שהתפריט פתוח — מופעל הפריט שנבחר',
+    (tester) async {
+      final opened = <String>[];
+      Widget bar(ToolbarActionId id, List<String> items) => host(
+        ResponsiveActionBar(
+          alwaysInMenu: const [],
+          actions: [
+            ActionButtonData.split(
+              icon: FluentIcons.bookmark_24_regular,
+              tooltip: id.name,
+              onPressed: () {},
+              compact: false,
+              actionId: id,
+              menuItems: [
+                for (final item in items)
+                  ActionButtonData(
+                    widget: const SizedBox.shrink(),
+                    tooltip: item,
+                    onPressed: () => opened.add(item),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      );
+
+      await tester.pumpWidget(
+        bar(ToolbarActionId.parallelEdition, ['א', 'ב', 'ג', 'ד']),
+      );
+      await tester.tap(find.byIcon(FluentIcons.chevron_down_16_regular));
+      await tester.pumpAndSettle();
+      // באותו מקום בסרגל נבנה לחצן מפוצל אחר (של תוסף) עם פריט אחד.
+      await tester.pumpWidget(bar(ToolbarActionId.plugin, ['פריט תוסף']));
+
+      await tester.tap(find.text('ד'));
+      await tester.pumpAndSettle();
+
+      expect(opened, ['ד']);
+    },
+  );
 
   testWidgets('הדגשת הריחוף של החצאים נחתכת לצורתם ואינה מצוירת כמלבן מעוגל', (
     tester,

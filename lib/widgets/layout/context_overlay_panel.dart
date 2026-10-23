@@ -32,6 +32,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/gestures.dart' show HitTestResult;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/theme/theme_exports.dart';
 import 'package:otzaria/utils/ui/editable_focus.dart';
 import 'package:otzaria/widgets/layout/floating_panel.dart';
@@ -233,6 +234,8 @@ class _ContextOverlayPanelState extends State<ContextOverlayPanel> {
   /// פאנל בעמוד/טאב שאינו מוצג, או מתחת לדיאלוג, אינו מקבל פגיעה במרכזו.
   bool _isTopmostOnScreen() {
     if (!mounted || !(ModalRoute.isCurrentOf(context) ?? true)) return false;
+    // פאנל בחלון שאינו פעיל לא בולע ESC של החלון הפעיל.
+    if (!AppWindowKeys.isActiveWindow(context)) return false;
     final box = _panelKey.currentContext?.findRenderObject();
     if (box is! RenderBox || !box.attached || !box.hasSize) return false;
     final result = HitTestResult();

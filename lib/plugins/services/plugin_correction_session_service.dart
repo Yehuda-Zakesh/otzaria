@@ -97,6 +97,11 @@ class PluginCorrectionSessionService extends ChangeNotifier {
   /// גדל בכל הסרת בעלים; מי שהתחיל לפני ההסרה לא יוצר אחריה סשן.
   int ownerEpoch(String owner) => _ownerEpochs[owner] ?? 0;
 
+  /// האם ל-[owner] יש סשן תיקון פתוח או שעדיין נסגר.
+  bool hasSessionsFor(String owner) =>
+      _sessions.values.any((s) => s.owner == owner) ||
+      _finalizing.any((s) => s.owner == owner);
+
   Future<Map<String, dynamic>> begin({
     required String owner,
     String? ownerName,

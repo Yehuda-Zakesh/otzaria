@@ -72,7 +72,7 @@ Future<void> _pumpPane(WidgetTester tester) async {
   );
   final searchController = TextEditingController();
   final focusNode = FocusNode();
-  final textSearcher = PdfTextSearcher(_FakeReadyController());
+  final textSearcher = PdfTextSearchSession(_FakeReadyController());
 
   addTearDown(settingsBloc.close);
   addTearDown(pdfBookBloc.close);

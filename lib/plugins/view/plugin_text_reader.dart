@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/plugins/services/plugin_restore_state_store.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 import 'package:otzaria/plugins/services/plugin_text_reader_registry.dart';
 import 'package:otzaria/plugins/view/plugin_tab_page.dart';
@@ -64,6 +65,10 @@ class _PluginTextReaderState extends State<PluginTextReader> {
 
   @override
   void dispose() {
+    // המזהה של מופע הקורא אינו נשמר בסשן, ולכן גם מצב השחזור שלו לא.
+    PluginRestoreStateStore.instance.removeInstanceId(
+      PluginTextReaderRegistry.instance.instanceIdFor(widget.tab),
+    );
     PluginTextReaderRegistry.instance.removeListener(_syncNavigation);
     if (widget.tab.lines.externalNavigator == _navigate) {
       widget.tab.lines.externalNavigator = null;

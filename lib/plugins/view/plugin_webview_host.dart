@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
+import 'package:otzaria/plugins/plugin_constants.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/bookmarks/bloc/bookmark_bloc.dart';
@@ -28,11 +30,13 @@ import 'package:otzaria/plugins/services/plugin_asset_scheme.dart';
 import 'package:otzaria/plugins/services/plugin_content_blockers.dart';
 import 'package:otzaria/plugins/services/plugin_content_security_policy.dart';
 import 'package:otzaria/plugins/services/plugin_file_server.dart';
+import 'package:otzaria/plugins/services/plugin_fonts.dart';
 import 'package:otzaria/plugins/services/plugin_headless_shell.dart';
 import 'package:otzaria/plugins/services/plugin_network_gate.dart';
 import 'package:otzaria/plugins/services/plugin_network_policy.dart';
 import 'package:otzaria/plugins/services/plugin_ref_line_resolver.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
+import 'package:otzaria/plugins/services/plugin_webview_diagnostics.dart';
 import 'package:otzaria/plugins/services/plugin_webview_failure_log.dart';
 import 'package:otzaria/plugins/storage/plugin_system_database.dart';
 import 'package:otzaria/plugins/view/plugin_sdk_scripts.dart';
@@ -52,6 +56,7 @@ import 'package:otzaria/widgets/dialogs/dialogs_exports.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
+import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 
 // Restricts localhost access to the exact dev server origin (host + scheme + port).
 bool isPluginDevServerUri(Uri uri, String? devRootPath) {
@@ -111,11 +116,18 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
   BuildContext? get dialogContext;
 
   InAppWebViewController? webViewController;
+
+  /// האם [controller] שהגיע ב-callback שייך ל-WebView הנוכחי. כל callback
+  /// מקבל עטיפה חדשה, ולכן משווים את המימוש שמתחתיה.
+  bool isCurrentWebView(InAppWebViewController controller) =>
+      identical(controller.platform, webViewController?.platform);
   late final PluginBridgeHandler bridge;
   late final PluginBridgeAdapter adapter;
   late final PluginRegistryRepository pluginRegistryRepository;
   late final PluginSystemBloc pluginSystemBloc;
   late final FindRefRepository _findRefRepository;
+  late final PluginBridgeWindowDependencies Function()
+  _initialWindowDependencies;
   DateTime? _lastFileServerDenialLogAt;
   Future<PluginNetworkPolicy>? _networkPolicy;
   StreamSubscription<String?>? _networkPolicyChanges;
@@ -162,8 +174,7 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
     required Future<void> Function() onReload,
     TextBookTab? readerTab,
     bool Function()? onBackgroundInstanceDone,
-    void Function()? onWorkStarted,
-    void Function()? onWorkEnded,
+    VoidCallback Function()? onWorkStarted,
   }) {
     pluginSystemBloc = context.read<PluginSystemBloc>();
     final historyBloc = context.read<HistoryBloc>();
@@ -174,6 +185,7 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
     final findRefRepository = _findRefRepository;
 
     final dependencies = PluginBridgeDependencies(
+      windowContext: context,
       historyBloc: historyBloc,
       tabsBloc: tabsBloc,
       navigationBloc: navigationBloc,
@@ -197,6 +209,7 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
         tabsBloc: tabsBloc,
         historyBloc: historyBloc,
         navigationBloc: navigationBloc,
+        layoutWidth: readingLayoutWidthResolverOf(context),
       ),
       resolveReference: buildPluginReferenceResolver(findRefRepository),
       resolveRefToLine: (book, ref) =>
@@ -207,8 +220,8 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
             required String title,
             required String content,
           }) async {
-            final ctx = dialogContext;
-            if (ctx == null) return false;
+            final ctx = adapter.rpcWindowContext ?? dialogContext;
+            if (ctx == null || !ctx.mounted) return false;
             return await showTwoActionsDialog(
                   context: ctx,
                   title: title,
@@ -224,8 +237,8 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
             required String content,
             required String subtitle,
           }) async {
-            final ctx = dialogContext;
-            if (ctx == null) return false;
+            final ctx = adapter.rpcWindowContext ?? dialogContext;
+            if (ctx == null || !ctx.mounted) return false;
             return await showWarningDialog(
                   context: ctx,
                   title: title,
@@ -309,10 +322,14 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
           },
     );
 
+    _initialWindowDependencies = () => dependencies.window;
     pluginRegistryRepository = PluginRegistryRepository();
     adapter = PluginBridgeAdapter(
       plugin,
       dependencies: dependencies,
+      windowDependenciesResolver: instanceId == PluginInstanceIds.background
+          ? _activeWindowDependencies
+          : null,
       instanceId: instanceId,
       readerTab: readerTab,
       pluginRepository: pluginRegistryRepository,
@@ -322,7 +339,6 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
       adapter: adapter,
       registry: pluginRegistryRepository,
       onWorkStarted: onWorkStarted,
-      onWorkEnded: onWorkEnded,
     );
     // Pre-fetch so onLoadStop has no async gap
     ensurePackageInfo();
@@ -341,6 +357,43 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
       }
     });
     unawaited(_refreshContentBlockers());
+  }
+
+  PluginBridgeWindowDependencies _activeWindowDependencies() {
+    final owner = AppWindowKeys.current.navigator.currentContext;
+    if (owner == null || !owner.mounted) {
+      return _initialWindowDependencies();
+    }
+    final tabs = owner.read<TabsBloc>();
+    final history = owner.read<HistoryBloc>();
+    final navigation = owner.read<NavigationBloc>();
+    final library = owner.read<LibraryBloc>();
+    return (
+      context: owner,
+      viewId: View.of(owner).viewId,
+      windowKeys: AppWindowKeys.of(owner),
+      tabsBloc: tabs,
+      historyBloc: history,
+      navigationBloc: navigation,
+      workspaceBloc: owner.read<WorkspaceBloc>(),
+      customFoldersBloc: owner.read<CustomFoldersBloc>(),
+      bookOpenCoordinator: BookOpenCoordinator(
+        tabsBloc: tabs,
+        historyBloc: history,
+        navigationBloc: navigation,
+        layoutWidth: readingLayoutWidthResolverOf(owner),
+      ),
+      waitForLibraryRefresh: (requestId) async {
+        final state = await library.stream.firstWhere(
+          (state) =>
+              state.completedRefreshRequestIds?.contains(requestId) == true ||
+              (!state.isLoading && state.error != null),
+        );
+        if (state.completedRefreshRequestIds?.contains(requestId) != true) {
+          throw StateError(state.error!);
+        }
+      },
+    );
   }
 
   Future<void> _refreshContentBlockers() async {
@@ -381,8 +434,10 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
 
   /// ה-context אחרי אימות סיסמת "מצב בטוח", או null.
   Future<BuildContext?> _verifiedDialogContext() async {
-    final ctx = dialogContext;
-    if (ctx == null || !await verifySaferModePassword(ctx)) return null;
+    final ctx = adapter.rpcWindowContext ?? dialogContext;
+    if (ctx == null || !ctx.mounted || !await verifySaferModePassword(ctx)) {
+      return null;
+    }
     return ctx.mounted ? ctx : null;
   }
 
@@ -400,6 +455,13 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
     final pluginId = plugin.pluginId;
     final id = instanceId;
     final controller = webViewController;
+    final dispatcher = PluginRuntimeDispatcher.instance;
+    // WebView שפונה אינו רשום כ-controller, אבל הדף הזה עדיין בעל המופע.
+    final ownsReleased = dispatcher.isReleasedBy(
+      pluginId,
+      instanceId: id,
+      token: this,
+    );
     // העץ נעול בזמן dispose וניקוי הרישומים מודיע ל-ListenableBuilders
     // (הדגשות, סרגל כלים) — לכן נדחה למיקרוטסק, אחרי שחרור הנעילה.
     scheduleMicrotask(() {
@@ -408,18 +470,13 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
       // ביטול הרישום רק אם הדף הזה עדיין הבעלים. עדכון תוסף משנה את ה-key,
       // ו-initState של הדף החדש רץ *לפני* ה-dispose של הישן — בלי הבדיקה
       // הישן היה מוחק את הרישום של החדש ומשתיק אותו.
-      if (PluginRuntimeDispatcher.instance.ownsController(
-        pluginId,
-        controller,
-        instanceId: id,
-      )) {
+      if (ownsReleased ||
+          dispatcher.ownsController(pluginId, controller, instanceId: id)) {
         onOwnerClosed?.call();
-        PluginRuntimeDispatcher.instance.unregisterController(
-          pluginId,
-          instanceId: id,
-        );
+        dispatcher.unregisterController(pluginId, instanceId: id);
       }
-      PluginRuntimeDispatcher.instance.unregisterReloadCallback(
+      dispatcher.unregisterInstanceHost(pluginId, instanceId: id, token: this);
+      dispatcher.unregisterReloadCallback(
         pluginId,
         instanceId: id,
         token: this,
@@ -450,10 +507,12 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
   ]) {
     try {
       webViewController = controller;
+      registerPluginWebViewDiagnostics();
       PluginRuntimeDispatcher.instance.registerController(
         plugin.pluginId,
         controller,
         instanceId: instanceId,
+        viewId: View.of(context).viewId,
       );
       bridge.register(controller);
       unawaited(_pushContentBlockers());
@@ -476,8 +535,8 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
     InAppWebViewController controller,
     ShowFileChooserRequest request,
   ) async {
-    final ctx = dialogContext;
-    if (ctx == null || !await verifySaferModePassword(ctx)) {
+    final ctx = adapter.rpcWindowContext ?? dialogContext;
+    if (ctx == null || !ctx.mounted || !await verifySaferModePassword(ctx)) {
       return ShowFileChooserResponse(handledByClient: true, filePaths: null);
     }
     return null;
@@ -605,6 +664,8 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
       }
       if (_isDevServerRequest(uri)) return null; // dev server + HMR
       if (uri.scheme == 'http' && PluginFileServer.instance.isServerUri(uri)) {
+        final font = await pluginFontResponse(request);
+        if (font != null) return font;
         // גם נתיב ההעלאה (/w/) של התוסף: בלי ההחרגה ה-PUT של
         // fs.beginBinaryWrite נחסם כאן, וכל שמירה בינארית נופלת ב-"Failed to
         // fetch" (נמדד בווינדוס, שבו ה-fork של אוצריא מפעיל shouldInterceptRequest).
@@ -643,7 +704,8 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
     required List<String> permissions,
     required Map<String, dynamic> theme,
     Map<String, dynamic>? reader,
-    String? fontFaceCss,
+    Map<String, dynamic>? restore,
+    String? fontFaceJson,
   }) {
     final bootPayload = {
       'plugin': {'id': plugin.pluginId, 'version': plugin.version},
@@ -666,21 +728,50 @@ mixin PluginWebViewHost<T extends StatefulWidget> on State<T> {
       'theme': theme,
       'permissions': permissions,
       'reader': ?reader,
+      'restore': ?restore,
     };
     return buildPluginBootScript(
       nonceJson: jsonEncode(bridge.bridgeNonce),
       payloadJson: jsonEncode(bootPayload),
-      fontFaceJson: fontFaceCss == null ? null : jsonEncode(fontFaceCss),
+      fontFaceJson: fontFaceJson,
     );
   }
 
+  final Map<String, DateTime> _processFailureLoggedAt = {};
+
+  /// רישום מה-callback הייעודי לנפילה. ב-Windows אותה נפילה כבר נרשמת דרך
+  /// onProcessFailed, עם קוד היציאה.
+  void logPluginWebViewGoneOnce(String kind) {
+    if (Platform.isWindows) return;
+    logPluginWebViewGone(kind);
+  }
+
+  /// רושם נפילה של תהליך — פעם אחת לכל סוג בכל 10 דקות, כי "לא מגיב"
+  /// חוזר כל כמה שניות.
+  void logPluginWebViewGone(
+    String kind, {
+    Map<String, String?> details = const {},
+  }) {
+    final now = DateTime.now();
+    final last = _processFailureLoggedAt[kind];
+    if (last != null && now.difference(last) < const Duration(minutes: 10)) {
+      return;
+    }
+    _processFailureLoggedAt[kind] = now;
+    logPluginWebViewFailure(
+      '$logTag WebView process gone',
+      kind,
+      details: {'Plugin': plugin.pluginId, ...details},
+    );
+  }
+
+  /// רישום בלבד: ההתאוששות מבוססת על ה-callbacks הייעודיים, שמגיעים גם הם
+  /// על אותה נפילה.
   void logPluginProcessFailed(ProcessFailedDetail detail) =>
-      logPluginWebViewFailure(
-        '$logTag WebView2 process failed',
-        detail.kind,
+      logPluginWebViewGone(
+        detail.kind.name(),
         details: {
-          'Plugin': plugin.pluginId,
-          'Reason': detail.reason?.toString(),
+          'Reason': detail.reason?.name(),
           'ExitCode': detail.exitCode?.toString(),
           'Process': detail.processDescription,
         },

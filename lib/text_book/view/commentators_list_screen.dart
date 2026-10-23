@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show listEquals, setEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/models/link_types.dart';
@@ -32,10 +33,14 @@ class CommentatorsListView extends StatefulWidget {
 }
 
 class CommentatorsListViewState extends State<CommentatorsListView> {
+  WeakReference<TextBookLoaded>? _lineRelevantFor;
+  Set<String> _lineRelevant = const {};
+
   @override
   Widget build(BuildContext context) {
     return TextBookStateBuilder(
       loadingWidget: const Center(),
+      buildWhen: _shouldRebuild,
       builder: (context, state) {
         return CommentatorsSelectionPanel(
           groups: state.commentatorGroups,
@@ -61,10 +66,28 @@ class CommentatorsListViewState extends State<CommentatorsListView> {
     );
   }
 
+  // גלילה בקורא משדרת מצב בכל שורה; הרשימה נבנית מחדש רק כשקלט שלה השתנה.
+  bool _shouldRebuild(TextBookState previous, TextBookState current) {
+    if (previous is! TextBookLoaded || current is! TextBookLoaded) return true;
+    // BlocBuilder מחזיק את המצב שנבנה; פינוי תוכן חייב לשחרר את הגוף הקודם.
+    return !identical(previous.content, current.content) ||
+        !identical(previous.book, current.book) ||
+        !identical(previous.links, current.links) ||
+        previous.commentatorGroups != current.commentatorGroups ||
+        !listEquals(previous.activeCommentators, current.activeCommentators) ||
+        !setEquals(previous.rareCommentators, current.rareCommentators) ||
+        !setEquals(
+          _lineRelevantCommentators(previous),
+          _lineRelevantCommentators(current),
+        );
+  }
+
   /// אינדקסי השורות הנוכחיים (בחירה מרובה אם יש, אחרת הנראות) שלפיהם מחליטים
   /// אילו מפרשים נדירים כן להציג ברשימה.
   Set<String> _lineRelevantCommentators(TextBookLoaded state) {
     if (state.rareCommentators.isEmpty) return const {};
+    // ה-build משתמש בסט שכבר חושב עבור אותו מצב ב-buildWhen.
+    if (identical(state, _lineRelevantFor?.target)) return _lineRelevant;
     final indexes = state.selectedIndices.isNotEmpty
         ? state.selectedIndices
         : (state.visibleIndices.isNotEmpty
@@ -72,7 +95,8 @@ class CommentatorsListViewState extends State<CommentatorsListView> {
               : (state.selectedIndex != null
                     ? [state.selectedIndex!]
                     : const <int>[]));
-    return lineRelevantRareCommentators(
+    _lineRelevantFor = WeakReference(state);
+    return _lineRelevant = lineRelevantRareCommentators(
       rareCommentators: state.rareCommentators,
       currentIndexes: indexes,
       linksByLine: state.linksByLine,

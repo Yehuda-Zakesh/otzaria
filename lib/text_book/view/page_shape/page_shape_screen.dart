@@ -62,6 +62,8 @@ import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
 import 'package:otzaria/personal_notes/models/personal_note.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_state.dart';
 import 'package:otzaria/personal_notes/repository/personal_notes_repository.dart';
+import 'package:otzaria/text_book/models/book_notes.dart';
+import 'package:otzaria/text_book/repository/book_notes_repository.dart';
 import 'package:otzaria/personal_notes/widgets/commentary_notes_section.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
@@ -1143,6 +1145,7 @@ class _PageShapeScreenState extends State<PageShapeScreen> {
                           onNavigateToLine: (lineNumber, {note}) =>
                               _navigateToLine(state, lineNumber, note),
                           onClosePane: _toggleLeftSidebar,
+                          isPaneOpen: _isLeftSidebarOpen,
                           initialTabIndex: _leftSidebarTabIndex,
                           onTabChanged: (index) {
                             setState(() {
@@ -1852,6 +1855,8 @@ class _CommentaryPaneState extends State<_CommentaryPane> {
   // שורות רק לספרי DB שיש להם מפרשים משלהם. null עד שהסיכום נבדק.
   Set<String>? _commentaryAnchorTargets;
   Map<int, List<Link>> _anchorLinksByLine = const {};
+  // הערות ספר המפרש: עוגניו נמדדים על השורה המלאה, עם גופי ההערות.
+  BookNotes _anchorBookNotes = BookNotes.empty;
   List<({int startLine, int endLine})> _anchorLoadedRanges = const [];
   int? _lastSyncedIndex; // האינדקס האחרון שסונכרן
   int? _lastSyncedMainIndex; // השורה הנבחרת שממנה נגזר הסנכרון האחרון
@@ -2158,14 +2163,40 @@ class _CommentaryPaneState extends State<_CommentaryPane> {
       return;
     }
     if (!mounted || widget.commentatorName != requested) return;
+    final anchorLinks = filterCommentaryAnchorLinks(links);
+    // העוגנים נמדדים על השורה המלאה: בלי ההערות אין להם מקום בטור.
+    final BookNotes notes;
+    try {
+      notes = anchorLinks.isEmpty
+          ? BookNotes.empty
+          : await BookNotesRepository.instance.notesFor(
+              book.title,
+              categoryId: categoryId,
+              source: book.source,
+              fileType: 'txt',
+            );
+    } catch (error, stack) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stack,
+          library: 'otzaria',
+          context: ErrorDescription(
+            'while loading the footnotes of "${book.title}"; its anchors are not shown',
+          ),
+        ),
+      );
+      return;
+    }
+    if (!mounted || widget.commentatorName != requested) return;
     _anchorLoadedRanges = TextBookBloc.mergeLoadedContentRanges(
       _anchorLoadedRanges,
       startLine: start,
       endLine: endLine,
     );
-    final anchorLinks = filterCommentaryAnchorLinks(links);
     if (anchorLinks.isEmpty) return;
     setState(() {
+      _anchorBookNotes = notes;
       _anchorLinksByLine = mergeAnchorLinksByLine(
         _anchorLinksByLine,
         anchorLinks,
@@ -2365,6 +2396,7 @@ class _CommentaryPaneState extends State<_CommentaryPane> {
     _loadedRanges = const [];
     _commentaryAnchorTargets = null;
     _anchorLinksByLine = const {};
+    _anchorBookNotes = BookNotes.empty;
     _anchorLoadedRanges = const [];
 
     try {
@@ -2746,6 +2778,7 @@ class _CommentaryPaneState extends State<_CommentaryPane> {
               anchorLinksByLine: _anchorLinksByLine.isEmpty
                   ? null
                   : _anchorLinksByLine,
+              anchorBookNotes: _anchorBookNotes,
             );
           },
         );

@@ -83,6 +83,9 @@ class PluginSearchDialogRegistry extends ChangeNotifier {
     if (items.length != before) notifyListeners();
   }
 
+  /// האם למופע [key] יש פריטים רשומים בדיאלוג החיפוש.
+  bool hasInstance(PluginInstanceKey key) => _items[key]?.isNotEmpty ?? false;
+
   /// ניקוי מלא ברמת התוסף — כל המופעים והרישומים הדקלרטיביים.
   void removeAll(String pluginId) {
     final before = _items.length;

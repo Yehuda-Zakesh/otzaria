@@ -9,6 +9,15 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:otzaria/core/windowing/app_window_controller.dart';
+import 'package:otzaria/core/windowing/app_window_id.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
+import 'package:otzaria/core/windowing/app_window_scope.dart';
+import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
+import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
+import 'package:otzaria/plugins/services/context_menu_registry.dart';
+import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -90,6 +99,143 @@ void main() {
     await tourCubit.close();
     focusRepository.resetForTesting();
   });
+
+  for (final contextMenu in [false, true]) {
+    testWidgets(
+      contextMenu
+          ? 'קיצור תפריט הקשר בטקסט נמסר למופע התוסף בחלון המקור'
+          : 'קיצור פקודת טקסט נמסר למופע התוסף בחלון המקור',
+      (tester) async {
+        const pluginId = 'text.shortcut.window';
+        final dispatcher = PluginRuntimeDispatcher.instance;
+        final controllerA = _PluginController();
+        final controllerB = _PluginController();
+        final keysA = AppWindowKeys(id: const AppWindowId('shortcut-a'));
+        final keysB = AppWindowKeys(id: const AppWindowId('shortcut-b'));
+        AppWindowKeys.register(keysA);
+        AppWindowKeys.register(keysB);
+        AppWindowKeys.activateWindow(keysB.id);
+        dispatcher.repositoryForTesting = _PluginRepository();
+        dispatcher.registerController(
+          pluginId,
+          controllerA,
+          instanceId: 'a',
+          viewId: -1,
+        );
+        dispatcher.registerController(
+          pluginId,
+          controllerB,
+          instanceId: 'b',
+          viewId: tester.view.viewId,
+        );
+        dispatcher.setVisiblePluginInstances({
+          (pluginId: pluginId, instanceId: 'a'),
+        }, viewId: -1);
+        dispatcher.setVisiblePluginInstances({
+          (pluginId: pluginId, instanceId: 'b'),
+        }, viewId: tester.view.viewId);
+        if (contextMenu) {
+          ContextMenuRegistry.instance.registerPayload(pluginId, {
+            'id': 'window-item',
+            'title': 'פעולה בחלון',
+          }, instanceId: 'a');
+          ContextMenuRegistry.instance.registerPayload(pluginId, {
+            'id': 'window-item',
+            'title': 'פעולה בחלון',
+          }, instanceId: 'b');
+        }
+        ShortcutValidator.registerPluginShortcuts({
+          'key-shortcut-plugin-window-command': (
+            pluginId: pluginId,
+            shortcutId: 'window-command',
+            label: 'פקודה בחלון',
+            defaultKey: 'ctrl+shift+f12',
+            command: contextMenu ? null : 'window-command',
+            contextMenuItemId: contextMenu ? 'window-item' : null,
+          ),
+        });
+        final book = TextBook(title: 'ספר בחלון ב');
+        final bloc = _TestTextBookBloc(_loadedState(book));
+        final tab = TextBookTab(book: book, index: 0, blocOverride: bloc);
+        final tabsBloc = _TestTabsBloc(
+          TabsState(tabs: [tab], currentTabIndex: 0),
+        );
+        final settingsBloc = _TestSettingsBloc(SettingsState.initial());
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await bloc.close();
+          await tabsBloc.close();
+          await settingsBloc.close();
+          tab.dispose();
+          ShortcutValidator.registerPluginShortcuts({});
+          ContextMenuRegistry.instance.removeAll(pluginId);
+          dispatcher.unregisterController(pluginId, instanceId: 'a');
+          dispatcher.unregisterController(pluginId, instanceId: 'b');
+          dispatcher.resetVisibilityForTesting();
+          dispatcher.repositoryForTesting = PluginRegistryRepository();
+          dispatcher.invalidatePlugin(pluginId);
+          AppWindowKeys.resetForTest();
+        });
+        await _setSurfaceSize(tester, const Size(1600, 900));
+        await _pumpTextBookScreen(
+          tester,
+          tab: tab,
+          textBookBloc: bloc,
+          tabsBloc: tabsBloc,
+          settingsBloc: settingsBloc,
+          focusRepository: focusRepository,
+          shamorZachorDataProvider: shamorZachorDataProvider,
+          shamorZachorProgressProvider: shamorZachorProgressProvider,
+          bookmarkBloc: bookmarkBloc,
+          personalNotesBloc: personalNotesBloc,
+          tourCubit: tourCubit,
+          isInCombinedView: false,
+          windowKeys: keysB,
+        );
+        if (contextMenu) {
+          tester
+              .widget<SplitedViewScreen>(find.byType(SplitedViewScreen))
+              .onSelectedTextChanged!('שורה א', 0, 0);
+        }
+        final modifier = Platform.isMacOS
+            ? LogicalKeyboardKey.metaLeft
+            : LogicalKeyboardKey.controlLeft;
+        await tester.sendKeyDownEvent(modifier);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.f12);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pumpAndSettle();
+        final topic = contextMenu ? 'contextMenu.itemClicked' : 'app.command';
+        expect(
+          controllerA.events.where((event) => event.contains(topic)),
+          isEmpty,
+        );
+        expect(
+          controllerB.events.where(
+            (event) =>
+                event.contains(topic) &&
+                event.contains(contextMenu ? 'window-item' : 'window-command'),
+          ),
+          hasLength(1),
+        );
+        if (contextMenu) {
+          expect(
+            controllerA.events.where(
+              (event) => event.contains('reader.context_menu_item_clicked'),
+            ),
+            isEmpty,
+          );
+          expect(
+            controllerB.events.where(
+              (event) => event.contains('reader.context_menu_item_clicked'),
+            ),
+            hasLength(1),
+          );
+        }
+      },
+    );
+  }
 
   group('TextBookViewerBloc actions', () {
     testWidgets(
@@ -1885,6 +2031,7 @@ Future<void> _pumpTextBookScreen(
   required TourCubit tourCubit,
   required bool isInCombinedView,
   TextDirection textDirection = TextDirection.ltr,
+  AppWindowKeys? windowKeys,
 }) async {
   // openBook (מסלול פתיחת נוסח) קורא גם ל-HistoryBloc ול-NavigationBloc.
   final historyBloc = _TestHistoryBloc();
@@ -1894,10 +2041,16 @@ Future<void> _pumpTextBookScreen(
     await navigationBloc.close();
   });
 
+  final screen = TextBookViewerBloc(
+    tab: tab,
+    isInCombinedView: isInCombinedView,
+    openBookCallback: (_) {},
+  );
   await tester.pumpWidget(
     MultiProvider(
       providers: [
         Provider<FocusRepository>.value(value: focusRepository),
+        Provider<PluginSystemBloc>.value(value: _PluginSystemBloc()),
         Provider<SettingsRepository>.value(value: _FakeSettingsRepository()),
         ChangeNotifierProvider<ShamorZachorDataProvider>.value(
           value: shamorZachorDataProvider,
@@ -1920,11 +2073,14 @@ Future<void> _pumpTextBookScreen(
         child: MaterialApp(
           builder: (context, child) =>
               Directionality(textDirection: textDirection, child: child!),
-          home: TextBookViewerBloc(
-            tab: tab,
-            isInCombinedView: isInCombinedView,
-            openBookCallback: (_) {},
-          ),
+          home: windowKeys == null
+              ? screen
+              : AppWindowScope(
+                  controller: _PluginWindow(),
+                  geometry: _PluginWindow(),
+                  keys: windowKeys,
+                  child: screen,
+                ),
         ),
       ),
     ),
@@ -2195,4 +2351,39 @@ class _MemoryCacheProvider extends CacheProvider {
   Future<void> setString(String key, String? value) async {
     _values[key] = value;
   }
+}
+
+class _PluginWindow extends Fake
+    implements AppWindowController, AppWindowGeometry {}
+
+class _PluginRepository extends Fake implements PluginRegistryRepository {
+  @override
+  Future<bool> getIsEnabled(String pluginId) async => true;
+  @override
+  Future<bool?> getPermission(String pluginId, String permission) async => true;
+}
+
+class _PluginController extends Fake implements InAppWebViewController {
+  final List<String> events = [];
+
+  @override
+  Future<void> resume() async {}
+
+  @override
+  Future<void> pause() async {}
+  @override
+  Future<dynamic> evaluateJavascript({
+    required String source,
+    ContentWorld? contentWorld,
+  }) async {
+    events.add(source);
+    return null;
+  }
+}
+
+class _PluginSystemBloc extends Fake implements PluginSystemBloc {
+  @override
+  get toolbarRegistry => null;
+  @override
+  get declarativeHost => null;
 }

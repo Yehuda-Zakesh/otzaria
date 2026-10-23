@@ -45,6 +45,15 @@ abstract class WindowMessages {
   static const String indexingRequestFailed =
       'לא ניתן היה להעביר את בקשת האינדוקס לחלון הראשי של אוצריא.';
 
+  /// חלון ראשי מוסתר אינו נבנה מחדש אחרי שחזור, והיה דורס את הנתונים ששוחזרו.
+  static const String restoreNeedsOpenMainWindow =
+      'כדי לשחזר גיבוי יש לפתוח שוב את החלון הראשי של אוצריא (Ctrl+Shift+T) '
+      'ולנסות שוב.';
+
+  /// המארח לא נמצא או לא ענה על פעולה שחלון משני העביר אליו.
+  static const String mainWindowRequestFailed =
+      'לא ניתן היה להעביר את הבקשה לחלון הראשי של אוצריא. נסה שוב.';
+
   /// איפוס ישיר של האינדקס, במסלול שאינו עובר דרך המארח.
   static const String indexResetOnlyInMainWindow =
       'איפוס אינדקס החיפוש אפשרי רק בחלון הראשי של אוצריא. עבור לחלון '

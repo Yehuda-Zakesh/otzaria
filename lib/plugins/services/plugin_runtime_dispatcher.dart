@@ -1,12 +1,21 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:otzaria/plugins/plugin_constants.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/plugins/utils/plugin_safe_mode.dart';
 import 'package:otzaria/plugins/services/context_menu_registry.dart';
 import 'package:otzaria/plugins/services/plugin_condition_evaluator.dart';
+import 'package:otzaria/plugins/services/plugin_discard_policy.dart';
+import 'package:otzaria/plugins/services/plugin_external_search_service.dart';
+import 'package:otzaria/plugins/services/plugin_in_book_search_service.dart';
+import 'package:otzaria/plugins/services/plugin_library_books_registry.dart';
+import 'package:otzaria/plugins/services/plugin_restore_state_store.dart';
+import 'package:otzaria/plugins/services/plugin_search_dialog_registry.dart';
 import 'package:otzaria/plugins/services/plugin_shortcut_registry.dart';
 import 'package:otzaria/plugins/services/plugin_toolbar_registry.dart';
 import 'package:otzaria/plugins/services/plugin_highlight_registry.dart';
@@ -15,12 +24,48 @@ import 'package:otzaria/plugins/services/plugin_lazy_activation_service.dart';
 import 'package:otzaria/plugins/services/plugin_page_launcher.dart';
 import 'package:otzaria/plugins/services/plugin_search_field_session_service.dart';
 import 'package:otzaria/plugins/services/plugin_startup_contributions_service.dart';
+import 'package:otzaria/plugins/services/plugin_unsaved_changes_registry.dart';
 import 'package:otzaria/plugins/services/plugin_webview_focus.dart';
 
 enum _PluginRuntimeShutdownMode { idle, restart, exit }
 
 /// מזהה ייחודי לכל instance של webview (foreground/background) של אותו plugin.
 typedef PluginInstanceId = String;
+
+/// מה ה-WebView יודע לעשות כשמופע עוזב את המסך.
+@visibleForTesting
+enum PluginSuspendMode {
+  /// Windows (TrySuspend) ו-Android (onPause).
+  nativePause,
+
+  /// Linux: הדף מסומן מוסתר.
+  visibility,
+
+  /// iOS/macOS: רק האירוע, והתוסף עוצר בעצמו.
+  eventOnly,
+}
+
+/// ה-WebView של מופע קדמי, שהדיספצ'ר יכול לבקש ממנו לשחרר ולהקים מחדש.
+abstract interface class PluginInstanceHost {
+  /// משחרר את ה-WebView (פינוי). המופע נשאר רשום.
+  void releaseWebView();
+
+  /// מקים WebView חדש. נקרא רק כשהמופע מוצג.
+  void restoreWebView();
+
+  /// מותר לפנות את המופע (למשל לא תוסף פיתוח).
+  bool get canDiscard;
+}
+
+/// אירוע שהגיע בזמן השהיה וממתין ל-resume.
+class _QueuedEvent {
+  const _QueuedEvent(this.topic, this.json, {required this.targeted});
+  final String topic;
+  final String json;
+
+  /// אירוע ממוקד אינו דורש הרשאת subscribe.
+  final bool targeted;
+}
 
 /// מופע ריצה יחיד של תוסף — כל המצב שהיה מפוזר במפות per-plugin חי כאן.
 class _PluginInstance {
@@ -30,24 +75,62 @@ class _PluginInstance {
   final PluginInstanceId instanceId;
 
   InAppWebViewController? controller;
+  int? viewId;
   Future<void> Function()? reloadCallback;
   Object? reloadToken;
+  PluginInstanceHost? host;
+  Object? hostToken;
 
-  /// מופע קדמי מושהה — evaluateJavascript עליו נבלע בשקט.
+  /// מופע קדמי מושהה: אירועי מצב נכנסים לתור ולא נמסרים לדף.
   bool suspended = false;
+  DateTime? suspendedAt;
+
+  /// ה-WebView שוחרר (פינוי או נפילה), והמופע ייטען מחדש כשיוצג.
+  bool released = false;
+
+  /// ה-boot של הדף הנוכחי הסתיים.
+  bool ready = false;
+
+  /// קריאות RPC פתוחות — מופע עסוק אינו מפונה.
+  int busyCount = 0;
+
+  /// סיבת הטעינה הבאה של הדף, עבור `restore` ב-boot.
+  PluginRestoreReason? nextBootReason;
 
   /// בקשת פוקוס מקלדת שהגיעה לפני שה-WebView היה מוכן (הטאב נפתח לפני
   /// שנוצר, או שה-resume עוד רץ) — תתבצע ברגע שיהיה.
   bool pendingKeyboardFocus = false;
 
+  /// ראה [PluginWebViewFocus.request]; false אם אחת הבקשות שנזכרו דרשה זאת.
+  bool pendingFocusTrustsPage = true;
+
   /// אירועים שהוזרקו בזמן השעיה וממתינים למסירה חוזרת אחרי boot.
   final List<({String topic, String jsonPayload, DateTime at})>
   pendingRedeliveries = [];
+
+  /// אירועי מצב לפי מפתח (האחרון גובר ועובר לסוף), וחד-פעמיים לפי ההגעה.
+  final LinkedHashMap<String, _QueuedEvent> queued = LinkedHashMap();
+  int queuedOneShots = 0;
 
   /// חלון החסד להשלמת טיפול אסינכרוני לפני הקפאה חוזרת.
   Timer? graceTimer;
 
   bool get isBackground => instanceId == PluginInstanceIds.background;
+
+  void clearQueue() {
+    queued.clear();
+    queuedOneShots = 0;
+  }
+}
+
+/// מצב הנראות של חלון אחד (תצוגה אחת).
+class _WindowVisibility {
+  Set<PluginInstanceKey> visibleKeys = const {};
+  bool readerScreenVisible = true;
+  bool shown = true;
+  bool minimized = false;
+
+  bool get isForeground => readerScreenVisible && shown && !minimized;
 }
 
 class PluginRuntimeDispatcher {
@@ -68,6 +151,13 @@ class PluginRuntimeDispatcher {
   set repositoryForTesting(PluginRegistryRepository repo) => _repository = repo;
   _PluginRuntimeShutdownMode _shutdownMode = _PluginRuntimeShutdownMode.idle;
 
+  @visibleForTesting
+  DateTime Function() clock = DateTime.now;
+
+  /// עוקף את מגבלות הפינוי של הפלטפורמה — לבדיקות בלבד.
+  @visibleForTesting
+  PluginDiscardLimits? discardLimitsOverride;
+
   // Cache in-memory למניעת שאילתות SQLite חוזרות במסלול החם
   final Map<String, bool> _enabledCache = {};
   final Map<String, Map<String, bool?>> _permissionCache = {};
@@ -76,15 +166,52 @@ class PluginRuntimeDispatcher {
   /// או להחייאה, כדי שמופע תקוע לא יעלה 3 שניות בכל אירוע.
   final Set<InAppWebViewController> _eventTimedOutControllers = Set.identity();
 
-  // ה-payload האחרון של theme.changed — תוסף מושהה לא מקבל את האירוע
-  // (ה-WebView מוקפא), ולכן מסנכרנים אותו מחדש בהתעוררות.
-  Map<String, dynamic>? _lastThemePayload;
-
   /// Events whose work must continue in the non-suspended background host.
   /// All other broadcast events retain the legacy foreground-first behavior.
   static const Set<String> _backgroundEventTopics = {
     'reader.sectionContentChanged',
   };
+
+  /// נושאי מצב: מופע מושהה מקבל ב-resume רק את האחרון מכל מפתח.
+  static const Set<String> _stateTopics = {
+    'theme.changed',
+    'navigation.changed',
+    'workspace.changed',
+    'settings.changed',
+    'calendar.date_changed',
+    'calendar.city_changed',
+    'reader.current_book_changed',
+    'reader.current_ref_changed',
+    'reader.selection_changed',
+    'plugin.permissions_changed',
+  };
+
+  static const _maxQueuedOneShots = 50;
+
+  static const _selectionTopic = 'reader.selection_changed';
+
+  /// גרירת בחירה מייצרת אירוע בכל צעד; נשלח לכל היותר אחד בחלון, והאחרון
+  /// נשלח בסופו.
+  @visibleForTesting
+  static const selectionThrottle = Duration(milliseconds: 150);
+  Timer? _selectionTimer;
+  Map<String, dynamic>? _pendingSelection;
+
+  int _oneShotSequence = 0;
+
+  /// מפתח האיחוד בתור של מופע מושהה, או null לאירוע חד-פעמי.
+  @visibleForTesting
+  static String? queueKeyFor(String topic, Map<String, dynamic> payload) {
+    if (topic == 'settings.changed') {
+      return 'settings.changed:${payload['key']}';
+    }
+    if (_stateTopics.contains(topic)) return topic;
+    if (topic == 'reader.textReaderNavigate') return topic;
+    if (topic == 'reader.textReaderCommand' && payload['action'] == 'display') {
+      return 'reader.textReaderCommand:display';
+    }
+    return null;
+  }
 
   // ── מחזור חיים של מופעים קדמיים (PluginTabPage) ──────────────────────────
   // משהים את ה-WebView של מופע שעזבו כדי לא לצרוך CPU/RAM ברקע. pause נייטיב =
@@ -92,15 +219,41 @@ class PluginRuntimeDispatcher {
   // לא נוגעים במופע הרקע ('background') — הוא הוער כדי לרוץ בלי דף נראה.
   //
   // קבוצה ולא מפתח יחיד: טאב מפוצל בעיון יכול להציג שני מופעים בו-זמנית.
-  Set<PluginInstanceKey> _visibleInstanceKeys = const {};
-  bool _readerScreenVisible = true;
-  bool _windowShown = true;
+  //
+  // הנראות נשמרת לכל חלון לפי viewId: מופע רץ אם הוא מוצג בחלון כלשהו שמסך
+  // העיון שלו גלוי והוא עצמו מוצג. בלי ריבוי חלונות קיים רק החלון הראשי.
+  final Map<int, _WindowVisibility> _windows = {
+    mainViewId: _WindowVisibility(),
+  };
+  bool _appVisible = true;
   Set<PluginInstanceKey> _runningForegroundKeys = const {};
+
+  /// התצוגה של החלון הראשי (ה-implicit view).
+  static const int mainViewId = 0;
+
+  _WindowVisibility _window(int? viewId) =>
+      _windows.putIfAbsent(viewId ?? mainViewId, _WindowVisibility.new);
+
+  Set<PluginInstanceKey> get _visibleInstanceKeys => _windows.length == 1
+      ? _windows.values.single.visibleKeys
+      : {for (final window in _windows.values) ...window.visibleKeys};
+
+  /// מסך העיון של החלון שמציג את [key]; מופע שאינו מוצג — של החלון הראשי.
+  bool _readerScreenVisibleFor(PluginInstanceKey key) {
+    for (final window in _windows.values) {
+      if (window.visibleKeys.contains(key)) return window.readerScreenVisible;
+    }
+    return _window(mainViewId).readerScreenVisible;
+  }
 
   // מסדר את כל פעולות מחזור-החיים בשרשרת אחת. בלי זה, שני reconciles
   // חופפים (מעבר מהיר בין תוספים/מסכים) מ-await בו-זמנית את pause/resume,
   // ועלולים להשאיר את המופע הלא-נכון מושהה או לשלוח resumed אחרי suspended.
   Future<void> _lifecycleLock = Future.value();
+
+  Timer? _discardDebounce;
+  Timer? _discardAgeTimer;
+  _PluginLifecycleObserver? _lifecycleObserver;
 
   PluginInstanceKey _keyOf(String pluginId, PluginInstanceId instanceId) =>
       (pluginId: pluginId, instanceId: instanceId);
@@ -147,7 +300,7 @@ class PluginRuntimeDispatcher {
 
   /// המופע הקדמי ה"ראשי" של [pluginId]: הגלוי כרגע, ואם אין גלוי —
   /// האחרון שנרשם (סדר ההכנסה באינדקס).
-  PluginInstanceKey? _primaryForegroundKey(String pluginId) {
+  PluginInstanceKey? _primaryForegroundKey(String pluginId, {int? viewId}) {
     final keys = _instancesByPlugin[pluginId];
     if (keys == null) return null;
     PluginInstanceKey? lastRegistered;
@@ -155,7 +308,8 @@ class PluginRuntimeDispatcher {
       final instance = _instances[key];
       if (instance == null ||
           instance.isBackground ||
-          instance.controller == null) {
+          instance.controller == null ||
+          (viewId != null && instance.viewId != viewId)) {
         continue;
       }
       if (_visibleInstanceKeys.contains(key)) return key;
@@ -168,24 +322,33 @@ class PluginRuntimeDispatcher {
   bool isInstanceVisible(PluginInstanceKey key) =>
       _visibleInstanceKeys.contains(key);
 
+  /// האם המופע [key] מוצג עכשיו למשתמש (כולל מסך העיון והחלון).
+  bool isInstanceShown(PluginInstanceKey key) =>
+      _desiredForegroundKeys.contains(key);
+
   /// בוחר מופע יעד ללחיצה על תרומת UI מבין המופעים שרשמו אותה
   /// ([registrantInstanceIds], בסדר הרישום): קדמי גלוי, אחרת הקדמי החי
   /// האחרון שנרשם. אין קדמי חי — null, והקריאה ל-[dispatchEventToPlugin]
   /// בלי instanceId תבחר כרגיל (רקע / החייאה).
   PluginInstanceId? pickContributionTarget(
     String pluginId,
-    Iterable<PluginInstanceId> registrantInstanceIds,
-  ) {
+    Iterable<PluginInstanceId> registrantInstanceIds, {
+    int? viewId,
+  }) {
     PluginInstanceId? fallback;
     for (final instanceId in registrantInstanceIds) {
       final key = _keyOf(pluginId, instanceId);
       final instance = _instances[key];
       if (instance == null ||
           instance.isBackground ||
-          instance.controller == null) {
+          instance.controller == null ||
+          (viewId != null && instance.viewId != viewId)) {
         continue;
       }
-      if (isInstanceVisible(key)) return instanceId;
+      if ((viewId == null ? _visibleInstanceKeys : _window(viewId).visibleKeys)
+          .contains(key)) {
+        return instanceId;
+      }
       fallback = instanceId;
     }
     return fallback;
@@ -195,6 +358,7 @@ class PluginRuntimeDispatcher {
     String pluginId,
     InAppWebViewController controller, {
     PluginInstanceId instanceId = PluginInstanceIds.defaultForeground,
+    int? viewId,
   }) {
     if (_shutdownMode == _PluginRuntimeShutdownMode.exit) {
       debugPrint(
@@ -207,7 +371,79 @@ class PluginRuntimeDispatcher {
     _eventTimedOutControllers.remove(controller);
     // בקשת פוקוס ממתינה אינה מבוצעת כאן אלא ב-onForegroundInstanceReady:
     // העברת פוקוס ל-WebView שהדף בו עוד לא נטען מקדימה את ה-autofocus שלו.
-    _instanceFor(pluginId, instanceId).controller = controller;
+    _instanceFor(pluginId, instanceId)
+      ..viewId = viewId
+      ..controller = controller
+      ..busyCount = 0
+      ..released = false
+      ..ready = false;
+  }
+
+  /// רושם את המארח של מופע קדמי. [token] מזהה את בעליו (ראו
+  /// [registerReloadCallback]).
+  void registerInstanceHost(
+    String pluginId,
+    PluginInstanceHost host, {
+    PluginInstanceId instanceId = PluginInstanceIds.defaultForeground,
+    Object? token,
+  }) {
+    final instance = _instanceFor(pluginId, instanceId);
+    instance.host = host;
+    instance.hostToken = token;
+  }
+
+  void unregisterInstanceHost(
+    String pluginId, {
+    PluginInstanceId instanceId = PluginInstanceIds.defaultForeground,
+    Object? token,
+  }) {
+    final instance = _instances[_keyOf(pluginId, instanceId)];
+    if (instance == null || instance.host == null) return;
+    if (token != null &&
+        instance.hostToken != null &&
+        instance.hostToken != token) {
+      return;
+    }
+    instance.host = null;
+    instance.hostToken = null;
+  }
+
+  /// האם המופע שוחרר והמארח שלו הוא [token] — בסגירת הטאב הוא הבעלים.
+  bool isReleasedBy(
+    String pluginId, {
+    PluginInstanceId instanceId = PluginInstanceIds.defaultForeground,
+    required Object token,
+  }) {
+    final instance = _instances[_keyOf(pluginId, instanceId)];
+    return instance != null &&
+        instance.released &&
+        identical(instance.hostToken, token);
+  }
+
+  /// רושם את הצופה במחזור החיים של האפליקציה (מובייל ברקע, לחץ זיכרון).
+  /// נקרא מ-widget, כדי שה-binding כבר קיים.
+  void ensureLifecycleObserver() {
+    if (_lifecycleObserver != null) return;
+    final observer = _PluginLifecycleObserver(this);
+    _lifecycleObserver = observer;
+    WidgetsBinding.instance.addObserver(observer);
+  }
+
+  /// תחילת RPC מחזירה פעולת סיום הקשורה לדף שהתחיל אותה.
+  VoidCallback beginInstanceWork(
+    String pluginId, {
+    required String instanceId,
+  }) {
+    final instance = _instances[_keyOf(pluginId, instanceId)];
+    final controller = instance?.controller;
+    if (instance == null || controller == null) return () {};
+    instance.busyCount++;
+    return () {
+      if (identical(instance.controller, controller) &&
+          instance.busyCount > 0) {
+        instance.busyCount--;
+      }
+    };
   }
 
   /// מעביר את פוקוס המקלדת אל המופע הקדמי [instanceId] של [pluginId], כדי
@@ -242,12 +478,13 @@ class PluginRuntimeDispatcher {
           hasController: true,
           isVisible: isInstanceVisible(key),
           isSuspended: instance.suspended,
-          readerScreenVisible: _readerScreenVisible,
+          readerScreenVisible: _readerScreenVisibleFor(key),
           platformNeedsHandoff: platformNeedsHandoff,
           appIsActive: appIsActiveNow(),
           flutterOwnsKeyboard: deferred && flutterOwnsKeyboardNow(),
         )) {
       instance.pendingKeyboardFocus = false;
+      instance.pendingFocusTrustsPage = true;
       return PluginWebViewFocus.request(
         controller,
         trustPageFocus: trustPageFocus,
@@ -256,10 +493,14 @@ class PluginRuntimeDispatcher {
     if (shouldRememberKeyboardFocusRequest(
       isBackground: isBackground,
       isVisible: isInstanceVisible(key),
-      readerScreenVisible: _readerScreenVisible,
+      readerScreenVisible: _readerScreenVisibleFor(key),
       platformNeedsHandoff: platformNeedsHandoff,
     )) {
-      _instanceFor(pluginId, instanceId).pendingKeyboardFocus = true;
+      final pending = _instanceFor(pluginId, instanceId);
+      pending.pendingFocusTrustsPage =
+          (!pending.pendingKeyboardFocus || pending.pendingFocusTrustsPage) &&
+          trustPageFocus;
+      pending.pendingKeyboardFocus = true;
     }
     return false;
   }
@@ -267,9 +508,8 @@ class PluginRuntimeDispatcher {
   /// מחזיר את פוקוס המקלדת ל-WebView של המופע הפעיל של תוסף, אחרי שחלון
   /// האפליקציה חזר ממיזעור.
   ///
-  /// אין אף מסלול אחר שמבקש את ההעברה: המופע לא הושהה (ולכן
-  /// אין `plugin.resumed`), הטאב לא התחלף (ולכן אין בקשת מיקוד תוכן),
-  /// ו-`AppLifecycleState.resumed` מגיע כש-`FocusManager` כבר העביר את
+  /// אין אף מסלול אחר שמבקש את ההעברה: הטאב לא התחלף (ולכן אין בקשת מיקוד
+  /// תוכן), ו-`AppLifecycleState.resumed` מגיע כש-`FocusManager` כבר העביר את
   /// `primaryFocus` ל-`rootScope` — ולכן [PluginWebViewFocusRestorer]
   /// מוותר. מה שנמדד בלעדיה: הדף מקבל `focus` ומדווח `document.hasFocus()`
   /// אמת, אבל אף הקשה אינה מגיעה אליו עד לחיצת עכבר.
@@ -296,6 +536,7 @@ class PluginRuntimeDispatcher {
   void cancelPendingKeyboardFocus() {
     for (final instance in _instances.values) {
       instance.pendingKeyboardFocus = false;
+      instance.pendingFocusTrustsPage = true;
     }
   }
 
@@ -307,6 +548,7 @@ class PluginRuntimeDispatcher {
       key.pluginId,
       instanceId: key.instanceId,
       deferred: true,
+      trustPageFocus: instance.pendingFocusTrustsPage,
     );
   }
 
@@ -322,8 +564,15 @@ class PluginRuntimeDispatcher {
       }
       instance.controller = null;
       instance.suspended = false;
+      instance.suspendedAt = null;
+      instance.released = false;
+      instance.ready = false;
+      instance.busyCount = 0;
+      instance.nextBootReason = null;
       instance.pendingKeyboardFocus = false;
+      instance.pendingFocusTrustsPage = true;
       instance.pendingRedeliveries.clear();
+      instance.clearQueue();
       instance.graceTimer?.cancel();
       instance.graceTimer = null;
       _removeInstanceIfEmpty(key);
@@ -350,48 +599,158 @@ class PluginRuntimeDispatcher {
     }
   }
 
-  /// מעדכן אילו מופעי תוספים מוצגים כעת בטאב העיון הפעיל (ריק = אף אחד).
-  void setVisiblePluginInstances(Set<PluginInstanceKey> keys) {
-    if (setEquals(_visibleInstanceKeys, keys)) return;
-    _visibleInstanceKeys = Set.unmodifiable(keys);
+  /// ה-WebView של המופע שוחרר — בפינוי או בנפילת תהליך — אבל המופע עצמו
+  /// נשאר: הרישומים, בקשות הפוקוס והמסירה החוזרת נשמרים עד שייטען מחדש.
+  void markInstanceReleased(
+    String pluginId, {
+    PluginInstanceId instanceId = PluginInstanceIds.defaultForeground,
+    required PluginRestoreReason reason,
+  }) {
+    final key = _keyOf(pluginId, instanceId);
+    final instance = _instances[key];
+    if (instance == null) return;
+    final controller = instance.controller;
+    if (controller != null) _eventTimedOutControllers.remove(controller);
+    instance.controller = null;
+    instance.released = true;
+    instance.ready = false;
+    instance.suspended = false;
+    instance.suspendedAt = null;
+    instance.busyCount = 0;
+    instance.nextBootReason = reason;
+    instance.clearQueue();
+    instance.graceTimer?.cancel();
+    instance.graceTimer = null;
+    _runningForegroundKeys = {..._runningForegroundKeys}..remove(key);
+    PluginPageLauncher.instance.markPageClosed(
+      pluginId,
+      instanceId: instanceId,
+      viewId: instance.viewId,
+    );
+    PluginSearchFieldSessionService.instance.onInstanceUnregistered(
+      pluginId,
+      instanceId,
+      pluginHasEngine: _hasAnyController(pluginId),
+    );
+  }
+
+  /// ה-`restore` של `plugin.boot`, או null בפתיחה טרייה.
+  /// [firstBoot] — ה-boot הראשון של הדף הזה; מצב שמור בלעדיו הוא טעינה חוזרת.
+  Map<String, dynamic>? takeBootRestore(
+    String pluginId, {
+    PluginInstanceId instanceId = PluginInstanceIds.defaultForeground,
+    required bool firstBoot,
+  }) {
+    final key = _keyOf(pluginId, instanceId);
+    final instance = _instances[key];
+    final store = PluginRestoreStateStore.instance;
+    // טעינה חוזרת של דף קיים מדווחת תמיד; דף חדש — רק אם נשמר לו מצב.
+    final reason =
+        instance?.nextBootReason ??
+        (!firstBoot
+            ? PluginRestoreReason.reloaded
+            : store.has(key)
+            ? PluginRestoreReason.session
+            : null);
+    instance?.nextBootReason = null;
+    if (reason == null || instance?.isBackground == true) return null;
+    return {'reason': reason.name, 'state': store.stateOf(key)};
+  }
+
+  /// מעדכן אילו מופעי תוספים מוצגים כעת בטאב העיון הפעיל (ריק = אף אחד)
+  /// של החלון [viewId] (`null` — החלון הראשי).
+  void setVisiblePluginInstances(Set<PluginInstanceKey> keys, {int? viewId}) {
+    final window = _window(viewId);
+    if (setEquals(window.visibleKeys, keys)) return;
+    window.visibleKeys = Set.unmodifiable(keys);
     unawaited(_serializeLifecycle(_reconcileForeground));
   }
 
   /// מעדכן אם מסך העיון גלוי. ביציאה משהים את המופעים המוצגים, בחזרה מחדשים.
-  void setReaderScreenVisible(bool visible) {
-    if (_readerScreenVisible == visible) return;
-    _readerScreenVisible = visible;
+  void setReaderScreenVisible(bool visible, {int? viewId}) {
+    final window = _window(viewId);
+    if (window.readerScreenVisible == visible) return;
+    window.readerScreenVisible = visible;
     unawaited(_serializeLifecycle(_reconcileForeground));
   }
 
   /// מעדכן אם החלון עצמו מוצג. חלון שנסגר מוסתר ולא נהרס, ובלי זה
   /// התוספים שבו היו ממשיכים לרוץ ברקע.
-  void setWindowShown(bool shown) {
-    if (_windowShown == shown) return;
-    _windowShown = shown;
+  void setWindowShown(bool shown, {int? viewId}) {
+    final window = _window(viewId);
+    if (window.shown == shown) return;
+    window.shown = shown;
     unawaited(_serializeLifecycle(_reconcileForeground));
   }
 
-  Set<PluginInstanceKey> get _desiredForegroundKeys =>
-      _readerScreenVisible && _windowShown ? _visibleInstanceKeys : const {};
+  /// חלון ממוזער אינו מוצג: התוספים שבו מושהים עד השחזור.
+  void setWindowMinimized(bool minimized, {int? viewId}) {
+    final window = _window(viewId);
+    if (window.minimized == minimized) return;
+    window.minimized = minimized;
+    unawaited(_serializeLifecycle(_reconcileForeground));
+  }
+
+  /// מובייל: האפליקציה ברקע (hidden/paused) כמוה כחלון שאינו מוצג.
+  void setAppVisible(bool visible) {
+    if (_appVisible == visible) return;
+    _appVisible = visible;
+    unawaited(_serializeLifecycle(_reconcileForeground));
+  }
+
+  /// חלון Dart נסגר: המופעים שהציג כבר אינם מוצגים בו. החלון הראשי נשאר תמיד.
+  void forgetWindow(int viewId) {
+    PluginPageLauncher.instance.forgetWindow(viewId);
+    if (viewId == mainViewId || _windows.remove(viewId) == null) return;
+    unawaited(_serializeLifecycle(_reconcileForeground));
+  }
+
+  Set<PluginInstanceKey> get _desiredForegroundKeys {
+    if (!_appVisible) return const {};
+    if (_windows.length == 1) {
+      final window = _windows.values.single;
+      return window.isForeground ? window.visibleKeys : const {};
+    }
+    return {
+      for (final window in _windows.values)
+        if (window.isForeground) ...window.visibleKeys,
+    };
+  }
 
   /// מאפס את מצב הנראות בלבד (בלי לגעת ב-controllers). הדיספצ'ר הוא singleton,
   /// ובלי איפוס מפורש מצב מטסט אחד דולף לבא אחריו.
   @visibleForTesting
   void resetVisibilityForTesting() {
-    _visibleInstanceKeys = const {};
+    _resetWindows();
     _runningForegroundKeys = const {};
     for (final instance in _instances.values) {
       instance.suspended = false;
+      instance.suspendedAt = null;
       instance.pendingKeyboardFocus = false;
+      instance.pendingFocusTrustsPage = true;
       instance.pendingRedeliveries.clear();
+      instance.clearQueue();
       instance.graceTimer?.cancel();
       instance.graceTimer = null;
     }
-    _readerScreenVisible = true;
-    _windowShown = true;
+    _appVisible = true;
     _lifecycleLock = Future.value();
+    _cancelTimers();
   }
+
+  void _cancelTimers() {
+    _discardDebounce?.cancel();
+    _discardDebounce = null;
+    _discardAgeTimer?.cancel();
+    _discardAgeTimer = null;
+    _selectionTimer?.cancel();
+    _selectionTimer = null;
+    _pendingSelection = null;
+  }
+
+  void _resetWindows() => _windows
+    ..clear()
+    ..[mainViewId] = _WindowVisibility();
 
   /// נקרא ע"י [PluginTabPage] כשה-WebView שלו סיים להיטען (אחרי boot).
   /// אם המופע נטען בזמן שאינו מוצג (למשל המשתמש עבר לטאב אחר לפני שהטעינה
@@ -403,11 +762,14 @@ class PluginRuntimeDispatcher {
     final key = _keyOf(pluginId, instanceId);
     return _serializeLifecycle(() async {
       // מסירה חוזרת: אירוע שהוזרק לטאב מושעה שההחייאה שלו גררה טעינת-דף
-      // מחדש (ה-WebView מושמד בהשעיה) נפל לדף בלי מאזינים. עכשיו, כשה-boot
-      // הסתיים, מזריקים אותו שוב — הבקשות אידמפוטנטיות (אותו requestId).
+      // מחדש, או לטאב שפונה, נפל לדף בלי מאזינים. עכשיו, כשה-boot הסתיים,
+      // מזריקים אותו שוב — הבקשות אידמפוטנטיות (אותו requestId).
       final instance = _instances[key];
       final controller = instance?.controller;
-      final now = DateTime.now();
+      instance?.ready = true;
+      // ה-boot נתן theme עדכני, ואת השאר התוסף שואל בעצמו.
+      instance?.clearQueue();
+      final now = clock();
       final fresh = <({String topic, String jsonPayload, DateTime at})>[];
       if (instance != null) {
         fresh.addAll(
@@ -445,6 +807,7 @@ class PluginRuntimeDispatcher {
         // המופע נטען כשהוא כבר מוצג — מסירים סימון השהיה שנשאר מטעינה קודמת.
         _runningForegroundKeys = {..._runningForegroundKeys, key};
         instance?.suspended = false;
+        instance?.suspendedAt = null;
         await _flushPendingKeyboardFocus(key);
       }
     });
@@ -472,53 +835,110 @@ class PluginRuntimeDispatcher {
     // חידוש לפני השהיה: המופע החדש כבר על המסך, וכל עוד הוא מוקפא הוא נראה
     // שחור. ההשהיה של המופע שעזבו יכולה לחכות — היא לא נראית למשתמש.
     for (final key in desired) {
-      if (!previous.contains(key)) await _resumeForeground(key);
+      if (previous.contains(key)) continue;
+      final instance = _instances[key];
+      if (instance != null && instance.released) {
+        instance.host?.restoreWebView();
+        continue;
+      }
+      await _resumeForeground(key);
     }
     for (final key in previous) {
       if (!desired.contains(key)) await _suspendForeground(key);
     }
   }
 
-  bool get _supportsNativePauseResume =>
-      defaultTargetPlatform == TargetPlatform.android ||
-      defaultTargetPlatform == TargetPlatform.windows;
+  /// לפי טבלת התמיכה של הפורק (`isMethodSupported` של pause, ‏setVisible
+  /// ו-setAllMediaPlaybackSuspended); אינה נשאלת בזמן ריצה כי היא דורשת
+  /// מימוש פלטפורמה רשום.
+  @visibleForTesting
+  static PluginSuspendMode get suspendMode => switch (defaultTargetPlatform) {
+    TargetPlatform.windows ||
+    TargetPlatform.android => PluginSuspendMode.nativePause,
+    TargetPlatform.linux => PluginSuspendMode.visibility,
+    _ => PluginSuspendMode.eventOnly,
+  };
+
+  static const _pauseMediaScript =
+      "document.querySelectorAll('audio,video')"
+      '.forEach(function (m) { m.pause(); });';
+
+  /// ב-Windows ההקפאה עוצרת מדיה; ב-Apple וב-Linux עוצרים אותה במפורש.
+  static bool get _suspendsMediaExplicitly => switch (defaultTargetPlatform) {
+    TargetPlatform.iOS || TargetPlatform.macOS || TargetPlatform.linux => true,
+    _ => false,
+  };
 
   Future<void> _suspendForeground(PluginInstanceKey key) async {
     final instance = _instances[key];
     final controller = instance?.controller;
     if (instance == null || controller == null) return;
-    // הסימון לפני ההשהיה: מרגע זה כל אירוע חייב ללכת למופע אחר.
+    // הסימון לפני ההשהיה: מרגע זה כל אירוע חייב ללכת למופע אחר או לתור.
     instance.suspended = true;
+    instance.suspendedAt = clock();
     // המשתמש עזב את הטאב — בקשת פוקוס שנזכרה תחטוף את המקלדת מהטאב החדש.
     instance.pendingKeyboardFocus = false;
+    instance.pendingFocusTrustsPage = true;
     // מודיעים ל-JS לפני ההקפאה כדי שיעצור timers בעצמו — זו ההגנה היחידה
     // בפלטפורמות שבהן pause נייטיב אינו נתמך (macOS/iOS/Linux).
     await _dispatchLifecycleEvent(controller, key.pluginId, 'plugin.suspended');
-    if (_supportsNativePauseResume) {
-      await _setMemoryTarget(controller, key, MemoryUsageTargetLevel.LOW);
-      try {
-        await controller.pause();
-      } catch (e) {
-        debugPrint(
-          'PluginRuntimeDispatcher: pause failed for ${key.pluginId}: $e',
-        );
+    await _setNativeSuspended(controller, key, suspended: true);
+    _scheduleDiscardCheck();
+  }
+
+  Future<void> _setNativeSuspended(
+    InAppWebViewController controller,
+    PluginInstanceKey key, {
+    required bool suspended,
+  }) async {
+    try {
+      switch (suspendMode) {
+        case PluginSuspendMode.nativePause:
+          if (suspended) {
+            // LOW לפני ההקפאה: renderer שכבר הוקפא אינו מקצץ את ה-working set.
+            await _setWindowsMemoryTarget(
+              controller,
+              MemoryUsageTargetLevel.LOW,
+            );
+            await controller.pause();
+          } else {
+            await controller.resume();
+            await _setWindowsMemoryTarget(
+              controller,
+              MemoryUsageTargetLevel.NORMAL,
+            );
+          }
+        case PluginSuspendMode.visibility:
+          await controller.setVisible(visible: !suspended);
+        case PluginSuspendMode.eventOnly:
+          break;
       }
+      if (_suspendsMediaExplicitly) {
+        await controller.setAllMediaPlaybackSuspended(suspended: suspended);
+      } else if (suspended && defaultTargetPlatform == TargetPlatform.android) {
+        // onPause אינו עוצר מדיה; כמו ב-Windows, עוזבים טאב — המדיה נעצרת.
+        await controller
+            .evaluateJavascript(source: _pauseMediaScript)
+            .timeout(const Duration(seconds: 3));
+      }
+    } catch (e) {
+      debugPrint(
+        'PluginRuntimeDispatcher: ${suspended ? 'pause' : 'resume'} failed '
+        'for ${key.pluginId}: $e',
+      );
     }
   }
 
-  /// WebView2 בלבד: מופע מושהה מתבקש לפנות זיכרון, ובחידוש חוזר לרגיל.
-  Future<void> _setMemoryTarget(
+  /// כשל ביעד הזיכרון לא יעצור את ה-pause/resume שסביבו.
+  static Future<void> _setWindowsMemoryTarget(
     InAppWebViewController controller,
-    PluginInstanceKey key,
     MemoryUsageTargetLevel level,
   ) async {
     if (defaultTargetPlatform != TargetPlatform.windows) return;
     try {
       await controller.setMemoryUsageTargetLevel(level);
     } catch (e) {
-      debugPrint(
-        'PluginRuntimeDispatcher: memory target failed for ${key.pluginId}: $e',
-      );
+      debugPrint('PluginRuntimeDispatcher: memory target failed: $e');
     }
   }
 
@@ -526,46 +946,76 @@ class PluginRuntimeDispatcher {
     final instance = _instances[key];
     final controller = instance?.controller;
     if (instance == null || controller == null) return;
-    if (_supportsNativePauseResume) {
-      try {
-        await controller.resume();
-      } catch (e) {
-        debugPrint(
-          'PluginRuntimeDispatcher: resume failed for ${key.pluginId}: $e',
-        );
-      }
-      await _setMemoryTarget(controller, key, MemoryUsageTargetLevel.NORMAL);
-    }
+    await _setNativeSuspended(controller, key, suspended: false);
     instance.suspended = false;
+    instance.suspendedAt = null;
     _eventTimedOutControllers.remove(controller);
     await _dispatchLifecycleEvent(controller, key.pluginId, 'plugin.resumed');
-    await _resyncThemeOnResume(controller, key.pluginId);
+    await _flushQueued(key, controller);
     await _flushPendingKeyboardFocus(key);
   }
 
-  /// שולח מחדש את ה-theme העדכני לתוסף שזה עתה התעורר — בזמן שהיה הוא לא
-  /// קיבל את theme.changed (ה-WebView היה מוקפא), והיה נשאר בצבעים ישנים.
-  /// מכבד enabled+permission כמו dispatchEvent, כדי שתוסף שהרשאתו נשללה
-  /// בזמן ההשהיה לא יקבל את האירוע בהתעוררות.
-  Future<void> _resyncThemeOnResume(
+  /// מוסר ב-eval אחד את מה שהצטבר בזמן ההשהיה. ההרשאה נבדקת שוב, כדי
+  /// שהרשאה שנשללה בזמן ההשהיה תכובד.
+  Future<void> _flushQueued(
+    PluginInstanceKey key,
     InAppWebViewController controller,
-    String pluginId,
   ) async {
-    final payload = _lastThemePayload;
-    if (payload == null) return;
-    if (!await _canReceiveEvent(pluginId, 'theme.changed')) return;
+    final instance = _instances[key];
+    if (instance == null || instance.queued.isEmpty) return;
+    final events = instance.queued.values.toList(growable: false);
+    instance.clearQueue();
+    final allowed = <_QueuedEvent>[];
+    for (final event in events) {
+      if (event.targeted || await _canReceiveEvent(key.pluginId, event.topic)) {
+        allowed.add(event);
+      }
+    }
+    if (allowed.isEmpty) return;
+    final batch = allowed
+        .map((e) => '[${jsonEncode(e.topic)},${e.json}]')
+        .join(',');
     try {
       // timeout: eval על WebView תקוע עלול לא להשלים לעולם, וכל שרשרת
       // ה-lifecycle (שרצה תחת מנעול) הייתה נתקעת איתו.
       await controller
           .evaluateJavascript(
             source:
-                "window.dispatchEvent(new CustomEvent('theme.changed', { detail: ${jsonEncode(payload)} }));",
+                '(function(q){for(var i=0;i<q.length;i++){'
+                'window.dispatchEvent(new CustomEvent(q[i][0],'
+                '{detail:q[i][1]}));}})([$batch]);',
           )
           .timeout(const Duration(seconds: 3));
     } catch (e) {
-      debugPrint('Failed to resync theme to plugin $pluginId: $e');
+      debugPrint('Failed to flush queued events to ${key.pluginId}: $e');
     }
+  }
+
+  void _enqueue(
+    _PluginInstance instance,
+    String? queueKey,
+    String topic,
+    String json, {
+    bool targeted = false,
+  }) {
+    final key = queueKey ?? '#${_oneShotSequence++}';
+    if (queueKey == null) {
+      if (instance.queuedOneShots >= _maxQueuedOneShots) {
+        final oldest = instance.queued.keys.firstWhere(
+          (k) => k.startsWith('#'),
+        );
+        instance.queued.remove(oldest);
+        instance.queuedOneShots--;
+        debugPrint(
+          'PluginRuntimeDispatcher: queue full for ${instance.pluginId}, '
+          'dropped oldest event',
+        );
+      }
+      instance.queuedOneShots++;
+    } else {
+      instance.queued.remove(key);
+    }
+    instance.queued[key] = _QueuedEvent(topic, json, targeted: targeted);
   }
 
   Future<void> _dispatchLifecycleEvent(
@@ -574,8 +1024,8 @@ class PluginRuntimeDispatcher {
     String topic,
   ) async {
     try {
-      // timeout: ראו _resyncThemeOnResume — לא נותנים ל-WebView תקוע להקפיא
-      // את מנעול ה-lifecycle לצמיתות.
+      // timeout: ראו _flushQueued — לא נותנים ל-WebView תקוע להקפיא את מנעול
+      // ה-lifecycle לצמיתות.
       await controller
           .evaluateJavascript(
             source:
@@ -585,6 +1035,105 @@ class PluginRuntimeDispatcher {
     } catch (e) {
       debugPrint('Failed to dispatch $topic to plugin $pluginId: $e');
     }
+  }
+
+  // ── פינוי מופעים מושהים ─────────────────────────────────────────────────
+
+  PluginDiscardLimits get _discardLimits =>
+      discardLimitsOverride ??
+      PluginDiscardLimits.forPlatform(defaultTargetPlatform);
+
+  void _scheduleDiscardCheck() {
+    _discardDebounce?.cancel();
+    _discardDebounce = Timer(const Duration(seconds: 5), () {
+      _discardDebounce = null;
+      unawaited(checkDiscard());
+    });
+    _discardAgeTimer ??= Timer.periodic(const Duration(minutes: 1), (_) {
+      unawaited(checkDiscard());
+    });
+  }
+
+  /// מפנה מופעים מושהים לפי [PluginDiscardLimits]. [memoryPressure] — כל
+  /// מי שמותר לפנות.
+  @visibleForTesting
+  Future<void> checkDiscard({bool memoryPressure = false}) =>
+      _serializeLifecycle(() async {
+        if (_shutdownMode != _PluginRuntimeShutdownMode.idle) return;
+        final candidates = <PluginDiscardCandidate>[
+          for (final instance in _instances.values)
+            if (!instance.isBackground &&
+                instance.controller != null &&
+                instance.suspended &&
+                instance.suspendedAt != null &&
+                !_desiredForegroundKeys.contains(
+                  _keyOf(instance.pluginId, instance.instanceId),
+                ))
+              PluginDiscardCandidate(
+                key: _keyOf(instance.pluginId, instance.instanceId),
+                suspendedAt: instance.suspendedAt!,
+                exempt: _isDiscardExempt(instance),
+              ),
+        ];
+        if (candidates.isEmpty) {
+          _discardAgeTimer?.cancel();
+          _discardAgeTimer = null;
+          return;
+        }
+        final victims = pickDiscardVictims(
+          candidates,
+          now: clock(),
+          limits: _discardLimits,
+          memoryPressure: memoryPressure,
+        );
+        for (final key in victims) {
+          final instance = _instances[key];
+          if (instance == null || _isDiscardExempt(instance)) continue;
+          final host = instance.host!;
+          debugPrint('PluginRuntimeDispatcher: discarding ${key.pluginId}');
+          markInstanceReleased(
+            key.pluginId,
+            instanceId: key.instanceId,
+            reason: PluginRestoreReason.discarded,
+          );
+          host.releaseWebView();
+        }
+      });
+
+  bool _isDiscardExempt(_PluginInstance instance) {
+    final key = _keyOf(instance.pluginId, instance.instanceId);
+    final pluginId = instance.pluginId;
+    final host = instance.host;
+    if (host == null || !host.canDiscard || !instance.ready) return true;
+    // תוסף שלא שמר מצב אינו יודע לשחזר את הדף אחרי פינוי.
+    if (!PluginRestoreStateStore.instance.has(key)) return true;
+    if (instance.busyCount > 0 ||
+        instance.graceTimer != null ||
+        instance.pendingRedeliveries.isNotEmpty ||
+        instance.queuedOneShots > 0) {
+      return true;
+    }
+    if (PluginUnsavedChangesRegistry.instance.hasUnsavedChanges(key) ||
+        PluginCorrectionSessionService.instance.hasSessionsFor(pluginId) ||
+        PluginPageLauncher.instance.hasPendingFor(pluginId) ||
+        PluginSearchFieldSessionService.instance.hasSessionFor(pluginId)) {
+      return true;
+    }
+    // רישומים של המופע נמחקים איתו, ולחיצה עליהם הייתה פותחת את הדף.
+    if (ContextMenuRegistry.instance.hasInstance(key) ||
+        PluginToolbarRegistry.instance.hasInstance(key) ||
+        PluginHighlightRegistry.instance.hasInstance(key) ||
+        PluginSearchDialogRegistry.instance.hasInstance(key)) {
+      return true;
+    }
+    final isLastEngine = !(_instancesByPlugin[pluginId] ?? const {}).any(
+      (other) => other != key && _instances[other]?.controller != null,
+    );
+    return isLastEngine &&
+        (PluginShortcutRegistry.instance.hasPlugin(pluginId) ||
+            PluginInBookSearchService.instance.isProviderPlugin(pluginId) ||
+            PluginExternalSearchService.instance.isProviderPlugin(pluginId) ||
+            PluginLibraryBooksRegistry.instance.hasProviderFor(pluginId));
   }
 
   /// מנקה את ה-cache של תוסף ספציפי - יש לקרוא כשמשתמש משנה enabled/permissions
@@ -617,12 +1166,11 @@ class PluginRuntimeDispatcher {
     _instancesByPlugin.clear();
     _enabledCache.clear();
     _permissionCache.clear();
-    _visibleInstanceKeys = const {};
+    _resetWindows();
     _runningForegroundKeys = const {};
-    _readerScreenVisible = true;
-    _windowShown = true;
-    _lastThemePayload = null;
+    _appVisible = true;
     _lifecycleLock = Future.value();
+    _cancelTimers();
 
     for (final pluginId in pluginIds) {
       ContextMenuRegistry.instance.removeAll(pluginId);
@@ -727,32 +1275,76 @@ class PluginRuntimeDispatcher {
     return permissions[permKey] == true;
   }
 
-  Future<void> dispatchEvent(String topic, Map<String, dynamic> payload) async {
+  /// משדר אירוע לכל התוספים שנרשמו לו (הרשאת events.subscribe).
+  Future<void> dispatchEvent(String topic, Map<String, dynamic> payload) {
+    if (topic == _selectionTopic) return _throttleSelection(payload);
+    return _dispatchBroadcast(topic, payload);
+  }
+
+  /// אירוע מצב לתוסף אחד, עם בדיקת subscribe ותור למופעים מושהים.
+  Future<void> dispatchStateEventToPlugin(
+    String pluginId,
+    String topic,
+    Map<String, dynamic> payload,
+  ) => _dispatchBroadcast(topic, payload, onlyPluginId: pluginId);
+
+  Future<void> _throttleSelection(Map<String, dynamic> payload) {
+    // בלי מופע אין למי למסור, ו-timer היה נשאר תלוי אחרי כל בחירה.
+    if (_instancesByPlugin.isEmpty) return Future.value();
+    if (_selectionTimer != null) {
+      _pendingSelection = payload;
+      return Future.value();
+    }
+    _selectionTimer = Timer(selectionThrottle, _flushSelection);
+    return _dispatchBroadcast(_selectionTopic, payload);
+  }
+
+  void _flushSelection() {
+    _selectionTimer = null;
+    final pending = _pendingSelection;
+    _pendingSelection = null;
+    if (pending == null) return;
+    _selectionTimer = Timer(selectionThrottle, _flushSelection);
+    unawaited(_dispatchBroadcast(_selectionTopic, pending));
+  }
+
+  Future<void> _dispatchBroadcast(
+    String topic,
+    Map<String, dynamic> payload, {
+    String? onlyPluginId,
+  }) async {
     await PluginSafeMode.ready;
     if (PluginSafeMode.isActive) return;
     if (_shutdownMode != _PluginRuntimeShutdownMode.idle) return;
-    if (topic == 'theme.changed') _lastThemePayload = payload;
     // הנקודה היחידה שדרכה עוברות כל הודעות שינוי ההגדרות — תנאי `when`
     // מוערכים מחדש כאן, בלי תלות באתר ה-UI שגרם לשינוי.
     if (topic == 'settings.changed') {
       PluginConditionEvaluator.instance.notifySettingsChanged();
     }
-    final jsonPayload = jsonEncode(payload);
+    // מקודד רק אם יש יעד שעבר את בדיקת ההרשאה, ולכל היותר פעם אחת.
+    String? encoded;
+    String json() => encoded ??= jsonEncode(payload);
     debugPrint('PluginRuntimeDispatcher: Dispatching $topic');
 
     // מסירה מקבילית: WebView תקוע של תוסף אחד לא יחסום את המסירה לשאר.
     // אירועי עבודה שייכים למופע הרקע (אינו מושהה ביציאה ממסך העיון); theme
     // הוא אירוע UI ולכן מעדיפים עבורו את הקדמיים.
     final preferBackground = _backgroundEventTopics.contains(topic);
+    final queueKey = queueKeyFor(topic, payload);
+    final pluginIds = onlyPluginId != null
+        ? [if (_instancesByPlugin.containsKey(onlyPluginId)) onlyPluginId]
+        : _instancesByPlugin.keys.toList(growable: false);
     await Future.wait([
-      for (final pluginId in _instancesByPlugin.keys.toList(growable: false))
+      for (final pluginId in pluginIds)
         _broadcastEventToPlugin(
           pluginId,
           topic,
-          jsonPayload,
+          json,
           preferBackground: preferBackground,
+          queueKey: queueKey,
         ),
     ]);
+    if (onlyPluginId != null) return;
 
     // הערה עצלה: תוסף עם contributes.startup שהצהיר על הנושא ואין לו מופע
     // שמסוגל לקבל אותו — מקבל מנוע רק עכשיו, כשהאירוע באמת קרה.
@@ -786,32 +1378,41 @@ class PluginRuntimeDispatcher {
   Future<void> _broadcastEventToPlugin(
     String pluginId,
     String topic,
-    String jsonPayload, {
+    String Function() json, {
     required bool preferBackground,
+    required String? queueKey,
   }) async {
     try {
       // בחירה לפני ה-await, סינון אחריו: כך מופע שנרשם בינתיים לא גונב את
       // האירוע (הוא עדיין דף ריק), ומופע שבוטל רישומו לא מקבל אותו.
-      final targets = _selectEventTargets(
+      final selection = _selectEventTargets(
         pluginId,
         preferBackground: preferBackground,
+        isState: queueKey != null,
       );
-      if (targets.isEmpty) return;
+      if (selection.now.isEmpty && selection.queue.isEmpty) return;
       if (!await _canReceiveEvent(pluginId, topic)) return;
-      final targetControllers = [
-        for (final target in targets)
-          if (ownsController(
-            pluginId,
-            target.controller,
-            instanceId: target.instanceId,
-          ))
-            target.controller,
-      ];
+      final targetControllers = <InAppWebViewController>[];
+      for (final target in [...selection.now, ...selection.queue]) {
+        if (!ownsController(
+          pluginId,
+          target.controller,
+          instanceId: target.instanceId,
+        )) {
+          continue;
+        }
+        final instance = _instances[_keyOf(pluginId, target.instanceId)]!;
+        if (instance.suspended && !instance.isBackground) {
+          _enqueue(instance, queueKey, topic, json());
+        } else {
+          targetControllers.add(target.controller);
+        }
+      }
       if (targetControllers.isEmpty) return;
       _notifyBackgroundActivity(pluginId, targetControllers);
       await Future.wait([
         for (final controller in targetControllers)
-          _evalEvent(controller, pluginId, topic, jsonPayload),
+          _evalEvent(controller, pluginId, topic, json()),
       ]);
     } catch (e) {
       debugPrint('Failed to dispatch $topic to plugin $pluginId: $e');
@@ -854,6 +1455,8 @@ class PluginRuntimeDispatcher {
     bool preferBackground = false,
     bool resumeForegroundIfNeeded = false,
     PluginInstanceId? instanceId,
+    int? viewId,
+    AppWindowKeys? windowKeys,
   }) async {
     await PluginSafeMode.ready;
     if (PluginSafeMode.isActive) return;
@@ -871,7 +1474,10 @@ class PluginRuntimeDispatcher {
       debugPrint('PluginRuntimeDispatcher: $topic → queued (boot pending)');
       return;
     }
-    if (!_hasAnyController(pluginId)) {
+    if (!_hasAnyController(pluginId) ||
+        (viewId != null &&
+            _backgroundControllerOf(pluginId) == null &&
+            _primaryForegroundKey(pluginId, viewId: viewId) == null)) {
       // תנאי `when` שלא מתקיים = התוסף לא ביקש את האירוע; לא מעירים מנוע
       // וגם לא פותחים את דף התוסף.
       if (PluginLazyActivationService.instance.isActivationBlocked(
@@ -896,6 +1502,8 @@ class PluginRuntimeDispatcher {
           pluginId,
           topic: topic,
           payload: payload,
+          viewId: viewId,
+          windowKeys: windowKeys,
         );
       } else {
         debugPrint('PluginRuntimeDispatcher: $topic → dropped (no engine)');
@@ -909,9 +1517,8 @@ class PluginRuntimeDispatcher {
           _enabledCache[pluginId] ?? await _repository.getIsEnabled(pluginId);
       _enabledCache[pluginId] = isEnabled;
       if (!isEnabled) return;
-      final jsonPayload = jsonEncode(payload);
       final background = _backgroundControllerOf(pluginId);
-      final primaryKey = _primaryForegroundKey(pluginId);
+      final primaryKey = _primaryForegroundKey(pluginId, viewId: viewId);
       final primary = primaryKey == null ? null : _instances[primaryKey];
       final primarySuspended = primary?.suspended ?? false;
       final shouldResumeForeground =
@@ -920,7 +1527,11 @@ class PluginRuntimeDispatcher {
               (preferBackground && background == null));
       if (shouldResumeForeground) {
         debugPrint('PluginRuntimeDispatcher: $topic → resume suspended tab');
-        await _dispatchToSuspendedForeground(primaryKey!, topic, jsonPayload);
+        await _dispatchToSuspendedForeground(
+          primaryKey!,
+          topic,
+          jsonEncode(payload),
+        );
         return;
       }
       // אירועים ממוקדים (למשל לחיצה בתפריט הקשר) חייבים להגיע למנוע הפעיל.
@@ -938,7 +1549,7 @@ class PluginRuntimeDispatcher {
       try {
         await target.evaluateJavascript(
           source:
-              "window.dispatchEvent(new CustomEvent('$topic', { detail: $jsonPayload }));",
+              "window.dispatchEvent(new CustomEvent('$topic', { detail: ${jsonEncode(payload)} }));",
         );
       } catch (e) {
         debugPrint('Failed to dispatch $topic to plugin $pluginId: $e');
@@ -959,6 +1570,14 @@ class PluginRuntimeDispatcher {
     final key = _keyOf(pluginId, instanceId);
     final instance = _instances[key];
     final controller = instance?.controller;
+    final queueKey = queueKeyFor(topic, payload);
+    if (instance != null && instance.released) {
+      // אירוע מצב מתיישן — ה-boot של הדף המשוחזר מקבל את המצב העדכני.
+      if (queueKey == null) {
+        _addRedelivery(instance, topic, jsonEncode(payload));
+      }
+      return;
+    }
     if (instance == null || controller == null) {
       debugPrint(
         'PluginRuntimeDispatcher: $topic → dropped '
@@ -973,6 +1592,11 @@ class PluginRuntimeDispatcher {
       if (!isEnabled) return;
       final jsonPayload = jsonEncode(payload);
       if (instance.suspended) {
+        // מצב (ניווט בכרטיסיית ספר מוסתרת) אינו מצדיק להעיר את הטאב.
+        if (queueKey != null) {
+          _enqueue(instance, queueKey, topic, jsonPayload, targeted: true);
+          return;
+        }
         await _dispatchToSuspendedForeground(key, topic, jsonPayload);
         return;
       }
@@ -988,6 +1612,12 @@ class PluginRuntimeDispatcher {
     }
   }
 
+  void _addRedelivery(_PluginInstance instance, String topic, String json) {
+    final pending = instance.pendingRedeliveries;
+    if (pending.length >= _maxPendingRedeliveries) pending.removeAt(0);
+    pending.add((topic: topic, jsonPayload: json, at: clock()));
+  }
+
   Future<void> _dispatchToSuspendedForeground(
     PluginInstanceKey key,
     String topic,
@@ -1000,15 +1630,13 @@ class PluginRuntimeDispatcher {
       if (instance == null || controller == null) return;
       // ההזרקה שלהלן אובדת אם ההחייאה גוררת טעינת-דף מחדש — האירוע נרשם
       // למסירה חוזרת כשה-boot של הדף יסתיים (onForegroundInstanceReady).
-      final pending = instance.pendingRedeliveries;
-      if (pending.length >= _maxPendingRedeliveries) pending.removeAt(0);
-      pending.add((topic: topic, jsonPayload: jsonPayload, at: DateTime.now()));
+      _addRedelivery(instance, topic, jsonPayload);
       try {
         await _resumeForeground(key);
         // בפלטפורמות בלי pause נייטיבי הדף מעולם לא הוקפא — מצב ה"זומבי"
         // אינו קיים, ו-callAsyncJavaScript פחות בשל שם (Linux beta). מסלול
         // ה-eval הרגיל מספיק.
-        if (!_supportsNativePauseResume) {
+        if (suspendMode != PluginSuspendMode.nativePause) {
           await controller.evaluateJavascript(
             source:
                 "window.dispatchEvent(new CustomEvent('$topic', "
@@ -1053,6 +1681,8 @@ class PluginRuntimeDispatcher {
           // של השירות (retry אחרי 8 שניות) יעבור דרך המסלול המאומת הזה
           // ויירשם למסירה חוזרת — ולא ייבלע ב-eval רגיל על דף באמצע טעינה.
           instance.suspended = true;
+          instance.ready = false;
+          instance.nextBootReason = PluginRestoreReason.reloaded;
           try {
             await controller.reload();
           } catch (e) {
@@ -1119,14 +1749,18 @@ class PluginRuntimeDispatcher {
     }
   }
 
-  /// בוחר את יעדי ה-broadcast של [pluginId]: כל המופעים הקדמיים החיים
-  /// והלא-מושהים — ולא הרקע (שידור גורף לרקע היה מאפס את שעון הכיבוי העצל
-  /// שלו ומחזיק אותו חי לנצח). הרקע נבחר רק כשהנושא מועדף-רקע
-  /// ([preferBackground]) או כשאין שום מופע קדמי שמיש. `evaluateJavascript`
-  /// על WebView מוקפא נבלע בשקט, ולכן מופע מושהה הוא יעד אחרון בלבד.
-  List<_EventTarget> _selectEventTargets(
+  /// בוחר את יעדי ה-broadcast של [pluginId].
+  ///
+  /// `now`: כל המופעים הקדמיים החיים והלא-מושהים — ולא הרקע (שידור גורף
+  /// לרקע היה מאפס את שעון הכיבוי העצל שלו ומחזיק אותו חי לנצח). הרקע נבחר
+  /// רק כשהנושא מועדף-רקע ([preferBackground]) או כשאין שום מופע קדמי שמיש.
+  ///
+  /// `queue`: מופעים מושהים — תמיד לאירוע מצב ([isState]), כי כל מופע קדמי
+  /// מצייר UI; ולאירוע חד-פעמי רק כשאין יעד אחר.
+  ({List<_EventTarget> now, List<_EventTarget> queue}) _selectEventTargets(
     String pluginId, {
-    bool preferBackground = false,
+    required bool preferBackground,
+    required bool isState,
   }) {
     final keys = _instancesByPlugin[pluginId] ?? const <PluginInstanceKey>{};
     _EventTarget? background;
@@ -1136,20 +1770,31 @@ class PluginRuntimeDispatcher {
       final instance = _instances[key];
       final controller = instance?.controller;
       if (instance == null || controller == null) continue;
+      if (instance.suspended && !instance.isBackground) {
+        suspended.add(_EventTarget(key.instanceId, controller));
+        continue;
+      }
       // מופע שאירוע קודם פג לו הזמן — כל שידור אליו עולה 3 שניות, ולכן הוא
       // מודר עד לרישום/החייאה הבאים.
       if (_eventTimedOutControllers.contains(controller)) continue;
       final target = _EventTarget(key.instanceId, controller);
       if (instance.isBackground) {
         background = target;
-        continue;
+      } else {
+        active.add(target);
       }
-      (instance.suspended ? suspended : active).add(target);
     }
-    if (preferBackground && background != null) return [background];
-    if (active.isNotEmpty) return active;
-    if (background != null) return [background];
-    return suspended;
+    final now = preferBackground && background != null
+        ? [background]
+        : active.isNotEmpty
+        ? active
+        : background != null
+        ? [background]
+        : <_EventTarget>[];
+    return (
+      now: now,
+      queue: isState || now.isEmpty ? suspended : const <_EventTarget>[],
+    );
   }
 }
 
@@ -1159,4 +1804,36 @@ class _EventTarget {
   const _EventTarget(this.instanceId, this.controller);
   final PluginInstanceId instanceId;
   final InAppWebViewController controller;
+}
+
+/// מובייל: אפליקציה ברקע אינה מציגה תוספים. בכל הפלטפורמות: לחץ זיכרון
+/// מפנה מופעים מושהים.
+class _PluginLifecycleObserver with WidgetsBindingObserver {
+  _PluginLifecycleObserver(this._dispatcher);
+  final PluginRuntimeDispatcher _dispatcher;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // בדסקטופ האות לא אמין (במזעור ב-Windows הוא נבלע), ושם מטפל
+    // AppWindowListener.
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return;
+    }
+    switch (state) {
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+        _dispatcher.setAppVisible(false);
+      case AppLifecycleState.resumed:
+        _dispatcher.setAppVisible(true);
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+        break;
+    }
+  }
+
+  @override
+  void didHaveMemoryPressure() {
+    unawaited(_dispatcher.checkDiscard(memoryPressure: true));
+  }
 }

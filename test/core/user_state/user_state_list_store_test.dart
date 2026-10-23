@@ -5,7 +5,9 @@ import 'dart:ui' as ui show IsolateNameServer;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/user_state_list_store.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
+import 'package:otzaria/data/repository/user_state_list_repository.dart';
 
 const String _namespace = 'otzaria.test.userstate';
 
@@ -114,7 +116,7 @@ void main() {
     });
     addTearDown(peerPort.close);
 
-    final ownChanges = <UserStateListKey>[];
+    final ownChanges = <UserStateListChange>[];
     final sub = store.changes.listen(ownChanges.add);
     addTearDown(sub.cancel);
 
@@ -143,6 +145,61 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(ownChanges, hasLength(1));
     expect(ownChanges.single.key, 'history');
+    expect(ownChanges.single.origin, isNull);
     db.close();
+  });
+
+  group('חלונות Dart באותו isolate', () {
+    tearDown(() => MultiViewMode.debugOverride = null);
+
+    UserStateListRepository<int> repo(UserStateListStore store) =>
+        UserStateListRepository<int>(
+          boxName: 'history',
+          key: 'history',
+          fromJson: (json) => json['v'] as int,
+          toJson: (value) => {'v': value},
+          store: store,
+        );
+
+    test('כתיבה בחלון אחד מגיעה לשני, ולא לכותב עצמו', () async {
+      MultiViewMode.debugOverride = true;
+      final db = UserStateDatabase.openAt(dbPath);
+      final store = UserStateListStore(database: db);
+      final a = repo(store);
+      final b = repo(store);
+      var seenByA = 0;
+      var seenByB = 0;
+      final subA = a.remoteChanges.listen((_) => seenByA++);
+      final subB = b.remoteChanges.listen((_) => seenByB++);
+      addTearDown(subA.cancel);
+      addTearDown(subB.cancel);
+
+      await a.mutate((current) => [...current, 1]);
+      await a.overwrite([2]);
+      await a.clear();
+      // כתיבה שאינה של אף חלון (למשל שחזור גיבוי) מגיעה לכולם.
+      await store.write('history', 'history', const []);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(seenByA, 1);
+      expect(seenByB, 4);
+      db.close();
+    });
+
+    test('בלי הדגל כתיבה מקומית אינה משודרת לעצמה', () async {
+      final db = UserStateDatabase.openAt(dbPath);
+      final store = UserStateListStore(database: db);
+      final a = repo(store);
+      final b = repo(store);
+      var seen = 0;
+      final subB = b.remoteChanges.listen((_) => seen++);
+      addTearDown(subB.cancel);
+
+      await a.mutate((current) => [...current, 1]);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(seen, 0);
+      db.close();
+    });
   });
 }

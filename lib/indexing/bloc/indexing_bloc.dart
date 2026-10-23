@@ -3,11 +3,11 @@ import 'dart:async';
 import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/messages/window_messages.dart';
 import 'package:otzaria/core/messages/settings_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/indexing/bloc/indexing_event.dart';
 import 'package:otzaria/indexing/bloc/indexing_state.dart';
 import 'package:otzaria/indexing/models/indexing_run_result.dart';
@@ -40,6 +40,7 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
        _showHiddenReconciliationError =
            showHiddenReconciliationError ?? UiSnack.showError,
        super(IndexingInitial()) {
+    _isEconomy = _repository.isEconomyIndexing;
     on<IndexingWorkEvent>((event, emit) async {
       try {
         await _onIndexingWork(event, emit);
@@ -113,7 +114,11 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
     // קפצה בכל פתיחת חלון משני.
     if (_delegateIndexMutationToMainWindow(
       emit,
-      forwardOp: event is StartIndexing ? MultiWindowService.indexOpAll : null,
+      forwardOp: switch (event) {
+        StartIndexing() => MultiWindowService.indexOpAll,
+        ResetAndIndex() => MultiWindowService.indexOpResetAndIndex,
+        _ => null,
+      },
     )) {
       return;
     }
@@ -123,6 +128,18 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
     if (_isPaused) {
       _isPaused = false;
       _repository.resumeIndexing();
+    }
+
+    if (event is ResetAndIndex) {
+      final cancelCount = _cancelCount;
+      _activeWorkId = null;
+      final requiresReset = await _repository.requiresManualReindex(
+        event.library,
+      );
+      if (cancelCount != _cancelCount) return;
+      // בקשה כפולה או מחלון שמצבו לא התעדכן הייתה מוחקת אינדקס שזה עתה נבנה.
+      if (requiresReset && !await _repository.clearIndex()) return;
+      if (cancelCount != _cancelCount) return;
     }
 
     if (event is RunIndexing) {
@@ -455,7 +472,7 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
     Emitter<IndexingState> emit, {
     required String? forwardOp,
   }) {
-    if (!WindowRole.isSecondary) return false;
+    if (ProcessDuties.current.isProcessOwner) return false;
     if (forwardOp != null) {
       emit(IndexingInitial());
       unawaited(_forwardToMainWindow(forwardOp));

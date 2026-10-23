@@ -308,6 +308,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
       currentIndex: _repository.loadCurrentTabIndex(),
     );
     final tabs = restored.tabs;
+    _separateHistorySlots(tabs, existingTabs: const []);
 
     emit(
       state.copyWith(
@@ -413,16 +414,19 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
   Future<void> _onAddTab(AddTab event, Emitter<TabsState> emit) async {
     debugPrint('DEBUG: הוספת טאב חדש - ${event.tab.title}');
     final tab = await _withCompanion(event.tab);
+    _separateHistorySlots([tab]);
     final newTabs = List<OpenedTab>.from(state.tabs);
-    final newIndex = event.insertAdjacent
-        ? min(state.currentTabIndex + 1, newTabs.length)
-        : newTabs.length;
+    final newIndex =
+        event.index?.clamp(0, newTabs.length) ??
+        (event.insertAdjacent
+            ? min(state.currentTabIndex + 1, newTabs.length)
+            : newTabs.length);
     newTabs.insert(newIndex, tab);
 
-    // ברקע נשארים על הטאב הנוכחי; ההוספה היא אחריו או בסוף, ולכן האינדקס
-    // שלו אינו זז. בלי טאב פתוח אין "נוכחי" להישאר עליו.
     final keepCurrent = event.inBackground && state.hasOpenTabs;
-    final currentIndex = keepCurrent ? state.currentTabIndex : newIndex;
+    final currentIndex = keepCurrent
+        ? state.currentTabIndex + (newIndex <= state.currentTabIndex ? 1 : 0)
+        : newIndex;
     emit(
       state.copyWith(
         tabs: newTabs,
@@ -434,6 +438,26 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
       ),
     );
     _scheduleSave(newTabs, currentIndex);
+  }
+
+  /// משמר מקום קיים, ומפריד רק התנגשות בין חלוניות של אותו ספר.
+  void _separateHistorySlots(
+    Iterable<OpenedTab> incomingTabs, {
+    Iterable<OpenedTab>? existingTabs,
+  }) {
+    final used = <(String, String?)>{};
+    for (final pane in (existingTabs ?? state.tabs).expand(leafPanes)) {
+      final identity = _readingBookIdentity(pane);
+      if (identity != null) used.add((identity, pane.historySlot));
+    }
+    for (final pane in incomingTabs.expand(leafPanes)) {
+      final identity = _readingBookIdentity(pane);
+      if (identity == null) continue;
+      if (!used.add((identity, pane.historySlot))) {
+        pane.historySlot = OpenedTab.newHistorySlot();
+        used.add((identity, pane.historySlot));
+      }
+    }
   }
 
   Future<void> _onOpenOrFocusTab(
@@ -456,7 +480,9 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
     final hasSameBook = state.tabs
         .expand(leafPanes)
         .any((open) => _isSameBook(open, event.tab));
-    final targetTitle = hasSameBook
+    final targetTitle =
+        hasSameBook &&
+            (!event.matchHistorySlot || event.tab.historySlot == null)
         ? await _resolveTabLocationTitle(
             event.tab,
             explicitTitle: event.targetTitle,
@@ -465,45 +491,46 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
     final matchingIndex = await _findMatchingTopLevelTabIndex(
       event.tab,
       targetTitle,
-      // כשמבקשים לנווט למיקום (סימניה/deep link עם מיקום מפורש), ההתאמה
-      // לפי זהות הספר בלבד - הכותרת מקודדת מיקום ולכן תיכשל בכוונה כשהמיקום
-      // שונה, ואז היה נפתח טאב חדש במקום לנווט בטאב הקיים.
+      // סימניה או deep link מנווטים בספר הפתוח גם כשהכותרת המבוקשת שונה.
       ignoreLocation: event.navigateToPositionIfReused,
+      matchHistorySlot: event.matchHistorySlot,
     );
 
     if (matchingIndex != null) {
+      final matchingPane = await _matchingPaneIn(
+        state.tabs[matchingIndex],
+        event.tab,
+        targetTitle,
+        ignoreLocation: event.navigateToPositionIfReused,
+        matchHistorySlot: event.matchHistorySlot,
+      );
+      final matchingTab = matchingPane ?? state.tabs[matchingIndex];
       _propagateSearchToExistingTab(
-        existingTab: state.tabs[matchingIndex],
+        existingTab: matchingTab,
         incomingTab: event.tab,
       );
       // סימניות/היסטוריה: המשתמש בחר מיקום ספציפי בספר, ולא מספיק להעביר
       // focus לטאב הקיים — צריך לגלול אותו למיקום המבוקש.
       if (event.navigateToPositionIfReused) {
         await _propagateNavigationToExistingTab(
-          existingTab: state.tabs[matchingIndex],
+          existingTab: matchingTab,
           incomingTab: event.tab,
         );
       }
       // ההדגשה מדייקת את היעד בתוך השורה, אחרי הניווט למיקום המפורש.
       _propagatePinpointHighlightToExistingTab(
-        existingTab: state.tabs[matchingIndex],
+        existingTab: matchingTab,
         incomingTab: event.tab,
       );
-      final matchingPane = await _matchingPaneIn(
-        state.tabs[matchingIndex],
-        event.tab,
-        targetTitle,
-        ignoreLocation: event.navigateToPositionIfReused,
-      );
       _forwardToolQueryToExistingTab(
-        existingTab: matchingPane ?? state.tabs[matchingIndex],
+        existingTab: matchingTab,
         incomingTab: event.tab,
       );
       event.tab.dispose();
       final tabsToSave = state.tabs;
       final readerTarget = event.tab is TextBookTab
           ? _resolveTextBookTab(
-              state.tabs[matchingIndex],
+              matchingTab,
               event.tab as TextBookTab,
             )
           : null;
@@ -517,9 +544,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
               event.navigateToPositionIfReused &&
               readerTarget != null &&
               PluginTextReaderRegistry.instance.usesPlugin(readerTarget),
-          // `_matchingPaneIn` מחזיר null במשמעות "הטאב עצמו הוא ההתאמה",
-          // ולא "אל תיגע". שמירת הערך הקודם הותירה כאן חלונית פעילה
-          // ששייכת לטאב אחר; `clear` נופל נכון ל-`panes.first`.
+          // null מציין התאמה לטאב עצמו; clear מסיר חלונית פעילה מטאב אחר.
           activePane: matchingPane == null
               ? const ActivePaneUpdate.clear()
               : ActivePaneUpdate.set(matchingPane),
@@ -543,6 +568,10 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
       return;
     }
 
+    _separateHistorySlots(
+      [event.newTab],
+      existingTabs: state.tabs.where((tab) => !identical(tab, event.oldTab)),
+    );
     event.newTab.isPinned = event.oldTab.isPinned;
     final newTabs = List<OpenedTab>.from(state.tabs);
     newTabs[index] = event.newTab;
@@ -773,6 +802,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
     OpenedTab targetTab,
     String? normalizedTargetTitle, {
     bool ignoreLocation = false,
+    bool matchHistorySlot = false,
   }) async {
     for (var index = 0; index < state.tabs.length; index++) {
       final openTab = state.tabs[index];
@@ -781,6 +811,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
         targetTab,
         normalizedTargetTitle,
         ignoreLocation,
+        matchHistorySlot,
       )) {
         return index;
       }
@@ -793,12 +824,14 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
     OpenedTab targetTab,
     String? normalizedTargetTitle,
     bool ignoreLocation,
+    bool matchHistorySlot,
   ) async {
     if (await _singleTabMatches(
       openTab,
       targetTab,
       normalizedTargetTitle,
       ignoreLocation,
+      matchHistorySlot,
     )) {
       return true;
     }
@@ -810,6 +843,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
           targetTab,
           normalizedTargetTitle,
           ignoreLocation,
+          matchHistorySlot,
         )) {
           return true;
         }
@@ -824,6 +858,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
     OpenedTab targetTab,
     String? normalizedTargetTitle,
     bool ignoreLocation,
+    bool matchHistorySlot,
   ) async {
     if (_hasMatchingDedupeKey(openTab, targetTab)) {
       return true;
@@ -831,6 +866,12 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
 
     if (!_isSameBook(openTab, targetTab)) {
       return false;
+    }
+
+    if (matchHistorySlot) {
+      if (openTab.historySlot != targetTab.historySlot) return false;
+      // null משותף לרשומות ישנות ללא שיוך מוכח, ולכן גם הכותרת חייבת להתאים.
+      if (targetTab.historySlot != null) return true;
     }
 
     // ניווט למיקום בספר פתוח: זהות הספר מספיקה, אין צורך בהתאמת כותרת/מיקום.
@@ -853,6 +894,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
     OpenedTab targetTab,
     String? normalizedTargetTitle, {
     required bool ignoreLocation,
+    required bool matchHistorySlot,
   }) async {
     if (openTab is! CombinedTab) return null;
     for (final pane in leafPanes(openTab)) {
@@ -861,6 +903,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
         targetTab,
         normalizedTargetTitle,
         ignoreLocation,
+        matchHistorySlot,
       )) {
         return pane;
       }
@@ -890,20 +933,17 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
   }
 
   bool _isSameBook(OpenedTab openTab, OpenedTab targetTab) {
-    if (openTab is TextBookTab && targetTab is TextBookTab) {
-      final openIdentity = _textBookIdentity(openTab);
-      final targetIdentity = _textBookIdentity(targetTab);
-      if (openIdentity == null || targetIdentity == null) {
-        return false;
-      }
-      return openIdentity == targetIdentity;
-    }
+    final identity = _readingBookIdentity(openTab);
+    return identity != null && identity == _readingBookIdentity(targetTab);
+  }
 
-    if (openTab is PdfBookTab && targetTab is PdfBookTab) {
-      return openTab.book.path == targetTab.book.path;
+  String? _readingBookIdentity(OpenedTab tab) {
+    if (tab is TextBookTab) {
+      final identity = _textBookIdentity(tab);
+      return identity == null ? null : 'text:$identity';
     }
-
-    return false;
+    if (tab is PdfBookTab) return 'pdf:${tab.book.path}';
+    return null;
   }
 
   String? _textBookIdentity(TextBookTab tab) {
@@ -1269,6 +1309,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
       await _saveCurrentTabIndex(tabsToSave, existingIndex);
       return;
     }
+    _separateHistorySlots([closedEntry.tab]);
     final restoredTabs = List<OpenedTab>.from(state.tabs);
     final restoreIndex = closedEntry.originalIndex.clamp(
       0,
@@ -1330,6 +1371,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
       }
     }
 
+    _separateHistorySlots([event.tab], existingTabs: pinned);
     final newTabs = [...pinned, event.tab];
     final newIndex = newTabs.length - 1;
     emit(
@@ -1527,6 +1569,7 @@ class TabsBloc extends Bloc<TabsEvent, TabsState> {
       return;
     }
 
+    _separateHistorySlots([event.tab]);
     final combinedTab = CombinedTab(
       rightTab: current,
       leftTab: event.tab,

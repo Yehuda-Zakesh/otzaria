@@ -133,9 +133,6 @@ abstract class SettingsMessages {
   static String backupRestoreError(Object error) =>
       'שגיאה בשחזור הגיבוי: $error';
 
-  static const String backupRestoreRequiresPrimaryWindow =
-      'שחזור גיבוי אפשרי רק בחלון הראשי';
-
   static String backupsMergedToArchive(int count) =>
       '$count גיבויים מוזגו לארכיון';
 

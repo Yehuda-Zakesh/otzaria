@@ -3,6 +3,9 @@ import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/ui_snack.dart';
+import 'package:otzaria/core/windowing/app_window_id.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/plugins/services/plugin_unsaved_changes_registry.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
@@ -219,6 +222,139 @@ void main() {
       await tester.tap(find.text(unsavedChangesCloseAnyway));
       await tester.pumpAndSettle();
       expect(await third, isTrue);
+    });
+  });
+
+  group('confirmAppCloseWithUnsavedChanges עם חלונות Dart', () {
+    final key = (pluginId: 'p.editor', instanceId: 'inst-p.editor');
+    late TabsBloc mainTabs;
+    late TabsBloc viewTabs;
+    late AppWindowKeys view;
+
+    setUp(() {
+      MultiViewMode.debugOverride = true;
+      mainTabs = TabsBloc(repository: _FakeTabsRepository());
+      viewTabs = TabsBloc(repository: _FakeTabsRepository());
+      view = AppWindowKeys(id: const AppWindowId('window-view-2'));
+      AppWindowKeys.register(view);
+    });
+    tearDown(() async {
+      MultiViewMode.debugOverride = null;
+      AppWindowKeys.resetForTest();
+      PluginUnsavedChangesRegistry.instance.removeInstance(key);
+      await mainTabs.close();
+      await viewTabs.close();
+    });
+
+    Widget window(AppWindowKeys keys, TabsBloc tabs) => BlocProvider.value(
+      value: tabs,
+      child: MaterialApp(navigatorKey: keys.navigator, home: const SizedBox()),
+    );
+
+    Future<void> pumpWindows(
+      WidgetTester tester, {
+      bool dirtyMain = true,
+    }) async {
+      final primary = AppWindowKeys.registered.firstWhere(
+        (keys) => keys.id == AppWindowId.primary,
+      );
+      await tester.pumpWidget(
+        Row(
+          textDirection: TextDirection.rtl,
+          children: [
+            Expanded(child: window(primary, mainTabs)),
+            Expanded(child: window(view, viewTabs)),
+          ],
+        ),
+      );
+      if (dirtyMain) {
+        mainTabs.add(ReplaceAllTabs([pluginTab('p.editor', 'עורך')], 0));
+        await tester.pump();
+        PluginUnsavedChangesRegistry.instance.set(key, hasChanges: true);
+      }
+    }
+
+    testWidgets('סגירת הראשי כשחלון Dart פתוח היא "סגירת החלון", בחלון שנסגר', (
+      tester,
+    ) async {
+      await pumpWindows(tester);
+      final primary = AppWindowKeys.registered.firstWhere(
+        (keys) => keys.id == AppWindowId.primary,
+      );
+      AppWindowKeys.activate(view);
+      final result = confirmAppCloseWithUnsavedChanges(window: primary);
+      await tester.pumpAndSettle();
+
+      expect(find.text(unsavedChangesWindowCloseSubtitle), findsOneWidget);
+      expect(find.textContaining('עורך'), findsOneWidget);
+      await tester.tap(find.text('ביטול'));
+      await tester.pumpAndSettle();
+      expect(await result, isFalse);
+    });
+
+    for (final dirtyInMain in [false, true]) {
+      testWidgets(
+        'יציאה מלאה אוספת תוספים מכל חלון ונשארת במקור: dirtyInMain=$dirtyInMain',
+        (tester) async {
+          await pumpWindows(tester, dirtyMain: false);
+          final primary = AppWindowKeys.registered.firstWhere(
+            (keys) => keys.id == AppWindowId.primary,
+          );
+          final dirtyTabs = dirtyInMain ? mainTabs : viewTabs;
+          final emptyTabs = dirtyInMain ? viewTabs : mainTabs;
+          dirtyTabs.add(
+            ReplaceAllTabs([pluginTab('p.editor', 'טיוטה מחלון אחר')], 0),
+          );
+          emptyTabs.add(ReplaceAllTabs([], 0));
+          await tester.pump();
+          PluginUnsavedChangesRegistry.instance.set(key, hasChanges: true);
+          if (dirtyInMain) {
+            await tester.pumpWidget(
+              Row(
+                textDirection: TextDirection.rtl,
+                children: [
+                  Expanded(child: Offstage(child: window(primary, mainTabs))),
+                  Expanded(child: window(view, viewTabs)),
+                ],
+              ),
+            );
+          }
+          final origin = dirtyInMain ? view : primary;
+          AppWindowKeys.activate(origin);
+          final first = confirmAppCloseWithUnsavedChanges(allWindows: true);
+          final second = confirmAppCloseWithUnsavedChanges(allWindows: true);
+          AppWindowKeys.activate(dirtyInMain ? primary : view);
+          await tester.pumpAndSettle();
+          expect(find.text(unsavedChangesDialogTitle), findsOneWidget);
+          expect(find.textContaining('טיוטה מחלון אחר'), findsOneWidget);
+          expect(
+            find.descendant(
+              of: find.byKey(origin.navigator),
+              matching: find.text(unsavedChangesDialogTitle),
+            ),
+            findsOneWidget,
+          );
+          await tester.tap(find.text('ביטול'));
+          await tester.pumpAndSettle();
+          expect(await first, isFalse);
+          expect(await second, isFalse);
+          expect(dirtyTabs.state.tabs, hasLength(1));
+        },
+      );
+    }
+
+    testWidgets('חלון Dart האחרון שנסגר אינו סופר את עצמו', (tester) async {
+      await pumpWindows(tester);
+      viewTabs.add(ReplaceAllTabs([pluginTab('p.editor', 'עורך')], 0));
+      await tester.pump();
+      AppWindowKeys.activate(view);
+      final result = confirmAppCloseWithUnsavedChanges();
+      await tester.pumpAndSettle();
+
+      expect(find.text(unsavedChangesAppCloseSubtitle), findsOneWidget);
+      await tester.tap(find.text(unsavedChangesCloseAnyway));
+      await tester.pumpAndSettle();
+      expect(await result, isTrue);
     });
   });
 }

@@ -90,7 +90,13 @@ class PluginLazyActivationService {
     required bool scheduleStartup,
     bool keepAlive = false,
     Map<String, PluginWhenCondition> activationConditions = const {},
+    String? version,
   }) {
+    // גרסה חדשה של התוסף מקבלת הזדמנות נוספת אחרי נפילות חוזרות.
+    if (version != null && _syncedVersions[pluginId] != version) {
+      _syncedVersions[pluginId] = version;
+      _clearFailures(pluginId);
+    }
     _activationGenerations.putIfAbsent(pluginId, () => 0);
     _activatable.add(pluginId);
     _broadcastTopics[pluginId] = Set.unmodifiable(broadcastTopics);
@@ -132,6 +138,8 @@ class PluginLazyActivationService {
     _pending.remove(pluginId);
     _activating.remove(pluginId);
     _keepAlive.remove(pluginId);
+    _clearFailures(pluginId);
+    _syncedVersions.remove(pluginId);
     final wasTracked = _idleTracked.contains(pluginId);
     _stopIdleTracking(pluginId);
     _busyCounts.remove(pluginId);
@@ -267,6 +275,7 @@ class PluginLazyActivationService {
   ) {
     if (!_activatable.contains(pluginId)) return false;
     if (!_activationAllowed(pluginId, topic)) return false;
+    if (_failureBlocked.contains(pluginId)) return false;
     final list = _pending.putIfAbsent(pluginId, () => []);
     if (list.length >= _maxPendingPerPlugin) list.removeAt(0);
     list.add((topic: topic, payload: payload));
@@ -290,6 +299,7 @@ class PluginLazyActivationService {
 
   void _activate(String pluginId) {
     if (_activating.containsKey(pluginId)) return;
+    if (_failureBlocked.contains(pluginId)) return;
     final activator = backgroundActivator;
     if (activator == null) return;
     final generation = activationGeneration(pluginId);
@@ -351,6 +361,46 @@ class PluginLazyActivationService {
     _pending.remove(pluginId);
     _stopIdleTracking(pluginId);
     backgroundDeactivator?.call(pluginId);
+  }
+
+  /// התהליך של מופע הרקע נפל: נספר לתקציב הנפילות, ואז כמו כל כשל.
+  void onBackgroundProcessGone(String pluginId, {int? generation}) {
+    if (generation != null && !isActivationCurrent(pluginId, generation)) {
+      return;
+    }
+    _recordFailure(pluginId);
+    onBackgroundInstanceFailed(pluginId, generation: generation);
+  }
+
+  /// מופע רקע שתהליכו נופל שוב ושוב לא מוער עוד, עד שהתוסף מוסר, מושבת
+  /// ומופעל מחדש, או מתעדכן.
+  static const int _maxFailures = 3;
+  static const Duration _failureWindow = Duration(minutes: 10);
+  final Map<String, List<DateTime>> _failures = {};
+  final Set<String> _failureBlocked = {};
+  final Map<String, String> _syncedVersions = {};
+
+  void _clearFailures(String pluginId) {
+    _failures.remove(pluginId);
+    _failureBlocked.remove(pluginId);
+  }
+
+  @visibleForTesting
+  DateTime Function() clock = DateTime.now;
+
+  bool isFailureBlocked(String pluginId) => _failureBlocked.contains(pluginId);
+
+  void _recordFailure(String pluginId) {
+    final now = clock();
+    final list = _failures.putIfAbsent(pluginId, () => [])
+      ..removeWhere((at) => now.difference(at) >= _failureWindow)
+      ..add(now);
+    if (list.length < _maxFailures) return;
+    _failureBlocked.add(pluginId);
+    debugPrint(
+      'PluginLazyActivationService: $pluginId failed $_maxFailures times; '
+      'not activating it again this session',
+    );
   }
 
   void onBackgroundInstanceClosed(String pluginId, {int? generation}) {

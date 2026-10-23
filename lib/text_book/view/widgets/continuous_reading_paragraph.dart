@@ -161,26 +161,40 @@ class ContinuousReadingParagraph extends StatefulWidget {
       _ContinuousReadingParagraphState();
 }
 
-typedef _BuiltLine = ({List<InlineSpan> spans, int length});
+typedef _BuiltLine = ({
+  List<InlineSpan> spans,
+  int length,
+  List<TapGestureRecognizer> recognizers,
+});
 
 class _ContinuousReadingParagraphState
     extends State<ContinuousReadingParagraph> {
-  // recognizer-ים של קישורי <a> inline; נבנים מחדש בכל build.
-  final List<TapGestureRecognizer> _linkRecognizers = [];
-
-  // שורות בלי קישורים אינן תלויות ב-callbacks, ולכן נשמרות בין builds.
-  Map<(String, TextStyle), _BuiltLine> _staticLines = {};
+  // המטמון מכיל רק שורות בפסקה הנוכחית; callbacks נקראים מה-widget העדכני.
+  Map<(String, TextStyle), _BuiltLine> _lines = {};
+  Object? _linkKey;
 
   @override
   void dispose() {
-    _disposeLinkRecognizers();
+    _disposeLines(_lines.values);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    _disposeLinkRecognizers();
-    final staticLines = <(String, TextStyle), _BuiltLine>{};
+    final linkKey = (
+      widget.linkStyle,
+      widget.anchorActiveBackground,
+      widget.onTapUrl != null,
+      widget.onAnchorHover != null,
+      widget.onAnchorExit != null,
+      widget.onMiddleClickUrl != null,
+    );
+    if (linkKey != _linkKey) {
+      _disposeLines(_lines.values);
+      _lines = {};
+      _linkKey = linkKey;
+    }
+    final builtLines = <(String, TextStyle), _BuiltLine>{};
 
     final spans = <InlineSpan>[];
     final lineData = <ReaderParagraphLineData>[];
@@ -196,7 +210,7 @@ class _ContinuousReadingParagraphState
         offset += text.length;
         markerSources.add(_htmlEscape.convert(text));
       }
-      final built = _buildLine(line, staticLines);
+      final built = _buildLine(line, builtLines);
       spans.addAll(built.spans);
       lineData.add(
         ReaderParagraphLineData(
@@ -225,7 +239,11 @@ class _ContinuousReadingParagraphState
         markerSources.add(' ');
       }
     }
-    _staticLines = staticLines;
+    _disposeLines([
+      for (final entry in _lines.entries)
+        if (!builtLines.containsKey(entry.key)) entry.value,
+    ]);
+    _lines = builtLines;
 
     final textSpan = TextSpan(style: widget.baseStyle, children: spans);
     // justify אינו מותח שורה אחרונה, ולכן גם לא פסקה בת שורה חזותית אחת.
@@ -263,49 +281,56 @@ class _ContinuousReadingParagraphState
 
   _BuiltLine _buildLine(
     ContinuousReadingParagraphLine line,
-    Map<(String, TextStyle), _BuiltLine> staticLines,
+    Map<(String, TextStyle), _BuiltLine> builtLines,
   ) {
     final htmlText = line.htmlText;
     if (htmlText == null) {
       return (
         spans: [TextSpan(text: line.text, style: line.style)],
         length: line.text.length,
+        recognizers: const [],
       );
     }
-    final cacheable = !htmlText.contains('<a');
     final key = (htmlText, line.style);
-    if (cacheable) {
-      final cached = staticLines[key] ?? _staticLines[key];
-      if (cached != null) {
-        staticLines[key] = cached;
-        return cached;
-      }
-    }
+    final cached = builtLines[key] ?? _lines[key];
+    if (cached != null) return builtLines[key] = cached;
+    final recognizers = <TapGestureRecognizer>[];
     final spans = buildInlineHtmlSpans(
       htmlText,
       line.style,
-      onTapUrl: widget.onTapUrl,
-      onAnchorHover: widget.onAnchorHover,
-      onAnchorExit: widget.onAnchorExit,
+      onTapUrl: widget.onTapUrl == null
+          ? null
+          : (url) async => await widget.onTapUrl?.call(url) ?? false,
+      onAnchorHover: widget.onAnchorHover == null
+          ? null
+          : (url, position) => widget.onAnchorHover?.call(url, position),
+      onAnchorExit: widget.onAnchorExit == null
+          ? null
+          : (url) => widget.onAnchorExit?.call(url),
       linkStyle: widget.linkStyle,
       anchorActiveBackground: widget.anchorActiveBackground,
-      recognizerSink: _linkRecognizers,
-      onMiddleClickUrl: widget.onMiddleClickUrl,
+      recognizerSink: recognizers,
+      onMiddleClickUrl: widget.onMiddleClickUrl == null
+          ? null
+          : (url) => widget.onMiddleClickUrl?.call(url),
     );
     var length = 0;
     for (final span in spans) {
       length += span.toPlainText(includeSemanticsLabels: false).length;
     }
-    final built = (spans: spans, length: length);
-    if (cacheable) staticLines[key] = built;
-    return built;
+    return builtLines[key] = (
+      spans: spans,
+      length: length,
+      recognizers: recognizers,
+    );
   }
 
-  void _disposeLinkRecognizers() {
-    for (final recognizer in _linkRecognizers) {
-      recognizer.dispose();
+  static void _disposeLines(Iterable<_BuiltLine> lines) {
+    for (final line in lines) {
+      for (final recognizer in line.recognizers) {
+        recognizer.dispose();
+      }
     }
-    _linkRecognizers.clear();
   }
 }
 

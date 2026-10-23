@@ -1,7 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/messages/library_messages.dart';
+import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/update/my_update_widget.dart';
 import 'package:otzaria/update/updat_compat.dart';
@@ -120,6 +122,32 @@ void main() {
       expect(manages(operatingSystem: 'android'), isFalse);
       expect(manages(operatingSystem: 'ios'), isFalse);
       expect(manages(isWeb: true), isFalse);
+    });
+  });
+
+  group('managesUpdatesHere', () {
+    tearDown(() => ProcessDuties.debugOverride = null);
+
+    final supported = supportsManagedUpdatePlatform(
+      isWeb: false,
+      operatingSystem: Platform.operatingSystem,
+    );
+
+    test('לא-בעלים של התהליך אינו מנהל, גם כש-WindowRole אומר ראשי', () {
+      final old = WindowRole.isSecondary;
+      addTearDown(() => WindowRole.isSecondary = old);
+      WindowRole.isSecondary = false;
+      final notOwner = ProcessDuties(isProcessOwner: () => false);
+      expect(managesUpdatesHere(isDebug: false, duties: notOwner), isFalse);
+      ProcessDuties.debugOverride = notOwner;
+      expect(managesUpdatesHere(isDebug: false), isFalse);
+    });
+
+    test('בעלים מנהל בפלטפורמה נתמכת', () {
+      final owner = ProcessDuties(isProcessOwner: () => true);
+      expect(managesUpdatesHere(isDebug: false, duties: owner), supported);
+      ProcessDuties.debugOverride = owner;
+      expect(managesUpdatesHere(isDebug: false), supported);
     });
   });
 

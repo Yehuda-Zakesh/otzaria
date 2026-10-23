@@ -6,4 +6,9 @@
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <!-- שרת הקבצים של התוספים ושרת הפיתוח שלהם רצים ב-HTTP על loopback בלבד. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
 </network-security-config>

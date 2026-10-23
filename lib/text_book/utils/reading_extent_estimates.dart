@@ -5,6 +5,7 @@ import 'package:html/parser.dart' as html;
 import 'package:otzaria/text_book/utils/inline_notes_utils.dart' as notes;
 import 'package:otzaria/text_book/utils/reading_extent_worker_queue.dart';
 import 'package:otzaria/text_book/utils/reading_segments.dart';
+import 'package:otzaria/utils/text/text_manipulation.dart' show removeHtmlTags;
 import 'package:positioned_sliver_list/positioned_list.dart';
 
 /// מידות הטקסט שנמדדו פעם אחת לסגנון, בלי לפרוס פסקאות לצורך הערכה.
@@ -259,17 +260,25 @@ ItemExtentEstimator readingExtentEstimator(
   };
 }
 
-final _tags = RegExp(r'<[^>]*>');
 final _combining = RegExp(r'\p{M}', unicode: true);
 
 /// סופר את הטקסט הגלוי, בלי גוף הערות ובלי סימנים שמשולבים באות בסיס.
 @visibleForTesting
 int visibleReadingCharCount(String text) {
   var plain = notes.stripInlineNotes(text);
-  if (plain.contains('<')) plain = plain.replaceAll(_tags, '');
+  if (plain.contains('<')) plain = removeHtmlTags(plain);
   if (plain.contains('&')) plain = html.parseFragment(plain).text ?? plain;
   var count = 0;
-  for (final code in plain.runes) {
+  final length = plain.length;
+  for (var i = 0; i < length; i++) {
+    var code = plain.codeUnitAt(i);
+    if (code >= 0xD800 && code <= 0xDBFF && i + 1 < length) {
+      final low = plain.codeUnitAt(i + 1);
+      if (low >= 0xDC00 && low <= 0xDFFF) {
+        code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+        i++;
+      }
+    }
     if ((code >= 0x591 && code <= 0x5BD) ||
         code == 0x5BF ||
         code == 0x5C1 ||
@@ -279,7 +288,8 @@ int visibleReadingCharCount(String text) {
         code == 0x5C7) {
       continue;
     }
-    if (code < 0x300 || (code >= 0x5D0 && code < 0x600)) {
+    // שאר הגוש העברי (אותיות, מקף, פסק, סוף פסוק) אינו משולב — בלי RegExp.
+    if (code < 0x300 || (code >= 0x591 && code < 0x600)) {
       count++;
     } else if (!_combining.hasMatch(String.fromCharCode(code))) {
       count++;

@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_event.dart';
@@ -129,6 +132,45 @@ class _FakeRepo implements PluginRegistryRepository {
 }
 
 void main() {
+  test(
+    'שני חלונות חולקים צופה וטעינה אחת ושחרור חלון אינו מפסיק את האחר',
+    () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final directory = await Directory.systemTemp.createTemp('plugin-watch-');
+      final script = File('${directory.path}/index.js');
+      await script.writeAsString('initial');
+      final plugin = _plugin('watch.shared').copyWith(
+        sourceType: 'development',
+        devRootPath: directory.path,
+      );
+      final a = PluginSystemBloc(repository: _FakeRepo([]));
+      final b = PluginSystemBloc(repository: _FakeRepo([]));
+      final runtime = PluginRuntimeDispatcher.instance;
+      var reloaded = Completer<void>();
+      var reloads = 0;
+      runtime.registerReloadCallback(plugin.pluginId, () async {
+        reloads++;
+        if (!reloaded.isCompleted) reloaded.complete();
+      });
+      addTearDown(() async {
+        if (!a.isClosed) await a.close();
+        await b.close();
+        runtime.unregisterReloadCallback(plugin.pluginId);
+        await directory.delete(recursive: true);
+      });
+      expect(a.devWatchService, same(b.devWatchService));
+      a.devWatchService.syncWatchers([plugin]);
+      await script.writeAsString('changed');
+      await reloaded.future.timeout(const Duration(seconds: 5));
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(reloads, 1);
+      await a.close();
+      final nextReload = runtime.reloadPlugin(plugin.pluginId);
+      await nextReload;
+      expect(reloads, 2);
+    },
+  );
+
   group('LoadPlugins', () {
     test('טעינה ראשונה עוברת דרך PluginSystemLoading', () async {
       final bloc = PluginSystemBloc(repository: _FakeRepo([_plugin('a')]));

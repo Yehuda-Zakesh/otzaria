@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-/// ערכי `kind` של טבלת `line_divine_name` במסד.
+/// ערכי `kind` של מופע שם במסד (ארוזים ב-`span`, ר' [decodeDivineNameSpan]).
 abstract final class DivineNameKind {
   static const int hvyh = 1;
   static const int adnut = 2;
@@ -13,8 +13,35 @@ abstract final class DivineNameKind {
   static const int yah = 9;
 }
 
-/// מופע שם אחד בשורה: [start, end) באופסט תווים גלויים, כמו `link_anchor`.
+/// מופע שם אחד בשורה: [start, end) באופסט תווים גלויים של השורה השמורה, בלי
+/// גופי ההערות (`link_anchor` נמדד על השורה המלאה, איתם).
 typedef DivineNameSpan = ({int start, int end, int kind});
+
+/// פענוח `span` של `line_divine_name` ו-`line_note_divine_name`:
+/// אורך << 7 | מקור << 4 | סוג (DivineSpanCode ב-SeforimLibrary).
+/// מבנה פגום — FormatException; סוג/מקור לא מוכרים (10–15/5–7) עוברים כמות שהם.
+({int end, int kind}) decodeDivineNameSpan(int start, int span) {
+  final length = span >> 7;
+  if (start < 0 ||
+      span < 0 ||
+      span > _maxInt32 ||
+      length < 1 ||
+      start + length > _maxInt32 ||
+      ((span >> 4) & 0x7) == 0 ||
+      (span & 0xF) == 0) {
+    throw FormatException('divine-name span $span at $start is malformed');
+  }
+  return (end: start + length, kind: span & 0xF);
+}
+
+const int _maxInt32 = 0x7FFFFFFF;
+
+/// ערך שאינו נכנס ב-Int32 היה נעטף בשקט באחסון הדחוס.
+void _requireInt32(int value) {
+  if (value != value.toSigned(32)) {
+    throw FormatException('divine-name value $value exceeds Int32');
+  }
+}
 
 /// מופעי השמות של ספר שלם, בצורה דחוסה: שורות ממוינות, ולכל שורה טווח
 /// במערך שלשות (start, end, kind). עובר ל-isolate וחזרה בלי המרה.
@@ -65,6 +92,10 @@ class DivineNameSpansBuilder {
   final _data = <int>[];
 
   void add(int lineIndex, int start, int end, int kind) {
+    _requireInt32(lineIndex);
+    _requireInt32(start);
+    _requireInt32(end);
+    _requireInt32(kind);
     if (start < 0 || end <= start) return;
     if (_lines.isEmpty || _lines.last != lineIndex) {
       // קלט לא ממוין היה שובר את החיפוש הבינארי — מדלגים במקום לשבש.

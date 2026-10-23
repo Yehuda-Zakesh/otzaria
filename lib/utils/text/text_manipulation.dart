@@ -95,7 +95,7 @@ final RegExp _holyName = RegExp(
 /// תגי שבירה הופכים לרווח; תגי inline נמחקים נטו (`מי<b>לה` — מילה אחת).
 String stripHtmlIfNeeded(String text) {
   if (!text.contains('<')) return decodeHtmlEntities(text);
-  return decodeHtmlEntities(_removeTags(_replaceBreakingTags(text)));
+  return decodeHtmlEntities(removeHtmlTags(_replaceBreakingTags(text)));
 }
 
 /// כמו `replaceAll(_breakingTagStripper, ' ')`, אך מנסה התאמה רק במקומות `<`.
@@ -118,8 +118,8 @@ String _replaceBreakingTags(String text) {
   return out == null ? text : (out..write(text.substring(copied))).toString();
 }
 
-/// כמו `replaceAll(_htmlStripper, '')`: כל `<` נמחק עד ה-`>` הקרוב.
-String _removeTags(String text) {
+/// כמו `replaceAll(RegExp(r'<[^>]*>'), '')`: כל `<` נמחק עד ה-`>` הקרוב.
+String removeHtmlTags(String text) {
   final out = StringBuffer();
   var copied = 0;
   var i = text.indexOf('<');

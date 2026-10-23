@@ -17,6 +17,7 @@ import 'package:otzaria/search/models/external_search_status.dart';
 import 'package:otzaria/search/utils/index_freshness_warner.dart';
 import 'package:otzaria/search/utils/result_text_status.dart';
 import 'package:otzaria/search/view/search_result_source_tag.dart';
+import 'package:otzaria/search/view/external_search_results_section.dart';
 import 'package:otzaria/search/view/tantivy_search_results.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
@@ -178,6 +179,64 @@ void main() {
         ),
       );
     }
+
+    testWidgets('מציג מקטע ראשון בחיפוש חדש לפני סיום הטעינה', (
+      tester,
+    ) async {
+      await tester.pumpWidget(buildWidget());
+      await tester.pump();
+      final results = searchBloc.state.results.take(1).toList();
+      searchBloc.emitState(
+        searchBloc.state.copyWith(
+          searchQuery: 'חדש',
+          results: [],
+          isLoading: true,
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('ספר א'), findsNothing);
+
+      searchBloc.emitState(searchBloc.state.copyWith(results: results));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('ספר א'), findsOneWidget);
+      expect(searchBloc.state.isLoading, isTrue);
+    });
+
+    testWidgets('מקטעים בזמן טעינה משמרים את המדור החיצוני', (tester) async {
+      await tester.pumpWidget(buildWidget());
+      await tester.pump();
+      tab.externalSearchStatus.value = const ExternalSearchStatus(
+        sourceTitle: 'היברובוקס',
+        loading: true,
+        books: 3,
+        hits: 7,
+      );
+      await tester.pump();
+      final section = find.byType(
+        ExternalSearchResultsSection,
+        skipOffstage: false,
+      );
+      final externalState = tester.state(section);
+      final first = searchBloc.state.results.take(1).toList();
+      searchBloc.emitState(
+        searchBloc.state.copyWith(
+          searchQuery: 'חדש',
+          results: [],
+          isLoading: true,
+        ),
+      );
+      await tester.pump();
+      searchBloc.emitState(searchBloc.state.copyWith(results: first));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('ספר א'), findsOneWidget);
+      expect(find.byType(SearchResultSourceTag), findsWidgets);
+      expect(tester.state(section), same(externalState));
+      expect(tab.externalSearchStatus.value?.loading, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
 
     testWidgets('בלי מדור תוצאות חיצוני אין תגית מקור על הכרטיסים', (
       tester,

@@ -27,6 +27,32 @@ void main() {
     });
   });
 
+  group('stripNonRefChars', () {
+    final reference = RegExp(r'[^\p{L}\p{N}\s/.-]', unicode: true);
+
+    test('matches the unicode regex for every BMP code unit', () {
+      for (var c = 0; c <= 0xFFFF; c++) {
+        final s = 'א${String.fromCharCode(c)}b';
+        expect(stripNonRefChars(s), s.replaceAll(reference, ''), reason: '$c');
+      }
+    });
+
+    test('matches the regex on mixed and astral input', () {
+      for (final s in [
+        '',
+        'כף החיים/סימן א/סעיף קטן י״ב',
+        'בְּרֵאשִׁית/פֶּרֶק א׳',
+        'דף כב: (ע"ב)',
+        'Chapter 1: A.b\t-x',
+        'סימן 𝔸 א',
+        'א😀ב',
+        'é/ש',
+      ]) {
+        expect(stripNonRefChars(s), s.replaceAll(reference, ''), reason: s);
+      }
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // hebrewNumeralValue – השומר שמונע ממילים להתחזות למספרי דף
   // ---------------------------------------------------------------------------

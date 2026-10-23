@@ -14,12 +14,11 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:provider/provider.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/plugins/view/safe_mode_controls.dart';
 import 'package:otzaria/plugins/services/startup_crash_counter.dart';
 import 'package:otzaria/plugins/services/webview2_creation_diagnostics.dart';
-import 'package:otzaria/attached_libraries/bloc/attached_libraries_bloc.dart';
 import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/attached_libraries/repository/attached_libraries_repository.dart';
 import 'package:otzaria/attached_libraries/repository/external_link_repository.dart';
@@ -32,34 +31,16 @@ import 'package:otzaria/app_report/services/crash_report_flow.dart';
 import 'package:otzaria/app_report/services/unclean_exit_detector.dart';
 import 'package:otzaria/app_report/view/crash_prompt_dialog.dart';
 import 'package:otzaria/app.dart';
-import 'package:otzaria/bookmarks/bloc/bookmark_bloc.dart';
-import 'package:otzaria/bookmarks/repository/bookmark_repository.dart';
-import 'package:otzaria/find_ref/bloc/find_ref_bloc.dart';
-import 'package:otzaria/find_ref/repository/find_ref_factory.dart';
-import 'package:otzaria/core/focus_repository.dart';
+import 'package:otzaria/app_scope/app_scope_providers.dart';
+import 'package:otzaria/app_scope/window_scope_providers.dart';
 import 'package:otzaria/core/netfree_certificates.dart';
 import 'package:otzaria/attached_libraries/repository/update/attached_library_update_service.dart';
-import 'package:otzaria/history/bloc/history_bloc.dart';
 import 'package:otzaria/history/history_repository.dart';
-import 'package:otzaria/indexing/bloc/indexing_bloc.dart';
 import 'package:otzaria/indexing/services/release_index_builder_cli.dart';
-import 'package:otzaria/library/bloc/library_bloc.dart';
-import 'package:otzaria/settings/services/custom_folders/bloc/custom_folders_bloc.dart';
-import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
-import 'package:otzaria/navigation/bloc/navigation_event.dart';
-import 'package:otzaria/navigation/bloc/navigation_state.dart';
-import 'package:otzaria/navigation/navigation_repository.dart';
-import 'package:otzaria/settings/engine/settings_bloc.dart';
-import 'package:otzaria/settings/engine/settings_event.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/update/differential/swap_recovery.dart';
-import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
-import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/tabs_repository.dart';
-import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
-import 'package:otzaria/workspaces/bloc/workspace_event.dart';
-import 'package:otzaria/workspaces/workspace_repository.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:path_provider/path_provider.dart';
@@ -69,28 +50,11 @@ import 'package:otzaria/data/data_providers/cache_database_holder.dart';
 import 'package:otzaria/data/data_providers/hive_data_provider.dart';
 import 'package:otzaria/data/data_providers/shared_preferences_cache.dart';
 import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
-import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/empty_library/bloc/empty_library_bloc.dart';
-import 'package:otzaria/library_update/bloc/library_update_bloc.dart';
 import 'package:otzaria/library_update/changes_notes/library_changes_notes.dart';
 import 'package:otzaria/library_update/services/library_access_gate.dart';
-import 'package:otzaria/library_update/repository/library_update_repository.dart';
-import 'package:otzaria/library_update/services/streaming_patch_downloader.dart';
-import 'package:otzaria/library_update/services/companion_assets_service.dart';
-import 'package:otzaria/semantic_search/repository/semantic_search_repository.dart';
 import 'package:otzaria/library_update/services/startup_recovery_check.dart';
-import 'package:otzaria/library_update/services/github_rate_limit.dart';
-import 'package:seforim_library_updater/seforim_library_updater.dart';
-import 'package:otzaria/work_status/work_status_cubit.dart';
-import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
-import 'package:otzaria/plugins/bloc/plugin_system_event.dart';
-import 'package:otzaria/plugins/bloc/plugin_updates_cubit.dart';
-import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
-import 'package:otzaria/plugins/declarative/services/declarative_library_book_access.dart';
-import 'package:otzaria/plugins/services/plugin_reader_actions.dart';
-import 'package:otzaria/plugins/declarative/services/declarative_plugin_host_service.dart';
-import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 
 import 'package:otzaria_search_engine/otzaria_search_engine.dart';
 import 'package:otzaria/core/app_paths.dart';
@@ -100,10 +64,9 @@ import 'package:otzaria/core/data_root_writability_warning.dart';
 import 'package:otzaria/core/personal_data_missing_warning.dart';
 import 'package:otzaria/core/cli_command.dart';
 import 'package:otzaria/core/ui_snack.dart';
+import 'package:otzaria/core/messages/window_messages.dart';
 import 'package:otzaria/core/sqlite_memory_release.dart';
 import 'package:otzaria/core/error_log_file.dart';
-import 'package:otzaria/core/messages/window_messages.dart';
-import 'package:otzaria/core/update_check_frequency.dart';
 import 'package:otzaria/core/info/app_info_cli.dart';
 import 'package:otzaria/core/info/app_install_timeline.dart';
 import 'package:otzaria/core/external_activation_queue.dart';
@@ -117,13 +80,17 @@ import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/window_bounds.dart';
 import 'package:otzaria/core/user_state/window_session_store.dart';
+import 'package:otzaria/core/windowing/multiview/multi_view_host.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
+import 'package:otzaria/core/windowing/multiview/view_window_opener.dart';
+import 'package:otzaria/core/windowing/multiview/view_window_scope.dart';
+import 'package:otzaria/core/windowing/dock_progress_listener.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/window_opener.dart';
 import 'package:otzaria/core/windowing/window_bus_host.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/core/windowing/window_manager_app_window_controller.dart';
-import 'package:otzaria/tools/shamor_zachor/providers/shamor_zachor_data_provider.dart';
-import 'package:otzaria/tools/shamor_zachor/providers/shamor_zachor_progress_provider.dart';
 import 'package:otzaria/settings/services/backup_service.dart';
 import 'package:otzaria/core/http_client_registry.dart';
 import 'package:otzaria/plugins/services/plugin_report_service.dart';
@@ -134,7 +101,6 @@ import 'package:otzaria/data/cache/generation_cache.dart';
 import 'package:otzaria/find_ref/repository/reference_books_cache.dart';
 import 'package:otzaria/tools/dictionary/repository/dictionary_lookup_repository.dart';
 import 'package:pdfrx/pdfrx.dart';
-import 'package:otzaria/tools/calendar/services/calendar_alerts_client.dart';
 import 'package:otzaria/tools/calendar/services/calendar_alerts_owner.dart';
 import 'package:otzaria/tools/calendar/services/notification_service.dart';
 import 'package:otzaria/plugins/database/plugin_database_bootstrap.dart';
@@ -177,7 +143,9 @@ void _markMainWindowRevealed() {
   if (!_mainWindowRevealedCompleter.isCompleted) {
     _mainWindowRevealedCompleter.complete();
   }
-  if (!WindowRole.isSecondary) StartupTimeline.instance.finishAtReveal();
+  if (ProcessDuties.current.isProcessOwner) {
+    StartupTimeline.instance.finishAtReveal();
+  }
 }
 
 /// Cosmetic: until it finishes, drag handles show the system hand cursor.
@@ -373,11 +341,13 @@ void main(List<String> args) async {
 
   PluginDevToolsMode.initFromArgs(args);
   PluginSafeMode.initFromArgs(args);
-  // שכבות טקסט של ספרים סרוקים שומרות עברית בסדר ויזואלי; בלי זה חיפוש,
-  // העתקה ואינדוקס מקבלים את המילים הפוכות.
+  // שכבות טקסט של ספרים סרוקים שומרות עברית בסדר ויזואלי או ב-Windows-1255;
+  // בלי זה חיפוש, העתקה ואינדוקס מקבלים מילים הפוכות או ג'יבריש.
   Pdfrx.normalizeHebrewText = true;
+  Pdfrx.decodeLegacyHebrewText = true;
 
   SentryWidgetsFlutterBinding.ensureInitialized();
+  if (MultiViewMode.enabled) installWindowingOwner();
 
   // אישור קבלה מוקדם לאתר החנות עבור קישורי התקנת תוסף שהגיעו כארגומנטים —
   // נורה כאן, לפני כל אתחול כבד ולפני עליית החלון, כדי שדף החנות יידע תוך
@@ -634,7 +604,7 @@ Future<void> _closeNativeSplash() async {
 /// מופיע בבת אחת עם תוכן והסמל הצף מתפוגג, ללא קפיצה וללא פער. נקרא אחרי שהתוכן
 /// נחשף ונצבע.
 Future<void> presentMainWindow() async {
-  if (!WindowRole.isSecondary) {
+  if (ProcessDuties.current.isProcessOwner) {
     StartupTimeline.instance.markOnce('presentMainWindow');
   }
   if (kIsWeb || !(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
@@ -711,7 +681,7 @@ Future<void> _initializeProcessSingletons() async {
     // ⚠️ פר-תהליך, לא פר-חלון. ניקוי יומן השגיאות בשינוי גרסה ורישום
     // ההפעלה מתארים את **התהליך**; חלון נוסף שרושם "הפעלה" מזייף את
     // הנתונים, וניקוי היומן פעם שנייה עלול למחוק שגיאות שנרשמו בינתיים.
-    if (!WindowRole.isSecondary) {
+    if (ProcessDuties.current.isProcessOwner) {
       _clearErrorLogOnVersionChange();
       await AppInstallTimelineStore.recordLaunch(ErrorLogFile.appVersion);
     }
@@ -768,7 +738,7 @@ Future<void> _initializeProcessSingletons() async {
   // ⚠️ פר-תהליך. המיגרציה משכתבת נתיבים אבסולוטיים בהגדרות המשותפות;
   // החלון הראשון כבר ביצע אותה, וחלון משני שיריץ אותה שוב יעבוד על
   // ה-Hive הפרטי שלו ולא על המשותף — כלומר בזבוז במקרה הטוב.
-  if (!WindowRole.isSecondary) {
+  if (ProcessDuties.current.isProcessOwner) {
     await _timedPhase('portablePaths', PortablePaths.migrateIfMoved);
     // נתיב הספרייה נרשם לקובץ טקסט שה-uninstaller קורא; ההגדרות עצמן
     // ב-Hive בינארי שאינו נגיש לו (issue #1020). פר-תהליך — קובץ אחד.
@@ -776,7 +746,7 @@ Future<void> _initializeProcessSingletons() async {
   }
 
   // ⚠️ פר-תהליך: בחלון משני הם היו מתזמנים התראות ושולחים דיווחים פעם שנייה.
-  if (!WindowRole.isSecondary) {
+  if (ProcessDuties.current.isProcessOwner) {
     unawaited(_runDeferredNotificationService());
     unawaited(_runDeferredErrorReportFlush());
   } else {
@@ -874,7 +844,7 @@ Future<void> _initializeRestartableRuntime() async {
   // חלונות שמריצים אותם במקביל היו מתנגשים על אותם קבצים — כולל אותה
   // העתקה של ~5.5GB פעמיים. החלון הראשון כבר ביצע אותם לפני שהחלון הזה
   // בכלל נוצר.
-  if (!WindowRole.isSecondary) {
+  if (ProcessDuties.current.isProcessOwner) {
     // ראשון: כל שאר השלבים כאן קוראים את נתיב ה-DB מההגדרות, וספרייה
     // שהגיעה למחשב מחוץ לאוצריא עדיין אינה רשומה בהן (issue #1436).
     // חלון משני מקבל את ההגדרה בזריעה מהחלון שפתח אותו.
@@ -961,7 +931,10 @@ Future<void> _runDeferredBookOrderWarmUp() async {
 /// סגירת התוכנה ונועלים את פרופיל ה-WebView2 (תוספים ריקים) — נרשם ל-errors.txt.
 Future<void> _logJobObjectContainmentFailure() async {
   // פר-תהליך: ה-Job Object אחד לתהליך, ורישום מכל חלון משכפל את אותה שורה.
-  if (kIsWeb || !Platform.isWindows || kDebugMode || WindowRole.isSecondary) {
+  if (kIsWeb ||
+      !Platform.isWindows ||
+      kDebugMode ||
+      !ProcessDuties.current.isProcessOwner) {
     return;
   }
   try {
@@ -991,7 +964,7 @@ Future<void> _initializeTimeZonesOnly() async {
 }
 
 Future<void> _runDeferredNotificationService() async {
-  if (WindowRole.isSecondary) return;
+  if (!ProcessDuties.current.isProcessOwner) return;
   await _initializeTimeZonesOnly();
 
   // קריאת אירועי התוספים נוגעת ב-SQLite סינכרוני; אין לעקוף את החשיפה.
@@ -1039,7 +1012,7 @@ Future<void> _runDeferredPdfrxCacheInit() async {
 Future<void> _runDeferredAutoBackup() async {
   // ⚠️ פר-תהליך. הגיבוי קורא `Hive.box` ישירות — בחלון משני זהו שורש פרטי
   // בלי תורי הדיווחים — ומשדר `key-last-auto-backup` שדורס את מועד הבעלים.
-  if (WindowRole.isSecondary) return;
+  if (!ProcessDuties.current.isProcessOwner) return;
   // קריאות SQLite וקידוד ה-JSON רצים ב-main isolate ומתחרים בפריים הראשון.
   try {
     await _mainWindowRevealedCompleter.future.timeout(
@@ -1080,7 +1053,9 @@ Future<void> _runDeferredDataRootWritabilityWarning() async {
 /// קריאת לוג ופענוח למסלול העלייה.
 Future<void> _runDeferredCrashCheck() async {
   // פר-תהליך: הנעילה היא של התהליך, וחלון משני היה דורס אותה.
-  if (WindowRole.isSecondary || !AppCrashSession.isSupported) return;
+  if (!ProcessDuties.current.isProcessOwner || !AppCrashSession.isSupported) {
+    return;
+  }
   try {
     await _mainWindowRevealedCompleter.future.timeout(
       const Duration(seconds: 20),
@@ -1104,7 +1079,9 @@ Future<void> _runDeferredCrashCheck() async {
 
 /// ANR של הפעלה קודמת באנדרואיד, מ-ApplicationExitInfo של המערכת.
 Future<void> _runDeferredAnrCheck() async {
-  if (kIsWeb || !Platform.isAndroid || WindowRole.isSecondary) return;
+  if (kIsWeb || !Platform.isAndroid || !ProcessDuties.current.isProcessOwner) {
+    return;
+  }
   try {
     await _mainWindowRevealedCompleter.future.timeout(
       const Duration(seconds: 20),
@@ -1144,7 +1121,7 @@ Future<void> _runDeferredPluginSafeMode(Future<void> previousDecision) async {
     await _timedPhase(
       'pluginSafeMode',
       () => PluginSafeMode.initializeSession(
-        isSecondary: WindowRole.isSecondary,
+        isSecondary: !ProcessDuties.current.isProcessOwner,
         onError: (error, stackTrace) => _logNonFatalInitializationError(
           'Plugin safe mode',
           error,
@@ -1175,7 +1152,7 @@ Future<void> _runDeferredPluginSafeMode(Future<void> previousDecision) async {
 /// a safe mode that was entered because of it.
 Future<void> _runDeferredStartupStability() async {
   // Per process: the count belongs to the main window's launch.
-  if (WindowRole.isSecondary) return;
+  if (!ProcessDuties.current.isProcessOwner) return;
   try {
     await _mainWindowRevealedCompleter.future.timeout(
       const Duration(seconds: 20),
@@ -1209,7 +1186,7 @@ Future<void> _runDeferredStartupStability() async {
 /// להערות שעוד לא פורסמו.
 Future<void> _runDeferredLibraryChangesNotes() async {
   // פר-תהליך: ההערות מוצגות פעם אחת, בחלון הראשי.
-  if (WindowRole.isSecondary) return;
+  if (!ProcessDuties.current.isProcessOwner) return;
   try {
     await _mainWindowRevealedCompleter.future.timeout(
       const Duration(seconds: 20),
@@ -1228,7 +1205,7 @@ Future<void> _runDeferredLibraryChangesNotes() async {
 /// שנוסף). שינוי משודר ל-AttachedLibrariesBloc, שמרענן את עץ הספרייה.
 Future<void> _runDeferredAttachedLibraries() async {
   // פר-תהליך: הסריקה שומרת את הרשימה בהגדרות; חלון משני קורא אותה בלבד.
-  if (WindowRole.isSecondary) return;
+  if (!ProcessDuties.current.isProcessOwner) return;
   try {
     await _mainWindowRevealedCompleter.future.timeout(
       const Duration(seconds: 20),
@@ -1257,7 +1234,7 @@ Future<void> _runDeferredAttachedLibraries() async {
 
 Future<void> _runDeferredCapabilitiesWrite() async {
   // פר-תהליך: קובץ אחד לשורש הנתונים, וחלון משני היה כותב אותו שוב.
-  if (WindowRole.isSecondary) return;
+  if (!ProcessDuties.current.isProcessOwner) return;
   try {
     await _mainWindowRevealedCompleter.future.timeout(
       const Duration(seconds: 20),
@@ -1276,7 +1253,7 @@ Future<void> _runDeferredCapabilitiesWrite() async {
 /// service itself applies the official gates (offline, updates, cadence).
 Future<void> _runDeferredAttachedLibraryUpdates() async {
   // Per machine: a second window would contact the same sources again.
-  if (WindowRole.isSecondary) return;
+  if (!ProcessDuties.current.isProcessOwner) return;
   try {
     await _mainWindowRevealedCompleter.future.timeout(
       const Duration(seconds: 20),
@@ -1306,7 +1283,7 @@ Future<void> _syncExternalLinkIndex({bool autoResume = false}) async {
 
 Future<void> _runDeferredProtocolRegistration() async {
   // פר-תהליך: רישום ברג'יסטרי של המשתמש, שחלון משני היה חוזר עליו.
-  if (WindowRole.isSecondary) return;
+  if (!ProcessDuties.current.isProcessOwner) return;
   // הכתיבה עצמה ב-isolate; ההמתנה רק כדי שהפעלתו לא תתחרה בעלייה.
   await _mainWindowRevealedCompleter.future;
   await Future<void>.delayed(const Duration(seconds: 2));
@@ -1339,7 +1316,7 @@ Future<void> _runDeferredCacheWarmups() async {
   // ⚠️ חלון משני מדלג: לכל השאר יש חימום לפי דרישה באתרי הקריאה, והרצתו
   // כאן שכפלה `VACUUM` על `cache.db` המשותף ושני isolates לכל חלון נוסף.
   // הגופנים נשארים, כי הנפילה שלהם היא סריקה סינכרונית על ה-thread הראשי.
-  if (WindowRole.isSecondary) {
+  if (!ProcessDuties.current.isProcessOwner) {
     unawaited(
       AppFonts.warmUpSystemFontsCache().catchError((e) {
         if (kDebugMode) debugPrint('Failed to warm up system fonts: $e');
@@ -1586,6 +1563,7 @@ class _AppBootstrapState extends State<AppBootstrap> {
   Object? _error;
   HistoryRepository? _historyRepository;
   SettingsRepository? _settingsRepository;
+  OpenedTab? _initialTab;
 
   @override
   void initState() {
@@ -1596,6 +1574,8 @@ class _AppBootstrapState extends State<AppBootstrap> {
           setState(() {
             _historyRepository = HistoryRepository();
             _settingsRepository = SettingsRepository();
+            // כאן ולא בנקודת הכניסה: `TextBookTab.fromJson` תלוי ב-`Settings`.
+            _initialTab = _takeSecondaryWindowInitialTab();
             _ready = true;
           });
           StartupTimeline.instance.mark('bootstrapReady');
@@ -1636,299 +1616,37 @@ class _AppBootstrapState extends State<AppBootstrap> {
     final historyRepository = _historyRepository!;
     final settingsRepository = _settingsRepository!;
 
-    return MultiRepositoryProvider(
-      providers: [
-        RepositoryProvider<FocusRepository>(
-          create: (_) => FocusRepository(),
-        ),
-        RepositoryProvider<SettingsRepository>(
-          create: (_) => settingsRepository,
-        ),
-      ],
-      child: MultiBlocProvider(
-        providers: [
-          BlocProvider<SettingsBloc>(
-            create: (_) => StartupTimeline.instance.phaseSync(
-              'settingsBloc',
-              () => SettingsBloc(
-                repository: settingsRepository,
-                initialSettings: settingsRepository.readSettings(),
-              )..add(LoadSettings()),
-            ),
-          ),
-          BlocProvider<LibraryBloc>(
-            // ה-LoadLibrary אינו נשלח כאן יותר: בניית הקטלוג (~300ms CPU על
-            // ה-main thread) הייתה חונקת את שאילתת תוכן הספר הפעיל ומעכבת את
-            // הופעתו. ההפעלה עברה ל-MainWindowScreen._revealMainWindowOnce,
-            // שמעדיף את טעינת הספר הפעיל ורק אז מתחיל את בניית הקטלוג.
-            create: (_) => LibraryBloc(),
-          ),
-          BlocProvider<CustomFoldersBloc>(
-            create: (context) => CustomFoldersBloc(
-              addLibraryEvent: (event) =>
-                  context.read<LibraryBloc>().add(event),
-            )..add(const LoadCustomFolders()),
-          ),
-          // לא עצל: הבלוק מאזין לשינויי המסדים המצורפים (גם מהסריקה בעלייה)
-          // ומרענן את העץ, גם כשמסך ההגדרות לא נפתח.
-          BlocProvider<AttachedLibrariesBloc>(
-            lazy: false,
-            create: (context) => AttachedLibrariesBloc(
-              addLibraryEvent: (event) =>
-                  context.read<LibraryBloc>().add(event),
-            ),
-          ),
-          BlocProvider<IndexingBloc>(
-            create: (_) => IndexingBloc.create(),
-          ),
-          BlocProvider<TabsBloc>(
-            create: (_) {
-              final bloc = StartupTimeline.instance.phaseSync(
-                'tabsBloc',
-                () {
-                  final repository = TabsRepository();
-                  return TabsBloc(
-                    repository: repository,
-                    session: repository.window,
-                  )..add(LoadTabs());
-                },
-              );
-              // חלון שנפתח עם מטען מקבל את הכרטיסיה שהועברה אליו. `LoadTabs`
-              // נשלח קודם כדי שסדר האירועים יהיה זהה לחלון רגיל — הכרטיסיה
-              // המועברת נכנסת אחריו, ולכן היא זו שתהיה פעילה.
-              // הפענוח כאן ולא בנקודת הכניסה: בשלב הזה `Settings` כבר
-              // מאותחל, ו-`TextBookTab.fromJson` תלוי בו.
-              final payload = secondaryWindowPayload;
-              secondaryWindowPayload = null;
-              final transferred = MultiWindowService.decodePayload(payload);
-              if (transferred != null) {
-                bloc.add(AddTab(transferred));
-              } else if (MultiWindowService.payloadHasTab(payload)) {
-                // ⚠️ המטען **הכיל** כרטיסיה והפענוח נכשל. עד כה זה היה
-                // כשל שקט: חלון חדש נפתח ריק, המקור כבר מחק את הכרטיסיה,
-                // והשורה היחידה שהסבירה למה נכתבה ל-stdout שאיש אינו רואה
-                // בהפעלה מהסייר.
-                //
-                // ההודעה נדחית לאחרי הבנייה — `UiSnack` זקוק ל-navigator,
-                // ובנקודה הזו העץ עוד לא הורכב.
-                debugPrint('⚠️ פענוח הכרטיסיה שהועברה נכשל — החלון ייפתח ריק');
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  UiSnack.showError(
-                    WindowMessages.transferredTabDecodeFailed,
-                  );
-                });
-                try {
-                  ErrorLogFile.append(
-                    title: 'פענוח כרטיסיה שהועברה לחלון חדש נכשל',
-                    error:
-                        'decodePayload returned null for a payload with a tab',
-                    stackTrace: StackTrace.current,
-                  );
-                } catch (_) {
-                  // רישום הוא best-effort ולעולם אינו חוסם את עליית החלון.
-                }
-              }
-              return bloc;
-            },
-          ),
-          // ⚠️ אחרי TabsBloc: ה-context של create רואה רק ספקים שמעליו,
-          // ו-currentTab קורא את TabsBloc בכל לכידה של ההיסטוריה.
-          BlocProvider<HistoryBloc>(
-            create: (context) => HistoryBloc(
-              historyRepository,
-              currentTab: () => context.read<TabsBloc>().state.currentTab,
-            ),
-          ),
-          BlocProvider<NavigationBloc>(
-            create: (context) {
-              // הבנאי משחזר את כל הכרטיסיות השמורות סינכרונית (loadTabs) —
-              // נמדד כי זה רץ בתוך build, לפני שהמסך הראשי קיים.
-              final nav = StartupTimeline.instance.phaseSync(
-                'navigationBloc',
-                () =>
-                    NavigationBloc(
-                      repository: NavigationRepository(),
-                      tabsRepository: TabsRepository(),
-                      // "חיפוש" ו"עיון" הם אותו עמוד טאבים; היישור לפי
-                      // החלונית הפעילה שומר שהאייקון המודגש בסרגל יתאים
-                      // למה שמוצג בפועל.
-                      activePaneStream: context
-                          .read<TabsBloc>()
-                          .stream
-                          .map((tabsState) => tabsState.activePane)
-                          .distinct(),
-                    )..add(
-                      const CheckLibrary(),
-                    ),
-              );
-              // ⚠️ אחרי `CheckLibrary` ולא במקומו. `CheckLibrary` מחליט
-              // לאן לנווט לפי מצב הספרייה, ובחלון שנפתח עם כרטיסיה מועברת
-              // ההחלטה שגויה: הוא היה נשאר במסך הספרייה בעוד הכרטיסיה
-              // פתוחה מאחוריו — בדיוק מה שנצפה. הניווט נשלח אחריו ולכן
-              // גובר עליו.
-              if (WindowRole.openedWithTab) {
-                nav.add(const NavigateToScreen(Screen.reading));
-              }
-              return nav;
-            },
-          ),
-          BlocProvider<FindRefBloc>(
-            create: (_) => FindRefBloc(
-              findRefRepository: buildFindRefRepository(),
-            ),
-          ),
-          BlocProvider<PersonalNotesBloc>(
-            create: (_) => PersonalNotesBloc(),
-          ),
-          BlocProvider<BookmarkBloc>(
-            create: (_) => BookmarkBloc(BookmarkRepository()),
-          ),
-          BlocProvider<WorkspaceBloc>(
-            create: (context) {
-              final tabsBloc = context.read<TabsBloc>();
-              return WorkspaceBloc(
-                repository: WorkspaceRepository(),
-                onWorkspaceTabsChanged:
-                    (
-                      List<OpenedTab> tabs,
-                      int activeIndex,
-                      String? activePane,
-                    ) async {
-                      // ⚠️ ההמתנה נרשמת **לפני** השליחה: `ReplaceAllTabs`
-                      // מטופל סינכרונית, ורישום אחריו היה מפספס את המצב
-                      // שהוא מחפש ומחכה לנצח.
-                      final replaced = tabsBloc.stream.firstWhere(
-                        (state) =>
-                            identical(state.tabs, tabs) &&
-                            state.currentTabIndex == activeIndex,
-                      );
-                      tabsBloc.add(
-                        ReplaceAllTabs(
-                          tabs,
-                          activeIndex,
-                          activePane: activePane,
-                        ),
-                      );
-                      await replaced;
-                    },
-              )..add(LoadWorkspaces());
-            },
-          ),
-          ChangeNotifierProvider<ShamorZachorDataProvider>(
-            lazy: true,
-            create: (_) => ShamorZachorDataProvider(),
-          ),
-          ChangeNotifierProvider<ShamorZachorProgressProvider>(
-            lazy: true,
-            create: (_) => ShamorZachorProgressProvider(),
-          ),
-          BlocProvider<WorkStatusCubit>(
-            create: (_) => WorkStatusCubit(),
-          ),
-          BlocProvider<LibraryUpdateBloc>(
-            lazy: true,
-            create: (context) => LibraryUpdateBloc(
-              repository: LibraryUpdateRepository(
-                discovery: LibraryUpdateDiscovery(
-                  client: GithubLibraryReleaseClient(
-                    httpClient: GithubRateLimitAwareClient(),
-                  ),
-                  supportedDbSchemaVersion:
-                      DatabaseConstants.readableDbSchemaVersion,
-                ),
-                // זורם לדיסק: patch גדול נפרס בלי לשבת ב-RAM (ראו את המחלקה).
-                downloader: StreamingPatchDownloader(),
-              ),
-              companionAssets: CompanionAssetsService(
-                // רק אחרי שהמשתמש הוריד את נתוני החיפוש הסמנטי; אחרת לא עושה דבר.
-                scheduleSemanticVectorsUpdate: (tag) => SemanticSearchRepository
-                    .instance
-                    .scheduleVectorsUpdate(libraryTag: tag),
-              ),
-              isOfflineMode: () =>
-                  Settings.getValue<bool>(SettingsRepository.keyOfflineMode) ??
-                  false,
-              // ⚠️ חלון משני לעולם אינו בודק עדכונים. עדכון ספרייה הוא
-              // פעולה פר-תהליך: שני חלונות ששאלו את GitHub במקביל קיבלו
-              // 403, והמשתמש ראה "שגיאה בקבלת רשימת ה-releases" בכל
-              // פתיחת חלון.
-              areUpdatesEnabled: () =>
-                  !WindowRole.isSecondary &&
-                  (Settings.getValue<bool>(
-                        SettingsRepository.keySoftwareAndBookUpdatesEnabled,
-                      ) ??
-                      true),
-              // עדכוני ספרייה תמיד ליציב בלבד — מנותק מערוץ הפיתוח, שמשפיע רק
-              // על עדכוני התוכנה.
-              allowPrerelease: () => false,
-              onCheckSucceeded: () => recordSuccessfulUpdateCheck(
-                SettingsRepository.keyLastLibraryUpdateCheck,
-              ),
-            ),
-          ),
-          BlocProvider<PluginUpdatesCubit>(
-            lazy: true,
-            create: (_) => PluginUpdatesCubit(),
-          ),
-          BlocProvider<PluginSystemBloc>(
-            create: (context) => StartupTimeline.instance.phaseSync(
-              'pluginSystemBloc',
-              () => _createPluginSystemBloc(context),
-            ),
-          ),
-        ],
-        // מתחת לכל ה-blocs: האפיק עונה על בקשות מחלונות אחרים, ושתי
-        // הבקשות הנתמכות — "תאר את עצמך" ו"קלוט כרטיסיה" — זקוקות
-        // ל-TabsBloc ול-NavigationBloc.
-        child: const WindowBusHost(child: App()),
+    final mainWindow = WindowScopeProviders(
+      historyRepository: historyRepository,
+      initialTab: _initialTab,
+      // מתחת לכל ה-blocs: האפיק עונה על בקשות מחלונות אחרים, ושתי
+      // הבקשות הנתמכות — "תאר את עצמך" ו"קלוט כרטיסיה" — זקוקות
+      // ל-TabsBloc ול-NavigationBloc.
+      child: const WindowBusHost(child: App()),
+    );
+
+    return AppScopeProviders(
+      settingsRepository: settingsRepository,
+      // הדוק שייך לתהליך: מאזין אחד מעל היקף החלון.
+      child: DockProgressListener(
+        // בלי הדגל הענף נגזם מהבנייה, יחד עם כל קוד חלונות ה-Dart.
+        child: MultiViewMode.enabled
+            ? MultiViewHost(
+                contentBuilder: (context, entry) =>
+                    ViewWindowScope(entry: entry, child: const App()),
+                child: mainWindow,
+              )
+            : mainWindow,
       ),
     );
   }
 }
 
-PluginSystemBloc _createPluginSystemBloc(BuildContext context) {
-  final repository = PluginRegistryRepository();
-  final tabsBloc = context.read<TabsBloc>();
-  final coordinator = BookOpenCoordinator(
-    tabsBloc: tabsBloc,
-    historyBloc: context.read<HistoryBloc>(),
-    navigationBloc: context.read<NavigationBloc>(),
-  );
-  final bookAccess = DeclarativeLibraryBookAccess.otzaria(
-    coordinator,
-  );
-  final host = DeclarativePluginHostService(
-    loadPlugin: repository.getPlugin,
-    loadPermissions: (pluginId) async =>
-        (await repository.getGrantedPermissionNames(
-          pluginId,
-        )).toSet(),
-    bookResolver: bookAccess,
-    bookOpener: bookAccess,
-    parallelEditionsFinder: bookAccess.parallelEditionsForIdentity,
-    readerScroller: PluginDeclarativeReaderScroller(
-      tabsBloc: tabsBloc,
-    ),
-    searchOpener: PluginDeclarativeSearchOpener(coordinator),
-    onError: (pluginId, error, stackTrace) => debugPrint(
-      'Declarative plugin host [$pluginId]: $error\n$stackTrace',
-    ),
-  );
-  return PluginSystemBloc(
-      repository: repository,
-      alertsClient: CalendarAlertsClient.forCurrentWindow(),
-      declarativeHost: host,
-      readerStates: tabsBloc.stream,
-      initialReaderState: tabsBloc.state,
-    )
-    ..add(const SeedBundledPlugins())
-    ..add(LoadPlugins());
-}
-
 Future<void> initHive() async {
   // שורשי חלונות ישנים נמחקים רק כשאין חלון משני חי שמשתמש בקבצים,
   // גם באתחול מחדש דרך RestartWidget.
-  if (!WindowRole.isSecondary && !WindowBus.instance.hasOtherWindows) {
+  if (ProcessDuties.current.isProcessOwner &&
+      !WindowBus.instance.hasOtherWindows) {
     await deleteStaleWindowRoots();
   }
   // בחלון משני הגדרות Hive יושבות בשורש פרטי; שאר הנתונים משותפים.
@@ -1937,7 +1655,9 @@ Future<void> initHive() async {
   // המסד נפתח כאן ולא בעצלות: `TabsRepository.loadTabs` קורא אותו
   // סינכרונית מבנאי של bloc.
   await UserStateDatabase.instance.database;
-  if (!WindowRole.isSecondary) await PersonalDataMissingWarning.detect();
+  if (ProcessDuties.current.isProcessOwner) {
+    await PersonalDataMissingWarning.detect();
+  }
   // סידור הסשנים חייב לרוץ פעם אחת לפני TabsBloc ו-NavigationBloc,
   // כי שניהם טוענים כרטיסיות וסדר הטעינה ביניהם תלוי בתזמון.
   if (_restoresAllWindows) {
@@ -1950,7 +1670,7 @@ Future<void> initHive() async {
 /// "שחזר את כל החלונות בהפעלה" — כל סשן שנשאר נפתח בחלון משלו במקום
 /// להתמזג לחלון הראשון. רק בהפעלה קרה של התהליך.
 bool get _restoresAllWindows =>
-    !WindowRole.isSecondary &&
+    ProcessDuties.current.isProcessOwner &&
     MultiWindowService.canOpenWindows &&
     !WindowBus.instance.hasOtherWindows &&
     (Settings.getValue<bool>(SettingsRepository.keyRestoreAllWindows) ?? false);
@@ -1965,9 +1685,14 @@ List<int> _windowSlotsToRestore = const [];
 /// חברו.
 Future<void> _runDeferredRestoreWindows() async {
   // פר-תהליך: חלון משני אינו פותח חלונות בשם ההפעלה.
-  if (WindowRole.isSecondary || _windowSlotsToRestore.isEmpty) return;
+  if (!ProcessDuties.current.isProcessOwner || _windowSlotsToRestore.isEmpty) {
+    return;
+  }
   final slots = _windowSlotsToRestore;
   _windowSlotsToRestore = const [];
+  // חלון שנפתח בזמן ההמתנה היה מוחק את השורה של משבצת פנויה.
+  final opener = WindowOpener.current;
+  if (opener is ViewWindowOpener) opener.reserveForRestore(slots);
   try {
     await _mainWindowRevealedCompleter.future.timeout(
       const Duration(seconds: 20),
@@ -1976,11 +1701,16 @@ Future<void> _runDeferredRestoreWindows() async {
     // ממשיכים בכל זאת — אחרת המשימה לא תרוץ כלל.
   }
   try {
-    const service = MultiWindowService();
+    final service = WindowOpener.current;
+    // חלונות Dart: המשבצת נקבעת ב-Dart, ואין אפיק להמתין לרישום בו.
+    if (service is ViewWindowOpener) {
+      await service.restoreAllWindows(slots);
+      return;
+    }
     for (final slot in slots) {
       final session = await WindowSessionStore.instance.load(slot);
       final bounds = WindowBounds.decode(session?.boundsJson)?.toPhysical();
-      if (!await service.openWindow(bounds: bounds)) {
+      if (!await service.openWindow(bounds: bounds, inheritPlacement: false)) {
         debugPrint('שחזור חלונות נעצר: פתיחת חלון למשבצת $slot נכשלה');
         return;
       }
@@ -2024,6 +1754,7 @@ void secondaryWindowMain(List<String> args) async {
   WindowRole.isSecondary = true;
   _secondaryWindowStartup = Stopwatch()..start();
   Pdfrx.normalizeHebrewText = true;
+  Pdfrx.decodeLegacyHebrewText = true;
   SentryWidgetsFlutterBinding.ensureInitialized();
   EditableText.debugDeterministicCursor = true;
 
@@ -2109,17 +1840,17 @@ void secondaryWindowMain(List<String> args) async {
   Bloc.observer = AppBlocObserver();
   unawaited(_runDeferredCursorSetup());
 
-  // ⚠️ המטען נשמר **גולמי** ומפוענח מאוחר יותר, ב-`TabsBloc`.
+  // ⚠️ המטען נשמר **גולמי** ומפוענח מאוחר יותר, ב-`AppBootstrap`.
   //
   // `TextBookTab.fromJson` קורא ל-`Settings.getValue('key-splited-view')`,
   // ו-`Settings` מאותחל רק בתוך `AppBootstrap`. פענוח כאן זרק, נתפס והחזיר
   // null — הכרטיסיה נעלמה מהחלון המקורי ולא נפתחה בחדש. `ToolTab.fromJson`
   // אינו נוגע ב-Settings, ולכן דווקא כלים עברו בהצלחה והבאג נראה אקראי.
-  secondaryWindowPayload = args.isEmpty || args.first.isEmpty
+  _secondaryWindowPayload = args.isEmpty || args.first.isEmpty
       ? null
       : args.first;
   WindowRole.openedWithTab = MultiWindowService.payloadHasTab(
-    secondaryWindowPayload,
+    _secondaryWindowPayload,
   );
 
   // ⚠️ נדרש לפני `runApp`: בלעדיו `setTitleBarStyle(hidden)` שב-bootstrap
@@ -2166,8 +1897,11 @@ void _maybeScheduleDebugSecondWindow() {
   );
   if (ms == null || ms <= 0) return;
   Timer(Duration(milliseconds: ms), () async {
-    final opened = await const MultiWindowService().openWindow();
-    debugPrint('[debug] openWindow -> $opened');
+    final stopwatch = Stopwatch()..start();
+    final opened = await WindowOpener.current.openWindow();
+    debugPrint(
+      '[debug] openWindow -> $opened, ${stopwatch.elapsedMilliseconds}ms',
+    );
   });
 }
 
@@ -2249,6 +1983,10 @@ Future<void> _isolatePdfiumForThisWindow(String windowRoot) async {
 Future<void> _installWindowCloseHandling() async {
   _appWindowListener = AppWindowListener(window: _appWindow);
   windowManager.addListener(_appWindowListener!);
+  if (MultiViewMode.enabled) {
+    final listener = _appWindowListener!;
+    ViewWindowOpener.instance.endProcess = listener.quitFromLastViewWindow;
+  }
   await windowManager.setPreventClose(true);
   await AppWindowListener.enableMacOSCloseHandling();
 }
@@ -2274,7 +2012,7 @@ void _claimWindowBusSlot() {
   // בעלים בשביל אפיק שאף אחד לא ידבר בו.
   if (!MultiWindowService.canOpenWindows) return;
   final slot = LibraryAccessGate.instance.registerWindow(
-    asOwner: !WindowRole.isSecondary,
+    asOwner: ProcessDuties.current.isProcessOwner,
   );
   if (slot == null) {
     debugPrint('⚠️ כל משבצות האפיק תפוסות — החלון הזה לא יוכל לשתף מצב');
@@ -2299,18 +2037,45 @@ Future<T> _timedPhase<T>(String name, Future<T> Function() body) async {
   }
 }
 
-/// המטען הגולמי שאיתו נפתח החלון, אם נפתח כחלון משני.
-///
-/// נצרך **פעם אחת** ביצירת `TabsBloc` ומתאפס שם, כדי ש-`RestartWidget`
-/// לא יוסיף את הכרטיסיה שוב בהפעלה מחדש של העץ. הפענוח קורה שם ולא
-/// כאן — ראו ההערה ב-[secondaryWindowMain].
-String? secondaryWindowPayload;
+/// המטען הגולמי של חלון משני; נצרך **פעם אחת** כדי ש-`RestartWidget` לא
+/// יוסיף את הכרטיסיה שוב. ראו [_takeSecondaryWindowInitialTab].
+String? _secondaryWindowPayload;
+
+/// צורך את [_secondaryWindowPayload] ומפענח את הכרטיסיה שבו, אם יש.
+OpenedTab? _takeSecondaryWindowInitialTab() {
+  final payload = _secondaryWindowPayload;
+  _secondaryWindowPayload = null;
+  final transferred = MultiWindowService.decodePayload(payload);
+  if (transferred != null || !MultiWindowService.payloadHasTab(payload)) {
+    return transferred;
+  }
+  // ⚠️ המטען **הכיל** כרטיסיה והפענוח נכשל. עד כה זה היה כשל שקט: חלון
+  // חדש נפתח ריק, המקור כבר מחק את הכרטיסיה, והשורה היחידה שהסבירה למה
+  // נכתבה ל-stdout שאיש אינו רואה בהפעלה מהסייר.
+  //
+  // ההודעה נדחית לאחרי הבנייה — `UiSnack` זקוק ל-navigator, ובנקודה הזו
+  // העץ עוד לא הורכב.
+  debugPrint('⚠️ פענוח הכרטיסיה שהועברה נכשל — החלון ייפתח ריק');
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    UiSnack.showError(WindowMessages.transferredTabDecodeFailed);
+  });
+  try {
+    ErrorLogFile.append(
+      title: 'פענוח כרטיסיה שהועברה לחלון חדש נכשל',
+      error: 'decodePayload returned null for a payload with a tab',
+      stackTrace: StackTrace.current,
+    );
+  } catch (_) {
+    // רישום הוא best-effort ולעולם אינו חוסם את עליית החלון.
+  }
+  return null;
+}
 
 /// משלים או מבטל החלפת עדכון שנקטעה. בדרך כלל רק שתי בדיקות קיום; השחזור
 /// עצמו רץ במעדכן אחרי יציאת אוצריא, כי ההתקנה החיה נעולה כל עוד היא רצה.
 Future<void> _runDeferredSwapRecovery() async {
   // פר-תהליך: ההתקנה אחת, וחלון נוסף היה משגר מעדכן שני על אותם קבצים.
-  if (WindowRole.isSecondary || !Platform.isWindows) return;
+  if (!ProcessDuties.current.isProcessOwner || !Platform.isWindows) return;
   final planFile = pendingInterruptedSwapPlan(differentialWorkDirectory());
   if (planFile == null) return;
   try {

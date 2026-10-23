@@ -3,17 +3,20 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:otzaria/plugins/view/safe_mode_controls.dart';
+import 'package:otzaria/core/windowing/app_drag_to_move_area.dart';
+import 'package:otzaria/core/windowing/app_window_caption.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
+import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 import 'package:otzaria/theme/app_tokens.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
-import 'package:window_manager/window_manager.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
 import 'package:otzaria/shortcuts/shortcut_helper.dart';
 import 'package:otzaria/shortcuts/shortcut_validator.dart';
@@ -133,7 +136,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
 
   // הטאב שהעכבר מעליו. שדה ולא משתנה מקומי ב-_buildTab: rebuild של ההורה היה
   // מאפס אותו, וה-X שמוצג רק בריחוף היה נמחק מתחת לסמן לפני שהלחיצה נורית.
-  OpenedTab? _hoveredTab;
+  final _hoveredTab = ValueNotifier<OpenedTab?>(null);
 
   // רוחב אזור הטאבים שנמדד בפריים הקודם (ע"י LayoutBuilder נפרד). הרשימה
   // נבנית עם הערך הזה ולא תחת ה-LayoutBuilder — אחרת Tooltip/OverlayPortal
@@ -213,9 +216,11 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
           // הקיצורים נקראים מ-Settings ב-build, ולכן נבדקת זהות המפה.
           buildWhen: (previous, current) =>
               previous.readingTabsOnSide != current.readingTabsOnSide ||
-              previous.isFullscreen != current.isFullscreen ||
               !identical(previous.shortcuts, current.shortcuts),
           builder: (context, settingsState) {
+            final isFullscreen = context.select(
+              (WindowFullscreenCubit cubit) => cubit.state,
+            );
             final stackedTabs = _useStackedTabs(context, navState);
             // במסך עיון ללא טאבים פתוחים אין תוכן קריאה אמיתי, ולכן המסגרת
             // העליונה נצבעת כשאר מסכי הלוח (רקע לוח + גבול תחתון) במקום ברקע
@@ -289,9 +294,9 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                                 const ManagedUpdateTitleBarIndicator(),
                                 _buildFullscreenCaptionButton(
                                   context,
-                                  settingsState,
+                                  isFullscreen,
                                 ),
-                                if (settingsState.isFullscreen)
+                                if (isFullscreen)
                                   _CaptionActionButton(
                                     brightness: Theme.of(context).brightness,
                                     tooltip: 'מזער',
@@ -308,7 +313,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                                       await window.minimize();
                                     },
                                   ),
-                                if (settingsState.isFullscreen)
+                                if (isFullscreen)
                                   _CaptionActionButton(
                                     brightness: Theme.of(context).brightness,
                                     tooltip: 'סגור',
@@ -320,11 +325,11 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
                                           context,
                                         ).close(),
                                   ),
-                                if (!settingsState.isFullscreen)
+                                if (!isFullscreen)
                                   SizedBox(
                                     width: _kWindowCaptionButtonsWidth,
                                     height: 50,
-                                    child: WindowCaption(
+                                    child: AppWindowCaption(
                                       brightness: Theme.of(context).brightness,
                                       backgroundColor: Colors.transparent,
                                     ),
@@ -367,7 +372,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
       width: _kAppBarControlsWidth,
       child: Stack(
         children: [
-          const DragToMoveArea(child: SizedBox.expand()),
+          const AppDragToMoveArea(child: SizedBox.expand()),
           Center(
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -415,7 +420,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
           children: [
             // במצב "בצד" כפתור חיפוש הכרטיסיות יושב בראש העמודה עצמה.
             if (stacked) TabSearchButton(style: _kIconButtonStyle),
-            const Expanded(child: DragToMoveArea(child: SizedBox.expand())),
+            const Expanded(child: AppDragToMoveArea(child: SizedBox.expand())),
             _buildReadingSettingsButton(context),
           ],
         );
@@ -473,7 +478,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     return Row(
       children: [
         Expanded(
-          child: DragToMoveArea(
+          child: AppDragToMoveArea(
             child: Center(
               child: Text(
                 subtitle != null ? '$title: $subtitle' : title,
@@ -486,11 +491,20 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     );
   }
 
+  /// השורה אינה מציגה את החלונית הפעילה, ולכן לחיצה בחלונית אחרת של טאב
+  /// מפוצל אינה צריכה לבנות מחדש את כל הכרטיסיות.
+  static bool _tabStripChanged(TabsState previous, TabsState current) =>
+      previous.tabs != current.tabs ||
+      previous.currentTabIndex != current.currentTabIndex ||
+      previous.updateCounter != current.updateCounter ||
+      previous.selectedTabs != current.selectedTabs;
+
   Widget _buildReadingTabs(BuildContext context) {
     return BlocBuilder<TabsBloc, TabsState>(
+      buildWhen: _tabStripChanged,
       builder: (context, state) {
         if (!state.hasOpenTabs) {
-          return DragToMoveArea(
+          return AppDragToMoveArea(
             child: Center(
               child: Text(
                 context.settingsText('עיון'),
@@ -603,12 +617,21 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
       onDragStarted: () => _pendingTabSelection = null,
       // סימון שטח הטאב ל-hit-test, כדי שה-double-tap-to-maximize שבמסגרת
       // ידלג עליו (ראה _EmptyAreaDoubleTapRecognizer).
-      tabBuilder: (tab, index, tabWidth) => MetaData(
-        metaData: _kTabHitMarker,
-        behavior: HitTestBehavior.opaque,
-        child: SizedBox(
-          width: tabWidth,
-          child: _buildTab(context, tab, index, state, tabWidth),
+      // הריחוף משנה רק את הכרטיסיה ואת המפריד של השכנה שאחריה, ולכן רק הן
+      // נבנות מחדש ולא השורה כולה.
+      tabBuilder: (tab, index, tabWidth) => _HoverSelector(
+        _hoveredTab,
+        (h) => (
+          identical(h, tab),
+          index > 0 && identical(h, state.tabs[index - 1]),
+        ),
+        (_) => MetaData(
+          metaData: _kTabHitMarker,
+          behavior: HitTestBehavior.opaque,
+          child: SizedBox(
+            width: tabWidth,
+            child: _buildTab(context, tab, index, state, tabWidth),
+          ),
         ),
       ),
     );
@@ -663,13 +686,16 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     return IconButton(
       icon: const Icon(FluentIcons.add_24_regular, size: 18),
       tooltip: context.settingsText('כרטיסייה חדשה'),
-      onPressed: PluginNewTabPageRegistry.instance.open,
+      onPressed: () => PluginNewTabPageRegistry.instance.open(
+        windowKeys: AppWindowKeys.of(context),
+        viewId: View.of(context).viewId,
+      ),
       style: _kIconButtonStyle,
     );
   }
 
   Widget _buildReadingSettingsButton(BuildContext context) {
-    return DragToMoveArea(
+    return AppDragToMoveArea(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4.0),
         child: IconButton(
@@ -692,6 +718,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
 
   Widget _buildNarrowTabsRow(BuildContext context) {
     return BlocBuilder<TabsBloc, TabsState>(
+      buildWhen: _tabStripChanged,
       builder: (context, state) {
         if (!state.hasOpenTabs) return const SizedBox.shrink();
         return Container(
@@ -727,7 +754,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
 
   Widget _buildFullscreenCaptionButton(
     BuildContext context,
-    SettingsState settingsState,
+    bool isFullscreen,
   ) {
     // הכפתור מוצג רק בהקשר שמתיר מסך מלא (עיון/כלים).
     if (!FullscreenHelper.isAllowedInContext(context)) {
@@ -735,12 +762,12 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     }
     return _CaptionActionButton(
       brightness: Theme.of(context).brightness,
-      tooltip: settingsState.isFullscreen ? 'צא ממסך מלא' : 'מסך מלא',
-      icon: settingsState.isFullscreen
+      tooltip: isFullscreen ? 'צא ממסך מלא' : 'מסך מלא',
+      icon: isFullscreen
           ? FluentIcons.full_screen_minimize_24_regular
           : FluentIcons.full_screen_maximize_24_regular,
       onPressed: () async {
-        final newFullscreenState = !settingsState.isFullscreen;
+        final newFullscreenState = !isFullscreen;
         await FullscreenHelper.toggleFullscreen(context, newFullscreenState);
       },
     );
@@ -832,7 +859,8 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
   /// המפריד של הכרטיסיה הראשונה מפריד אותה מלחצני הפעולה שלפניה.
   bool _showLeadingDivider(TabsState state, int index) {
     bool emphasized(int i) =>
-        i == state.currentTabIndex || identical(_hoveredTab, state.tabs[i]);
+        i == state.currentTabIndex ||
+        identical(_hoveredTab.value, state.tabs[i]);
     if (index == 0) return !emphasized(0);
     return !emphasized(index) && !emphasized(index - 1);
   }
@@ -860,7 +888,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
   ) {
     final isSelected = index == state.currentTabIndex;
     final showLeadingDivider = _showLeadingDivider(state, index);
-    final isTabHovered = identical(_hoveredTab, tab);
+    final isTabHovered = identical(_hoveredTab.value, tab);
 
     return _wrapWithTabPointer(
       context,
@@ -948,7 +976,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
               '(${ShortcutHelper.formatShortcutForDisplay(closeTabShortcut)})'
         : closeTabLabel;
 
-    final isTabHovered = identical(_hoveredTab, tab);
+    final isTabHovered = identical(_hoveredTab.value, tab);
 
     Widget fadedTitle(String title) => buildFadedTabTitle(context, title);
 
@@ -1177,8 +1205,6 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
       child: AppContextMenuRegion(
         menuBuilder: (menuCtx, _) =>
             _buildTabContextMenuEntries(menuCtx, tab, state),
-        // הריחוף מרענן את השורה כולה ולא רק את הכרטיסיה: המפריד שנעלם בצדה
-        // שייך לכרטיסיה השכנה.
         child: MouseRegion(
           onEnter: (_) => _setHoveredTab(tab),
           onExit: (_) => _clearHoveredTab(tab),
@@ -1188,14 +1214,10 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
     );
   }
 
-  void _setHoveredTab(OpenedTab tab) {
-    if (identical(_hoveredTab, tab)) return;
-    setState(() => _hoveredTab = tab);
-  }
+  void _setHoveredTab(OpenedTab tab) => _hoveredTab.value = tab;
 
   void _clearHoveredTab(OpenedTab tab) {
-    if (!identical(_hoveredTab, tab)) return;
-    setState(() => _hoveredTab = null);
+    if (identical(_hoveredTab.value, tab)) _hoveredTab.value = null;
   }
 
   /// כפתור ה-X של כרטיסיה, או של חלונית בתוך כרטיסיה מפוצלת.
@@ -1302,6 +1324,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> {
   @override
   void dispose() {
     _crossWindowDrag.dispose();
+    _hoveredTab.dispose();
     super.dispose();
   }
 
@@ -1479,5 +1502,42 @@ class _EmptyAreaDoubleTapRecognizer extends DoubleTapGestureRecognizer {
   bool isPointerAllowed(PointerDownEvent event) {
     if (isPointerOnTab?.call(event.position) ?? false) return false;
     return super.isPointerAllowed(event);
+  }
+}
+
+class _HoverSelector extends StatefulWidget {
+  const _HoverSelector(this.hovered, this.select, this.builder);
+
+  final ValueListenable<OpenedTab?> hovered;
+  final Object? Function(OpenedTab? hovered) select;
+  final WidgetBuilder builder;
+
+  @override
+  State<_HoverSelector> createState() => _HoverSelectorState();
+}
+
+class _HoverSelectorState extends State<_HoverSelector> {
+  Object? _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.hovered.addListener(_onHoverChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.hovered.removeListener(_onHoverChanged);
+    super.dispose();
+  }
+
+  void _onHoverChanged() {
+    if (widget.select(widget.hovered.value) != _selected) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _selected = widget.select(widget.hovered.value);
+    return widget.builder(context);
   }
 }

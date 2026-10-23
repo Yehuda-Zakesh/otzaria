@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
+import 'package:otzaria/core/diagnostics/developer_diagnostics.dart';
 import 'package:otzaria/text_book/utils/reading_extent_estimates.dart';
 import 'package:otzaria/text_book/utils/reading_segments.dart';
 import 'package:positioned_sliver_list/positioned_list.dart';
@@ -21,6 +23,7 @@ class ReadingExtentEstimation extends StatefulWidget {
     this.verticalPadding = 4,
     this.textWidth,
     this.styleKey,
+    this.crossAxisPadding = 0,
   });
 
   final ReadingSegments segments;
@@ -32,8 +35,15 @@ class ReadingExtentEstimation extends StatefulWidget {
   final List<FontVariation>? fontVariations;
   final double contentWidthRatio;
   final double verticalPadding;
+
+  /// נקרא פעם אחת לכל רוחב; ערך שתלוי ב-context נקרא ב-build ונכנס ל-[styleKey]
+  /// או ל-crossAxisLayoutKey של הרשימה.
   final double Function(double availableWidth)? textWidth;
   final Object? styleKey;
+
+  /// הריפוד האופקי של הרשימה. החימום מוערך ברוחב הפריט שבפריסה, כי בזמן שינוי
+  /// רוחב ברשימה גדולה הרשימה אינה קוראת להערכה, ורוחב שנלמד ממנה מיושן.
+  final double crossAxisPadding;
   final Widget Function(ItemExtentEstimator estimator, Object estimationKey)
   builder;
 
@@ -51,8 +61,15 @@ class _ReadingExtentEstimationState extends State<ReadingExtentEstimation> {
   Object _estimationKey = Object();
   bool _refreshScheduled = false;
   bool _enabled = true;
-  double _availableWidth = 0;
+  double _layoutItemWidth = 0;
   double _itemWidth = 0;
+  double? _textWidth;
+
+  @override
+  void initState() {
+    super.initState();
+    DeveloperDiagnostics.instance.trackEstimateRefreshes(widget.controller);
+  }
 
   @override
   void didChangeDependencies() {
@@ -62,6 +79,7 @@ class _ReadingExtentEstimationState extends State<ReadingExtentEstimation> {
 
   @override
   void dispose() {
+    DeveloperDiagnostics.instance.untrackEstimateRefreshes(widget.controller);
     _data?.dispose();
     super.dispose();
   }
@@ -69,6 +87,7 @@ class _ReadingExtentEstimationState extends State<ReadingExtentEstimation> {
   @override
   void didUpdateWidget(ReadingExtentEstimation oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _textWidth = null;
     final changedReader =
         oldWidget.segments.readerIdentity != widget.segments.readerIdentity;
     if (changedReader) {
@@ -77,6 +96,11 @@ class _ReadingExtentEstimationState extends State<ReadingExtentEstimation> {
       _refreshScheduled = false;
     } else {
       _data?.update(widget.segments);
+    }
+    if (!identical(oldWidget.controller, widget.controller)) {
+      DeveloperDiagnostics.instance
+        ..untrackEstimateRefreshes(oldWidget.controller)
+        ..trackEstimateRefreshes(widget.controller);
     }
     if (changedReader ||
         !oldWidget.segments.layout.hasSameStructure(widget.segments.layout) ||
@@ -132,11 +156,7 @@ class _ReadingExtentEstimationState extends State<ReadingExtentEstimation> {
         } else {
           unawaited(
             widget.controller.updateEstimatedExtents({
-              for (final item in items)
-                item: _estimate(
-                  item,
-                  _itemWidth > 0 ? _itemWidth : _availableWidth,
-                ),
+              for (final item in items) item: _estimate(item, _layoutItemWidth),
             }),
           );
         }
@@ -145,13 +165,15 @@ class _ReadingExtentEstimationState extends State<ReadingExtentEstimation> {
   }
 
   double _estimate(int index, double width) {
-    _itemWidth = width;
-    final textWidth = widget.textWidth?.call(width);
-    return _estimates.estimate(
-      index,
-      textWidth != null && textWidth > 0 ? textWidth : width,
-      _metrics!,
-    );
+    var textWidth = _textWidth;
+    if (textWidth == null || width != _itemWidth) {
+      _itemWidth = width;
+      final resolved = widget.textWidth?.call(width);
+      textWidth = _textWidth = resolved != null && resolved > 0
+          ? resolved
+          : width;
+    }
+    return _estimates.estimate(index, textWidth, _metrics!);
   }
 
   @override
@@ -199,7 +221,10 @@ class _ReadingExtentEstimationState extends State<ReadingExtentEstimation> {
     _scheduleRefresh();
     return LayoutBuilder(
       builder: (_, constraints) {
-        _availableWidth = constraints.maxWidth;
+        _layoutItemWidth = math.max(
+          0.0,
+          constraints.maxWidth - widget.crossAxisPadding,
+        );
         return widget.builder(_estimate, _estimationKey);
       },
     );

@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria/settings/settings_exports.dart';
+import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 import 'package:otzaria/tabs/view/pane_drag_handle.dart';
 import 'package:otzaria/theme/theme_exports.dart';
 import 'package:otzaria/utils/ui/fullscreen_helper.dart';
@@ -296,6 +297,10 @@ class _AppTopBarState extends State<AppTopBar>
       },
       builder: (context, settingsState) {
         final isCompact = settingsState.compactMenuMode;
+        // סרגל משותף לעשרות מסכים; מחוץ להיקף חלון (בדיקות מסך) אין מסך מלא.
+        final isFullscreen = context.select(
+          (WindowFullscreenCubit? cubit) => cubit?.state ?? false,
+        );
         final cs = Theme.of(context).colorScheme;
         final barColor =
             widget.backgroundColor ?? AppSurfaces.topBarBackground(context);
@@ -318,7 +323,7 @@ class _AppTopBarState extends State<AppTopBar>
         // בקצה השמאלי, באותה פינה שבה יושב לחצן הכניסה למסך מלא בשורת הכותרת.
         final trailingItems = [
           ...widget.trailingItems,
-          if (settingsState.isFullscreen)
+          if (isFullscreen)
             AppTopBarItem(
               widget: BarButton.icon(
                 tooltip: 'צא ממסך מלא',

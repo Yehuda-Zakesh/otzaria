@@ -21,6 +21,8 @@ import 'package:otzaria/search/search_repository.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_state.dart';
 import 'package:otzaria/data/repository/text_book_repository.dart';
+import 'package:otzaria/text_book/models/book_notes.dart';
+import 'package:otzaria/text_book/repository/book_notes_repository.dart';
 import 'package:otzaria/tools/calendar/bloc/calendar_cubit.dart';
 import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
@@ -136,6 +138,13 @@ InstalledPlugin _buildInstalledPlugin({List<String> permissions = const []}) {
 /// adapter פיקטיבי לבדיקת מיפוי ההרשאות בלבד — execute לא אמור להיקרא
 /// כשההרשאה חסרה.
 class _FakeAdapter implements PluginBridgeAdapter {
+  @override
+  Future<T> withWindowDependencies<T>(
+    Future<T> Function() action, {
+    String? domain,
+    String? rpcAction,
+  }) => action();
+
   int executeCalls = 0;
 
   @override
@@ -578,6 +587,64 @@ void main() {
               as Map<String, dynamic>;
       expect(byUid['links'], hasLength(1));
       expect(repository.capturedBook, same(attached));
+    });
+  });
+
+  group('library.getLinks includeAnchors', () {
+    tearDown(() {
+      BookNotesRepository.instance
+        ..debugLoader = null
+        ..clear();
+    });
+
+    Link anchored(int start, int end, {String path = 'רש״י על בראשית'}) => Link(
+      heRef: '$path א, א',
+      index1: 1,
+      path2: path,
+      index2: 1,
+      connectionType: 'LINKER',
+      anchorStart: start,
+      anchorEnd: end,
+    );
+
+    test('העוגן מוחזר בטקסט השמור; עוגן שכולו בגוף הערה מושמט', () async {
+      // השורה המלאה: 3 תווים, גוף של 3 תווים ב-[3,6), ואז השאר.
+      BookNotesRepository.instance
+        ..clear()
+        ..debugLoader = (title, {categoryId, required source}) async =>
+            (BookNotesBuilder()..add(0, 0, null, 'אבג', charPos: 3)).build();
+      repository.links = [anchored(5, 8), anchored(3, 6, path: 'תוספות')];
+
+      final result =
+          await adapter.execute('library', 'getLinks', {
+                'bookId': 'בראשית',
+                'startLine': 0,
+                'endLine': 0,
+                'includeAnchors': true,
+              })
+              as Map<String, dynamic>;
+
+      final links = (result['links'] as List).cast<Map<String, dynamic>>();
+      expect(links.first['anchor'], {'start': 3, 'end': 5, 'label': null});
+      expect(links.last.containsKey('anchor'), isFalse);
+    });
+
+    test('כשל בטעינת ההערות מכשיל את הקריאה', () async {
+      BookNotesRepository.instance
+        ..clear()
+        ..debugLoader = (title, {categoryId, required source}) async =>
+            throw StateError('גוף שאינו מתפענח');
+      repository.links = [anchored(5, 8)];
+
+      await expectLater(
+        adapter.execute('library', 'getLinks', {
+          'bookId': 'בראשית',
+          'startLine': 0,
+          'endLine': 0,
+          'includeAnchors': true,
+        }),
+        throwsA(isA<StateError>()),
+      );
     });
   });
 

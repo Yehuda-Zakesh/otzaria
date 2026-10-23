@@ -7,10 +7,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
+import 'package:otzaria/core/diagnostics/process_tree_sampler.dart';
 import 'package:otzaria/core/error_log_file.dart';
+import 'package:otzaria/core/diagnostics/smart_text_render_stats.dart';
 import 'package:otzaria/core/info/os_version.dart';
 import 'package:otzaria/core/startup_timeline.dart';
 import 'package:path/path.dart' as p;
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 /// How diagnostics were requested at launch.
 enum DiagnosticsLaunchMode { off, panel, logOnly }
@@ -51,6 +54,62 @@ class FrameSample {
   final double totalMs;
 }
 
+/// Refreshes of estimated item extents during one tick, summed over lists.
+@immutable
+class EstimateRefreshWindow {
+  const EstimateRefreshWindow({
+    this.count = 0,
+    this.totalMs,
+    this.items = 0,
+    this.deferred = 0,
+    this.skipped = 0,
+  });
+
+  final int count;
+
+  /// Null when a list refreshed more than once: only its last duration is known.
+  final double? totalMs;
+  final int items;
+  final int deferred;
+  final int skipped;
+
+  bool get isEmpty => count == 0 && deferred == 0 && skipped == 0;
+
+  Map<String, Object?> toJson() => {
+    'count': count,
+    if (totalMs != null) 'totalMs': totalMs,
+    'items': items,
+    'deferred': deferred,
+    'skipped': skipped,
+  };
+}
+
+/// Sums the change from each `before` (null for a new list) to its `after`.
+EstimateRefreshWindow estimateRefreshDelta(
+  Iterable<(EstimateRefreshStats?, EstimateRefreshStats)> lists,
+) {
+  var count = 0, items = 0, deferred = 0, skipped = 0;
+  var totalMicros = 0;
+  var exact = true;
+  for (final (before, after) in lists) {
+    final refreshes = after.refreshCount - (before?.refreshCount ?? 0);
+    deferred += after.deferredResizeCount - (before?.deferredResizeCount ?? 0);
+    skipped += after.skippedResizeCount - (before?.skippedResizeCount ?? 0);
+    if (refreshes <= 0) continue;
+    count += refreshes;
+    items += refreshes * after.lastRefreshItemCount;
+    if (refreshes > 1) exact = false;
+    totalMicros += after.lastRefreshDuration.inMicroseconds;
+  }
+  return EstimateRefreshWindow(
+    count: count,
+    totalMs: exact && count > 0 ? _round1(totalMicros / 1000) : null,
+    items: items,
+    deferred: deferred,
+    skipped: skipped,
+  );
+}
+
 /// Frame statistics over the sliding window shown in the panel and logged.
 @immutable
 class FrameStats {
@@ -65,6 +124,8 @@ class FrameStats {
     this.rssMb = 0,
     this.peakRssMb = 0,
     this.topRebuilds = const [],
+    this.processes,
+    this.estimates,
   });
 
   final int framesPerSecond;
@@ -80,7 +141,14 @@ class FrameStats {
   /// Widget types rebuilt most often in the window. Debug builds only.
   final List<MapEntry<String, int>> topRebuilds;
 
-  Map<String, Object?> toJson() => {
+  /// הדגימה האחרונה של עץ התהליכים, או null כשאין (כבוי, לפני reveal, או
+  /// פלטפורמה בלי מימוש).
+  final ProcessTreeSample? processes;
+
+  /// Estimate refreshes of the reader lists since the previous tick, if any.
+  final EstimateRefreshWindow? estimates;
+
+  Map<String, Object?> toJson({bool includeProcesses = true}) => {
     'fps': framesPerSecond,
     'buildAvgMs': buildAvgMs,
     'buildMaxMs': buildMaxMs,
@@ -92,6 +160,8 @@ class FrameStats {
     'peakRssMb': peakRssMb,
     if (topRebuilds.isNotEmpty)
       'rebuilds': {for (final e in topRebuilds) e.key: e.value},
+    if (includeProcesses && processes != null) 'processes': processes!.toJson(),
+    if (estimates != null) 'estimates': estimates!.toJson(),
   };
 }
 
@@ -103,6 +173,8 @@ FrameStats computeFrameStats(
   int rssMb = 0,
   int peakRssMb = 0,
   List<MapEntry<String, int>> topRebuilds = const [],
+  ProcessTreeSample? processes,
+  EstimateRefreshWindow? estimates,
 }) {
   double? avg(Iterable<double> v) =>
       v.isEmpty ? null : _round1(v.reduce((a, b) => a + b) / v.length);
@@ -123,6 +195,8 @@ FrameStats computeFrameStats(
     rssMb: rssMb,
     peakRssMb: peakRssMb,
     topRebuilds: topRebuilds,
+    processes: processes,
+    estimates: estimates == null || estimates.isEmpty ? null : estimates,
   );
 }
 
@@ -146,6 +220,10 @@ class DeveloperDiagnostics {
   /// A frame this slow is logged on its own, with the app context.
   static const double slowFrameLogMs = 100;
 
+  /// The process tree is sampled every this many ticks (seconds), after the
+  /// window is revealed.
+  static const int processSampleEveryTicks = 5;
+
   DiagnosticsLaunchMode _launchMode = DiagnosticsLaunchMode.off;
   bool _toggledOn = false;
   bool _running = false;
@@ -162,6 +240,15 @@ class DeveloperDiagnostics {
 
   late String outputPath = _defaultOutputPath();
 
+  /// Lists the WebView processes; registered by the plugin layer.
+  WebViewProcessLister? webViewProcessLister;
+
+  /// Samples the app and WebView processes; replaced in tests.
+  late ProcessTreeSampler processSampler = _sampleProcessTree;
+
+  Future<ProcessTreeSample?> _sampleProcessTree() =>
+      sampleProcessTree(webViewProcesses: webViewProcessLister);
+
   /// Receives the readable snapshot entry; errors.txt by default.
   void Function(String text) errorLogWriter = ErrorLogFile.appendText;
 
@@ -170,6 +257,8 @@ class DeveloperDiagnostics {
   Future<bool>? _flushInFlight;
   static const int _maxPendingRecords = 4096;
   final Map<String, int> _rebuildsInWindow = {};
+  final Map<ItemScrollController, int> _estimateLists = {};
+  Expando<EstimateRefreshStats> _lastEstimates = Expando();
   int _slowTotal = 0;
   int _peakRss = 0;
   Timer? _tick;
@@ -179,8 +268,45 @@ class DeveloperDiagnostics {
   RebuildDirtyWidgetCallback? _previousRebuildCallback;
   bool _previousRepaintRainbow = false;
   bool _previousPaintSize = false;
+  ProcessTreeSample? _processes;
+  DateTime? _processesAt;
+  int _ticksUntilProcessSample = 0;
+  bool _processesFresh = false;
+  bool _processSampleFailureLogged = false;
+  Future<void>? _processSampling;
+
+  /// A sample started in an earlier collection is dropped when it lands.
+  int _session = 0;
 
   bool get isCollecting => _running;
+
+  /// רשימה שעלות רענון ההערכות שלה נכנסת ל-stats. נרשמת גם כשהאיסוף כבוי,
+  /// כדי שהפעלה ב-Ctrl+Shift+I תכלול רשימות שכבר פתוחות.
+  void trackEstimateRefreshes(ItemScrollController controller) => _estimateLists
+      .update(controller, (count) => count + 1, ifAbsent: () => 1);
+
+  // נספר: מופע חדש נרשם ב-initState לפני ש-dispose של הקודם מסיר את אותו בקר.
+  void untrackEstimateRefreshes(ItemScrollController controller) {
+    final count = _estimateLists[controller];
+    if (count == null) return;
+    if (count > 1) {
+      _estimateLists[controller] = count - 1;
+    } else {
+      _estimateLists.remove(controller);
+    }
+  }
+
+  EstimateRefreshWindow _estimateRefreshesSinceLastTick() {
+    final lists = <(EstimateRefreshStats?, EstimateRefreshStats)>[];
+    for (final controller in _estimateLists.keys) {
+      final list = controller.listController;
+      final stats = list?.estimateRefreshStats;
+      if (list == null || stats == null) continue;
+      lists.add((_lastEstimates[list], stats));
+      _lastEstimates[list] = stats;
+    }
+    return estimateRefreshDelta(lists);
+  }
 
   /// Called once from main(); cheap and does no I/O unless requested.
   void initFromLaunch(List<String> args, {Map<String, String>? environment}) {
@@ -225,11 +351,18 @@ class DeveloperDiagnostics {
 
   void _start() {
     _running = true;
+    _session++;
     _clock = Stopwatch()..start();
     _slowTotal = 0;
     _peakRss = 0;
     _startupWritten = false;
     _lastContext = null;
+    _resetProcesses();
+    // רענונים שקדמו לאיסוף אינם נספרים.
+    _lastEstimates = Expando();
+    _estimateRefreshesSinceLastTick();
+    SmartTextRenderStats.reset();
+    SmartTextRenderStats.enabled = true;
     SchedulerBinding.instance.addTimingsCallback(_onTimings);
     if (kDebugMode) {
       _previousRebuildCallback = debugOnRebuildDirtyWidget;
@@ -263,6 +396,7 @@ class DeveloperDiagnostics {
     panelVisible.value = false;
     _tick?.cancel();
     _tick = null;
+    SmartTextRenderStats.enabled = false;
     SchedulerBinding.instance.removeTimingsCallback(_onTimings);
     if (kDebugMode && debugOnRebuildDirtyWidget == _onRebuild) {
       debugOnRebuildDirtyWidget = _previousRebuildCallback;
@@ -272,8 +406,53 @@ class DeveloperDiagnostics {
     if (flush) unawaited(_flushAll());
     _samples.clear();
     _rebuildsInWindow.clear();
+    _resetProcesses();
     stats.value = const FrameStats();
     performanceOverlay.value = false;
+  }
+
+  void _resetProcesses() {
+    _processes = null;
+    _processesAt = null;
+    _ticksUntilProcessSample = 0;
+    _processesFresh = false;
+    _processSampleFailureLogged = false;
+    _processSampling = null;
+  }
+
+  /// psapi.dll וה-COM של WebView2 נטענים בדגימה הראשונה — לכן רק אחרי reveal.
+  void _maybeSampleProcesses({required bool revealed}) {
+    if (!revealed || _processSampling != null) return;
+    if (_ticksUntilProcessSample-- > 0) return;
+    _ticksUntilProcessSample = processSampleEveryTicks - 1;
+    unawaited(_sampleProcesses());
+  }
+
+  Future<void> _sampleProcesses() {
+    final running = _processSampling;
+    if (running != null) return running;
+    late final Future<void> operation;
+    operation = _runProcessSample().whenComplete(() {
+      if (identical(_processSampling, operation)) _processSampling = null;
+    });
+    return _processSampling = operation;
+  }
+
+  Future<void> _runProcessSample() async {
+    final session = _session;
+    try {
+      final sample = await processSampler().timeout(
+        const Duration(seconds: 2),
+      );
+      if (!_running || session != _session || sample == null) return;
+      _processes = sample;
+      _processesAt = DateTime.now();
+      _processesFresh = true;
+    } catch (error) {
+      if (_processSampleFailureLogged) return;
+      _processSampleFailureLogged = true;
+      debugPrint('Developer diagnostics process sample failed: $error');
+    }
   }
 
   int get _elapsedMs => _clock?.elapsedMilliseconds ?? 0;
@@ -309,6 +488,8 @@ class DeveloperDiagnostics {
   }
 
   void _onTick() {
+    final startup = StartupTimeline.instance.toJson();
+    _maybeSampleProcesses(revealed: startup['revealMs'] != null);
     final cutoff = DateTime.now().subtract(window);
     while (_samples.isNotEmpty && _samples.first.$1.isBefore(cutoff)) {
       _samples.removeFirst();
@@ -325,8 +506,12 @@ class DeveloperDiagnostics {
       rssMb: rss >> 20,
       peakRssMb: _peakRss >> 20,
       topRebuilds: top.take(10).toList(),
+      processes: _processes,
+      estimates: _estimateRefreshesSinceLastTick(),
     );
     stats.value = current;
+    final freshProcesses = _processesFresh;
+    _processesFresh = false;
 
     final context = _context();
     final encodedContext = jsonEncode(context);
@@ -334,10 +519,19 @@ class DeveloperDiagnostics {
       _lastContext = encodedContext;
       _write({'type': 'context', 't': _elapsedMs, ...context});
     }
-    if (current.framesPerSecond > 0 || current.topRebuilds.isNotEmpty) {
-      _write({'type': 'stats', 't': _elapsedMs, ...current.toJson()});
+    final smartText = SmartTextRenderStats.takeAndReset();
+    if (current.framesPerSecond > 0 ||
+        current.topRebuilds.isNotEmpty ||
+        current.estimates != null ||
+        freshProcesses ||
+        smartText != null) {
+      _write({
+        'type': 'stats',
+        't': _elapsedMs,
+        ...current.toJson(includeProcesses: freshProcesses),
+        'smartText': ?smartText,
+      });
     }
-    final startup = StartupTimeline.instance.toJson();
     if (!_startupWritten && startup['revealMs'] != null) {
       _startupWritten = true;
       _write({
@@ -363,11 +557,18 @@ class DeveloperDiagnostics {
     if (_pending.length >= _maxPendingRecords && !await _flushAll()) {
       return null;
     }
+    await _sampleProcesses();
+    final processesAt = _processesAt;
     final record = {
       'type': 'snapshot',
       't': _elapsedMs,
       'time': DateTime.now().toIso8601String(),
-      ...stats.value.toJson(),
+      ...stats.value.toJson(includeProcesses: false),
+      'processes': ?_processes?.toJson(
+        ageMs: processesAt == null
+            ? null
+            : DateTime.now().difference(processesAt).inMilliseconds,
+      ),
       'context': _context(),
       'startup': StartupTimeline.instance.toJson(),
     };
@@ -462,10 +663,15 @@ class DeveloperDiagnostics {
   );
 
   @visibleForTesting
+  void debugTick() => _onTick();
+
+  @visibleForTesting
   void resetForTesting() {
     if (_running) {
       _running = false;
       _tick?.cancel();
+      SmartTextRenderStats.enabled = false;
+      SmartTextRenderStats.reset();
       SchedulerBinding.instance.removeTimingsCallback(_onTimings);
       if (kDebugMode && debugOnRebuildDirtyWidget == _onRebuild) {
         debugOnRebuildDirtyWidget = _previousRebuildCallback;
@@ -478,8 +684,13 @@ class DeveloperDiagnostics {
     _flushInFlight = null;
     _samples.clear();
     _rebuildsInWindow.clear();
+    _estimateLists.clear();
+    _lastEstimates = Expando();
     contextProvider = null;
     errorLogWriter = ErrorLogFile.appendText;
+    processSampler = _sampleProcessTree;
+    webViewProcessLister = null;
+    _resetProcesses();
     panelVisible.value = false;
     performanceOverlay.value = false;
     stats.value = const FrameStats();

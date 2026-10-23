@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
+import 'package:otzaria/attached_libraries/repository/external_link_repository.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/app_runtime_reset.dart';
 import 'package:otzaria/core/error_log_file.dart';
@@ -14,7 +16,6 @@ import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/core/user_state/user_state_list_store.dart';
 import 'package:otzaria/core/windowing/settings_sync.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/indexing/bloc/indexing_bloc.dart';
 import 'package:otzaria/indexing/utils/indexing_crash_canary.dart';
 import 'package:otzaria/indexing/bloc/indexing_event.dart';
@@ -38,6 +39,8 @@ import 'package:otzaria/plugins/services/plugin_new_tab_page_service.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
+import 'package:otzaria/semantic_search/repository/semantic_search_repository.dart';
+import 'package:otzaria/settings/services/backup_service.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/widgets/misc/restart_widget.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
@@ -80,7 +83,7 @@ class _WindowBusHostState extends State<WindowBusHost> {
     // המשותפים היה סריקת `describe` עם timeout — והבעלים דווקא עסוק בזמן
     // שנפתח חלון שני, כלומר הסריקה פקעה בדיוק כשהיא נחוצה.
     final slot = LibraryAccessGate.instance.registerWindow(
-      asOwner: !WindowRole.isSecondary,
+      asOwner: ProcessDuties.current.isProcessOwner,
     );
     WindowBus.instance.onRequest = _handleRequest;
     LibraryAccessGate.instance.onLibraryReplaced = () {
@@ -116,7 +119,7 @@ class _WindowBusHostState extends State<WindowBusHost> {
     // בחלון אחד ורואה שני חלונות של אותה תוכנה נראים שונה.
     _settingsChanged = SettingsSync.instance.changes.listen((key) {
       // איפוס מחלון אחר מחק כאן גם את רישום ההתראות; הבעלים מבטל לפי הזיכרון.
-      if (key.isEmpty && !WindowRole.isSecondary) {
+      if (key.isEmpty && ProcessDuties.current.isProcessOwner) {
         unawaited(
           CalendarAlertsOwner.instance.handleSettingsReset().catchError(
             (Object error, StackTrace stackTrace) =>
@@ -225,6 +228,19 @@ class _WindowBusHostState extends State<WindowBusHost> {
         return _openUri(request['uri']);
       case MultiWindowService.requestIndex:
         return _runIndexRequest(request);
+      case BackupService.requestRestore:
+        if (!mounted) return null;
+        if (!await AppWindowScope.controllerOf(context).isVisible()) {
+          return {'error': WindowMessages.restoreNeedsOpenMainWindow};
+        }
+        return BackupService.handleRestoreRequest(request);
+      case SemanticSearchRepository.requestState:
+      case SemanticSearchRepository.requestCommand:
+      case SemanticSearchRepository.requestRelease:
+        return SemanticSearchRepository.handleWindowRequest(request);
+      case ExternalLinkRepository.requestState:
+      case ExternalLinkRepository.requestCommand:
+        return ExternalLinkRepository.instance.handleWindowRequest(request);
       case MultiWindowService.requestIndexVisibilityResult:
         final id = request['operationId'];
         final success = request['success'];
@@ -249,11 +265,13 @@ class _WindowBusHostState extends State<WindowBusHost> {
         // הגדרה שונתה בחלון אחר — מוחלת על ה-box המקומי ומרעננת את ה-state.
         return SettingsSync.instance.handleRequest(request);
       case CalendarAlertsOwner.requestCommand:
-        if (WindowRole.isSecondary) throw StateError('Not the main window');
+        if (!ProcessDuties.current.isProcessOwner) {
+          throw StateError('Not the main window');
+        }
         return CalendarAlertsOwner.instance.handleBusRequest(request);
       case CalendarAlertsOwner.requestStateChanged:
       case CalendarAlertsOwner.requestScheduleStatus:
-        if (!WindowRole.isSecondary) return null;
+        if (ProcessDuties.current.isProcessOwner) return null;
         return RemoteCalendarAlertsClient.instance.handleBusMessage(request);
       case MultiWindowService.requestRestart:
         return _restartSelf(
@@ -408,13 +426,18 @@ class _WindowBusHostState extends State<WindowBusHost> {
   ///
   /// מחזיר true רק אחרי שהאירוע נשלח בפועל, כי השולח מדווח למשתמש לפיו.
   Future<Object?> _runIndexRequest(Map<String, dynamic> request) async {
-    if (!mounted || WindowRole.isSecondary) return false;
+    if (!mounted || !ProcessDuties.current.isProcessOwner) return false;
     final indexing = context.read<IndexingBloc>();
     switch (request['op']) {
       case MultiWindowService.indexOpAll:
         final library = await DataRepository.instance.library;
         if (!mounted) return false;
         indexing.add(StartIndexing(library));
+        return true;
+      case MultiWindowService.indexOpResetAndIndex:
+        final library = await DataRepository.instance.library;
+        if (!mounted) return false;
+        indexing.add(ResetAndIndex(library));
         return true;
       case MultiWindowService.indexOpVisibility:
         final bookKeys = request['bookKeys'];
@@ -538,7 +561,7 @@ class _WindowBusHostState extends State<WindowBusHost> {
       'title': current?.title ?? 'חלון ריק',
       'tabCount': state.tabs.length,
       // מאפשר לחלונות משניים לאתר את הבעלים של המאגרים המשותפים.
-      'isOwner': !WindowRole.isSecondary,
+      'isOwner': ProcessDuties.current.isProcessOwner,
       'activeWorkspaceId': context
           .read<WorkspaceBloc>()
           .state

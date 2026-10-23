@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/text_book/repository/book_notes_repository.dart';
 import 'package:otzaria/data/data_providers/book_composite_key.dart';
 import 'package:otzaria/data/data_providers/library_provider.dart';
 import 'package:otzaria/data/data_providers/library_provider_manager.dart';
@@ -31,6 +32,17 @@ class _TestSettingsBloc extends Bloc<SettingsEvent, SettingsState>
 void main() {
   final manager = LibraryProviderManager.instance;
   tearDown(manager.resetForTesting);
+  // ספק הבדיקה אינו מסד; בלי הקיצור איתורו נכשל, וכשל בטעינת ההערות מדווח.
+  setUp(
+    () => BookNotesRepository.instance
+      ..clear()
+      ..debugIsDatabaseBook = (title, {categoryId, fileType}) async => false,
+  );
+  tearDown(
+    () => BookNotesRepository.instance
+      ..debugIsDatabaseBook = null
+      ..clear(),
+  );
 
   // פריט מפרש שנבנה מחדש בגלילה למעלה: אם הוא מתחיל בשלד טעינה קצר וגדל
   // אחריו, הוא דוחף את הרשימה חזרה למטה (issue #1588).

@@ -3,11 +3,13 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart';
 
-/// מפתח של רשימה ב-[UserStateListStore]: שם המאגר ההיסטורי ומפתח בתוכו.
-typedef UserStateListKey = ({String box, String key});
+/// שינוי ברשימה של [UserStateListStore]: שם המאגר ההיסטורי ומפתח בתוכו.
+/// `origin` — מי שכתב באותו isolate; `null` כשהגיע מחלון אחר באפיק.
+typedef UserStateListChange = ({String box, String key, Object? origin});
 
 /// רשימות מצב המשתמש (היסטוריה, סימניות, שולחנות) — רשימה שלמה לכל מפתח.
 ///
@@ -26,21 +28,27 @@ class UserStateListStore {
 
   final UserStateDatabase _database;
   final WindowBus _bus;
-  final StreamController<UserStateListKey> _changes =
-      StreamController<UserStateListKey>.broadcast();
+  final StreamController<UserStateListChange> _changes =
+      StreamController<UserStateListChange>.broadcast();
 
-  /// רשימות ששונו **בחלון אחר**. כתיבה מקומית אינה משודרת לעצמה.
-  Stream<UserStateListKey> get changes => _changes.stream;
+  /// רשימות ששונו בחלון אחר. בחלונות Dart (isolate אחד) גם כתיבה מקומית
+  /// משודרת, עם ה-[origin] שלה, כדי שהכותב יוכל לסנן את עצמו.
+  Stream<UserStateListChange> get changes => _changes.stream;
 
   Future<List<dynamic>> read(String box, String key) async {
     final db = await _database.database;
     return _readIn(db, box, key);
   }
 
-  Future<void> write(String box, String key, List<dynamic> value) async {
+  Future<void> write(
+    String box,
+    String key,
+    List<dynamic> value, {
+    Object? origin,
+  }) async {
     final db = await _database.database;
     _withImmediateTransaction(db, () => _writeIn(db, box, key, value));
-    _notifyPeers(box, key);
+    _notifyPeers(box, key, origin);
   }
 
   /// קורא, מחיל את [apply] וכותב — הכול בטרנזקציה אחת. מחזיר את הרשימה
@@ -48,22 +56,23 @@ class UserStateListStore {
   Future<List<dynamic>> mutate(
     String box,
     String key,
-    List<dynamic> Function(List<dynamic> current) apply,
-  ) async {
+    List<dynamic> Function(List<dynamic> current) apply, {
+    Object? origin,
+  }) async {
     final db = await _database.database;
     late List<dynamic> result;
     _withImmediateTransaction(db, () {
       result = apply(_readIn(db, box, key));
       _writeIn(db, box, key, result);
     });
-    _notifyPeers(box, key);
+    _notifyPeers(box, key, origin);
     return result;
   }
 
-  Future<void> clear(String box, String key) async {
+  Future<void> clear(String box, String key, {Object? origin}) async {
     final db = await _database.database;
     db.execute('DELETE FROM lists WHERE box = ? AND key = ?', [box, key]);
-    _notifyPeers(box, key);
+    _notifyPeers(box, key, origin);
   }
 
   /// מטפל בהודעת [requestChanged] שהגיעה באפיק. מחזיר null כשאינה שלנו.
@@ -72,7 +81,9 @@ class UserStateListStore {
     final box = request['box'];
     final key = request['key'];
     if (box is! String || key is! String) return null;
-    if (request['origin'] != _bus.slot) _changes.add((box: box, key: key));
+    if (request['origin'] != _bus.slot) {
+      _changes.add((box: box, key: key, origin: null));
+    }
     return true;
   }
 
@@ -120,7 +131,11 @@ class UserStateListStore {
 
   /// fire-and-forget: חלון שלא קיבל את ההודעה יקרא את הערך הנכון בפעם
   /// הבאה שיטען את הרשימה.
-  void _notifyPeers(String box, String key) {
+  void _notifyPeers(String box, String key, Object? origin) {
+    // חלונות Dart חולקים isolate ואין ביניהם אפיק.
+    if (MultiViewMode.enabled) {
+      _changes.add((box: box, key: key, origin: origin));
+    }
     final slot = _bus.slot;
     if (slot == null) return;
     try {

@@ -150,6 +150,23 @@ export interface BootPayload {
    *  For a fresh runtime snapshot, call `app.getGrantedPermissions()` or
    *  listen to `plugin.permissions_changed`. */
   permissions: string[];
+  /** Present whenever the page of an already open tab loads again (discard,
+   *  crash, update) — then `state` may be `null`. For a tab restored from a
+   *  previous session or a workspace, present only if a state was saved.
+   *  Absent on a fresh open. `state` is the last value passed to
+   *  `plugin.setRestoreState`. Since 0.9.99. */
+  restore?: PluginRestorePayload;
+}
+
+/** The `restore` field of `plugin.boot`. Since 0.9.99. */
+export interface PluginRestorePayload {
+  reason: 'discarded' | 'crashed' | 'reloaded' | 'session';
+  state: unknown | null;
+}
+
+/** Arguments of `plugin.setRestoreState`. `null` clears; at most 64KB as JSON. */
+export interface PluginSetRestoreStateArgs {
+  state: unknown | null;
 }
 
 /** Result of `app.getConnectivity`, and the `connectivity` field of `plugin.boot`. */
@@ -516,7 +533,11 @@ export type GetCommentatorsResult =
   | { commentators: CommentatorInfo[] }
   | { groups: CommentatorGroup[] };
 
-/** עוגן-מילה של קישור בשורת המקור (אופסטים בתווים גלויים). */
+/**
+ * עוגן-מילה של קישור בשורת המקור, באופסטים בתווים גלויים של הטקסט ש-`getBookContent`
+ * מחזיר. גוף הערה שבטבלה נפרדת אינו בטקסט הזה: עוגן שכולו בגוף הערה אינו מוחזר,
+ * וטווח שחוצה הערה מוחזר בלי החלק שבה.
+ */
 export interface LinkAnchor {
   start: number;
   end: number | null;
@@ -2122,9 +2143,9 @@ export interface FontFamilyRequest {
 }
 
 /**
- * Result of `fonts.resolveFamilies`: ready-to-inject `@font-face` rules whose
- * bytes come from Otzaria's bundled or system fonts, each declared under the
- * requested `name`.
+ * Result of `fonts.resolveFamilies`: ready-to-inject `@font-face` rules for
+ * Otzaria's bundled or system fonts, each declared under the requested `name`.
+ * Each `src` is a self-contained `data:` URL, suitable for storing or exporting.
  *
  * Needed because `src: local()` inside a plugin WebView resolves only fonts
  * installed on the machine — never the faces Otzaria injects itself. A plugin
@@ -2376,6 +2397,7 @@ export type OtzariaMethod =
   /** @internal חנות התוספים בלבד — לא מתועד ב-API_REFERENCE ואינו חוזה יציב. */
   | 'plugin.requestInstall'
   | 'plugin.backgroundDone'
+  | 'plugin.setRestoreState'
   | 'plugin.listInstalled'
   | 'reader.addContextMenuItem'
   | 'reader.removeContextMenuItem'
@@ -2473,6 +2495,12 @@ export interface OtzariaGlobal {
   call(
     method: 'plugin.setNewTabPage',
     payload?: { enabled?: boolean }
+  ): Promise<OtzariaResponse<boolean>>;
+
+  /** שומר מצב שחזור ב-`plugin.boot.restore`; מצב שאינו null מאפשר פינוי אוטומטי של הכרטיסייה. */
+  call(
+    method: 'plugin.setRestoreState',
+    payload: PluginSetRestoreStateArgs
   ): Promise<OtzariaResponse<boolean>>;
 
   /** מחזיר רשימה של כל התוספים המותקנים. */

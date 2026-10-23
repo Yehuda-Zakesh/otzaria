@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show BuildContext;
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:window_manager/window_manager.dart';
 
 /// מעדכן את כותרת החלון לפי הכרטיסיה הפעילה בו, כמו בדפדפן.
@@ -28,6 +30,20 @@ class WindowTitleSync {
 
   /// הכותרת של החלון שה-isolate הזה מציג; היום כל חלון הוא isolate משלו.
   static final WindowTitleSync current = WindowTitleSync();
+
+  static final Expando<WindowTitleSync> _perWindow = Expando('WindowTitleSync');
+
+  /// חלון באותו isolate קושר מופע משלו למפתחות שלו.
+  static void bind(AppWindowKeys keys, WindowTitleSync sync) =>
+      _perWindow[keys] = sync;
+
+  static void unbind(AppWindowKeys keys, WindowTitleSync sync) {
+    if (identical(_perWindow[keys], sync)) _perWindow[keys] = null;
+  }
+
+  /// המופע של החלון ש-[context] יושב בו; בלי קשירה — [current].
+  static WindowTitleSync of(BuildContext context) =>
+      _perWindow[AppWindowKeys.of(context)] ?? current;
 
   final Future<void> Function(String title) _setTitle;
 
@@ -57,9 +73,16 @@ class WindowTitleSync {
   }
 
   /// מעדכן את כותרת החלון של ה-isolate הזה, אם היא שונה מזו שנשלחה.
-  static Future<void> update(String? activeTabTitle, {int tabCount = 0}) async {
+  static Future<void> update(String? activeTabTitle, {int tabCount = 0}) =>
+      current.syncIfSupported(activeTabTitle, tabCount: tabCount);
+
+  /// כמו [sync], ורק בפלטפורמות שיש בהן כותרת חלון.
+  Future<void> syncIfSupported(
+    String? activeTabTitle, {
+    int tabCount = 0,
+  }) async {
     if (!_isSupported) return;
-    await current.sync(activeTabTitle, tabCount: tabCount);
+    await sync(activeTabTitle, tabCount: tabCount);
   }
 
   /// מעדכן את כותרת החלון הזה, אם היא שונה מזו שנשלחה אליו.

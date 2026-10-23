@@ -65,4 +65,24 @@ void main() {
     await tester.pump();
     expect(retried, 1);
   });
+
+  testWidgets('נפילה חוזרת מציגה הסבר משלה ו"נסה שוב"', (tester) async {
+    var retried = 0;
+    await tester.pumpWidget(
+      _wrap(
+        PluginWebViewFailedView(
+          pluginName: 'מחשבון',
+          kind: PluginWebViewFailureKind.crashed,
+          isEmulatedOnArm: true,
+          onRetry: () => retried++,
+        ),
+      ),
+    );
+
+    expect(find.textContaining('התוסף "מחשבון" הפסיק לפעול'), findsOne);
+    expect(find.textContaining('נסגר שוב ושוב'), findsOne);
+    expect(find.textContaining('מבוסס מעבד ARM'), findsNothing);
+    await tester.tap(find.text('נסה שוב'));
+    expect(retried, 1);
+  });
 }

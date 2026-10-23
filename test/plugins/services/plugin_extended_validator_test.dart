@@ -328,6 +328,7 @@ void main() {
         'ui.printFile',
         'ui.exportPdf',
         'ui.setUnsavedChanges',
+        'plugin.setRestoreState',
       };
       final missing = PluginExtendedValidator.knownApiMethods
           .where((m) => !noManifestPermission.contains(m))

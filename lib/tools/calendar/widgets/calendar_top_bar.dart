@@ -440,7 +440,7 @@ class _CalendarTopBarState extends State<CalendarTopBar>
                       ),
                       JumpToDatePanel(
                         selectedDate: _pendingJumpDate,
-                        currentDate: widget.state.selectedGregorianDate,
+                        currentDate: widget.state.todayGregorianDate,
                         showHebrew: _jumpShowHebrew,
                         onDateChanged: (date) {
                           setState(() {

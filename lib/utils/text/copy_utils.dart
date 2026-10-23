@@ -10,6 +10,10 @@ import 'package:otzaria/text_display/text_display_exports.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as text_utils;
 
 class CopyUtils {
+  /// מספר הפעמים שה-HTML להעתקה פוענח (לבדיקות).
+  @visibleForTesting
+  static int debugHtmlParseCount = 0;
+
   /// מחיל העדפות תצוגה על טקסט שמיועד להעתקה.
   ///
   /// [removeNikud] מסיר ניקוד וטעמים מהעותק בלבד (פעולת "העתק בלי ניקוד",
@@ -57,6 +61,14 @@ class CopyUtils {
     if ((!replaceHolyNames && !removeNikud && profile == null) ||
         htmlText.isEmpty) {
       return (plainText: processedPlainText, htmlText: htmlText);
+    }
+
+    // בחירה רב-שורתית: ה-HTML הוא הטקסט עצמו, וכשאין בו תווים שהפענוח
+    // או הקידוד משנים, התוצאה זהה לטקסט המעובד.
+    if (htmlText == plainText &&
+        !_hasHtmlSensitiveChar(plainText) &&
+        !_hasHtmlSensitiveChar(processedPlainText)) {
+      return (plainText: processedPlainText, htmlText: processedPlainText);
     }
 
     final processedHtmlText = _applyCopyPreferencesToHtml(
@@ -418,6 +430,7 @@ class CopyUtils {
       return htmlText;
     }
 
+    debugHtmlParseCount++;
     final fragment = html_parser.parseFragment(htmlText);
     _applyPreferencesToTextNodes(
       fragment.nodes,
@@ -474,6 +487,23 @@ class CopyUtils {
       ' ',
     );
     return html_parser.parseFragment(withBreaks).text ?? '';
+  }
+
+  /// לולאה ולא RegExp: הבדיקה רצה על כל הבחירה, ו-RegExp איטי ממנה פי 4.
+  static bool _hasHtmlSensitiveChar(String s) {
+    for (var i = 0; i < s.length; i++) {
+      final c = s.codeUnitAt(i);
+      // < > & \r NUL NBSP
+      if (c == 0x3C ||
+          c == 0x3E ||
+          c == 0x26 ||
+          c == 0x0D ||
+          c == 0 ||
+          c == 0xA0) {
+        return true;
+      }
+    }
+    return false;
   }
 
   static String _normalizeCopiedText(String text) {

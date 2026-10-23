@@ -24,28 +24,11 @@ class PluginDropZone extends StatefulWidget {
   State<PluginDropZone> createState() => _PluginDropZoneState();
 }
 
-class _PluginDropZoneState extends State<PluginDropZone> {
-  PluginFileDropService get _service => PluginFileDropService.instance;
+class _PluginDropZoneState extends State<PluginDropZone>
+    with PluginFileDropZoneBinding {
+  PluginFileDropService get _service => dropService;
 
-  StreamSubscription<PluginFileDrag>? _dropSubscription;
   bool _isHovering = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _service.acquire();
-    _service.drag.addListener(_onDragChanged);
-    _dropSubscription = _service.drops.listen(_onDrop);
-  }
-
-  @override
-  void dispose() {
-    _service.drag.removeListener(_onDragChanged);
-    _dropSubscription?.cancel();
-    _service.setZoneAccepting(this, false);
-    _service.release();
-    super.dispose();
-  }
 
   static List<String> _pluginPaths(List<String> paths) => paths
       .where((path) => path.toLowerCase().endsWith(_pluginExtension))
@@ -64,7 +47,8 @@ class _PluginDropZoneState extends State<PluginDropZone> {
         local.dy < box.size.height;
   }
 
-  void _onDragChanged() {
+  @override
+  void onFileDragChanged() {
     final drag = _service.drag.value;
     final hovering =
         drag != null &&
@@ -74,7 +58,8 @@ class _PluginDropZoneState extends State<PluginDropZone> {
     if (hovering != _isHovering) setState(() => _isHovering = hovering);
   }
 
-  Future<void> _onDrop(PluginFileDrag drop) async {
+  @override
+  Future<void> onFileDropped(PluginFileDrag drop) async {
     if (_isHovering) setState(() => _isHovering = false);
     if (!_contains(drop.physicalPosition)) return;
 

@@ -6,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/core/windowing/app_window_controller.dart';
@@ -43,6 +44,7 @@ import 'package:otzaria/work_status/work_status_cubit.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
 import 'package:otzaria/workspaces/bloc/workspace_event.dart';
 import 'package:otzaria/workspaces/bloc/workspace_state.dart';
+import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:window_manager/window_manager.dart' show TitleBarStyle;
 import '../test_helpers/memory_cache_provider.dart';
@@ -91,6 +93,33 @@ void main() {
       () => harness.indexing.add(any(that: isA<ReconcileHiddenIndex>())),
     ).called(1);
   });
+
+  testWidgets(
+    'החלטת האינדוקס בעלייה שואלת את ProcessDuties ולא את WindowRole',
+    (
+      tester,
+    ) async {
+      // לפני הבנייה: המסך קורא את ProcessDuties פעם אחת, ב-initState.
+      ProcessDuties.debugOverride = ProcessDuties(isProcessOwner: () => false);
+      addTearDown(() => ProcessDuties.debugOverride = null);
+      final harness = await _pumpMainWindow(
+        tester,
+        Future.value(Library(categories: [])),
+      );
+      // החלון "ראשי", אבל אינו בעלי התהליך — הענף של מי שאינו בעלים חייב לרוץ.
+      WindowRole.isSecondary = false;
+      harness.libraryChanges.add(
+        harness.initialState.copyWith(isLoading: false),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      verify(
+        () => harness.indexing.add(any(that: isA<CheckIndexStatus>())),
+      ).called(1);
+    },
+  );
 
   testWidgets('סוף רצף העלייה מכבה את סימון ההמתנה כשהאינדוקס מתחיל (#2646)', (
     tester,
@@ -254,6 +283,12 @@ Future<_Harness> _pumpMainWindow(
             BlocProvider<NavigationBloc>.value(value: navigation),
             BlocProvider<WorkStatusCubit>.value(value: workStatus),
             BlocProvider<SettingsBloc>.value(value: settings),
+            BlocProvider<WindowFullscreenCubit>(
+              create: (_) => WindowFullscreenCubit(
+                initial: false,
+                persist: (_) async {},
+              ),
+            ),
             BlocProvider<IndexingBloc>.value(value: indexing),
             BlocProvider<HistoryBloc>.value(value: history),
             BlocProvider<LibraryBloc>.value(value: library),
@@ -319,6 +354,8 @@ class _FakeWindow implements AppWindowController, AppWindowGeometry {
   Future<Rect> getBounds() async => Rect.zero;
   @override
   Future<bool> isFullScreen() async => false;
+  @override
+  Listenable get stateChanges => Listenable.merge(const []);
   @override
   Future<bool> isMaximized() async => false;
   @override

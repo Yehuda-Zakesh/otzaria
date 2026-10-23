@@ -17,6 +17,7 @@ class PdfScrollbar extends StatefulWidget {
   final double thumbMinSize;
   final PdfScrollBoundsBuilder? scrollBoundsBuilder;
   final bool freezeThumb;
+  final VoidCallback? onNavigationStarted;
 
   /// תוכן העניינים (outline) של המסמך. כשהוא מסופק (ולא ריק), ריחוף/גרירה
   /// על הסרגל מציגים תווית צפה עם כותרת המקום שאליו תתבצע הקפיצה. כשהוא
@@ -35,6 +36,7 @@ class PdfScrollbar extends StatefulWidget {
     this.thumbMinSize = 40.0,
     this.scrollBoundsBuilder,
     this.freezeThumb = false,
+    this.onNavigationStarted,
     this.outline,
     this.bookTitle,
   });
@@ -180,23 +182,26 @@ class _PdfScrollbarState extends State<PdfScrollbar> {
                 : Size(widget.thumbMinSize, widget.trackThickness),
             thumbBuilder: (context, thumbSize, pageNumber, controller) {
               final colorScheme = Theme.of(context).colorScheme;
-              return Container(
-                width: isVertical ? widget.trackThickness : thumbSize.width,
-                height: isVertical ? thumbSize.height : widget.trackThickness,
-                decoration: BoxDecoration(
-                  color:
-                      widget.thumbColor ??
-                      colorScheme.outline.withValues(alpha: 0.75),
-                  borderRadius: AppTokens.borderRadiusAll,
+              return Listener(
+                onPointerDown: (_) => widget.onNavigationStarted?.call(),
+                child: Container(
+                  width: isVertical ? widget.trackThickness : thumbSize.width,
+                  height: isVertical ? thumbSize.height : widget.trackThickness,
+                  decoration: BoxDecoration(
+                    color:
+                        widget.thumbColor ??
+                        colorScheme.outline.withValues(alpha: 0.75),
+                    borderRadius: AppTokens.borderRadiusAll,
+                  ),
+                  child: isVertical
+                      ? Center(
+                          child: _buildPageNumberText(
+                            pageNumber ?? 1,
+                            colorScheme,
+                          ),
+                        )
+                      : null,
                 ),
-                child: isVertical
-                    ? Center(
-                        child: _buildPageNumberText(
-                          pageNumber ?? 1,
-                          colorScheme,
-                        ),
-                      )
-                    : null,
               );
             },
           );
@@ -342,6 +347,7 @@ class _PdfScrollbarState extends State<PdfScrollbar> {
 
                 void startThumbDrag(DragStartDetails details) {
                   if (widget.freezeThumb) return;
+                  widget.onNavigationStarted?.call();
                   _isDraggingThumb = true;
                   _dragPointerOffsetWithinThumb = details.localPosition.dy;
                   // נצמד מיד לאצבע מהמיקום הנוכחי של המחוון.
@@ -403,10 +409,12 @@ class _PdfScrollbarState extends State<PdfScrollbar> {
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTapDown: (details) {
+                      if (widget.freezeThumb) return;
                       final tapY = details.localPosition.dy;
                       final isTapOnThumb =
                           tapY >= thumbTop && tapY <= thumbTop + thumbHeight;
                       if (isTapOnThumb) return;
+                      widget.onNavigationStarted?.call();
                       jumpToThumbTop(
                         details.localPosition.dy - thumbHeight / 2,
                       );
@@ -462,6 +470,7 @@ class PdfHorizontalScrollbar extends StatefulWidget {
   final PdfViewerController controller;
   final double trackThickness;
   final Color? thumbColor;
+  final VoidCallback? onNavigationStarted;
   static const double _minThumbWidth = 60.0;
 
   const PdfHorizontalScrollbar({
@@ -469,6 +478,7 @@ class PdfHorizontalScrollbar extends StatefulWidget {
     required this.controller,
     this.trackThickness = 8.0,
     this.thumbColor,
+    this.onNavigationStarted,
   });
 
   @override
@@ -557,6 +567,7 @@ class _PdfHorizontalScrollbarState extends State<PdfHorizontalScrollbar> {
             }
 
             void startDrag(DragStartDetails details) {
+              widget.onNavigationStarted?.call();
               _dragPointerOffsetWithinThumb = details.localPosition.dx;
               setState(() => _activeDragThumbLeft = thumbLeft);
             }
@@ -591,6 +602,7 @@ class _PdfHorizontalScrollbarState extends State<PdfHorizontalScrollbar> {
                 if (tapX >= thumbLeft && tapX <= thumbLeft + thumbWidth) {
                   return;
                 }
+                widget.onNavigationStarted?.call();
                 jumpToThumbLeft(details.localPosition.dx - thumbWidth / 2);
               },
               child: SizedBox(

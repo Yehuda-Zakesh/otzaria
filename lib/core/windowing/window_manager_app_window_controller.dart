@@ -1,5 +1,7 @@
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:otzaria/core/windowing/app_window_controller.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
 import 'package:window_manager/window_manager.dart';
@@ -57,6 +59,9 @@ final class WindowManagerAppWindowController
   Future<bool> isFullScreen() => windowManager.isFullScreen();
 
   @override
+  Listenable get stateChanges => _WindowManagerStateChanges.instance;
+
+  @override
   Future<Rect> getBounds() => windowManager.getBounds();
 
   @override
@@ -83,4 +88,31 @@ final class WindowManagerAppWindowController
   @override
   Future<void> setProgressBar(double progress) =>
       windowManager.setProgressBar(progress);
+}
+
+/// מתרגם את אירועי ה-maximize של `windowManager` ל-[Listenable]; נרשם
+/// ל-singleton רק כל עוד יש מאזינים.
+final class _WindowManagerStateChanges extends ChangeNotifier
+    with WindowListener {
+  _WindowManagerStateChanges._();
+
+  static final instance = _WindowManagerStateChanges._();
+
+  @override
+  void addListener(VoidCallback listener) {
+    if (!hasListeners) windowManager.addListener(this);
+    super.addListener(listener);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    super.removeListener(listener);
+    if (!hasListeners) windowManager.removeListener(this);
+  }
+
+  @override
+  void onWindowMaximize() => notifyListeners();
+
+  @override
+  void onWindowUnmaximize() => notifyListeners();
 }

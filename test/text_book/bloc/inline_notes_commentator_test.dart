@@ -579,6 +579,33 @@ void main() {
         expect(state.availableCommentators, contains(kNotesCommentatorTitle));
       },
     );
+
+    test(
+      'LoadContent — כשל בטעינת ההערות מכשיל את פתיחת הספר (TextBookError)',
+      () async {
+        final failed = Completer<BookNotes>();
+        final notesBloc = TextBookBloc(
+          repository: _ContentRepository(strippedContent),
+          bookNotesLoader: (_) => failed.future,
+          protectionLoader: (_) async => BookProtection.none,
+          initialState: TextBookInitial.named(book, 0, false, const []),
+        );
+        addTearDown(notesBloc.close);
+        final error = notesBloc.stream.firstWhere(
+          (s) => s is TextBookError || s is TextBookLoaded,
+        );
+        notesBloc.add(
+          const LoadContent(
+            fontSize: 20,
+            showSplitView: false,
+            removeNikud: false,
+          ),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        failed.completeError(StateError('גוף שאינו מתפענח'));
+        expect(await error, isA<TextBookError>());
+      },
+    );
   });
 }
 

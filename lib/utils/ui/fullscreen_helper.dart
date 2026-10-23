@@ -7,7 +7,7 @@ import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
 import 'package:otzaria/navigation/bloc/navigation_state.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
-import 'package:otzaria/settings/settings_exports.dart';
+import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 
 /// Helper functions for fullscreen mode management
 class FullscreenHelper {
@@ -66,11 +66,8 @@ class FullscreenHelper {
     // מותקן, ו-`geometryOf` מבצע חיפוש בעץ ה-widgets.
     final geometry = AppWindowScope.geometryOf(context);
 
-    // עדכון ה-state ב-Bloc
-    final settingsBloc = context.read<SettingsBloc>();
-    if (settingsBloc.state.isFullscreen != isFullscreen) {
-      settingsBloc.add(UpdateIsFullscreen(isFullscreen));
-    }
+    // מצב החלון הזה בלבד; ערך זהה אינו נכתב שוב.
+    context.read<WindowFullscreenCubit>().set(isFullscreen);
 
     final isMobilePlatform =
         !kIsWeb &&

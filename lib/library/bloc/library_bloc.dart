@@ -6,6 +6,7 @@ import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/core/error_log_file.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/library/bloc/library_event.dart';
@@ -83,6 +84,9 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
     on<LoadLibrary>(_onLoadLibrary, transformer: droppable());
     on<RefreshLibrary>(_onRefreshLibrary);
     on<HiddenBooksChanged>(_onHiddenBooksChanged);
+    on<LibraryChangedInOtherWindow>(
+      (event, emit) => _rebuildVisibleTree(emit),
+    );
     on<ExternalBooksChanged>((event, emit) {
       _repository.invalidateHebrewBooksCache();
       _repeatSearch(_showsSearch);
@@ -97,6 +101,29 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
     on<UpdateSearchQuery>(_onUpdateSearchQuery);
     on<SelectBookForPreview>(_onSelectBookForPreview);
     on<SelectCategoryForPreview>(_onSelectCategoryForPreview);
+    if (MultiViewMode.enabled) {
+      _catalogChangedSub = _catalogChanged.stream.listen((source) {
+        if (!identical(source, this) && !isClosed) {
+          add(const LibraryChangedInOtherWindow());
+        }
+      });
+    }
+  }
+
+  /// חלונות Dart חולקים isolate, את הקטלוג ואת ההסתרות, אבל לא את ה-bloc:
+  /// מי שבנה את העץ מחדש מודיע כאן, והשאר קוראים את העץ הטרי.
+  static final StreamController<LibraryBloc> _catalogChanged =
+      StreamController<LibraryBloc>.broadcast();
+  StreamSubscription<LibraryBloc>? _catalogChangedSub;
+
+  void _announceCatalogChanged() {
+    if (MultiViewMode.enabled) _catalogChanged.add(this);
+  }
+
+  @override
+  Future<void> close() async {
+    await _catalogChangedSub?.cancel();
+    return super.close();
   }
 
   Future<void> _onLoadLibrary(
@@ -161,7 +188,12 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
     HiddenBooksChanged event,
     Emitter<LibraryState> emit,
   ) async {
-    if (state.library == null) return;
+    if (await _rebuildVisibleTree(emit)) _announceCatalogChanged();
+  }
+
+  /// בונה מחדש את העץ הגלוי מהקטלוג הממוטמן. `false` כשהספרייה טרם נטענה.
+  Future<bool> _rebuildVisibleTree(Emitter<LibraryState> emit) async {
+    if (state.library == null) return false;
     final library = await _visibleLibrary();
     final hadResults = _showsSearch;
     // כל קטגוריה מיוצגת באובייקט אחר בעץ החדש. מי שמחזיק הפניה לישן ימשיך
@@ -181,6 +213,7 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
       ),
     );
     _repeatSearch(hadResults);
+    return true;
   }
 
   bool get _showsSearch => state.searchResults != null || state.isSearching;
@@ -363,6 +396,7 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
         ),
       );
       _repeatSearch(hadResults);
+      _announceCatalogChanged();
     } catch (e, stackTrace) {
       try {
         ErrorLogFile.append(
@@ -535,6 +569,7 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
       }
 
       await _emitLibraryRoot(emit);
+      _announceCatalogChanged();
     } catch (e) {
       emit(
         state.copyWith(
@@ -563,6 +598,7 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
       DataRepository.instance.invalidateExternalBooksCache();
 
       await _emitLibraryRoot(emit, changedHebrewBooksPath: event.path);
+      _announceCatalogChanged();
     } catch (e) {
       emit(
         state.copyWith(
@@ -591,6 +627,7 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
       DataRepository.instance.invalidateExternalBooksCache();
 
       await _emitLibraryRoot(emit, changedHebrewBooksPath: '');
+      _announceCatalogChanged();
 
       developer.log(
         'Hebrew books path removed successfully',

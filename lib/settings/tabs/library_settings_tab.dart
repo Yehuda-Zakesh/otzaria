@@ -766,12 +766,10 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
                   onPressed: () async {
                     if (library == null) return;
                     final indexingBloc = context.read<IndexingBloc>();
-                    if (!await _indexingRepository.clearIndex()) return;
+                    final fullLibrary = await DataRepository.instance.library;
                     if (!mounted) return;
                     setState(() => _requiresManualReindex = false);
-                    indexingBloc.add(
-                      StartIndexing(await DataRepository.instance.library),
-                    );
+                    indexingBloc.add(ResetAndIndex(fullLibrary));
                   },
                 )
               else if (indexingState is IndexingComplete)

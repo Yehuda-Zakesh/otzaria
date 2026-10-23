@@ -140,6 +140,42 @@ void main() {
       expect(c.has('line_dh'), isTrue);
       expect(c.hasLineDhDisplay, isFalse);
     });
+
+    group('באנרים: book_banner מפנה ל-banner', () {
+      void bannerTables(
+        sqlite3.Database db, {
+        bool banner = true,
+        bool oldShape = false,
+      }) {
+        db.execute('DROP TABLE IF EXISTS banner');
+        db.execute('DROP TABLE IF EXISTS book_banner');
+        if (banner) {
+          db.execute('CREATE TABLE banner (id INTEGER PRIMARY KEY, text TEXT)');
+        }
+        db.execute(
+          oldShape
+              ? 'CREATE TABLE book_banner (bookId INTEGER PRIMARY KEY, text TEXT)'
+              : 'CREATE TABLE book_banner '
+                    '(bookId INTEGER PRIMARY KEY, bannerId INTEGER)',
+        );
+      }
+
+      test('שתי הטבלאות בצורת סכמה 7 — יש באנרים', () {
+        expect(probeWith(bannerTables).hasBookBanners, isTrue);
+      });
+
+      test('book_banner בצורה הישנה (bookId, text) — אין באנרים', () {
+        final c = probeWith((db) => bannerTables(db, oldShape: true));
+        expect(c.has('book_banner'), isTrue);
+        expect(c.hasBookBanners, isFalse);
+      });
+
+      test('book_banner בלי banner — אין באנרים', () {
+        final c = probeWith((db) => bannerTables(db, banner: false));
+        expect(c.has('book_banner'), isTrue);
+        expect(c.hasBookBanners, isFalse);
+      });
+    });
   });
 
   test('forDatabase קולט טבלה שנוצרה אחרי הבדיקה, גם מחיבור אחר', () {

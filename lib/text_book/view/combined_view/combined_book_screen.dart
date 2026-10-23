@@ -1,3 +1,4 @@
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/data/book_identity.dart';
 import 'package:otzaria/text_book/models/book_notes.dart';
 import 'package:otzaria/text_book/view/widgets/selection_gutter_painter.dart';
@@ -48,6 +49,7 @@ import 'package:otzaria/utils/navigation/talmud_bavli_open_format.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/personal_notes/personal_notes_system.dart';
+import 'package:otzaria/personal_notes/widgets/personal_notes_sidebar.dart';
 import 'package:otzaria/personal_notes/utils/personal_note_source_selection.dart';
 import 'package:otzaria/bookmarks/utils/section_bookmark.dart';
 import 'package:otzaria/core/messages/text_book_messages.dart';
@@ -346,6 +348,9 @@ class _ParagraphStateKey extends GlobalKey {
 }
 
 class _CombinedViewState extends State<CombinedView> {
+  /// מאגר הפוקוס של החלון; נשמר כאן כי ב-dispose אסור לחפש ב-context.
+  late final FocusRepository _focus;
+
   PageStorageBucket _commentaryStorage = PageStorageBucket();
   bool _localCorrectionActive = false;
   bool _anchorHandledCurrentTap = false;
@@ -432,12 +437,14 @@ class _CombinedViewState extends State<CombinedView> {
 
   /// סמני עוגן-מילה, למשל (א), בנקודה המדויקת בשורה. מוזרקים על שורת המקור
   /// כפי שנשמרה — לפני הזרקות שמוסיפות תוכן גלוי (הערות אישיות וכד'), כי
-  /// anchorStart נמדד בתווים גלויים של התוכן השמור.
+  /// anchorStart נמדד בתווים גלויים של התוכן השמור. [note] — גוף ההערה
+  /// ה-[note] של השורה במקום השורה עצמה.
   String _injectAnchorMarkersForLine(
     String rawLine,
     int lineIndex0,
-    TextBookLoaded state,
-  ) {
+    TextBookLoaded state, {
+    int? note,
+  }) {
     if (!state.bodyDisplayProfile.showAnchorMarkers) return rawLine;
     // מהדורה חלופית: העוגנים ממופים לנוסח הראשי — במיקומים שגויים כאן.
     if (state.book.versionTitle != null) return rawLine;
@@ -453,6 +460,8 @@ class _CombinedViewState extends State<CombinedView> {
       styleIndexByCommentator: _anchorStyles(state),
       lineIndex: lineIndex0,
       activeIndex: lineIndex0 == _activeAnchorLine ? _activeAnchorIndex : null,
+      notes: state.bookNotes.notesAt(lineIndex0),
+      note: note,
     );
   }
 
@@ -490,7 +499,7 @@ class _CombinedViewState extends State<CombinedView> {
 
   /// פתיחת יעד התצוגה המקדימה: חלונית מתאימה, או ספר עבור Linker.
   Future<void> _openPreviewDestination(Link link, {int? sourceLine}) async {
-    LinkPreviewOverlay.dismiss();
+    LinkPreviewOverlay.dismiss(window: AppWindowKeys.of(context));
     if (!shouldOpenPreviewLinkInBook(link)) {
       if (sourceLine != null) {
         final state = _textBookBloc.state;
@@ -569,7 +578,7 @@ class _CombinedViewState extends State<CombinedView> {
   }
 
   Future<void> _openLinkTarget(Link link) {
-    LinkPreviewOverlay.dismiss();
+    LinkPreviewOverlay.dismiss(window: AppWindowKeys.of(context));
     return openLinkTarget(link, _openTab);
   }
 
@@ -629,7 +638,7 @@ class _CombinedViewState extends State<CombinedView> {
         )) {
       return;
     }
-    LinkPreviewOverlay.cancelScheduledHide();
+    LinkPreviewOverlay.cancelScheduledHide(AppWindowKeys.of(context));
     _cancelPendingAnchorHover();
 
     // סימון העוגן מחליף את MouseRegion ויוצר exit/enter מלאכותיים.
@@ -673,6 +682,8 @@ class _CombinedViewState extends State<CombinedView> {
         state.content,
         url,
         dbNotes: state.bookNotes,
+        decorateBody: (line, note, body) =>
+            _injectAnchorMarkersForLine(body, line, state, note: note),
       );
       if (note == null) return;
       LinkPreviewOverlay.showContent(
@@ -684,6 +695,7 @@ class _CombinedViewState extends State<CombinedView> {
           removeNikud: state.removeNikud,
           removePunctuation: state.removePunctuation,
           maxFontSize: widget.textSize,
+          onAnchorTap: _handleAnchorTap,
         ),
       );
       return;
@@ -705,8 +717,16 @@ class _CombinedViewState extends State<CombinedView> {
         context,
         globalPosition: globalPosition,
         hoverMode: hoverMode,
-        contentBuilder: (_) =>
-            PersonalNotesListView(notes: notes, maxHeight: 220),
+        contentBuilder: (_) => PersonalNotesListView(
+          notes: notes,
+          maxHeight: 220,
+          onLinkTap: (url) => openNoteLink(
+            context,
+            url,
+            notes.first.bookId,
+            (line, {note}) => widget.tab.lines.scrollToLine(line - 1),
+          ),
+        ),
       );
       return;
     }
@@ -731,7 +751,7 @@ class _CombinedViewState extends State<CombinedView> {
     Offset globalPosition, {
     bool hoverMode = true,
   }) {
-    LinkPreviewOverlay.cancelScheduledHide();
+    LinkPreviewOverlay.cancelScheduledHide(AppWindowKeys.of(context));
     _cancelPendingAnchorHover();
     final line = noteMarkerLineFromUrl(url);
     final state = _textBookBloc.state;
@@ -751,7 +771,7 @@ class _CombinedViewState extends State<CombinedView> {
   /// (מתבטלת אם הסמן נכנס לחלונית עצמה או חוזר לעוגן).
   void _handleAnchorHoverExit(String url) {
     _cancelPendingAnchorHover();
-    LinkPreviewOverlay.scheduleHide();
+    LinkPreviewOverlay.scheduleHide(AppWindowKeys.of(context));
   }
 
   late final ReadingViewportBinding _viewportBinding = ReadingViewportBinding(
@@ -840,9 +860,13 @@ class _CombinedViewState extends State<CombinedView> {
   final DictionaryLookupRepository _dictionaryLookupRepository =
       DictionaryLookupRepository.instance;
 
+  late final AppWindowKeys _previewWindow;
+
   @override
   void initState() {
     super.initState();
+    _previewWindow = AppWindowKeys.of(context);
+    _focus = FocusRepository.of(context);
     _localCorrectionActive = _hasLocalCorrections;
     PluginCorrectionSessionService.instance.addListener(
       _onLocalCorrectionChanged,
@@ -916,7 +940,7 @@ class _CombinedViewState extends State<CombinedView> {
     lines.attach(_viewportBinding);
     view.tab.dynamicCopyRequestNotifier.addListener(_onDynamicCopyRequest);
     if (!view.isPreviewMode) {
-      FocusRepository().registerTabContentFocusRequester(view.tab, () {
+      _focus.registerTabContentFocusRequester(view.tab, () {
         if (_focusNode.canRequestFocus) _focusNode.requestFocus();
       });
     }
@@ -931,7 +955,7 @@ class _CombinedViewState extends State<CombinedView> {
     lines.detach(_viewportBinding);
     view.tab.dynamicCopyRequestNotifier.removeListener(_onDynamicCopyRequest);
     if (!view.isPreviewMode) {
-      FocusRepository().unregisterTabContentFocusRequester(view.tab);
+      _focus.unregisterTabContentFocusRequester(view.tab);
     }
   }
 
@@ -962,7 +986,7 @@ class _CombinedViewState extends State<CombinedView> {
   void _resetBookState() {
     _cancelCommentaryReveal();
     _cancelPendingAnchorHover();
-    LinkPreviewOverlay.dismiss();
+    LinkPreviewOverlay.dismiss(window: AppWindowKeys.of(context));
     _activeAnchorLine = null;
     _activeAnchorIndex = null;
     _anchorHandledCurrentTap = false;
@@ -1159,7 +1183,7 @@ class _CombinedViewState extends State<CombinedView> {
     _disposed = true;
     _detachTabBindings(widget);
     _cancelPendingAnchorHover();
-    LinkPreviewOverlay.dismiss();
+    LinkPreviewOverlay.dismiss(window: _previewWindow);
     _savedSelectedText.dispose();
     _savedSelectedIndex.dispose();
     _currentSelectedIndex.dispose();
@@ -2163,6 +2187,12 @@ class _CombinedViewState extends State<CombinedView> {
                                         PersonalNotesBloc,
                                         PersonalNotesState
                                       >(
+                                        // שאר שדות ה-bloc (חיפוש, טיוטה) משתנים
+                                        // בכל הקשה, והבנייה קוראת רק את אלה.
+                                        buildWhen: (previous, current) =>
+                                            previous.bookId != current.bookId ||
+                                            previous.locatedNotes !=
+                                                current.locatedNotes,
                                         builder: (context, notesState) {
                                           final noteMap =
                                               <int, List<PersonalNote>>{};
@@ -2243,7 +2273,7 @@ class _CombinedViewState extends State<CombinedView> {
         child: _trackReadingScroll(
           _withReadingExtentEstimation(
             state,
-            builder: (estimateExtent, estimationKey) =>
+            builder: (estimateExtent, estimationKey, _) =>
                 ScrollablePositionedList.builder(
                   key: ValueKey((widget.tab, _textBookBloc)),
                   initialScrollIndex: clampedInitial,
@@ -2301,9 +2331,16 @@ class _CombinedViewState extends State<CombinedView> {
     );
   }
 
+  /// [builder] מקבל גם את רוחב עמודת הטקסט לפי רוחב הפריט (null בתצוגה מקדימה).
   Widget _withReadingExtentEstimation(
     TextBookLoaded state, {
-    required Widget Function(ItemExtentEstimator, Object) builder,
+    double crossAxisPadding = 0,
+    required Widget Function(
+      ItemExtentEstimator,
+      Object,
+      double Function(double)? columnWidth,
+    )
+    builder,
   }) => Builder(
     builder: (context) {
       final metrics = context.select(
@@ -2314,6 +2351,23 @@ class _CombinedViewState extends State<CombinedView> {
           textMaxWidth: bloc.state.textMaxWidth,
         ),
       );
+      // נקרא ב-build ולא בכל הערכה. הבסיס נכנס למפתח הפריסה של הרשימה ולא
+      // ל-styleKey, כדי שגרירת חלון תידחה כמו שינוי רוחב.
+      final baseWidth = widget.isPreviewMode
+          ? null
+          : ReadingAreaWidth.maybeOf(context);
+      final setting = metrics.textMaxWidth;
+      // בלי הגבלה (0) כל הפריט ברוחב מלא, כולל כרטיס המפרשים — אז העמודה היא הרוחב.
+      double columnWidth(double width) {
+        final column = resolveTextColumnMaxWidth(
+          setting: setting,
+          availableWidth: width,
+          baseWidth: baseWidth ?? width,
+        );
+        return column > 0 ? column : width;
+      }
+
+      final columnWidthOrNull = widget.isPreviewMode ? null : columnWidth;
       return ReadingExtentEstimation(
         segments: readingSegmentsOf(state),
         controller: widget.tab.lines.itemController,
@@ -2325,15 +2379,11 @@ class _CombinedViewState extends State<CombinedView> {
           metrics.fontBold ? FontWeight.bold : FontWeight.normal,
         ),
         lineHeight: metrics.lineHeight,
-        styleKey: metrics.textMaxWidth,
-        textWidth: widget.isPreviewMode
-            ? null
-            : (availableWidth) => textColumnMaxWidthOf(
-                context,
-                setting: metrics.textMaxWidth,
-                availableWidth: availableWidth,
-              ),
-        builder: builder,
+        styleKey: setting,
+        textWidth: columnWidthOrNull,
+        crossAxisPadding: crossAxisPadding,
+        builder: (estimator, estimationKey) =>
+            builder(estimator, estimationKey, columnWidthOrNull),
       );
     },
   );
@@ -2361,11 +2411,17 @@ class _CombinedViewState extends State<CombinedView> {
         ? 0
         : initialIndex.clamp(0, itemCount - 1);
 
+    // מרווח ברוחב המסילה בקצה הנגדי ממרכז את הטקסט; הוא בתוך הרשימה ולא
+    // סביבה, כדי שטעם שבולט אחרי המילה האחרונה בשורה לא ייחתך בגבול שלה.
+    final padding = const EdgeInsetsDirectional.only(
+      end: ScrollablePositionedListScrollbar.trackWidth,
+    ).resolve(Directionality.of(context));
     // המצב ב-key מאלץ יצירת רשימה חדשה בהחלפת מצב רציף, כך שהפריים הראשון
     // כבר מצויר ב-initialScrollIndex הנכון — בלי הבזק של מיקום שגוי.
     final list = _withReadingExtentEstimation(
       state,
-      builder: (estimateExtent, estimationKey) =>
+      crossAxisPadding: padding.horizontal,
+      builder: (estimateExtent, estimationKey, columnWidth) =>
           ScrollablePositionedList.builder(
             key: ValueKey(
               (widget.tab, _textBookBloc, state.continuousReadingMode),
@@ -2381,11 +2437,13 @@ class _CombinedViewState extends State<CombinedView> {
                 : 0,
             estimateExtent: estimateExtent,
             estimationKey: estimationKey,
-            // מרווח ברוחב המסילה בקצה הנגדי ממרכז את הטקסט; הוא בתוך הרשימה ולא
-            // סביבה, כדי שטעם שבולט אחרי המילה האחרונה בשורה לא ייחתך בגבול שלה.
-            padding: const EdgeInsetsDirectional.only(
-              end: ScrollablePositionedListScrollbar.trackWidth,
-            ).resolve(Directionality.of(context)),
+            // הגבהים תלויים ברוחב העמודה בלבד; הבאנר שבפריט 0 פרוס ברוחב המלא.
+            crossAxisLayoutKey: columnWidth == null
+                ? null
+                : state.protection.hasBanner
+                ? (width) => (width, columnWidth(width))
+                : columnWidth,
+            padding: padding,
             itemPositionsListener: widget.tab.lines.positionsListener,
             itemScrollController: widget.tab.lines.itemController,
             scrollOffsetController: widget.tab.lines.offsetController,

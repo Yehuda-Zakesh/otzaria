@@ -24,6 +24,7 @@ import 'package:otzaria/widgets/lists/items_list_view.dart';
 import 'package:otzaria/widgets/dialogs/app_dialogs.dart';
 import 'package:otzaria/widgets/dialogs/input_dialog.dart';
 import 'package:otzaria/utils/calendar_days.dart';
+import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 
 class BookmarksDialog extends StatelessWidget {
   /// אם מסופק, יוצגו רק סימניות של ספר זה (הדיאלוג הופך לתצוגת
@@ -120,7 +121,10 @@ class _BookmarkViewState extends State<BookmarkView> {
     Bookmark bookmark, {
     String? targetTitle,
   }) {
-    final tab = tabFromBookmark(bookmark);
+    final tab = tabFromBookmark(
+      bookmark,
+      screenWidth: readingLayoutWidthOf(context),
+    );
 
     context.read<TabsBloc>().add(
       OpenOrFocusTab(
@@ -142,10 +146,11 @@ class _BookmarkViewState extends State<BookmarkView> {
   /// ספר שכבר פתוח מקבל מיקוד ונגלל למיקום הסימניה.
   void _openGroup(BuildContext context, BookmarkGroup group) {
     final tabsBloc = context.read<TabsBloc>();
+    final screenWidth = readingLayoutWidthOf(context);
     for (final bookmark in group.items) {
       tabsBloc.add(
         OpenOrFocusTab(
-          tabFromBookmark(bookmark),
+          tabFromBookmark(bookmark, screenWidth: screenWidth),
           targetTitle: bookmark.ref,
           navigateToPositionIfReused: true,
         ),
@@ -155,7 +160,10 @@ class _BookmarkViewState extends State<BookmarkView> {
     if (group.items.length > 1) {
       final first = group.items.first;
       tabsBloc.add(
-        OpenOrFocusTab(tabFromBookmark(first), targetTitle: first.ref),
+        OpenOrFocusTab(
+          tabFromBookmark(first, screenWidth: screenWidth),
+          targetTitle: first.ref,
+        ),
       );
     }
     context.read<NavigationBloc>().add(const NavigateToScreen(Screen.reading));

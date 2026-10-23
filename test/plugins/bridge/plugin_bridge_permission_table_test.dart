@@ -9,6 +9,13 @@ import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/plugins/services/plugin_extended_validator.dart';
 
 class _FakeAdapter implements PluginBridgeAdapter {
+  @override
+  Future<T> withWindowDependencies<T>(
+    Future<T> Function() action, {
+    String? domain,
+    String? rpcAction,
+  }) => action();
+
   int executeCalls = 0;
 
   @override

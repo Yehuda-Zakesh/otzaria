@@ -42,6 +42,10 @@ class PluginInBookSearchService {
   final InBookSearchEventDispatcher _dispatch;
   int _requestCounter = 0;
 
+  /// האם [pluginId] רשום כספק כלשהו.
+  bool isProviderPlugin(String pluginId) =>
+      _providerToPlugin.containsValue(pluginId);
+
   /// רושם את [pluginId] כספק הבלעדי של [provider].
   void register(String provider, String pluginId) {
     final owner = _providerToPlugin[provider];

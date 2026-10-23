@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/windowing/app_window_controller.dart';
+import 'package:otzaria/core/windowing/app_window_id.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
+import 'package:otzaria/core/windowing/last_active_window.dart';
 
 /// שני חלונות באותו isolate חייבים מפתחות נפרדים — אחרת GlobalKey מתנגש
 /// והודעות של חלון אחד מוצגות באחר.
@@ -147,6 +149,105 @@ void main() {
       ),
       isTrue,
     );
+  });
+
+  group('activateWindow', () {
+    const second = AppWindowId('window-2');
+    tearDown(() {
+      AppWindowKeys.resetForTest();
+      LastActiveWindow.resetForTest();
+    });
+
+    test('החלון הראשי רשום כברירת מחדל', () {
+      AppWindowKeys.activateWindow(AppWindowId.primary);
+      expect(AppWindowKeys.current.id, AppWindowId.primary);
+      expect(AppWindowKeys.current, same(original));
+    });
+
+    test('חלון רשום הופך לנוכחי ומסומן כפעיל אחרון', () {
+      final keys = AppWindowKeys(id: second);
+      AppWindowKeys.register(keys);
+
+      AppWindowKeys.activateWindow(second);
+      expect(AppWindowKeys.current, same(keys));
+      expect(LastActiveWindow.id, second);
+
+      AppWindowKeys.activateWindow(AppWindowId.primary);
+      expect(AppWindowKeys.current, same(original));
+      expect(LastActiveWindow.id, AppWindowId.primary);
+    });
+
+    test('מזהה לא רשום — מסומן בלבד, הנוכחי לא משתנה', () {
+      AppWindowKeys.activateWindow(second);
+      expect(LastActiveWindow.id, second);
+      expect(AppWindowKeys.current, same(original));
+    });
+
+    test('ביטול רישום של הנוכחי חוזר לראשי; מופע זר לא מוחק רישום', () {
+      final keys = AppWindowKeys(id: second);
+      AppWindowKeys.register(keys);
+      AppWindowKeys.activateWindow(second);
+
+      AppWindowKeys.unregister(AppWindowKeys(id: second));
+      expect(AppWindowKeys.current, same(keys));
+
+      AppWindowKeys.unregister(keys);
+      expect(AppWindowKeys.current, same(original));
+      AppWindowKeys.activateWindow(second);
+      expect(AppWindowKeys.current, same(original));
+    });
+
+    test('יעדי הסיור והמפתחות נגזרים מהחלון הפעיל', () {
+      final keys = AppWindowKeys(id: second);
+      AppWindowKeys.register(keys);
+      AppWindowKeys.activateWindow(second);
+      expect(AppWindowKeys.current.tour, same(keys.tour));
+      expect(navigatorKey, same(keys.navigator));
+    });
+  });
+
+  testWidgets('isActiveWindow: רק החלון הנוכחי; בלי scope — תמיד', (
+    tester,
+  ) async {
+    final a = AppWindowKeys(id: const AppWindowId('a'));
+    final b = AppWindowKeys(id: const AppWindowId('b'));
+    late BuildContext inA;
+    late BuildContext inB;
+    late BuildContext outside;
+    Widget scoped(AppWindowKeys keys, void Function(BuildContext) grab) =>
+        AppWindowScope(
+          controller: window,
+          geometry: window,
+          keys: keys,
+          child: Builder(
+            builder: (context) {
+              grab(context);
+              return const SizedBox();
+            },
+          ),
+        );
+    await tester.pumpWidget(
+      Column(
+        children: [
+          scoped(a, (c) => inA = c),
+          scoped(b, (c) => inB = c),
+          Builder(
+            builder: (context) {
+              outside = context;
+              return const SizedBox();
+            },
+          ),
+        ],
+      ),
+    );
+
+    AppWindowKeys.activate(a);
+    expect(AppWindowKeys.isActiveWindow(inA), isTrue);
+    expect(AppWindowKeys.isActiveWindow(inB), isFalse);
+    expect(AppWindowKeys.isActiveWindow(outside), isTrue);
+    AppWindowKeys.activate(b);
+    expect(AppWindowKeys.isActiveWindow(inA), isFalse);
+    expect(AppWindowKeys.isActiveWindow(inB), isTrue);
   });
 }
 

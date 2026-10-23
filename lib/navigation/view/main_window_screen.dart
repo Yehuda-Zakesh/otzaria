@@ -9,10 +9,13 @@ import 'package:flutter/services.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:otzaria/app_report/view/app_report_dialog.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/core/startup_timeline.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/window_opener.dart';
 import 'package:otzaria/widgets/misc/rtl_icon.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/core/error_log_file.dart';
@@ -31,7 +34,7 @@ import 'package:otzaria/indexing/indexing_work_status.dart';
 import 'package:otzaria/indexing/models/index_update_mode.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/core/windowing/window_title_sync.dart';
-import 'package:otzaria/core/windowing/window_bus.dart';
+import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/navigation/utils/refresh_indexing_plan.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
@@ -122,8 +125,7 @@ import 'package:otzaria/plugins/bridge/plugin_bridge_adapter.dart'
     show buildThemePayloadFromScheme;
 import 'package:otzaria/theme/app_theme_data.dart' show AppThemeData;
 import 'package:otzaria/core/sequential_dialog_queue.dart';
-import 'package:otzaria/core/external_activation_queue.dart';
-import 'package:otzaria/core/external_activation_channel.dart';
+import 'package:otzaria/app_scope/external_activation_service.dart';
 import 'package:otzaria/core/external_uri_router.dart';
 import 'package:otzaria/find_ref/find_ref_deep_link.dart';
 import 'package:otzaria/core/info/app_info_service.dart';
@@ -148,6 +150,7 @@ import 'package:otzaria/tools/calendar/helpers/calendar_date_helpers.dart'
     show getDafYomi, formatAmud;
 import 'package:otzaria/tools/calendar/helpers/daf_yomi_navigation.dart'
     show openDafYomiBook;
+import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 
 /// פריט מאוחד לסרגל הניווט הראשי — מייצג תוסף או כלי-מובנה שהוצמד לסרגל.
 ///
@@ -336,11 +339,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
 
   late final CalendarCubit _calendarCubit;
   late final SettingsScreenController _settingsScreenController;
-  final ExternalActivationQueue _externalActivationQueue =
-      const ExternalActivationQueue();
   late final TourCubit _tourCubit;
-  final ExternalActivationChannel _externalActivationChannel =
-      ExternalActivationChannel();
   ReaderLocationTracker? _readerLocationTracker;
   Orientation? _previousOrientation;
   int _currentPageIndex = 0;
@@ -420,14 +419,12 @@ class MainWindowScreenState extends State<MainWindowScreen>
   _pluginInstallDialogQueue = SequentialDialogQueue(_showPluginInstallDialog);
 
   bool _hasInitializedPageController = false;
-  late final CoalescingDrainRunner _externalActivationDrainRunner =
-      CoalescingDrainRunner(_drainPendingExternalActivations);
 
   /// מונע הערמת פופאפים כשמגיעים כמה קישורי `info` בזה אחר זה.
   bool _isShowingInfoReport = false;
   bool _isShowingAppReport = false;
-  StreamSubscription<FileSystemEvent>? _externalActivationWatchSub;
-  StreamSubscription<String>? _externalActivationChannelSub;
+  // השירות של התהליך; החלון רק פותח את מה שהוא מפנה אליו.
+  ExternalActivationService? _externalActivationService;
 
   static const List<
     ({
@@ -638,7 +635,19 @@ class MainWindowScreenState extends State<MainWindowScreen>
   /// ובניית הקטלוג מעכבת את החשיפה בכ-700ms. `LibraryBrowser` טוען אותו
   /// ב-`initState` שלו כשנכנסים אליו, ולכן שום דבר לא אובד.
   bool get _skipsEagerLibraryLoad =>
-      WindowRole.isSecondary && WindowRole.openedWithTab;
+      !_role.isPrimaryView && _role.openedWithTab;
+
+  /// עבודה של bloc ברמת התהליך: עם חלונות Dart כל המסכים מאזינים לו.
+  bool get _ownsSharedLibraryUpdate =>
+      !MultiViewMode.enabled || _duties.isProcessOwner;
+
+  /// דיאלוג שנולד מ-bloc משותף מוצג רק בחלון שהמשתמש עובד בו.
+  bool get _showsSharedPrompts =>
+      !MultiViewMode.enabled || identical(AppWindowKeys.current, _windowKeys);
+
+  /// תפקיד החלון והעבודה פר-תהליך שלו; נקראים פעם אחת, ב-[initState].
+  late final AppWindowRole _role;
+  late final ProcessDuties _duties;
 
   StreamSubscription<Object?>? _semanticWorkStatusSub;
   SemanticWorkStatusReporter? _semanticWorkStatus;
@@ -660,6 +669,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
   void initState() {
     super.initState();
     StartupTimeline.instance.markOnce('mainScreenInit');
+    _role = AppWindowScope.roleOf(context);
+    _duties = ProcessDuties.of(context);
     _indexUpdateMode = context.read<SettingsBloc>().state.indexUpdateMode;
     // מאזין לזרם סטטי בלבד: המאגר הסמנטי לא נוצר עד שמשתמשים בו.
     _semanticWorkStatusSub = SemanticSearchRepository.sharedAvailabilityChanges
@@ -678,7 +689,10 @@ class MainWindowScreenState extends State<MainWindowScreen>
     _calendarCubit = CalendarCubit();
     _settingsScreenController = SettingsScreenController();
     _tourCubit = TourCubit();
-    LibraryChangesNotes.instance.beforeAutoShow = _tourFinished;
+    // ה-singletons האלה שייכים לחלון הראשי; חלון Dart אינו דורס אותם.
+    if (!_role.isViewWindow) {
+      LibraryChangesNotes.instance.beforeAutoShow = _tourFinished;
+    }
     _lastScreen = context.read<NavigationBloc>().state.currentScreen;
 
     // כשהמסך ההתחלתי אינו קריאה (אין טאבים שמורים) אין ספר להמתין לו, ולכן
@@ -700,14 +714,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
       }
     }
 
-    PluginPageLauncher.instance.navigator = (pluginId) {
-      if (!mounted) return;
-      openToolTabById(context, pluginId);
-    };
-    ToolsLauncherController.instance.opener = () {
-      if (!mounted || _isToolsLauncherOpen) return;
-      setState(() => _isToolsLauncherOpen = true);
-    };
+    PluginPageLauncher.instance.register(_windowKeys, _openPluginPage);
+    ToolsLauncherController.instance.register(_windowKeys, _openToolsLauncher);
 
     // הצגת פופאפ פרסומת אחרי 5 שניות
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -720,15 +728,24 @@ class MainWindowScreenState extends State<MainWindowScreen>
 
       // ⚠️ המארח בלבד: הניקוז הוא rename אטומי, וכשכל החלונות מנטרים
       // הזוכה שרירותי — לפעמים חלון שהמשתמש סגר קפץ בחזרה למסך.
-      if (!WindowRole.isSecondary) {
+      if (_duties.isProcessOwner) {
         unawaited(_initializeExternalActivationMonitoring());
+      } else if (_role.isViewWindow && mounted) {
+        // חלון Dart אינו מנקז; המארח מפנה אליו כשהוא החלון הפעיל.
+        final service = _externalActivationService = context
+            .read<ExternalActivationService>();
+        service.attachViewWindow(
+          _windowKeys.id,
+          _handleExternalActivationUriString,
+          isVisible: AppWindowScope.controllerOf(context).isVisible,
+        );
       }
 
       _tourCubit.registerSession();
 
       // ⚠️ פר-תהליך: מונה ההפעלות שמכתיב מתי הפופאפ מוצג עולה פר-חלון,
       // והפופאפ עצמו הופיע בכל חלון שנפתח.
-      if (!WindowRole.isSecondary) {
+      if (_duties.isProcessOwner) {
         AdPopupDialog.showIfNeeded(
           context,
           shouldSkip: () => _tourStartedAutomaticallyThisLaunch,
@@ -760,10 +777,18 @@ class MainWindowScreenState extends State<MainWindowScreen>
 
     // Listen to calendar changes for plugin dispatch
     var lastDispatchedCity = _calendarCubit.state.selectedCity;
+    var lastDispatchedDate = _calendarCubit.state.selectedGregorianDate
+        .toIso8601String();
     _calendarCubit.stream.listen((state) {
-      PluginRuntimeDispatcher.instance.dispatchEvent('calendar.date_changed', {
-        'date': state.selectedGregorianDate.toIso8601String(),
-      });
+      // הקוביט משדר גם על שינויים שאינם בתאריך (אירועים, עיר).
+      final date = state.selectedGregorianDate.toIso8601String();
+      if (date != lastDispatchedDate) {
+        lastDispatchedDate = date;
+        PluginRuntimeDispatcher.instance.dispatchEvent(
+          'calendar.date_changed',
+          {'date': date},
+        );
+      }
       // שינוי העיר הנבחרת — אירוע נפרד, נשלח רק כשהעיר באמת משתנה
       if (state.selectedCity != lastDispatchedCity) {
         lastDispatchedCity = state.selectedCity;
@@ -899,7 +924,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
       if (!mounted) {
         _initialContentReady = true;
         _splashOverlayVisible = false;
-        await presentMainWindow();
+        await _presentWindow();
         await WidgetsBinding.instance.endOfFrame;
         if (!_skipsEagerLibraryLoad) libraryBloc.add(LoadLibrary());
         return;
@@ -915,15 +940,24 @@ class MainWindowScreenState extends State<MainWindowScreen>
       StartupTimeline.instance.mark('reveal:contentShown');
       await WidgetsBinding.instance.endOfFrame;
       StartupTimeline.instance.mark('reveal:firstFrame');
-      await presentMainWindow();
+      await _presentWindow();
       await WidgetsBinding.instance.endOfFrame;
       if (!_skipsEagerLibraryLoad) libraryBloc.add(LoadLibrary());
     }());
   }
 
+  /// חלון Dart נחשף לבד בפריים הראשון שלו; [presentMainWindow] הוא של החלון
+  /// הראשי (show, maximize שמור, סגירת ה-splash).
+  Future<void> _presentWindow() =>
+      _role.isViewWindow ? Future<void>.value() : presentMainWindow();
+
+  /// התצוגה (החלון) של המסך; הנראות של התוספים נשמרת לפיה.
+  int? _viewId;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _viewId = View.maybeOf(context)?.viewId;
 
     // אתחול PageController פעם אחת עם initialPage הנכון
     if (!_hasInitializedPageController) {
@@ -938,7 +972,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
   /// This avoids DB lock contention that caused 17s delays.
   void _initializeBackgroundSync() {
     // ⚠️ פר-תהליך: הסנכרון כותב ל-`seforim.db` ול-`user_books.db` המשותפים.
-    if (WindowRole.isSecondary) return;
+    if (!_duties.isProcessOwner) return;
     BackgroundSyncInitializer.initializeAfterDelay(
       delaySeconds: 2, // Small delay to let UI settle after library load
       onComplete: (result) {
@@ -989,7 +1023,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
         (Settings.getValue<bool>(SettingsRepository.keyAutoSync) ?? true) &&
         context.read<SettingsBloc>().state.canUseSoftwareAndBookUpdates &&
         // ⚠️ פר-תהליך: שני חלונות היו מורידים לאותו נתיב ונלחמים על seforim.db.
-        !WindowRole.isSecondary &&
+        _duties.isProcessOwner &&
         isAutoUpdateCheckDue(SettingsRepository.keyLastLibraryUpdateCheck);
   }
 
@@ -1101,21 +1135,20 @@ class MainWindowScreenState extends State<MainWindowScreen>
         (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS)) {
       return;
     }
+    // ה-listener הוא של החלון הראשי.
+    if (_role.isViewWindow) return;
 
     // Listen for fullscreen changes from the window manager (e.g., user presses F11 in OS)
     appWindowListener?.onFullscreenChanged = (isFullscreen) {
       if (!mounted) return;
-      final settingsBloc = context.read<SettingsBloc>();
-      // Only update if the state is different to avoid loops
-      if (settingsBloc.state.isFullscreen != isFullscreen) {
-        settingsBloc.add(UpdateIsFullscreen(isFullscreen));
-      }
+      // ערך זהה אינו נכתב שוב, כך שאין לולאה מול toggleFullscreen.
+      context.read<WindowFullscreenCubit>().set(isFullscreen);
     };
 
     // שחזור פוקוס לאחר אירועי מצב חלון דיסקרטיים (maximize/unmaximize/fullscreen/restore)
     appWindowListener?.onWindowStateChanged = () {
       if (!mounted) return;
-      FocusRepository().scheduleRestore();
+      FocusRepository.of(context).scheduleRestore();
     };
 
     // ה-WebView של תוסף אינו חלק מעץ הפוקוס של Flutter, ולכן השחזור שמעל
@@ -1141,7 +1174,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
     // שחזור פוקוס בזמן resize רציף — עם debounce כדי למנוע הצפת קריאות
     appWindowListener?.onWindowResizeOccurred = () {
       if (!mounted) return;
-      FocusRepository().scheduleRestoreDebounced();
+      FocusRepository.of(context).scheduleRestoreDebounced();
     };
   }
 
@@ -1198,7 +1231,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
   ) async {
     // ⚠️ החלטה פר-תהליך: הענף `autoReindexThenStart` מוחק את האינדקס שכל
     // החלונות חולקים. החלון המשני רק מדווח על מצב האינדקס ופותח את השער.
-    if (WindowRole.isSecondary) {
+    if (!_duties.isProcessOwner) {
       _startupWorkGate.markIndexingDecisionResolved(expectIndexing: false);
       _tryStartDeferredStartupWork();
       context.read<IndexingBloc>().add(CheckIndexStatus(library));
@@ -1343,86 +1376,15 @@ class MainWindowScreenState extends State<MainWindowScreen>
     }
   }
 
-  Future<void> _processPendingExternalActivations() =>
-      _externalActivationDrainRunner.run();
-
-  Future<void> _drainPendingExternalActivations() async {
-    if (!mounted) return;
-    try {
-      final pendingUris = await _externalActivationQueue.drainUriStrings();
-      for (final uriString in pendingUris) {
-        await _routeDrainedExternalUri(uriString);
-      }
-    } catch (e, stackTrace) {
-      debugPrint('External activation polling failed: $e\n$stackTrace');
-    }
-  }
-
   Future<void> _initializeExternalActivationMonitoring() async {
-    await _externalActivationChannel.initialize();
-    await _externalActivationChannelSub?.cancel();
-    _externalActivationChannelSub = _externalActivationChannel.uriStrings
-        .listen((uriString) {
-          unawaited(_handleExternalActivationUriString(uriString));
-        });
-
-    final pendingPlatformUris = await _externalActivationChannel
-        .takePendingUriStrings();
-    for (final uriString in pendingPlatformUris) {
-      await _handleExternalActivationUriString(uriString);
-    }
-
-    final queuePath = await _externalActivationQueue.resolveQueueFilePath();
-    final queueFile = File(queuePath);
-    await queueFile.parent.create(recursive: true);
-
-    await _externalActivationWatchSub?.cancel();
-    _externalActivationWatchSub = queueFile.parent.watch().listen(
-      (event) {
-        final normalizedPath = event.path.replaceAll('\\', '/');
-        final normalizedQueuePath = queuePath.replaceAll('\\', '/');
-        if (normalizedPath != normalizedQueuePath) {
-          return;
-        }
-
-        unawaited(_processPendingExternalActivations());
-      },
-      onError: (error, stackTrace) {
-        debugPrint('External activation watch failed: $error\n$stackTrace');
-      },
-    );
-
-    await _processPendingExternalActivations();
-  }
-
-  /// מפנה קישור שנוקז אל החלון הגלוי שהיה פעיל אחרון, או מטפל בו כאן.
-  ///
-  /// המארח הוא המנקז היחיד, ולכן בלי ההפניה הזו הקישור היה נפתח תמיד בו —
-  /// גם כשהמשתמש עובד בחלון אחר.
-  Future<void> _routeDrainedExternalUri(String uriString) async {
-    final uri = Uri.tryParse(uriString);
-    final action = uri == null ? null : ExternalUriRouter.parseUri(uri);
-    // "חלון חדש" לא ביקש חלון קיים — אין למי להפנות.
-    if (action is OpenNewWindowAction || !MultiWindowService.canOpenWindows) {
-      await _handleExternalActivationUriString(uriString);
-      return;
-    }
-
-    final slot = await const MultiWindowService().lastActiveSlot();
     if (!mounted) return;
-    // null = אין חלון גלוי; אז המארח מוצג בכוונה — משהו חייב להופיע.
-    if (slot == null || slot == WindowBus.instance.slot) {
-      await _handleExternalActivationUriString(uriString);
-      return;
-    }
-
-    final handled = await WindowBus.instance.request(slot, {
-      'type': MultiWindowService.requestOpenUri,
-      'uri': uriString,
-    }, timeout: const Duration(seconds: 5));
-    if (handled == true || !mounted) return;
-    // היעד לא ענה או סירב — עדיף שהקישור ייפתח כאן מאשר שייעלם.
-    await _handleExternalActivationUriString(uriString);
+    final service = _externalActivationService = context
+        .read<ExternalActivationService>();
+    service.attachWindow(
+      _handleExternalActivationUriString,
+      isVisible: AppWindowScope.controllerOf(context).isVisible,
+    );
+    await service.start();
   }
 
   Future<bool> _handleExternalActivationUriString(String uriString) async {
@@ -1470,7 +1432,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
     if (kIsWeb) return;
     if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) return;
     if (!mounted) return;
-    if (MultiWindowService.canOpenWindows) {
+    // `raiseSelf` מעלה את חלון ה-runner, כלומר את הראשי ולא חלון Dart.
+    if (MultiWindowService.canOpenWindows && !_role.isViewWindow) {
       await const MultiWindowService().raiseSelf();
       return;
     }
@@ -1692,7 +1655,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
         _settingsScreenController.openTab(SettingsTab.tools);
         return true;
       case OpenNewWindowAction():
-        return const MultiWindowService().openEmptyWindow();
+        return WindowOpener.current.openEmptyWindow();
       case ReindexLibraryAction():
         // רענון הקטלוג מהדיסק; ה-listener על completedRefreshRequestIds מריץ
         // ריצת אינדוקס עם בדיקה מלאה כשהרענון שקלט את הבקשה מסתיים.
@@ -1745,7 +1708,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
   /// הוא שאילתה, לא יעד.
   ///
   /// הדיאלוג נדחה לפוסט-פריים ואינו מומתן: המתנה לסגירתו הייתה חוסמת את
-  /// `_processPendingExternalActivations` (שמתנקז רק בעקבות אירוע קובץ), וכן
+  /// `ExternalActivationService.processPending` (מתנקז רק באירוע קובץ), וכן
   /// גורמת ל-`Navigator.pop` של הקורא — דיאלוג איתור מקורות — לסגור את
   /// הפופאפ הזה במקום את עצמו.
   Future<bool> _showInfoReport(ShowInfoAction action) async {
@@ -1838,6 +1801,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
         tabsBloc: context.read<TabsBloc>(),
         historyBloc: context.read<HistoryBloc>(),
         navigationBloc: context.read<NavigationBloc>(),
+        layoutWidth: readingLayoutWidthResolverOf(context),
       ),
     );
     return true;
@@ -1863,6 +1827,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
         tabsBloc: context.read<TabsBloc>(),
         historyBloc: context.read<HistoryBloc>(),
         navigationBloc: context.read<NavigationBloc>(),
+        layoutWidth: readingLayoutWidthResolverOf(context),
       ),
     );
     return true;
@@ -1873,18 +1838,23 @@ class MainWindowScreenState extends State<MainWindowScreen>
     _startupWorkGate.markStartupIndexingSettled();
     _startupRefreshWait.cancel();
     _indexingDeferral.clear();
-    PluginPageLauncher.instance.navigator = null;
-    ToolsLauncherController.instance.opener = null;
-    // Clean up fullscreen callback
-    appWindowListener?.onFullscreenChanged = null;
-    appWindowListener?.onWindowStateChanged = null;
-    appWindowListener?.onWindowRestoredFromMinimize = null;
-    appWindowListener?.onWindowResizeOccurred = null;
+    PluginPageLauncher.instance.unregister(_windowKeys, _openPluginPage);
+    ToolsLauncherController.instance.unregister(
+      _windowKeys,
+      _openToolsLauncher,
+    );
+    if (!_role.isViewWindow) {
+      // Clean up fullscreen callback
+      appWindowListener?.onFullscreenChanged = null;
+      appWindowListener?.onWindowStateChanged = null;
+      appWindowListener?.onWindowRestoredFromMinimize = null;
+      appWindowListener?.onWindowResizeOccurred = null;
+    }
     _splashFailsafeTimer?.cancel();
     _pluginInstallDialogQueue.clear();
-    _externalActivationWatchSub?.cancel();
-    _externalActivationChannelSub?.cancel();
-    _externalActivationChannel.dispose();
+    _externalActivationService
+      ?..detachWindow(_handleExternalActivationUriString)
+      ..detachViewWindow(_windowKeys.id, _handleExternalActivationUriString);
     _calendarCubit.close();
     _removeTourOverlay();
     if (LibraryChangesNotes.instance.beforeAutoShow == _tourFinished) {
@@ -1967,6 +1937,16 @@ class MainWindowScreenState extends State<MainWindowScreen>
     }
     _lastBackPressAt = now;
     UiSnack.show(CommonMessages.pressBackAgainToExit);
+  }
+
+  void _openPluginPage(String pluginId) {
+    if (!mounted) return;
+    openToolTabById(context, pluginId);
+  }
+
+  void _openToolsLauncher() {
+    if (!mounted || _isToolsLauncherOpen) return;
+    setState(() => _isToolsLauncherOpen = true);
   }
 
   void _toggleToolsLauncher() {
@@ -2158,7 +2138,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
     final shouldExitFullscreen =
         FullscreenHelper.shouldExitFullscreenOnNavigation(
           platform: defaultTargetPlatform,
-          isFullscreen: context.read<SettingsBloc>().state.isFullscreen,
+          isFullscreen: context.read<WindowFullscreenCubit>().state,
           screen: state.currentScreen,
           hasOpenTabs: context.read<TabsBloc>().state.hasOpenTabs,
         );
@@ -2181,6 +2161,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
       PluginRuntimeDispatcher.instance.setReaderScreenVisible(
         state.currentScreen == Screen.reading ||
             state.currentScreen == Screen.search,
+        viewId: _viewId,
       );
       // בקשת מיקוד אזור הקריאה שייכת למסך העיון בלבד; בעזיבתו היא מתבטלת כדי
       // שלא תירה מאוחר יותר, כשהתוכן נרשם, ותחטוף פוקוס משדה במסך הנוכחי.
@@ -2958,6 +2939,9 @@ class MainWindowScreenState extends State<MainWindowScreen>
               if ((state.status == LibraryUpdateStatus.completed ||
                       state.status == LibraryUpdateStatus.error) &&
                   state.hasUpdate) {
+                // ה-bloc משותף לחלונות ה-Dart: הבעלים מרענן ומאנדקס פעם אחת,
+                // והשאר מקבלים את העץ מ-LibraryChangedInOtherWindow.
+                if (!_ownsSharedLibraryUpdate) return;
                 final requestId = _nextIndexRequestId++;
                 _startupRefreshWait.attachRequest(requestId);
                 _pendingIndexRequests[requestId] = (
@@ -2985,7 +2969,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
                   );
                 }
               } else if (state.status ==
-                  LibraryUpdateStatus.needsFullConfirmation) {
+                      LibraryUpdateStatus.needsFullConfirmation &&
+                  _showsSharedPrompts) {
                 _promptFullDownload(context, state);
               }
             },
@@ -3447,7 +3432,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
                 previous.currentTabIndex != current.currentTabIndex ||
                 previous.currentTab?.title != current.currentTab?.title,
             listener: (context, state) => unawaited(
-              WindowTitleSync.update(
+              WindowTitleSync.of(context).syncIfSupported(
                 state.currentTab?.title,
                 tabCount: state.tabs.length,
               ),
@@ -3652,7 +3637,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
             final isImmersive = FullscreenHelper.shouldUseImmersiveLayout(
               platform: defaultTargetPlatform,
               isFullscreen: context.select(
-                (SettingsBloc b) => b.state.isFullscreen,
+                (WindowFullscreenCubit cubit) => cubit.state,
               ),
               screen: state.currentScreen,
               hasOpenTabs: hasOpenTabs,
@@ -4056,7 +4041,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
                           // host נסתר לתוספים שביקשו לרוץ ברקע עם עליית
                           // האפליקציה. הוא חי כל זמן שה-MainWindowScreen קיים,
                           // ולא תלוי במסך "כלים".
-                          const PluginBackgroundHost(),
+                          if (_duties.hostsPluginBackground)
+                            const PluginBackgroundHost(),
                           ContextOverlayPanel(
                             isOpen:
                                 _isReadingSettingsPanelOpen &&
@@ -4160,6 +4146,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
 
     if (!_closeRootOverlayRoutes(context)) return;
     final navigationBloc = context.read<NavigationBloc>();
+    final focusRepository = FocusRepository.of(context);
     setState(() => _isSearchOpen = true);
 
     showDialog(
@@ -4170,7 +4157,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
       setState(() => _isSearchOpen = false);
       // Restore focus to the screen below (dialog restorer was already removed
       // by SearchDialog.dispose → unregisterActiveRestorer)
-      FocusRepository().scheduleRestore();
+      focusRepository.scheduleRestore();
       final currentScreen = navigationBloc.state.currentScreen;
       if (currentScreen == Screen.reading || currentScreen == Screen.search) {
         _syncPageWithState();
@@ -4194,6 +4181,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
 
     if (!_closeRootOverlayRoutes(context)) return;
     final navigationBloc = context.read<NavigationBloc>();
+    final focusRepository = FocusRepository.of(context);
     setState(() => _isFindRefOpen = true);
 
     showDialog(
@@ -4206,7 +4194,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
       setState(() => _isFindRefOpen = false);
       // Restore focus to the screen below (dialog restorer was already removed
       // by FindRefDialog.dispose → unregisterActiveRestorer)
-      FocusRepository().scheduleRestore();
+      focusRepository.scheduleRestore();
       final currentScreen = navigationBloc.state.currentScreen;
       if (currentScreen == Screen.reading || currentScreen == Screen.search) {
         _syncPageWithState();

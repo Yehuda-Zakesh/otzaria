@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -14,7 +15,6 @@ import 'package:otzaria/attached_libraries/view/attached_library_update_view.dar
 import 'package:otzaria/attached_libraries/view/external_link_index_tile.dart';
 import 'package:otzaria/core/messages/settings_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/settings/l10n/settings_text.dart';
 import 'package:otzaria/settings/widgets/settings_widgets_exports.dart';
 import 'package:otzaria/theme/theme_exports.dart';
@@ -47,6 +47,7 @@ class _AttachedLibrariesPanelState extends State<AttachedLibrariesPanel> {
     _links.tooLargeSlugs.addListener(_rebuild);
     _links.buildingSlugs.addListener(_rebuild);
     _links.incompleteSlugs.addListener(_rebuild);
+    unawaited(_links.refreshFromHost());
   }
 
   @override
@@ -463,10 +464,7 @@ class _AttachedLibraryTile extends StatelessWidget {
                 ),
             ],
           ),
-          if (library.isOk &&
-              linksIncomplete &&
-              !linksBuilding &&
-              !WindowRole.isSecondary)
+          if (library.isOk && linksIncomplete && !linksBuilding)
             ActionButton.neutral(
               onPressed: enabled ? onRebuildLinks : null,
               text: context.settingsText('בנה אינדקס מחדש'),

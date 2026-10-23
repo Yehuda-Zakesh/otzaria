@@ -260,23 +260,14 @@ class _OutlineViewState extends State<OutlineView>
       final itemRenderObject = itemContext.findRenderObject();
       if (itemRenderObject is! RenderBox) return;
 
-      // --- התחלה: החישוב הנכון והבדוק ---
-      // זהו החישוב מההצעה של ה-AI השני, מותאם לקוד שלנו.
-
       final scrollableBox =
           _tocScrollController.position.context.storageContext
                   .findRenderObject()
               as RenderBox;
-
-      // המיקום של הפריט ביחס ל-viewport של הגלילה
       final itemOffset = itemRenderObject
           .localToGlobal(Offset.zero, ancestor: scrollableBox)
           .dy;
-
-      // גובה ה-viewport (האזור הנראה)
       final viewportHeight = scrollableBox.size.height;
-
-      // גובה הפריט עצמו
       final itemHeight = itemRenderObject.size.height;
 
       // מיקום היעד המדויק למירוכז
@@ -285,7 +276,6 @@ class _OutlineViewState extends State<OutlineView>
           itemOffset -
           (viewportHeight / 2) +
           (itemHeight / 2);
-      // --- סיום: החישוב הנכון והבדוק ---
 
       _tocScrollController.animateTo(
         target.clamp(

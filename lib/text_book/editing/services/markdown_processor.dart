@@ -17,8 +17,8 @@ class MarkdownProcessor {
   String markdownToHtml(String rawInput) {
     if (rawInput.isEmpty) return '';
 
-    // Generate cache key from input hash
-    final cacheKey = rawInput.hashCode.toString();
+    // מפתח לפי הטקסט עצמו: התנגשות hashCode הייתה מחזירה HTML של מסמך אחר.
+    final cacheKey = rawInput;
 
     // Check cache first
     if (_htmlCache.containsKey(cacheKey)) {

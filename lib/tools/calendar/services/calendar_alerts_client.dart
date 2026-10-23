@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/windowing/settings_sync.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/tools/calendar/services/calendar_alerts_owner.dart';
 
@@ -63,9 +63,10 @@ class CalendarAlertsAck {
 /// הדרך של חלון לשנות את מצב ההתראות: תמיד דרך הבעלים.
 abstract class CalendarAlertsClient {
   /// הבעלים עצמו בחלון הראשי ובחלון יחיד, ואפיק החלונות בחלון משני.
-  static CalendarAlertsClient forCurrentWindow() => WindowRole.isSecondary
-      ? RemoteCalendarAlertsClient.instance
-      : LocalCalendarAlertsClient.instance;
+  static CalendarAlertsClient forCurrentWindow() =>
+      ProcessDuties.current.isProcessOwner
+      ? LocalCalendarAlertsClient.instance
+      : RemoteCalendarAlertsClient.instance;
 
   Future<CalendarAlertsAck> send(
     String op, [

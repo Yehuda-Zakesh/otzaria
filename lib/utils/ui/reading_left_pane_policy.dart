@@ -1,20 +1,41 @@
 import 'dart:ui' as ui;
 
+import 'package:flutter/widgets.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/theme/layout_tokens.dart';
 
+double _logicalWidthOf(ui.FlutterView view) {
+  if (view.devicePixelRatio == 0) {
+    return LayoutBreakpoints.expanded;
+  }
+  return view.physicalSize.width / view.devicePixelRatio;
+}
+
+/// ברירת המחדל בלי הקשר: התצוגה הראשונה של התהליך.
 double _currentLogicalScreenWidth() {
   final views = ui.PlatformDispatcher.instance.views;
   if (views.isEmpty) {
     return LayoutBreakpoints.expanded;
   }
+  return _logicalWidthOf(views.first);
+}
 
-  final view = views.first;
-  if (view.devicePixelRatio == 0) {
-    return LayoutBreakpoints.expanded;
-  }
+// בלי רישום תלות, כדי שיעבוד גם מ-initState ומ-create של provider.
+ui.FlutterView? _viewOf(BuildContext context) =>
+    context.findAncestorWidgetOfExactType<View>()?.view;
 
-  return view.physicalSize.width / view.devicePixelRatio;
+/// הרוחב הלוגי של התצוגה ש-[context] מוצג בה, ל-`screenWidth` של הפונקציות
+/// כאן; null (= ברירת המחדל) כשאין View מעליו.
+double? readingLayoutWidthOf(BuildContext context) {
+  final view = _viewOf(context);
+  return view == null ? null : _logicalWidthOf(view);
+}
+
+/// כמו [readingLayoutWidthOf], אך נמדד מחדש בכל קריאה — למחזיקים ארוכי-חיים
+/// (התצוגה של הקשר קבועה; גודלה לא).
+double? Function() readingLayoutWidthResolverOf(BuildContext context) {
+  final view = _viewOf(context);
+  return () => view == null ? null : _logicalWidthOf(view);
 }
 
 bool isCompactReadingLayout({double? screenWidth}) {

@@ -1,5 +1,9 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:html/dom.dart' as dom;
+import 'package:html/parser.dart' as html_parser;
 import 'package:otzaria/search/utils/snippet_builder.dart';
 
 import '../support/search_engine_test_init.dart';
@@ -311,6 +315,76 @@ Future<void> main() async {
         'תהו <font color=red>ובהו</font><br> ויאמר אלהים',
       );
       expect(plain, 'תהו ובהו\nויאמר אלהים');
+    });
+
+    test('כיווץ הרווחים זהה לאלגוריתם הקודם בקלט אקראי (perf)', () {
+      // הקודם, כלשונו: שתי סריקות RegExp בכל קטע, גם בלי סימון <br>.
+      String oldCollapse(String text) => text
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .replaceAll(RegExp(' ?\uE000 ?'), '\n');
+      dom.Element? parseBody(String html) => html_parser
+          .parse(
+            html.replaceAll(
+              RegExp(r'<br\s*/?>', caseSensitive: false),
+              '\uE000',
+            ),
+          )
+          .body;
+      List<String> oldSpanTexts(String html) {
+        final texts = <String>[];
+        void walk(dom.Node node) {
+          for (final child in node.nodes) {
+            if (child is dom.Text) {
+              final text = oldCollapse(child.text);
+              if (text.isNotEmpty) texts.add(text);
+            } else if (child is dom.Element) {
+              walk(child);
+            }
+          }
+        }
+
+        final body = parseBody(html);
+        if (body != null) walk(body);
+        return texts.isEmpty ? [''] : texts;
+      }
+
+      const parts = [
+        'ויאמר',
+        ' ',
+        '  ',
+        '\n',
+        '\t',
+        '<br>',
+        '<BR/>',
+        '<br />',
+        ' <br> ',
+        '<b>משה</b>',
+        '<font color="red">אל</font>',
+        '&nbsp;',
+        '\uE000',
+      ];
+      final random = Random(3);
+      for (var i = 0; i < 500; i++) {
+        final html = [
+          for (var n = random.nextInt(8) + 1; n > 0; n--)
+            parts[random.nextInt(parts.length)],
+        ].join();
+        expect(
+          SnippetBuilder.htmlToPlainText(html),
+          oldCollapse(parseBody(html)?.text ?? '').trim(),
+          reason: html,
+        );
+        final spans = SnippetBuilder.fromHighlightedHtml(
+          html: html,
+          defaultStyle: _defaultStyle,
+          highlightStyle: _highlightStyle,
+        );
+        expect(
+          [for (final span in spans) (span as TextSpan).text],
+          oldSpanTexts(html),
+          reason: html,
+        );
+      }
     });
   });
 

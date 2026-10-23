@@ -251,6 +251,8 @@ void main() {
     });
 
     testWidgets('מסלול ה-HtmlWidget', (tester) async {
+      SmartTextWidget.debugForceHtmlWidget = true;
+      addTearDown(() => SmartTextWidget.debugForceHtmlWidget = false);
       await tester.pumpWidget(
         _wrap(
           const SmartTextWidget(
@@ -272,14 +274,45 @@ void main() {
       expect(richText.strutStyle?.forceStrutHeight, isTrue);
     });
 
-    // רגרסיה מקצה לקצה על צורת הטקסט בתלמוד, בשני המסלולים: `<big><strong>`
-    // לבדו נשאר במסלול המהיר, ותוספת סמן-עוגן מעבירה את השורה ל-HtmlWidget.
-    for (final withAnchor in [false, true]) {
+    testWidgets('סמן-עוגן במסלול הספאנים', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          SmartTextWidget(
+            text:
+                'טקסט <a class="link-anchor link-anchor-0" '
+                'href="otzaria://anchor?ref=0_0">(א)</a> ועוד',
+            settings: const RenderSettings(
+              fontSize: 18,
+              fontFamily: 'FrankRuhlCLM',
+              lineHeight: 1.5,
+            ),
+            onAnchorTap: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(HtmlWidget), findsNothing);
+      final richText = tester
+          .widgetList<RichText>(find.byType(RichText))
+          .firstWhere((widget) => widget.text.toPlainText().contains('ועוד'));
+      expect(richText.strutStyle?.forceStrutHeight, isTrue);
+    });
+
+    // רגרסיה מקצה לקצה על צורת הטקסט בתלמוד, בשני המסלולים.
+    for (final (withAnchor, viaHtml) in const [
+      (false, false),
+      (true, false),
+      (true, true),
+    ]) {
       final anchor = withAnchor ? ' <span class="link-anchor">א</span>' : '';
       testWidgets(
         'שורת "גמ׳" בגובה של שורה רגילה'
-        '${withAnchor ? ' (מסלול HtmlWidget)' : ''}',
+        '${withAnchor ? ' עם עוגן' : ''}'
+        '${viaHtml ? ' (מסלול HtmlWidget)' : ''}',
         (tester) async {
+          SmartTextWidget.debugForceHtmlWidget = viaHtml;
+          addTearDown(() => SmartTextWidget.debugForceHtmlWidget = false);
           const settings = RenderSettings(
             fontSize: 18,
             fontFamily: 'FrankRuhlCLM',
@@ -309,7 +342,7 @@ void main() {
 
           expect(
             find.byType(HtmlWidget),
-            withAnchor ? findsNWidgets(2) : findsNothing,
+            viaHtml ? findsNWidgets(2) : findsNothing,
           );
           final heights = tester
               .widgetList<RichText>(find.byType(RichText))

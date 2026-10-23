@@ -16,6 +16,29 @@ class PluginDevFsChange {
 }
 
 class PluginDevWatchService {
+  static PluginDevWatchService? _shared;
+  static int _users = 0;
+
+  /// כל חלונות ה-isolate חולקים מאזין קבצים אחד.
+  static PluginDevWatchService acquire() {
+    _users++;
+    return _shared ??= PluginDevWatchService();
+  }
+
+  static void release() {
+    if (--_users != 0) return;
+    _shared?.dispose();
+    _shared = null;
+  }
+
+  final _handled = Expando<Future<void>>();
+
+  /// הטעינה מתבצעת פעם אחת; כל חלון ממתין לאותה תוצאה ומרענן את ה-UI שלו.
+  Future<void> handleOnce(
+    PluginDevFsChange change,
+    Future<void> Function() reload,
+  ) => _handled[change] ??= Future.sync(reload);
+
   final Map<String, StreamSubscription<FileSystemEvent>> _watchers = {};
   final Map<String, String> _watchedPaths = {};
   final Map<String, Timer> _debounceTimers = {};

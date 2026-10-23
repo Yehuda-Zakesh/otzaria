@@ -77,4 +77,51 @@ void main() {
     expect(tabSwipeUpdates, greaterThan(0));
     expect(contentScaleUpdates, 0);
   });
+
+  for (final zoomed in [false, true]) {
+    testWidgets('צביטה אופקית נשארת בתוכן, מוגדל=$zoomed', (tester) async {
+      await tester.pumpWidget(
+        buildHarness(singleFingerPansContent: zoomed),
+      );
+      final left = await tester.startGesture(
+        const Offset(100, 250),
+        pointer: 1,
+      );
+      final right = await tester.startGesture(
+        const Offset(700, 250),
+        pointer: 2,
+      );
+      for (var step = 0; step < 10; step++) {
+        await left.moveBy(const Offset(-10, 0));
+        await right.moveBy(const Offset(10, 0));
+      }
+      await left.up();
+      await right.up();
+      await tester.pump();
+
+      expect(tabSwipeUpdates, 0);
+      expect(contentScaleUpdates, greaterThan(0));
+    });
+    testWidgets('צביטה עם תזוזה נשארת בתוכן, מוגדל=$zoomed', (tester) async {
+      await tester.pumpWidget(buildHarness(singleFingerPansContent: zoomed));
+      final left = await tester.startGesture(
+        const Offset(100, 250),
+        pointer: 1,
+      );
+      final right = await tester.startGesture(
+        const Offset(700, 250),
+        pointer: 2,
+      );
+      for (var step = 0; step < 10; step++) {
+        await left.moveBy(const Offset(5, 0));
+        await right.moveBy(const Offset(15, 0));
+      }
+      await left.up();
+      await right.up();
+      await tester.pump();
+
+      expect(tabSwipeUpdates, 0);
+      expect(contentScaleUpdates, greaterThan(0));
+    });
+  }
 }

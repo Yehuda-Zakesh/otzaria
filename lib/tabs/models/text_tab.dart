@@ -323,7 +323,7 @@ class TextBookTab extends OpenedTab {
       searchMode: searchState.searchMode,
       searchDistance: searchState.searchDistance,
       matchPolicy: searchState.matchPolicy,
-    );
+    )..historySlot = json['historySlot'] as String?;
   }
 
   @override
@@ -341,6 +341,7 @@ class TextReadingSnapshot {
     _index = _readingAnchor?.line ?? tab.index;
     _isPinned = tab.isPinned;
     _dedupeKey = tab.dedupeKey;
+    _historySlot = tab.historySlot;
     _showLeftPane = state.showLeftPane;
     _commentators = tab.commentators;
     _persistedSplitView = tab._lastSplitView;
@@ -426,6 +427,7 @@ class TextReadingSnapshot {
   late final ReadingAnchor? _readingAnchor;
   late final bool _isPinned;
   late final String? _dedupeKey;
+  late final String? _historySlot;
   late final bool _showLeftPane;
   late final ReadingTabSearchState _search;
   List<String>? _commentators;
@@ -466,7 +468,7 @@ class TextReadingSnapshot {
       showPageShapeView: _pageShapeView,
       isPinned: _isPinned,
       dedupeKey: _dedupeKey,
-    );
+    )..historySlot = _historySlot;
   }
 
   /// שומר את פורמט הטאב הקיים ואת נתוני הספר שהועשרו בזמן הקריאה.
@@ -481,6 +483,7 @@ class TextReadingSnapshot {
     'showLeftPane': _showLeftPane,
     'isPinned': _isPinned,
     'type': 'TextBookTab',
+    'historySlot': ?_historySlot,
     if (_highlightText.isNotEmpty) 'highlightText': _highlightText,
     'permanentHighlightLine': ?_permanentHighlightLine,
     // null = חיפוש שלא רץ; סט ריק = חיפוש שלא מצא תוצאות.

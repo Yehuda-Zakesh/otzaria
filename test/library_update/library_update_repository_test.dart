@@ -1217,7 +1217,7 @@ void main() {
     );
   }
 
-  test('הורדה מלאה מחליפה קובץ קריאה בלבד ב-POSIX', () async {
+  test('הורדה מלאה מחליפה קובץ קריאה בלבד בתיקייה ניתנת לכתיבה', () async {
     final dbPath = p.join(tmp.path, DatabaseConstants.databaseFileName);
     _writeDb(dbPath, version: 1, marker: 'old');
     await _setReadOnly(dbPath, true);
@@ -1228,10 +1228,19 @@ void main() {
         refreshService: _NoopRefreshService(),
       ).applyFullDownload(_localFullDownloadPlan());
       expect(_readMarker(dbPath), 'new');
+      expect(const LocalDbVersionReader().read(dbPath).dbVersion, 2);
+      expect(
+        File(
+          const LibraryDbRecoveryService().markerPathFor(dbPath),
+        ).existsSync(),
+        isFalse,
+      );
     } finally {
       await _setReadOnly(dbPath, false);
+      final backupPath = const LibraryDbRecoveryService().backupPathFor(dbPath);
+      if (File(backupPath).existsSync()) await _setReadOnly(backupPath, false);
     }
-  }, skip: Platform.isWindows);
+  });
 
   for (final full in [true, false]) {
     test('בדיקת ${full ? 'מלאה' : 'דלתא'} אינה יוצרת מסד חסר', () async {
@@ -1345,13 +1354,15 @@ void main() {
           sourceName: 'new',
         );
         if (beforeDownload) await _setReadOnly(dbPath, true);
+        var downloaded = false;
         final repository = LibraryUpdateRepository(
           discovery: _unusedDiscovery(),
           downloader: _LocalPatchDownloader(
             patchPath,
-            beforeReturn: beforeDownload
-                ? null
-                : () => _setReadOnly(dbPath, true),
+            beforeReturn: () async {
+              downloaded = true;
+              if (!beforeDownload) await _setReadOnly(dbPath, true);
+            },
           ),
           refreshService: _NoopRefreshService(),
           dbPathProvider: () => dbPath,
@@ -1378,9 +1389,13 @@ void main() {
               ),
             ),
           );
-          final log = ErrorLogFile.resolveFile().readAsStringSync();
-          expect(log, contains('journal_mode=WAL failed'));
-          expect(log, contains('readonly database'));
+          // מאפיין "קריאה בלבד" של Windows נעצר כבר לפני ההורדה.
+          expect(downloaded, !(beforeDownload && Platform.isWindows));
+          if (downloaded) {
+            final log = ErrorLogFile.resolveFile().readAsStringSync();
+            expect(log, contains('journal_mode=WAL failed'));
+            expect(log, contains('readonly database'));
+          }
           expect(const LocalDbVersionReader().read(dbPath).dbVersion, 1);
         } finally {
           await _setReadOnly(dbPath, false);
@@ -2502,6 +2517,7 @@ Map<String, String> _tableHashes(String dbPath, {int schemaVersion = 4}) {
         .computeReport(
           db,
           tableOrder: hashTableOrderForSchemaVersion(schemaVersion),
+          rowOrder: hashRowOrderForSchemaVersion(schemaVersion),
         )
         .tableHashes;
   } finally {
@@ -2516,6 +2532,7 @@ String _logicalHash(String dbPath) {
     return const LogicalContentHasher().compute(
       db,
       tableOrder: hashTableOrderForSchemaVersion(4),
+      rowOrder: hashRowOrderForSchemaVersion(4),
     );
   } finally {
     db.close();

@@ -10,6 +10,8 @@ import 'package:otzaria/plugins/bridge/plugin_bridge_handler.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/models/plugin_manifest.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
+import 'package:otzaria/plugins/models/plugin_api_catalog.dart';
+import 'package:otzaria/plugins/services/plugin_restore_state_store.dart';
 import 'package:otzaria/plugins/services/plugin_unsaved_changes_registry.dart';
 import 'package:otzaria/search/search_repository.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
@@ -102,9 +104,10 @@ void main() {
     TabsBloc tabsBloc, {
     bool warningAnswer = true,
     List<String>? warningsShown,
+    String instanceId = 'tab-3',
   }) => PluginBridgeAdapter(
     _plugin(),
-    instanceId: 'tab-3',
+    instanceId: instanceId,
     dependencies: PluginBridgeDependencies(
       historyBloc: _MockHistoryBloc(),
       tabsBloc: tabsBloc,
@@ -178,11 +181,75 @@ void main() {
       expect(registry.hasUnsavedChanges(key), isFalse);
     });
 
+    test('שחרור ה-WebView (נפילה או פינוי) מנקה את הדגל', () async {
+      final adapter = buildAdapter(_MockTabsBloc());
+      await adapter.execute('ui', 'setUnsavedChanges', {'hasChanges': true});
+      adapter.releaseRuntime();
+      expect(registry.hasUnsavedChanges(key), isFalse);
+    });
+
     test('dispose של האדפטר מנקה את הדגל', () async {
       final adapter = buildAdapter(_MockTabsBloc());
       await adapter.execute('ui', 'setUnsavedChanges', {'hasChanges': true});
       adapter.dispose();
       expect(registry.hasUnsavedChanges(key), isFalse);
+    });
+  });
+
+  group('plugin.setRestoreState', () {
+    final store = PluginRestoreStateStore.instance;
+    tearDown(() => store.remove(key));
+
+    test('בלי הרשאה, מגרסה 0.9.99', () {
+      expect(
+        PluginBridgeHandler.methodPermissions['plugin.setRestoreState'],
+        PluginBridgeHandler.noManifestPermission,
+      );
+      expect(pluginApiMinVersions['plugin.setRestoreState'], '0.9.99');
+    });
+
+    test('שומר את המצב של המופע הקורא, ו-null מוחק', () async {
+      final adapter = buildAdapter(_MockTabsBloc());
+      expect(
+        await adapter.execute('plugin', 'setRestoreState', {
+          'state': {'screen': 'list'},
+        }),
+        isTrue,
+      );
+      expect(store.stateOf(key), {'screen': 'list'});
+      await adapter.execute('plugin', 'setRestoreState', {'state': null});
+      expect(store.has(key), isFalse);
+    });
+
+    test('בלי state, או גדול מדי — invalid_params', () async {
+      final adapter = buildAdapter(_MockTabsBloc());
+      final invalid = throwsA(
+        isA<Exception>().having(
+          (e) => e.toString(),
+          'message',
+          contains('error.invalid_params'),
+        ),
+      );
+      expect(() => adapter.execute('plugin', 'setRestoreState', {}), invalid);
+      expect(
+        () => adapter.execute('plugin', 'setRestoreState', {
+          'state': 'x' * PluginRestoreStateStore.maxStateBytes,
+        }),
+        invalid,
+      );
+      expect(store.has(key), isFalse);
+    });
+
+    test('מופע רקע מקבל false ואינו נשמר', () async {
+      final adapter = buildAdapter(_MockTabsBloc(), instanceId: 'background');
+      expect(
+        await adapter.execute('plugin', 'setRestoreState', {'state': 1}),
+        isFalse,
+      );
+      expect(
+        store.has((pluginId: 'test.plugin', instanceId: 'background')),
+        isFalse,
+      );
     });
   });
 

@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/book_protection/utils/copy_guard.dart';
 import 'package:otzaria/book_common/selection/selected_text_restore.dart';
 import 'package:otzaria/plugins/models/plugin_context_menu_item.dart';
@@ -169,6 +170,8 @@ List<AppContextMenuEntry> buildClickedHighlightPluginEntries({
   );
   if (clicked.isEmpty) return const [];
   final entries = buildPluginContextMenuEntries(
+    viewId: View.of(menuContext).viewId,
+    windowKeys: AppWindowKeys.of(menuContext),
     records: pluginItems,
     selection: buildClickedHighlightsPayload(
       highlights: clicked,
@@ -211,6 +214,8 @@ List<AppContextMenuEntry> buildReaderPluginMenuEntries({
   final renderSettings = settings();
   if (!hasSelection) {
     final bookEntries = buildPluginContextMenuEntries(
+      viewId: View.of(menuContext).viewId,
+      windowKeys: AppWindowKeys.of(menuContext),
       records: items,
       selection: buildReaderBookPayload(
         state: state,
@@ -250,6 +255,8 @@ List<AppContextMenuEntry> buildReaderPluginMenuEntries({
   return [
     const AppContextMenuEntry.divider(),
     ...buildPluginContextMenuEntries(
+      viewId: View.of(menuContext).viewId,
+      windowKeys: AppWindowKeys.of(menuContext),
       records: items,
       selection: selection,
       context: selectionContext,

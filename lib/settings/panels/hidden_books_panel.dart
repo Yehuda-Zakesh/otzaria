@@ -4,11 +4,11 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/messages/settings_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/core/windowing/settings_sync.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
@@ -153,7 +153,9 @@ class _HiddenBooksPanelState extends State<HiddenBooksPanel> {
   }) async {
     if (next == base) return true;
     if (!mounted) return false;
-    if (WindowRole.isSecondary) {
+    // ברמת ה-isolate ולא `of(context)`: חלון Dart חולק אותו עם הבעלים ושומר
+    // מקומית; העברה דרך האפיק לא הייתה מגיעה לאיש.
+    if (!ProcessDuties.current.isProcessOwner) {
       final response =
           await (widget.visibilityRequester?.call(base, next) ??
               const MultiWindowService().requestVisibilityChange(base, next));

@@ -621,6 +621,277 @@ void main() {
     }
   });
 
+  for (final reverse in [false, true]) {
+    for (final estimatedHeight in [50.0, 200.0]) {
+      for (final flushOnRelease in [false, true]) {
+        testWidgets(
+          'גרירה נשארת יחסית אחרי שינוי אומדנים: '
+          'height=$estimatedHeight reverse=$reverse release=$flushOnRelease',
+          (tester) async {
+            final fixture = await _pumpList(
+              tester,
+              heights: List.filled(1000, 100.0),
+              reverse: reverse,
+            );
+            final position = fixture.pixels.position;
+            fixture.pixels.jumpTo(position.maxScrollExtent / 2);
+            await tester.pumpAndSettle();
+            final gesture = await tester.startGesture(
+              tester.getRect(_thumb).center,
+              kind: PointerDeviceKind.mouse,
+            );
+            await gesture.moveBy(const Offset(0, 40));
+            await tester.pump(const Duration(milliseconds: 16));
+
+            final listController = fixture.item.listController!;
+            final beforeUpdate = position.pixels;
+            final anchor = listController.anchor!;
+            final oldRange =
+                position.maxScrollExtent - position.minScrollExtent;
+            final update = listController.updateEstimatedExtents({
+              for (var index = 600; index < 1000; index++)
+                index: estimatedHeight,
+            });
+            await tester.pump(const Duration(milliseconds: 16));
+            await update;
+            expect(position.pixels, closeTo(beforeUpdate, 0.01));
+            expect(listController.anchor!.index, anchor.index);
+            expect(
+              listController.anchor!.offsetInItem,
+              closeTo(anchor.offsetInItem, 0.01),
+            );
+            final newRange =
+                position.maxScrollExtent - position.minScrollExtent;
+            expect(
+              newRange,
+              closeTo(oldRange + 400 * (estimatedHeight - 100), 0.01),
+            );
+
+            final movementRange =
+                tester.getRect(_track).height - tester.getRect(_thumb).height;
+            final pixelsPerDragPixel =
+                (reverse ? -1 : 1) * newRange / movementRange;
+            await gesture.moveBy(const Offset(0, 1));
+            final firstTarget = beforeUpdate + pixelsPerDragPixel;
+            expect(position.pixels, closeTo(firstTarget, 0.01));
+            for (var i = 0; i < 10; i++) {
+              await gesture.moveBy(const Offset(0, 0.25));
+            }
+            expect(position.pixels, closeTo(firstTarget, 0.01));
+            final lastTarget = beforeUpdate + 3.5 * pixelsPerDragPixel;
+            if (flushOnRelease) {
+              await gesture.up();
+              expect(position.pixels, closeTo(lastTarget, 0.01));
+            } else {
+              await tester.pump(const Duration(milliseconds: 16));
+              expect(position.pixels, closeTo(lastTarget, 0.01));
+              await gesture.up();
+            }
+            await tester.pumpAndSettle();
+            expect(position.pixels, closeTo(lastTarget, 0.01));
+            _expectPhysicalThumb(tester, fixture);
+          },
+        );
+      }
+    }
+  }
+
+  for (final reverse in [false, true]) {
+    testWidgets(
+      'יעד גרירה ממתין שומר מקור אחרי שינוי אומדנים לפניו: reverse=$reverse',
+      (tester) async {
+        final fixture = await _pumpList(
+          tester,
+          heights: List.filled(1000, 100.0),
+          reverse: reverse,
+        );
+        final position = fixture.pixels.position;
+        fixture.pixels.jumpTo(position.maxScrollExtent / 2);
+        await tester.pumpAndSettle();
+        final gesture = await tester.startGesture(
+          tester.getRect(_thumb).center,
+          kind: PointerDeviceKind.mouse,
+        );
+        await gesture.moveBy(const Offset(0, 40));
+        await tester.pump(const Duration(milliseconds: 16));
+
+        final listController = fixture.item.listController!;
+        final source = find.text('שורה ${listController.anchor!.index + 3}');
+        final sourceTop = tester.getTopLeft(source).dy;
+        expect(sourceTop, inExclusiveRange(0, position.viewportDimension));
+        final beforeDrag = position.pixels;
+        final range = position.maxScrollExtent - position.minScrollExtent;
+        final movementRange =
+            tester.getRect(_track).height - tester.getRect(_thumb).height;
+        final distance = 0.75 * range / movementRange;
+        expect(sourceTop - distance, greaterThanOrEqualTo(0));
+        await gesture.moveBy(const Offset(0, 0.5));
+        final immediateTarget = position.pixels;
+        for (var i = 0; i < 10; i++) {
+          await gesture.moveBy(const Offset(0, 0.025));
+        }
+        expect(position.pixels, immediateTarget);
+        final update = listController.updateEstimatedExtents({
+          for (var index = 0; index < 200; index++) index: 150,
+        });
+        await tester.pump(const Duration(milliseconds: 16));
+        await update;
+        expect(
+          position.pixels,
+          closeTo(beforeDrag + (reverse ? -distance : distance) + 10000, 0.01),
+        );
+        expect(
+          tester.getTopLeft(source).dy,
+          closeTo(sourceTop - distance, 0.01),
+        );
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(
+          tester.getTopLeft(source).dy,
+          closeTo(sourceTop - distance, 0.01),
+        );
+        _expectPhysicalThumb(tester, fixture);
+      },
+    );
+  }
+
+  for (final reverse in [false, true]) {
+    for (final flushOnRelease in [false, true]) {
+      testWidgets(
+        'תיקון pixels מעביר יעד ממתין למערכת החדשה: '
+        'reverse=$reverse release=$flushOnRelease',
+        (tester) async {
+          final fixture = await _pumpList(
+            tester,
+            heights: List.filled(1000, 100.0),
+            reverse: reverse,
+          );
+          final position = fixture.pixels.position;
+          fixture.pixels.jumpTo(position.maxScrollExtent / 2);
+          await tester.pumpAndSettle();
+          final gesture = await tester.startGesture(
+            tester.getRect(_thumb).center,
+            kind: PointerDeviceKind.mouse,
+          );
+          await gesture.moveBy(const Offset(0, 40));
+          await tester.pump(const Duration(milliseconds: 16));
+          final beforeDrag = position.pixels;
+          final range = position.maxScrollExtent - position.minScrollExtent;
+          final movementRange =
+              tester.getRect(_track).height - tester.getRect(_thumb).height;
+          final distance = (reverse ? -1 : 1) * 3.5 * range / movementRange;
+          await gesture.moveBy(const Offset(0, 1));
+          final immediateTarget = position.pixels;
+          for (var i = 0; i < 10; i++) {
+            await gesture.moveBy(const Offset(0, 0.25));
+          }
+          expect(position.pixels, immediateTarget);
+
+          position.correctBy(10000);
+          final context = tester.element(find.byType(ScrollablePositionedList));
+          ScrollMetricsNotification(
+            metrics: position.copyWith(),
+            context: context,
+          ).dispatch(context);
+          expect(position.pixels, immediateTarget + 10000);
+          final target = beforeDrag + distance + 10000;
+          if (flushOnRelease) {
+            await gesture.up();
+            expect(position.pixels, closeTo(target, 0.01));
+          } else {
+            await tester.pump(const Duration(milliseconds: 16));
+            expect(position.pixels, closeTo(target, 0.01));
+            await gesture.up();
+          }
+          await tester.pumpAndSettle();
+          expect(position.pixels, closeTo(target, 0.01));
+          _expectPhysicalThumb(tester, fixture);
+        },
+      );
+    }
+  }
+
+  for (final reverse in [false, true]) {
+    for (final bottom in [false, true]) {
+      for (final returnBeforeRelease in [false, true]) {
+        testWidgets(
+          returnBeforeRelease
+              ? 'קצה ממתין וחזרה 1px נוחתים ליד הקצה: '
+                    'reverse=$reverse bottom=$bottom'
+              : 'גרירה לקצה אחרי הגדלת טווח מגיעה לקצה התוכן: '
+                    'reverse=$reverse bottom=$bottom',
+          (tester) async {
+            final fixture = await _pumpList(
+              tester,
+              heights: List.filled(1000, 100.0),
+              reverse: reverse,
+            );
+            final position = fixture.pixels.position;
+            fixture.pixels.jumpTo(position.maxScrollExtent / 2);
+            await tester.pumpAndSettle();
+            final gesture = await tester.startGesture(
+              tester.getRect(_thumb).center,
+              kind: PointerDeviceKind.mouse,
+            );
+            await gesture.moveBy(const Offset(0, 40));
+            await tester.pump(const Duration(milliseconds: 16));
+            final beforeUpdate = position.pixels;
+            final update = fixture.item.listController!.updateEstimatedExtents({
+              for (var index = 600; index < 1000; index++) index: 200,
+            });
+            await tester.pump(const Duration(milliseconds: 16));
+            await update;
+            expect(position.pixels, closeTo(beforeUpdate, 0.01));
+
+            final track = tester.getRect(_track);
+            final movementRange = track.height - tester.getRect(_thumb).height;
+            final pixelsPerDragPixel =
+                (position.maxScrollExtent - position.minScrollExtent) /
+                movementRange;
+            final firstTarget =
+                position.pixels +
+                (reverse ? -1 : 1) * (bottom ? 1 : -1) * pixelsPerDragPixel;
+            if (returnBeforeRelease) {
+              await gesture.moveBy(Offset(0, bottom ? 1 : -1));
+              expect(position.pixels, closeTo(firstTarget, 0.01));
+            }
+            var target = bottom != reverse
+                ? position.maxScrollExtent
+                : position.minScrollExtent;
+            await gesture.moveTo(
+              bottom
+                  ? track.bottomCenter - const Offset(0, 1)
+                  : track.topCenter + const Offset(0, 1),
+            );
+            if (returnBeforeRelease) {
+              expect(position.pixels, closeTo(firstTarget, 0.01));
+              await gesture.moveBy(Offset(0, bottom ? -1 : 1));
+              expect(position.pixels, closeTo(firstTarget, 0.01));
+              target += bottom != reverse
+                  ? -pixelsPerDragPixel
+                  : pixelsPerDragPixel;
+            }
+            await gesture.up();
+            expect(position.pixels, closeTo(target, 0.01));
+            await tester.pumpAndSettle();
+            if (!returnBeforeRelease) {
+              expect(
+                position.pixels,
+                closeTo(
+                  bottom != reverse
+                      ? position.maxScrollExtent
+                      : position.minScrollExtent,
+                  0.01,
+                ),
+              );
+            }
+            _expectPhysicalThumb(tester, fixture);
+          },
+        );
+      }
+    }
+  }
+
   testWidgets('הודעות מטריקות זהות אינן מתזמנות בנייה נוספת', (tester) async {
     final fixture = await _pumpList(tester);
     final context = tester.element(find.byType(ScrollablePositionedList));

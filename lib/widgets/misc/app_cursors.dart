@@ -12,14 +12,30 @@ import 'package:flutter/services.dart';
 class AppCursors {
   AppCursors._();
 
-  /// יד פתוחה — ריחוף על אזור אחיז.
-  static MouseCursor get grab =>
-      Platform.isWindows ? const _WindowsHandCursor() : SystemMouseCursors.grab;
+  /// יד פתוחה — ריחוף על אזור אחיז. ב-Windows הסמן נבנה ל-DPR של התצוגה
+  /// הראשונה; [grabOf] בונה אותו לתצוגה של הווידג'ט.
+  static MouseCursor get grab => _grab(null);
 
   /// בזמן גרירה פעילה (ב-Windows זהה ל-[grab] — אין גליף אגרוף ב-Fluent).
-  static MouseCursor get grabbing => Platform.isWindows
-      ? const _WindowsHandCursor()
+  static MouseCursor get grabbing => _grabbing(null);
+
+  /// [grab] בגודל של התצוגה ש-[context] מוצג בה.
+  static MouseCursor grabOf(BuildContext context) => _grab(_viewOf(context));
+
+  /// [grabbing] בגודל של התצוגה ש-[context] מוצג בה.
+  static MouseCursor grabbingOf(BuildContext context) =>
+      _grabbing(_viewOf(context));
+
+  static MouseCursor _grab(ui.FlutterView? view) =>
+      Platform.isWindows ? _WindowsHandCursor(view) : SystemMouseCursors.grab;
+
+  static MouseCursor _grabbing(ui.FlutterView? view) => Platform.isWindows
+      ? _WindowsHandCursor(view)
       : SystemMouseCursors.grabbing;
+
+  // בלי רישום תלות: נקרא גם מחוץ ל-build.
+  static ui.FlutterView? _viewOf(BuildContext context) =>
+      context.findAncestorWidgetOfExactType<View>()?.view;
 
   /// גודל הסמן בפיקסלים לוגיים.
   static const double _size = 18;
@@ -115,7 +131,10 @@ class AppCursors {
 }
 
 class _WindowsHandCursor extends MouseCursor {
-  const _WindowsHandCursor();
+  const _WindowsHandCursor(this.view);
+
+  /// התצוגה שה-DPR שלה נקרא בהפעלה; null — התצוגה הראשונה.
+  final ui.FlutterView? view;
 
   @override
   MouseCursorSession createSession(int device) =>
@@ -123,17 +142,28 @@ class _WindowsHandCursor extends MouseCursor {
 
   @override
   String get debugDescription => 'AppCursors.hand';
+
+  // MouseTracker מחליף סשן רק כשהסמן שונה; סמן לכל build לא יפעיל מחדש.
+  @override
+  bool operator ==(Object other) =>
+      other is _WindowsHandCursor && other.view == view;
+
+  @override
+  int get hashCode => Object.hash(_WindowsHandCursor, view);
 }
 
 class _WindowsHandCursorSession extends MouseCursorSession {
-  _WindowsHandCursorSession(super.cursor, super.device);
+  _WindowsHandCursorSession(_WindowsHandCursor super.cursor, super.device);
 
   bool _disposed = false;
 
   @override
   Future<void> activate() async {
     final name = AppCursors._initStarted
-        ? await AppCursors._cursorFor(AppCursors._currentDpr())
+        ? await AppCursors._cursorFor(
+            (cursor as _WindowsHandCursor).view?.devicePixelRatio ??
+                AppCursors._currentDpr(),
+          )
         : null;
     // סמן אחר הופעל בזמן שהסמן ל-DPR הזה נוצר.
     if (_disposed) return;

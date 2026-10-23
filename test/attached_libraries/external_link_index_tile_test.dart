@@ -66,18 +66,17 @@ void main() {
     );
   });
 
-  testWidgets('חלון משני אינו מציג פקדי בניית אינדקס', (tester) async {
+  // הבנייה רצה במארח; המאגר מעביר אליו את הפקודה ומשקף את מצבו.
+  testWidgets('חלון משני מציג את פקדי בניית האינדקס', (tester) async {
     final previousRole = WindowRole.isSecondary;
     addTearDown(() => WindowRole.isSecondary = previousRole);
     WindowRole.isSecondary = true;
     await pump(tester);
-    expect(find.text('אינדקס קישורים'), findsNothing);
-    expect(find.text('איפוס'), findsNothing);
+    expect(find.text('אינדקס קישורים'), findsOneWidget);
     links.incompleteSlugs.value = {'dbA'};
     await tester.pump();
-    expect(find.text('המשך בנייה'), findsNothing);
-    expect(find.text('בנה מחדש'), findsNothing);
-    expect(links.calls, isEmpty);
+    await tester.tap(find.text('המשך בנייה'));
+    expect(links.calls, ['resume:dbA']);
   });
 
   testWidgets('מעודכן כשאין בנייה', (tester) async {

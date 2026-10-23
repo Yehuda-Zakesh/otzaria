@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:otzaria/pdf_book/utils/bounded_image_cache.dart';
 
 void main() {
@@ -44,17 +45,50 @@ void main() {
     cache.dispose();
   });
 
-  test('תמונה יחידה שחורגת מהתקרה נשמרת', () async {
+  test('תמונה יחידה שחורגת מהתקרה אינה נשמרת', () async {
     final cache = BoundedImageCache<int>(maxBytes: 100);
     final source = await image10();
     cache.put(1, source);
     source.dispose();
 
-    expect(cache.length, 1);
-    cache.lookup(1)!.dispose();
+    expect(cache.length, 0);
+    expect(cache.bytes, 0);
+    expect(cache.lookup(1), isNull);
     cache.dispose();
   });
 
+  test('מטמונים נפרדים חולקים אומדן זיכרון אחד', () async {
+    final budget = PdfImageCacheBudget(maximumBytes: 1000);
+    final first = BoundedImageCache<int>(maxBytes: 1000, budget: budget);
+    final second = BoundedImageCache<int>(maxBytes: 1000, budget: budget);
+    final source = await image10();
+    first.put(1, source);
+    expect(budget.retainedBytes, 800);
+    second.put(2, source);
+    expect(first.lookup(1), isNull);
+    expect(second.length, 1);
+    expect(budget.retainedBytes, 800);
+    second.dispose();
+    first.dispose();
+    source.dispose();
+    expect(budget.estimatedBytes, 0);
+  });
+
+  test('רזרבת רינדור מפנה מטמון בלי לפגוע בעותק המוצג', () async {
+    final budget = PdfImageCacheBudget(maximumBytes: 1000);
+    final cache = BoundedImageCache<int>(maxBytes: 1000, budget: budget);
+    final source = await image10();
+    cache.put(1, source);
+    final displayed = cache.lookup(1)!;
+    final pending = budget.tryReserve(900)!;
+    expect(cache.length, 0);
+    expect(displayed.debugDisposed, isFalse);
+    pending.dispose();
+    displayed.dispose();
+    source.dispose();
+    cache.dispose();
+    expect(budget.estimatedBytes, 0);
+  });
   test('put חוזר לאותו מפתח מחליף בלי לספור פעמיים', () async {
     final cache = BoundedImageCache<int>(maxBytes: 1000);
     final source = await image10();

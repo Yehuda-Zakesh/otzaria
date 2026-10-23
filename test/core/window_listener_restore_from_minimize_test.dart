@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/window_listener.dart';
+import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 
 /// חזרה של החלון ממיזעור היא הרגע היחיד שבו ה-WebView של תוסף נשאר בלי
 /// מקלדת (ראו `PluginRuntimeDispatcher.restoreKeyboardFocusAfterWindowRestore`),
@@ -68,5 +69,23 @@ void main() {
     listener.onWindowRestore();
 
     expect(calls, 2);
+  });
+
+  test('מזעור מסתיר את התוספים מהדיספצ\'ר, והשחזור מחזיר לפני ה-callback', () {
+    final dispatcher = PluginRuntimeDispatcher.instance;
+    const key = (pluginId: 'p', instanceId: 'i');
+    dispatcher.resetVisibilityForTesting();
+    addTearDown(dispatcher.resetVisibilityForTesting);
+    dispatcher.setVisiblePluginInstances({key});
+    final listener = AppWindowListener();
+    bool? shownAtCallback;
+    listener.onWindowRestoredFromMinimize = () =>
+        shownAtCallback = dispatcher.isInstanceShown(key);
+
+    listener.onWindowMinimize();
+    expect(dispatcher.isInstanceShown(key), isFalse);
+    listener.onWindowRestore();
+
+    expect(shownAtCallback, isTrue);
   });
 }

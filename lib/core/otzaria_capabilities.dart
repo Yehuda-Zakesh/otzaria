@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/plugins/services/plugin_install_results_log.dart';
+import 'package:otzaria/semantic_search/models/semantic_vectors_family.dart';
 import 'package:otzaria/update/app_release_version.dart';
 import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -33,6 +34,14 @@ class OtzariaCapabilities {
     'libraryDbPath': libraryDbPath,
     'reportsQueueFormat': kReportsQueueFormat,
     'pluginInstallResults': PluginInstallResultsLog.formatVersion,
+    // סדר ה-enum הוא סדר ההעדפה; בלי המקף הסוגר של התחילית.
+    'semanticVectorFamilies': [
+      for (final family in SemanticVectorsFamily.values)
+        family.releaseTagPrefix.substring(
+          0,
+          family.releaseTagPrefix.length - 1,
+        ),
+    ],
   };
 
   /// ארכיטקטורת התהליך הרץ; ב-macOS החבילה אוניברסלית.

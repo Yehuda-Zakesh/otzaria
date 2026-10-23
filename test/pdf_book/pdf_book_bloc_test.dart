@@ -93,7 +93,7 @@ PdfBookLoaded _loaded({
   PdfLayoutMode layoutMode = PdfLayoutMode.regularView,
   String searchText = '',
   String currentTitle = '',
-  List<PdfPageTextRange>? searchMatches,
+  List<PdfTextSearchResult>? searchMatches,
   int? currentSearchMatchIndex,
 }) => PdfBookLoaded(
   book: book ?? _book(),

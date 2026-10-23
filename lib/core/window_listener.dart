@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/plugins/services/startup_crash_counter.dart';
 import 'package:otzaria/app_report/services/app_crash_session.dart';
 import 'package:otzaria/app_report/services/app_hang_report.dart';
@@ -14,8 +15,11 @@ import 'package:otzaria/core/window_persistence.dart';
 import 'package:otzaria/core/windowing/app_window_controller.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
 import 'package:otzaria/core/windowing/window_manager_app_window_controller.dart';
-import 'package:otzaria/core/windowing/last_active_window.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
+import 'package:otzaria/core/windowing/multiview/view_window_opener.dart';
+import 'package:otzaria/core/windowing/window_opener.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
@@ -74,7 +78,7 @@ class AppWindowListener extends WindowListener {
         return null;
       case 'appHangRecovered':
         // ה-UI isolate חזר להגיב; הדיווח לא יעכב את המשך הטיפול בהודעות.
-        if (!WindowRole.isSecondary) {
+        if (ProcessDuties.current.isProcessOwner) {
           unawaited(AppHangReport.onRecovered(call.arguments));
         }
         return null;
@@ -211,12 +215,15 @@ class AppWindowListener extends WindowListener {
   void _notifyRestoredFromMinimize() {
     if (!_minimized) return;
     _minimized = false;
+    // לפני ה-callback: בקשת הפוקוס שלו צריכה למצוא את התוסף בדרך לחידוש.
+    PluginRuntimeDispatcher.instance.setWindowMinimized(false);
     onWindowRestoredFromMinimize?.call();
   }
 
   /// נקרא בכל אירוע resize רציף — מיועד ל-debounced restore.
   VoidCallback? onWindowResizeOccurred;
-  bool _isClosing = false;
+  ({Future<void> done, bool quit})? _activeClose;
+  Future<void>? _queuedClose;
 
   /// הכנת עדכון פר-isolate, אחרי אישור הסגירה ולפני תחילת הכיבוי.
   static Future<void> Function()? prepareUpdateForClose;
@@ -287,7 +294,7 @@ class AppWindowListener extends WindowListener {
       // (הצעד הראשון ב-`_shutdownProcessUpToFlush`), ולכן ערוץ שלא עונה
       // היה משאיר את החלון פתוח ואת התהליך חי בלי שום רשת ביטחון —
       // המשתמש לוחץ X ושום דבר לא קורה, לנצח.
-      final info = await const MultiWindowService().windowCount().timeout(
+      final info = await WindowOpener.current.windowCount().timeout(
         const Duration(seconds: 2),
       );
       if (info != null) return info.count <= 1;
@@ -313,15 +320,65 @@ class AppWindowListener extends WindowListener {
   Future<void> handleWindowClose({
     bool Function()? canClose,
     bool quit = false,
-  }) async {
-    if (_isClosing) {
-      return;
+  }) {
+    final processQuit =
+        quit || (MultiViewMode.enabled && MultiWindowService.closingAll);
+    if (processQuit) _queuedClose = null;
+    final active = _activeClose;
+    if (active != null) {
+      if (!processQuit || active.quit) return Future.value();
+      return active.done.then(
+        (_) => handleWindowClose(canClose: canClose, quit: true),
+      );
     }
-    _isClosing = true;
+    if (!MultiViewMode.enabled || processQuit) {
+      return _startWindowClose(canClose: canClose, quit: processQuit);
+    }
+    final pending = _queuedClose;
+    if (pending != null) return Future.value();
+    late final Future<void> queued;
+    queued = ViewWindowOpener.instance
+        .serializeClose(() async {
+          // יציאה מלאה מחליפה סגירה רגילה שעדיין ממתינה בתור.
+          if (!identical(_queuedClose, queued)) return false;
+          _queuedClose = null;
+          await _startWindowClose(canClose: canClose, quit: false);
+          return true;
+        })
+        .then<void>((_) {});
+    _queuedClose = queued;
+    return queued;
+  }
+
+  Future<void> _startWindowClose({
+    bool Function()? canClose,
+    required bool quit,
+  }) {
+    final done = _handleWindowClose(
+      canClose: canClose,
+      quit: quit,
+    ).whenComplete(() => _activeClose = null);
+    _activeClose = (done: done, quit: quit);
+    return done;
+  }
+
+  Future<void> _handleWindowClose({
+    bool Function()? canClose,
+    required bool quit,
+  }) async {
+    // עדכון ממתין ליציאת התהליך; חלונות Dart חולקים את אותו מנוע.
+    quit = quit || (MultiViewMode.enabled && MultiWindowService.closingAll);
     var correctionQuitFinished = false;
     try {
       if (canClose != null && !canClose()) return;
-      if (!await confirmAppCloseWithUnsavedChanges(allWindows: quit)) return;
+      // יציאה מחלון Dart האחרון שואלת בו (הוא הופעל); סגירה רגילה — בחלון הזה.
+      final closing = quit ? null : AppWindowKeys.byId(windowId);
+      if (!await confirmAppCloseWithUnsavedChanges(
+        allWindows: quit,
+        window: closing,
+      )) {
+        return;
+      }
       if (!await confirmCloseWhilePrinting()) return;
       if (canClose != null && !canClose()) return;
 
@@ -339,7 +396,10 @@ class AppWindowListener extends WindowListener {
 
       if (endsProcess) {
         if (!quit &&
-            !await confirmAppCloseWithUnsavedChanges(allWindows: true)) {
+            !await confirmAppCloseWithUnsavedChanges(
+              allWindows: true,
+              window: closing,
+            )) {
           return;
         }
         if (!await finishPreparedProcessCorrectionQuit()) {
@@ -363,11 +423,19 @@ class AppWindowListener extends WindowListener {
           await TabsRepository().discardWindowSession();
         }
 
-        // המנוע נשאר חי, ולכן הכתיבות האחרונות לטיוטה ממשיכות אחרי ההסתרה.
-        PluginCorrectionSessionService.instance.endAll('window_closed');
-
-        // מוסתר ולא נהרס: תוספים שממשיכים לרוץ היו צורכים משאבים ברקע.
-        PluginRuntimeDispatcher.instance.setWindowShown(false);
+        if (MultiViewMode.enabled) {
+          // ה-flush של החלון האחרון ירוץ גם כאן (isolate אחד): בלי השהיה
+          // הסשן שנמחק היה נכתב מחדש. הטיוטות שייכות לכל החלונות ונשארות.
+          WindowTabsSession.current.suspend();
+          await ViewWindowOpener.instance.beforeMainWindowHides();
+          // הנראות נשמרת לפי חלון: רק התוספים של הראשי מושהים.
+          PluginRuntimeDispatcher.instance.setWindowShown(false);
+        } else {
+          // המנוע נשאר חי, ולכן הכתיבות האחרונות לטיוטה ממשיכות אחרי ההסתרה.
+          PluginCorrectionSessionService.instance.endAll('window_closed');
+          // מוסתר ולא נהרס: תוספים שממשיכים לרוץ היו צורכים משאבים ברקע.
+          PluginRuntimeDispatcher.instance.setWindowShown(false);
+        }
 
         // ⚠️ דרך ה-runner ולא `quitApplication()`: האחרון הוא
         // `PostQuitMessage` — הוא סוגר את התוכנה כולה ולא את החלון הזה.
@@ -379,9 +447,11 @@ class AppWindowListener extends WindowListener {
       }
       // רק בעל הניסיון מנקה: בקשת עדכון יכולה להגיע בזמן שומר הסגירה.
       MultiWindowService.closingAll = false;
-      _isClosing = false;
     }
   }
+
+  /// סגירת חלון ה-Dart האחרון כשהחלון הראשי מוסתר: יציאה מלאה מהתוכנה.
+  Future<void> quitFromLastViewWindow() => handleWindowClose(quit: true);
 
   /// הצעדים שקודמים ל-flush — כולם פר-תהליך.
   Future<void> _shutdownProcessUpToFlush() async {
@@ -571,7 +641,7 @@ class AppWindowListener extends WindowListener {
             // חלון סגור מוסתר ולא נהרס, ולכן `engines` יכול להיות 4 בעוד
             // `count` הוא 1 — ובלי המספר הזה בלוג אין דרך לדעת אם קריסת
             // יציאה שדווחה הייתה בתצורה המסוכנת.
-            final live = await const MultiWindowService().windowCount().timeout(
+            final live = await WindowOpener.current.windowCount().timeout(
               const Duration(seconds: 1),
               onTimeout: () => null,
             );
@@ -651,9 +721,10 @@ class AppWindowListener extends WindowListener {
         ),
       );
     }
-    LastActiveWindow.markActive(windowId);
+    AppWindowKeys.activateWindow(windowId);
     // חלון שהוחזר מהסתרה מקבל פוקוס — זה האות שהוא מוצג שוב.
     PluginRuntimeDispatcher.instance.setWindowShown(true);
+    if (MultiViewMode.enabled) WindowTabsSession.current.resume();
   }
 
   @override
@@ -669,6 +740,8 @@ class AppWindowListener extends WindowListener {
       debugPrint('Window minimized');
     }
     _minimized = true;
+    // ממוזער אינו מוצג: התוספים שבו מושהים עד השחזור.
+    PluginRuntimeDispatcher.instance.setWindowMinimized(true);
   }
 
   @override

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -268,7 +269,12 @@ Future<DocumentFormat?> _sniffFormat(File file) async {
 /// כדי לא לטעון קובץ שלם רק לצורך הבדיקה.
 Future<String> _readPlainTextFile(File file) async {
   _assertNotBinaryContainer(await _readFileHead(file, 8), file.path);
-  return _textOf(await readTextFileSmartDetailed(file), file.path);
+  final path = file.path;
+  // פענוח ספר של כמה MB חוסם את ה-UI למאות ms; התוצאה חוזרת בלי העתקה.
+  final result = await Isolate.run(
+    () => decodeTextBytesSmartDetailed(File(path).readAsBytesSync()),
+  );
+  return _textOf(result, path);
 }
 
 String _decodeTextBytes(Uint8List bytes, String? path) {

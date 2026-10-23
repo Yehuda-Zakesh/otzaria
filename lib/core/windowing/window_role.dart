@@ -23,3 +23,47 @@ class WindowRole {
   /// הדילוג אינו מוותר על שום דבר; הוא רק דוחה למי שבאמת צריך.
   static bool openedWithTab = false;
 }
+
+/// תפקיד חלון אחד, כפי שנחשף ב-`AppWindowScope.roleOf`. [AppWindowRole.current]
+/// הוא מה ש-[WindowRole] אומר; חלון באותו isolate יעביר ערכים משלו.
+class AppWindowRole {
+  const AppWindowRole({
+    required this.isPrimaryView,
+    this.openedWithTab = false,
+    this.isViewWindow = false,
+  });
+
+  /// חלון Dart באותו isolate עם החלון הראשי (ריבוי תצוגות).
+  const AppWindowRole.view({bool openedWithTab = false})
+    : this(
+        isPrimaryView: false,
+        openedWithTab: openedWithTab,
+        isViewWindow: true,
+      );
+
+  /// התפקיד מתוך [WindowRole], נקרא מחדש בכל גישה.
+  static AppWindowRole get current => AppWindowRole(
+    isPrimaryView: !WindowRole.isSecondary,
+    openedWithTab: WindowRole.openedWithTab,
+  );
+
+  /// האם זה החלון הראשון ולא חלון שנפתח מתוך אחר ([WindowRole.isSecondary]).
+  final bool isPrimaryView;
+
+  /// האם החלון נפתח עם כרטיסיה שהועברה אליו ([WindowRole.openedWithTab]).
+  final bool openedWithTab;
+
+  /// חלון Dart ולא חלון של ה-runner: מסגרת משלו (`AppVirtualWindowFrame`), ובלי
+  /// ה-singletons של החלון הראשי (`windowManager`, חשיפת ה-splash, ה-listener).
+  final bool isViewWindow;
+
+  @override
+  bool operator ==(Object other) =>
+      other is AppWindowRole &&
+      other.isPrimaryView == isPrimaryView &&
+      other.openedWithTab == openedWithTab &&
+      other.isViewWindow == isViewWindow;
+
+  @override
+  int get hashCode => Object.hash(isPrimaryView, openedWithTab, isViewWindow);
+}

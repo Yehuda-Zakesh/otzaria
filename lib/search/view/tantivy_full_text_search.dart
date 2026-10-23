@@ -90,6 +90,9 @@ UpdateSearchQuery searchQueryEventForTab(SearchingTab tab, String query) {
 
 class _TantivyFullTextSearchState extends State<TantivyFullTextSearch>
     with AutomaticKeepAliveClientMixin {
+  /// מאגר הפוקוס של החלון; נשמר כאן כי ב-dispose אסור לחפש ב-context.
+  late final FocusRepository _focus;
+
   static const _externalCountLineMaxWidth = 240.0;
   @override
   bool get wantKeepAlive => true;
@@ -161,6 +164,7 @@ class _TantivyFullTextSearchState extends State<TantivyFullTextSearch>
   @override
   void initState() {
     super.initState();
+    _focus = FocusRepository.of(context);
 
     // Request focus on search field when the widget is first created
     _requestSearchFieldFocus();
@@ -213,7 +217,7 @@ class _TantivyFullTextSearchState extends State<TantivyFullTextSearch>
       if (!mounted || !_isTabDisplayed(context.read<TabsBloc>().state)) return;
       _focusTabContent();
       // Register as screen-level restorer so window events restore focus here
-      FocusRepository().setScreenRestorer(
+      _focus.setScreenRestorer(
         restore: () {
           if (mounted) _focusTabContent();
         },
@@ -306,11 +310,14 @@ class _TantivyFullTextSearchState extends State<TantivyFullTextSearch>
   }) {
     final cs = Theme.of(context).colorScheme;
     final muted = TextStyle(fontSize: 14, color: cs.onSurfaceVariant);
-    final engineLine = state.totalGroups != null
+    final engineLine = state.isCounting
+        ? '${state.results.length} תוצאות (הספירה מתעדכנת)'
+        : state.totalGroups != null
         ? '${state.results.length}/${state.totalGroups} תוצאות מאוחדות (מתוך ${state.totalResults})'
         : '${state.results.length}/${state.totalResults} תוצאות';
-    final compactEngineLine =
-        '${state.results.length}/${state.totalGroups ?? state.totalResults}';
+    final compactEngineLine = state.isCounting
+        ? '${state.results.length}/…'
+        : '${state.results.length}/${state.totalGroups ?? state.totalResults}';
     return ValueListenableBuilder<ExternalSearchStatus?>(
       valueListenable: widget.tab.externalSearchStatus,
       builder: (context, status, _) {

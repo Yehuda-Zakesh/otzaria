@@ -6,9 +6,18 @@ import 'package:otzaria/widgets/controls/action_buttons.dart';
 import 'package:otzaria/widgets/layout/centered_scrollable_state.dart';
 import 'package:otzaria/widgets/misc/app_selection_area.dart';
 
-/// תצוגה שמופיעה במקום ה-WebView כשיצירת רכיב הדפדפן נכשלה — מצב שעד כה
-/// הסתיים במסך ריק בלי שום הסבר. [isEmulatedOnArm] מחליף את ההסבר הכללי
-/// בהסבר הספציפי למחשבי ARM, שם התקלה ידועה ואין למשתמש מה לתקן.
+/// למה ה-WebView של התוסף אינו מוצג.
+enum PluginWebViewFailureKind {
+  /// יצירת רכיב הדפדפן נכשלה.
+  creation,
+
+  /// התהליך שמריץ את התוסף נפל שוב ושוב.
+  crashed,
+}
+
+/// תצוגה שמופיעה במקום ה-WebView כשרכיב הדפדפן לא נוצר או נפל שוב ושוב —
+/// מצבים שהסתיימו במסך ריק בלי שום הסבר. [isEmulatedOnArm] מחליף את ההסבר
+/// הכללי בהסבר הספציפי למחשבי ARM, שם התקלה ידועה ואין למשתמש מה לתקן.
 class PluginWebViewFailedView extends StatelessWidget {
   final String? pluginName;
 
@@ -16,6 +25,8 @@ class PluginWebViewFailedView extends StatelessWidget {
   final String? errorDetails;
 
   final bool isEmulatedOnArm;
+
+  final PluginWebViewFailureKind kind;
 
   final VoidCallback onRetry;
 
@@ -25,6 +36,7 @@ class PluginWebViewFailedView extends StatelessWidget {
     this.pluginName,
     this.errorDetails,
     this.isEmulatedOnArm = false,
+    this.kind = PluginWebViewFailureKind.creation,
   });
 
   @override
@@ -32,6 +44,8 @@ class PluginWebViewFailedView extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final label = pluginName == null ? 'התוסף' : 'התוסף "$pluginName"';
+    final crashed = kind == PluginWebViewFailureKind.crashed;
+    final arm = isEmulatedOnArm && !crashed;
 
     return CenteredScrollableState(
       padding: const EdgeInsets.all(32),
@@ -48,14 +62,19 @@ class PluginWebViewFailedView extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              isEmulatedOnArm
+              crashed
+                  ? '$label הפסיק לפעול'
+                  : arm
                   ? 'התוספים אינם נתמכים עדיין במחשב זה'
                   : 'לא ניתן להפעיל את $label',
               style: tt.titleLarge,
             ),
             const SizedBox(height: 12),
             Text(
-              isEmulatedOnArm
+              crashed
+                  ? 'רכיב הדפדפן שמריץ את $label נסגר שוב ושוב, ולכן הוא לא '
+                        'נטען מחדש אוטומטית. שאר חלקי התוכנה ממשיכים לעבוד כרגיל.'
+                  : arm
                   ? 'המחשב שלך מבוסס מעבד ARM, ואוצריא עדיין רצה עליו במצב '
                         'תאימות. במצב זה רכיב הדפדפן שמציג את התוספים אינו '
                         'נוצר, ולכן התוספים וחנות התוספים אינם זמינים. '
@@ -78,7 +97,11 @@ class PluginWebViewFailedView extends StatelessWidget {
                   Text('מה אפשר לעשות:', style: tt.titleSmall),
                   const SizedBox(height: 8),
                   Text(
-                    isEmulatedOnArm
+                    crashed
+                        ? '1. לחץ "נסה שוב" כדי לטעון את התוסף מחדש.\n'
+                              '2. אם הבעיה חוזרת, ייתכן שהתוסף צורך יותר מדי זיכרון '
+                              'או שיש בו תקלה — דווח למפתח התוסף.'
+                        : arm
                         ? '1. אפשר להמשיך להשתמש בכל שאר חלקי התוכנה כרגיל.\n'
                               '2. כדאי לעקוב אחר עדכוני הגרסה — כשתצא גרסה '
                               'למחשבי ARM התוספים יעבדו.\n'

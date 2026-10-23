@@ -166,7 +166,18 @@ class _ReadingTabStripState extends State<ReadingTabStrip> {
   void initState() {
     super.initState();
     _geometry = _TabStripGeometry.fromWidths(widget.widths);
-    externalTabDrag.addListener(_onExternalDrag);
+  }
+
+  /// מצב הגרירה החיצונית של החלון שהרצועה יושבת בו.
+  ExternalTabDragState? _externalDrag;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final state = ExternalTabDragState.of(context);
+    if (identical(state, _externalDrag)) return;
+    _externalDrag?.drag.removeListener(_onExternalDrag);
+    _externalDrag = state..drag.addListener(_onExternalDrag);
   }
 
   /// כרטיסיה מחלון אחר נגררת מעל החלון הזה.
@@ -175,9 +186,11 @@ class _ReadingTabStripState extends State<ReadingTabStrip> {
   /// אפשר לתרגם אותו למיקום הכנסה, ולכן התוצאה נכתבת ל-
   /// [externalTabDropIndex] שה-host מחזיר לשולח.
   void _onExternalDrag() {
-    final drag = externalTabDrag.value;
+    final external = _externalDrag;
+    if (external == null) return;
+    final drag = external.drag.value;
     if (drag == null) {
-      externalTabDropIndex.value = null;
+      external.dropIndex.value = null;
       if (_insertIndex != null) setState(() => _insertIndex = null);
       return;
     }
@@ -191,13 +204,13 @@ class _ReadingTabStripState extends State<ReadingTabStrip> {
     final cross = widget.isVertical ? local.dx : local.dy;
     final crossExtent = widget.isVertical ? box.size.width : box.size.height;
     if (cross < -12 || cross > crossExtent + 12) {
-      externalTabDropIndex.value = null;
+      external.dropIndex.value = null;
       if (_insertIndex != null) setState(() => _insertIndex = null);
       return;
     }
 
     final next = _insertIndexFor(widget.isVertical ? local.dy : local.dx);
-    externalTabDropIndex.value = next;
+    external.dropIndex.value = next;
     if (next != _insertIndex) setState(() => _insertIndex = next);
   }
 
@@ -211,7 +224,7 @@ class _ReadingTabStripState extends State<ReadingTabStrip> {
 
   @override
   void dispose() {
-    externalTabDrag.removeListener(_onExternalDrag);
+    _externalDrag?.drag.removeListener(_onExternalDrag);
     _springTimer?.cancel();
     _autoScrollTimer?.cancel();
     _scrollController.dispose();

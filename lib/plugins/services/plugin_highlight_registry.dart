@@ -7,6 +7,7 @@ import 'package:otzaria/plugins/models/plugin_reader_selection.dart';
 import 'package:otzaria/plugins/models/text_source_map.dart';
 import 'package:otzaria/plugins/plugin_constants.dart';
 import 'package:otzaria/plugins/services/plugin_highlight_anchor_service.dart';
+import 'package:otzaria/plugins/services/plugin_highlight_reveal_service.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 
 class PluginHighlightException implements Exception {
@@ -27,13 +28,15 @@ class PluginHighlightRegistry extends ChangeNotifier {
   static final PluginHighlightRegistry instance = PluginHighlightRegistry._();
   PluginHighlightRegistry._()
     : _anchorService = const PluginHighlightAnchorService(),
-      _isInstanceVisible = _dispatcherVisibility;
+      _isInstanceVisible = _dispatcherVisibility,
+      _revealService = PluginHighlightRevealService.instance;
 
   @visibleForTesting
   PluginHighlightRegistry.forTesting({
     this._anchorService = const PluginHighlightAnchorService(),
     bool Function(PluginInstanceKey key)? isInstanceVisible,
-  }) : _isInstanceVisible = isInstanceVisible ?? _neverVisible;
+  }) : _isInstanceVisible = isInstanceVisible ?? _neverVisible,
+       _revealService = PluginHighlightRevealService.instance;
 
   static bool _dispatcherVisibility(PluginInstanceKey key) =>
       PluginRuntimeDispatcher.instance.isInstanceVisible(key);
@@ -54,6 +57,12 @@ class PluginHighlightRegistry extends ChangeNotifier {
   int _idCounter = 0;
   int _revision = 0;
 
+  final PluginHighlightRevealService _revealService;
+  final Map<_PluginHighlightSectionKey, _SectionChannel> _sectionChannels = {};
+  final Set<_PluginHighlightSectionKey> _changedSections = {};
+  PluginHighlight? _revealed;
+  bool _listensToReveal = false;
+
   /// מונה מוטציות. מאפשר לצרכנים לזהות ב-O(1) שאף highlight לא השתנה,
   /// במקום להשוות רשומות בכל פריים.
   int get revision => _revision;
@@ -62,6 +71,67 @@ class PluginHighlightRegistry extends ChangeNotifier {
   void notifyListeners() {
     _revision++;
     super.notifyListeners();
+    final changed = List.of(_changedSections);
+    _changedSections.clear();
+    _notifySections(changed);
+  }
+
+  /// מודיע רק כשרשומות הקטע משתנות, או כשההדגשה החשופה נכנסת אליו או יוצאת
+  /// ממנו — כך שינוי בקטע אחד לא בונה מחדש את כל השורות המוצגות.
+  Listenable sectionListenable({
+    required String bookId,
+    required int sectionIndex,
+    String? bookUid,
+  }) => _SectionListenable(
+    this,
+    bookId,
+    bookUid != null && bookUid.isNotEmpty && bookUid != bookId ? bookUid : null,
+    sectionIndex,
+  );
+
+  void _addSectionListener(
+    _PluginHighlightSectionKey key,
+    VoidCallback listener,
+  ) {
+    if (!_listensToReveal) {
+      _listensToReveal = true;
+      _revealed = _revealService.highlight;
+      _revealService.addListener(_onRevealChanged);
+    }
+    _sectionChannels.putIfAbsent(key, _SectionChannel.new).add(listener);
+  }
+
+  void _removeSectionListener(
+    _PluginHighlightSectionKey key,
+    VoidCallback listener,
+  ) {
+    final channel = _sectionChannels[key];
+    if (channel == null || !channel.remove(listener)) return;
+    _sectionChannels.remove(key);
+    channel.dispose();
+  }
+
+  void _onRevealChanged() {
+    final previous = _revealed;
+    final current = _revealService.highlight;
+    _revealed = current;
+    _notifySections([
+      // הציור חושף לפי highlightId, כולל עותקים של תוספים ומופעים אחרים.
+      for (final key in _sectionChannels.keys)
+        if (_recordsBySection[key]?.values.any(
+              (record) =>
+                  record.highlightId == previous?.highlightId ||
+                  record.highlightId == current?.highlightId,
+            ) ??
+            false)
+          key,
+    ]);
+  }
+
+  void _notifySections(Iterable<_PluginHighlightSectionKey> keys) {
+    for (final key in keys.toSet()) {
+      _sectionChannels[key]?.fire();
+    }
   }
 
   PluginHighlight setHighlight({
@@ -509,6 +579,10 @@ class PluginHighlightRegistry extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// האם למופע [key] יש הדגשות רשומות.
+  bool hasInstance(PluginInstanceKey key) =>
+      _recordsByOwner[key]?.isNotEmpty ?? false;
+
   /// מסיר רק את רישומי המופע [key] (סגירת טאב אחד) — עותק של מופע אחר
   /// לאותה הדגשה נחשף אוטומטית בציור דרך ה-dedup.
   void removeInstance(PluginInstanceKey key) {
@@ -547,10 +621,9 @@ class PluginHighlightRegistry extends ChangeNotifier {
       highlightId: record.highlightId,
     );
     for (final bookKey in _sectionBookKeys(record)) {
-      _recordsBySection.putIfAbsent(
-        (bookId: bookKey, sectionIndex: record.sectionIndex),
-        () => {},
-      )[recordKey] = record;
+      final sectionKey = (bookId: bookKey, sectionIndex: record.sectionIndex);
+      _changedSections.add(sectionKey);
+      _recordsBySection.putIfAbsent(sectionKey, () => {})[recordKey] = record;
     }
   }
 
@@ -571,6 +644,7 @@ class PluginHighlightRegistry extends ChangeNotifier {
     );
     for (final bookKey in _sectionBookKeys(record)) {
       final sectionKey = (bookId: bookKey, sectionIndex: record.sectionIndex);
+      _changedSections.add(sectionKey);
       final records = _recordsBySection[sectionKey];
       records?.remove(recordKey);
       if (records?.isEmpty ?? false) _recordsBySection.remove(sectionKey);
@@ -799,6 +873,71 @@ class PluginHighlightRegistry extends ChangeNotifier {
 }
 
 typedef _PluginHighlightSectionKey = ({String bookId, int sectionIndex});
+
+class _SectionChannel extends ChangeNotifier {
+  int _listeners = 0;
+
+  void add(VoidCallback listener) {
+    _listeners++;
+    addListener(listener);
+  }
+
+  /// מחזיר true כשהמאזין האחרון הוסר.
+  bool remove(VoidCallback listener) {
+    _listeners--;
+    removeListener(listener);
+    return _listeners <= 0;
+  }
+
+  void fire() => notifyListeners();
+}
+
+/// מאזין לקטע אחד דרך שני מפתחות הספר (כותרת ו-uid) — כמו [getAllHighlights].
+final class _SectionListenable implements Listenable {
+  const _SectionListenable(
+    this._registry,
+    this._bookId,
+    this._bookUid,
+    this._sectionIndex,
+  );
+
+  final PluginHighlightRegistry _registry;
+  final String _bookId;
+  final String? _bookUid;
+  final int _sectionIndex;
+
+  Iterable<_PluginHighlightSectionKey> get _keys => [
+    (bookId: _bookId, sectionIndex: _sectionIndex),
+    if (_bookUid case final uid?) (bookId: uid, sectionIndex: _sectionIndex),
+  ];
+
+  @override
+  void addListener(VoidCallback listener) {
+    for (final key in _keys) {
+      _registry._addSectionListener(key, listener);
+    }
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    for (final key in _keys) {
+      _registry._removeSectionListener(key, listener);
+    }
+  }
+
+  // ListenableBuilder משווה ב-==: בנייה חוזרת לא נרשמת מחדש.
+  @override
+  bool operator ==(Object other) =>
+      other is _SectionListenable &&
+      identical(other._registry, _registry) &&
+      other._bookId == _bookId &&
+      other._bookUid == _bookUid &&
+      other._sectionIndex == _sectionIndex;
+
+  @override
+  int get hashCode => Object.hash(_registry, _bookId, _bookUid, _sectionIndex);
+}
+
 typedef _PluginHighlightRecordKey = ({
   String ownerPluginId,
   String ownerInstanceId,

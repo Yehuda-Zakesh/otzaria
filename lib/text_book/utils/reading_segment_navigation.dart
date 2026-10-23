@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:otzaria/text_book/utils/reading_segments.dart';
 import 'package:otzaria/widgets/lists/jump_aware_item_scroll_controller.dart';
+import 'package:otzaria/widgets/smart_text/long_line_chunks.dart';
 import 'package:positioned_sliver_list/positioned_list.dart';
 
 export 'package:otzaria/text_book/utils/reading_extent_estimates.dart';
@@ -76,7 +77,7 @@ TargetRectResolver readingAnchorTargetRectResolver({
   return Rect.fromLTWH(0, fraction * box.size.height, 0, 0);
 };
 
-/// מיישר שורת מקור מדודה בתוך הפריט, בלי תיקוני קפיצה אחרי הציור.
+/// מיישר שורת מקור מדודה; בשורה שנבנית בהדרגה ממתין לגובהה הסופי.
 Future<void> scrollToSourceLine({
   required ItemScrollController scrollController,
   required ItemPositionsListener? positionsListener,
@@ -131,4 +132,25 @@ Future<void> scrollToSourceLine({
   await (visible && controller is JumpAwareItemScrollController
       ? controller.withoutNotifying(move)
       : move());
+  final pixels = scrollController.scrollController;
+  if (pixels == null) return;
+  if (!await longLinesBuilt(
+        scrollController: pixels,
+        isCurrent: isCurrent,
+      ) ||
+      !scrollController.isAttached ||
+      !(isCurrent?.call() ?? true)) {
+    return;
+  }
+  final settled = current();
+  if (settled.isEmpty) return;
+  final settledLine = lineIndex.clamp(0, settled.layout.lineCount - 1);
+  Future<void> settle() => scrollController.jumpToAsync(
+    index: settled.layout.itemForLine(settledLine),
+    alignment: alignment,
+    targetRectResolver: resolver,
+  );
+  await (controller is JumpAwareItemScrollController
+      ? controller.withoutNotifying(settle)
+      : settle());
 }

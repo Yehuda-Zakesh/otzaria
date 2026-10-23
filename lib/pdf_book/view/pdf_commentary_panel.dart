@@ -422,7 +422,6 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
   bool _showSearchField = false;
   final Map<String, bool> _expansionStates = {};
 
-  // Anti-jitter search stats
   Map<String, int> get _searchResultsPerLink => _searchBloc.state.counts;
 
   /// הטקסט המרונדר של כל מפרש מוצג — לשחזור מעברי שורה בהעתקה רב-שורתית,
@@ -455,6 +454,12 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
   /// so the list builds only what is on screen (#844).
   List<CommentaryFlatItem> _flatItems = const [];
   Map<String, int> _linkFlatIndex = const {};
+  ({
+    List<CommentaryGroup> groups,
+    Map<String, bool> expansion,
+    List<CommentaryFlatItem> items,
+  })?
+  _flatSnapshot;
 
   /// נשמרות כדי להשאיר את עץ הרשימה חי ומוסתר בזמן טעינת הקטע הבא.
   List<CommentaryGroup>? _lastResolvedGroups;
@@ -1310,7 +1315,7 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
             constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
             iconSize: 20,
           ),
-          // 2. הרחב/כווץ הכל — רק כשיש מפרשים פעילים (לוגיקה מקורית)
+          // 2. הרחב/כווץ הכל — רק כשיש מפרשים פעילים
           if (widget.tab.activeCommentators.isNotEmpty) ...[
             const SizedBox(width: gap),
             IconButton(
@@ -1476,13 +1481,7 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
       settings.replaceHolyNames,
       settings.holyNameStyle,
       _allExpanded,
-      items
-          .map(
-            (item) => item.link == null
-                ? 'header:${item.group.bookTitle}'
-                : _getLinkKey(item.link!),
-          )
-          .join('\n'),
+      items,
     );
     if (_fullSelectionScope == scope) return;
     _fullSelectionScope = scope;
@@ -1641,14 +1640,7 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
         for (final group in sortedGroups) {
           _expansionStates.putIfAbsent(group.bookTitle, () => _allExpanded);
         }
-        final linkFlatIndex = <String, int>{};
-        final flatItems = buildCommentaryFlatItems(
-          groups: sortedGroups,
-          isGroupExpanded: (title) => _expansionStates[title] ?? _allExpanded,
-          linkKey: _getLinkKey,
-          headerIndexOut: <String, int>{},
-          linkIndexOut: linkFlatIndex,
-        );
+        final flatItems = _flatItems = _buildFlatItems(sortedGroups);
         // הבחירה המלאה תלויה רק בהגדרות שמות הקודש.
         context.select(
           (SettingsBloc bloc) =>
@@ -1660,41 +1652,16 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
             flatItems,
             context.read<SettingsBloc>().state,
           );
-        }
-        _flatItems = flatItems;
-        _linkFlatIndex = linkFlatIndex;
-        _flatIndexByKey = {
-          for (var index = 0; index < flatItems.length; index++)
-            _flatItemKey(flatItems[index]): index,
-        };
-        final titles = sortedGroups.map((group) => group.bookTitle).toSet();
-        _headerKeys.removeWhere((title, _) => !titles.contains(title));
-        if (currentGroups != null) {
           _lastResolvedGroups = currentGroups;
-          _orderedGroups = currentGroups;
-        }
-
-        final orderedLinks = <Link>[];
-        for (final group in currentGroups ?? const <CommentaryGroup>[]) {
-          orderedLinks.addAll(group.links);
-        }
-        if (currentGroups != null) _orderedLinks = orderedLinks;
-
-        // Initialize keys
-        final currentLinkKeys = _orderedLinks
-            .map((l) => _getLinkKey(l))
-            .toSet();
-
-        _scheduleSearchCompute();
-        _itemKeys.removeWhere((key, value) => !currentLinkKeys.contains(key));
-        for (final key in currentLinkKeys) {
-          if (!_itemKeys.containsKey(key)) {
-            _itemKeys[key] = GlobalKey();
+          if (!identical(currentGroups, _orderedGroups) ||
+              _orderedLinks.isEmpty) {
+            _orderedGroups = currentGroups;
+            _orderedLinks = [for (final group in currentGroups) ...group.links];
           }
         }
-        _renderedTextByKey.removeWhere(
-          (key, value) => !currentLinkKeys.contains(key),
-        );
+
+        _scheduleSearchCompute();
+        _syncItemKeys();
 
         return SelectionContainer(
           delegate: _commentarySelectionDelegate,
@@ -1746,6 +1713,59 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
         );
       },
     );
+  }
+
+  /// הפריטים השטוחים של [groups] לפי מצב הכיווץ, ומיפויי האינדקסים שלהם.
+  /// נבנים מחדש רק כשהקבוצות או הכיווץ משתנים, לא בכל הקשה בחיפוש.
+  List<CommentaryFlatItem> _buildFlatItems(List<CommentaryGroup> groups) {
+    final snapshot = _flatSnapshot;
+    if (snapshot != null &&
+        identical(snapshot.groups, groups) &&
+        groups.every(
+          (group) =>
+              snapshot.expansion[group.bookTitle] ==
+              (_expansionStates[group.bookTitle] ?? _allExpanded),
+        )) {
+      return snapshot.items;
+    }
+    final linkFlatIndex = <String, int>{};
+    final items = buildCommentaryFlatItems(
+      groups: groups,
+      isGroupExpanded: (title) => _expansionStates[title] ?? _allExpanded,
+      linkKey: _getLinkKey,
+      headerIndexOut: <String, int>{},
+      linkIndexOut: linkFlatIndex,
+    );
+    _linkFlatIndex = linkFlatIndex;
+    _flatIndexByKey = {
+      for (var index = 0; index < items.length; index++)
+        _flatItemKey(items[index]): index,
+    };
+    final titles = groups.map((group) => group.bookTitle).toSet();
+    _headerKeys.removeWhere((title, _) => !titles.contains(title));
+    _flatSnapshot = (
+      groups: groups,
+      expansion: {
+        for (final group in groups)
+          group.bookTitle: _expansionStates[group.bookTitle] ?? _allExpanded,
+      },
+      items: items,
+    );
+    return items;
+  }
+
+  /// [_orderedLinks] שלפיו עודכנו מפתחות הפריטים.
+  List<Link>? _keyedLinks;
+
+  void _syncItemKeys() {
+    if (identical(_keyedLinks, _orderedLinks)) return;
+    _keyedLinks = _orderedLinks;
+    final currentLinkKeys = _orderedLinks.map(_getLinkKey).toSet();
+    _itemKeys.removeWhere((key, _) => !currentLinkKeys.contains(key));
+    for (final key in currentLinkKeys) {
+      _itemKeys.putIfAbsent(key, GlobalKey.new);
+    }
+    _renderedTextByKey.removeWhere((key, _) => !currentLinkKeys.contains(key));
   }
 
   Future<void> _scrollToSearchResult() async {
@@ -1893,7 +1913,6 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
     );
   }
 
-  // Helper method used in _scrollToSearchResult to inject keys
   Key? _getLinkKeyObject(Link link) {
     return _itemKeys[_getLinkKey(link)];
   }

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/library/bloc/library_bloc.dart';
 import 'package:otzaria/library/bloc/library_event.dart';
 import 'package:otzaria/library/bloc/library_state.dart';
@@ -91,6 +92,7 @@ void main() {
     )?
     visibilityRequester,
     bool showSnacks = false,
+    ProcessDuties? windowDuties,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1000, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -103,17 +105,20 @@ void main() {
             textDirection: TextDirection.rtl,
             child: Scaffold(
               body: SingleChildScrollView(
-                child: HiddenBooksPanel(
-                  pickFileOverride: pickFile,
-                  libraryLoader: libraryLoader ?? () async => _library(),
-                  indexDropper: (books) async {
-                    droppedFromIndex.addAll(books.map((b) => b.title));
-                    return true;
-                  },
-                  indexAdder: (books, _) {
-                    addedToIndex.addAll(books.map((b) => b.title));
-                  },
-                  visibilityRequester: visibilityRequester,
+                child: _withWindowDuties(
+                  windowDuties,
+                  HiddenBooksPanel(
+                    pickFileOverride: pickFile,
+                    libraryLoader: libraryLoader ?? () async => _library(),
+                    indexDropper: (books) async {
+                      droppedFromIndex.addAll(books.map((b) => b.title));
+                      return true;
+                    },
+                    indexAdder: (books, _) {
+                      addedToIndex.addAll(books.map((b) => b.title));
+                    },
+                    visibilityRequester: visibilityRequester,
+                  ),
                 ),
               ),
             ),
@@ -155,6 +160,54 @@ void main() {
 
     expect(const HiddenLibraryStore().load().isEmpty, isTrue);
     expect(droppedFromIndex, isEmpty);
+  });
+
+  // ההעברה למארח נקבעת ב-ProcessDuties של ה-isolate, לא בתפקיד החלון.
+  testWidgets('מי שאינו בעל התהליך מעביר את השמירה למארח גם בחלון ראשי', (
+    tester,
+  ) async {
+    ProcessDuties.debugOverride = ProcessDuties(isProcessOwner: () => false);
+    addTearDown(() => ProcessDuties.debugOverride = null);
+    var forwarded = 0;
+    await pump(
+      tester,
+      visibilityRequester: (_, next) async {
+        forwarded++;
+        return (selection: null, saved: false, uncertain: false);
+      },
+    );
+    await tester.tap(find.text('פתח רשימה'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CheckboxListTile).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('שמור'));
+    await tester.pumpAndSettle();
+
+    expect(forwarded, 1);
+    expect(const HiddenLibraryStore().load().isEmpty, isTrue);
+    expect(droppedFromIndex, isEmpty);
+  });
+
+  // חלון Dart חולק את ה-isolate עם הבעלים: ה-duties שלו אינם מפעילים העברה.
+  testWidgets('duties של חלון שאינו בעלים אינם מעבירים לאפיק', (tester) async {
+    var forwarded = 0;
+    await pump(
+      tester,
+      windowDuties: ProcessDuties(isProcessOwner: () => false),
+      visibilityRequester: (_, next) async {
+        forwarded++;
+        return (selection: null, saved: false, uncertain: false);
+      },
+    );
+    await tester.tap(find.text('פתח רשימה'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CheckboxListTile).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('שמור'));
+    await tester.pumpAndSettle();
+
+    expect(forwarded, 0);
+    expect(const HiddenLibraryStore().load().bookKeys, {_key('בראשית')});
   });
 
   testWidgets('פאנל פתוח קורא בחירה חדשה מהחנות לפני פעולת משתמש', (
@@ -639,3 +692,7 @@ class _TestLibraryBloc extends Cubit<LibraryState> implements LibraryBloc {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
+
+Widget _withWindowDuties(ProcessDuties? duties, Widget child) => duties == null
+    ? child
+    : RepositoryProvider<ProcessDuties>.value(value: duties, child: child);

@@ -87,7 +87,7 @@ void main() {
     );
     dispatched = [];
     registry = PluginLibraryBooksRegistry.forTesting(
-      dispatch: (pluginId, topic, payload) async =>
+      dispatch: (pluginId, topic, payload, {viewId, windowKeys}) async =>
           dispatched.add((pluginId: pluginId, topic: topic, payload: payload)),
       conditions: conditions,
       repository: repo,
@@ -420,7 +420,7 @@ void main() {
       );
 
       final restored = PluginLibraryBooksRegistry.forTesting(
-        dispatch: (_, _, _) async {},
+        dispatch: (_, _, _, {viewId, windowKeys}) async {},
         conditions: conditions,
         repository: repo,
       );

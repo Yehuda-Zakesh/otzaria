@@ -104,7 +104,7 @@ Future<void> _pumpEngineSearch(
   );
   final searchController = TextEditingController(text: 'אב');
   final focusNode = FocusNode();
-  final textSearcher = PdfTextSearcher(_FakeReadyController());
+  final textSearcher = PdfTextSearchSession(_FakeReadyController());
 
   addTearDown(settingsBloc.close);
   addTearDown(pdfBookBloc.close);

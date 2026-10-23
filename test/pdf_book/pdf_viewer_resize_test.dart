@@ -8,6 +8,7 @@ import 'package:otzaria/settings/services/per_book_settings_service.dart'
     show PdfLayoutMode;
 import 'package:pdfrx/pdfrx.dart';
 import 'package:pdf/widgets.dart' as pw;
+import '../test_helpers/pdf_document_dispose.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -116,7 +117,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     final document = await openTestDocument(tester);
-    addTearDown(document.dispose);
+    addTearDown(() => disposePdfDocument(tester, document));
     final controller = PdfViewerController();
     var showRightPane = false;
     late ValueChanged<bool> setShowRightPane;
@@ -170,7 +171,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     final document = await openTestDocument(tester);
-    addTearDown(document.dispose);
+    addTearDown(() => disposePdfDocument(tester, document));
     final controller = PdfViewerController();
     var showRightPane = false;
     late ValueChanged<bool> setShowRightPane;
@@ -252,7 +253,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     final document = await openMultiPageDocument(tester);
-    addTearDown(document.dispose);
+    addTearDown(() => disposePdfDocument(tester, document));
     final controller = PdfViewerController();
     var showRightPane = true;
     late ValueChanged<bool> setShowRightPane;

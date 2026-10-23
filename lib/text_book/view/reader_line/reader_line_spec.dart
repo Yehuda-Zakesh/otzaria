@@ -18,6 +18,7 @@ import 'package:otzaria/theme/app_fonts.dart';
 import 'package:otzaria/theme/app_surfaces.dart';
 import 'package:otzaria/utils/file/markdown_to_otzaria.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
+import 'package:otzaria/widgets/smart_text/long_line_chunks.dart';
 import 'package:otzaria/widgets/smart_text/smart_text.dart';
 
 enum ReaderLineBackground { none, permanent, highlighted, related }
@@ -102,7 +103,9 @@ final RegExp _leadingBlockElement = RegExp(
 );
 
 /// שורה שאינה ניתנת לייצוג כספאנים בתוך פסקה, ולכן מוצגת כבלוק משלה.
+/// גם שורה ארוכה מאוד: כבלוק היא מוצגת במקטעים ([LongLineChunks]).
 bool isReaderBlockLine(String rawLine) =>
+    rawLine.length > kLongLineMinChars ||
     isAlignedBlockLine(rawLine) ||
     rawLine.contains(kMarkdownBlockClass) ||
     (rawLine.contains('<') &&

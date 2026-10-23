@@ -129,9 +129,6 @@ class SemanticAvailability extends Equatable {
   /// המשתמש עצר את ההורדה; עדכוני ספרייה לא יחדשו אותה עד שיבקש שוב.
   final bool pausedByUser;
 
-  /// חלון משני: מציגים מצב, אבל הורדה ומחיקה רק מהחלון הראשי.
-  final bool isSecondaryWindow;
-
   /// ב-[SemanticAvailabilityPhase.needsDownload]: נמצאו נתונים שהוכנו מראש.
   final bool stagedDataFound;
 
@@ -143,7 +140,6 @@ class SemanticAvailability extends Equatable {
     this.failure,
     this.unpublishedLibraryVersion,
     this.pausedByUser = false,
-    this.isSecondaryWindow = false,
     this.stagedDataFound = false,
   });
 
@@ -182,7 +178,6 @@ class SemanticAvailability extends Equatable {
     failure?.kind,
     unpublishedLibraryVersion,
     pausedByUser,
-    isSecondaryWindow,
     stagedDataFound,
   ];
 }

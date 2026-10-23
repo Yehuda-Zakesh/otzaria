@@ -627,6 +627,19 @@ void main() {
       },
     );
 
+    blocTest<IndexingBloc, IndexingState>(
+      'איפוס ובנייה מחדש נשלחים למארח כפעולה אחת ולא מתבצעים מקומית',
+      build: _FakeIndexingBloc.new,
+      act: (bloc) => bloc.add(ResetAndIndex(libraryWithBooks())),
+      wait: const Duration(milliseconds: 100),
+      expect: () => [IndexingInitial()],
+      verify: (bloc) {
+        expect(owner.receivedOps, [MultiWindowService.indexOpResetAndIndex]);
+        expect(repositoryOf(bloc).clearCalls, 0);
+        expect(repositoryOf(bloc).runs, isEmpty);
+      },
+    );
+
     // עבודת התחזוקה רצה במארח בכל טעינת ספרייה — העברה הייתה מכפילה אותה.
     blocTest<IndexingBloc, IndexingState>(
       'עבודת רקע אינה נשלחת למארח',
@@ -821,6 +834,64 @@ void main() {
       await bloc.close();
     });
 
+    test('ביטול מנקז גם בקשות איפוס ובנייה שכבר בתור', () async {
+      final repository = _FakeIndexingRepository()..runGate = Completer<void>();
+      final bloc = _FakeIndexingBloc(repository);
+      final library = libraryWithBooks();
+      final settled = Completer<void>();
+      bloc
+        ..add(ResetAndIndex(library))
+        ..add(ResetAndIndex(library))
+        ..add(IndexingWorkBarrier(onSettled: settled.complete));
+      await pumpEventQueue();
+      expect(repository.runs, hasLength(1));
+
+      bloc.add(CancelIndexing());
+      await pumpEventQueue();
+      repository.runGate!.complete();
+      await settled.future.timeout(const Duration(seconds: 2));
+      expect(repository.runs, hasLength(1));
+
+      final afterCancel = Completer<void>();
+      bloc
+        ..add(ResetAndIndex(library))
+        ..add(IndexingWorkBarrier(onSettled: afterCancel.complete));
+      await afterCancel.future.timeout(const Duration(seconds: 2));
+      expect(repository.runs, hasLength(2));
+      await bloc.close();
+    });
+
+    for (final duringClear in [false, true]) {
+      test(
+        'ביטול בזמן ${duringClear ? 'מחיקת האינדקס' : 'בדיקת התאימות'} עוצר את הבנייה',
+        () async {
+          final gate = Completer<void>();
+          final repository = _FakeIndexingRepository()..manualReindex = true;
+          if (duringClear) {
+            repository.clearGate = gate;
+          } else {
+            repository.compatibilityGate = gate;
+          }
+          final bloc = _FakeIndexingBloc(repository);
+          final settled = Completer<void>();
+          bloc
+            ..add(ResetAndIndex(libraryWithBooks()))
+            ..add(IndexingWorkBarrier(onSettled: settled.complete));
+          await pumpEventQueue();
+          expect(repository.clearCalls, duringClear ? 1 : 0);
+
+          bloc.add(CancelIndexing());
+          await pumpEventQueue();
+          gate.complete();
+          await settled.future.timeout(const Duration(seconds: 2));
+          expect(repository.runs, isEmpty);
+          expect(repository.clearCalls, duringClear ? 1 : 0);
+          expect(bloc.state, isA<IndexingStopped>());
+          await bloc.close();
+        },
+      );
+    }
+
     blocTest<IndexingBloc, IndexingState>(
       'ClearIndex מנקה ומחזיר למצב התחלתי',
       seed: () => IndexingStopped(),
@@ -828,6 +899,30 @@ void main() {
       act: (bloc) => bloc.add(ClearIndex()),
       expect: () => [isA<IndexingInitial>()],
       verify: (bloc) => expect(repositoryOf(bloc).clearCalls, 1),
+    );
+
+    // אינדוקס שמתחיל לפני שהמחיקה הסתיימה כותב לאינדקס שעומד להימחק.
+    blocTest<IndexingBloc, IndexingState>(
+      'ResetAndIndex מוחק את האינדקס ורק אחריו מאנדקס את כל הספרייה',
+      build: () =>
+          _FakeIndexingBloc(_FakeIndexingRepository()..manualReindex = true),
+      act: (bloc) => bloc.add(ResetAndIndex(libraryWithBooks())),
+      verify: (bloc) {
+        final repository = repositoryOf(bloc);
+        expect(repository.clearCalls, 1);
+        expect(repository.runsAtClear, 0);
+        expect(repository.indexAllCalls, 1);
+      },
+    );
+
+    blocTest<IndexingBloc, IndexingState>(
+      'ResetAndIndex על אינדקס שכבר תקין אינו מוחק אותו',
+      build: _FakeIndexingBloc.new,
+      act: (bloc) => bloc.add(ResetAndIndex(libraryWithBooks())),
+      verify: (bloc) {
+        expect(repositoryOf(bloc).clearCalls, 0);
+        expect(repositoryOf(bloc).indexAllCalls, 1);
+      },
     );
 
     blocTest<IndexingBloc, IndexingState>(
@@ -920,6 +1015,23 @@ void main() {
         ),
       ],
       verify: (bloc) => expect(repositoryOf(bloc).resumeCalls, 1),
+    );
+
+    blocTest<IndexingBloc, IndexingState>(
+      'BLoC חדש מכבד את הבחירה שנשמרה ב-repository',
+      build: () => _FakeIndexingBloc(
+        _FakeIndexingRepository()..isEconomyIndexing = true,
+      ),
+      act: (bloc) => bloc.add(StartIndexing(libraryWithBooks(2))),
+      expect: () => [
+        const IndexingInProgress(
+          booksProcessed: 0,
+          totalBooks: 2,
+          isCreatingIndex: false,
+          isEconomy: true,
+        ),
+        const IndexingComplete(),
+      ],
     );
 
     blocTest<IndexingBloc, IndexingState>(
@@ -1056,6 +1168,8 @@ class _FakeIndexingRepository extends IndexingRepository {
   Object? error;
   bool allBooksIndexed = false;
   bool manualReindex = false;
+  Completer<void>? compatibilityGate;
+  Completer<void>? clearGate;
   final reportedResults = <IndexingRunResult>[];
   final runs =
       <({List<Book>? books, List<Book> changedBooks, IndexCheckScope check})>[];
@@ -1074,6 +1188,8 @@ class _FakeIndexingRepository extends IndexingRepository {
   int cancelCalls = 0;
   int pauseCalls = 0;
   int resumeCalls = 0;
+  @override
+  bool isEconomyIndexing = false;
   final economyValues = <bool>[];
   Object? economyError;
   Completer<void>? economyGate;
@@ -1084,6 +1200,9 @@ class _FakeIndexingRepository extends IndexingRepository {
   /// דיווחי onScanProgress ששלב הבדיקה יפלוט לפני הסיום.
   List<(int, int)> scanProgressReports = const [];
   int clearCalls = 0;
+
+  /// מספר הריצות שכבר התחילו ברגע המחיקה האחרונה.
+  int? runsAtClear;
   int awaitReadyCalls = 0;
 
   Future<IndexingRunResult> _finish(
@@ -1172,7 +1291,10 @@ class _FakeIndexingRepository extends IndexingRepository {
   }
 
   @override
-  Future<bool> requiresManualReindex(Library library) async => manualReindex;
+  Future<bool> requiresManualReindex(Library library) async {
+    await compatibilityGate?.future;
+    return manualReindex;
+  }
 
   @override
   bool isBookIndexed(Book book) => allBooksIndexed;
@@ -1207,11 +1329,15 @@ class _FakeIndexingRepository extends IndexingRepository {
     await economyGate?.future;
     final error = economyError;
     if (error != null) throw error;
+    isEconomyIndexing = enabled;
   }
 
   @override
   Future<bool> clearIndex() async {
     clearCalls++;
+    await clearGate?.future;
+    runsAtClear = runs.length;
+    manualReindex = false;
     return true;
   }
 }

@@ -550,4 +550,74 @@ void main() {
       );
     });
   });
+
+  testWidgets(
+    'בנייה חוזרת עם אותה רשימה אינה גוזרת מחדש את מפתחות כל הקישורים (perf)',
+    (tester) async {
+      const count = 300;
+      final links = [
+        for (var i = 1; i <= count; i++)
+          _CountingLink(
+            heRef: 'הפניה $i',
+            index1: 5,
+            path2: 'ספר $i',
+            index2: i,
+            connectionType: LinkTypes.quotation,
+          ),
+      ];
+      late StateSetter rebuild;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BlocProvider<SettingsBloc>.value(
+            value: _FakeSettingsBloc(),
+            child: Scaffold(
+              body: StatefulBuilder(
+                builder: (context, setState) {
+                  rebuild = setState;
+                  return LinksListView(
+                    displayProfile: TextDisplayProfile.defaults,
+                    links: links,
+                    chipSourceLinks: links,
+                    openBookTitle: 'שבת',
+                    selectedLinkTypes: const {},
+                    onSelectedLinkTypesChanged: (_) {},
+                    openBookCallback: (_) {},
+                    fontSize: 16,
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      _CountingLink.index2EndReads = 0;
+      rebuild(() {});
+      await tester.pump();
+
+      // רק הפריטים הבנויים גוזרים את מפתחם, ולא כל קישורי הקטע.
+      expect(_CountingLink.index2EndReads, lessThan(count));
+    },
+  );
+}
+
+/// סופר קריאות של [index2End], שמפתחות הקישור נגזרים ממנו.
+class _CountingLink extends Link {
+  _CountingLink({
+    required super.heRef,
+    required super.index1,
+    required super.path2,
+    required super.index2,
+    required super.connectionType,
+  });
+
+  static int index2EndReads = 0;
+
+  @override
+  int? get index2End {
+    index2EndReads++;
+    return super.index2End;
+  }
 }

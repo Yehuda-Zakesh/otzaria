@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/plugins/models/plugin_library_book_provider.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
@@ -14,8 +15,10 @@ typedef PluginLibraryBooksDispatch =
     Future<void> Function(
       String pluginId,
       String topic,
-      Map<String, dynamic> payload,
-    );
+      Map<String, dynamic> payload, {
+      int? viewId,
+      AppWindowKeys? windowKeys,
+    });
 
 /// ביצוע `openAction` של ספק — מסופק ע"י DeclarativePluginHost, בלי להעיר את
 /// מנוע התוסף.
@@ -45,22 +48,26 @@ class PluginLibraryBooksRegistry extends ChangeNotifier {
 
   @visibleForTesting
   PluginLibraryBooksRegistry.forTesting({
-    required this._dispatch,
+    PluginLibraryBooksDispatch? dispatch,
     required this._conditions,
     required this._repository,
-  }) {
+  }) : _dispatch = dispatch ?? _dispatchToPlugin {
     _conditions.addListener(_onConditionsChanged);
   }
 
   static Future<void> _dispatchToPlugin(
     String pluginId,
     String topic,
-    Map<String, dynamic> payload,
-  ) => PluginRuntimeDispatcher.instance.dispatchEventToPlugin(
+    Map<String, dynamic> payload, {
+    int? viewId,
+    AppWindowKeys? windowKeys,
+  }) => PluginRuntimeDispatcher.instance.dispatchEventToPlugin(
     pluginId,
     topic,
     payload,
     preferBackground: true,
+    viewId: viewId,
+    windowKeys: windowKeys,
   );
 
   static const String openRequestedTopic = 'library.providerBook.openRequested';
@@ -99,6 +106,9 @@ class PluginLibraryBooksRegistry extends ChangeNotifier {
   @visibleForTesting
   Iterable<PluginLibraryBookProvider> get providers => _providers.values;
 
+  bool hasProviderFor(String pluginId) =>
+      _providers.values.any((provider) => provider.pluginId == pluginId);
+
   bool isOwner(String pluginId, String provider) =>
       _providers[provider]?.pluginId == pluginId;
 
@@ -123,7 +133,12 @@ class PluginLibraryBooksRegistry extends ChangeNotifier {
   /// `false` כשהספר אינו של תוסף — אז הפתיחה נשארת בידי המסלול הקיים.
   /// ספק עם `openAction` מבוצע ב-[actionDispatcher], בלי להעיר את המנוע;
   /// בלעדיו (עץ בלי מערכת התוספים) נשלח האירוע, כמו לספק בלי פעולה.
-  bool open(Book book, {PluginLibraryBookActionDispatcher? actionDispatcher}) {
+  bool open(
+    Book book, {
+    PluginLibraryBookActionDispatcher? actionDispatcher,
+    int? viewId,
+    AppWindowKeys? windowKeys,
+  }) {
     final owner = providerOf(book);
     if (owner == null) return false;
     final payload = {
@@ -136,7 +151,13 @@ class PluginLibraryBooksRegistry extends ChangeNotifier {
     final action = owner.openAction;
     final Future<void> opening = action != null && actionDispatcher != null
         ? actionDispatcher(owner.pluginId, action, payload)
-        : _dispatch(owner.pluginId, openRequestedTopic, payload);
+        : _dispatch(
+            owner.pluginId,
+            openRequestedTopic,
+            payload,
+            viewId: viewId,
+            windowKeys: windowKeys,
+          );
     unawaited(
       opening.catchError((Object error) {
         debugPrint('PluginLibraryBooksRegistry: open dispatch failed: $error');

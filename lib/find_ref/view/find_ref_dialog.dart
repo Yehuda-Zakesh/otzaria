@@ -309,6 +309,9 @@ Book? resolveFindRefBookInLibrary(
 }
 
 class _FindRefDialogState extends State<FindRefDialog> {
+  /// מאגר הפוקוס של החלון; נשמר כאן כי ב-dispose אסור לחפש ב-context.
+  late final FocusRepository _focus;
+
   /// מאגר הדוגמאות שמוצגות כשאין עדיין איתורים אחרונים. בכל פתיחה מוצג
   /// חלון אחר מתוכו (ראו [_rotatedExamples]).
   static const List<String> _referenceExamples = [
@@ -379,6 +382,7 @@ class _FindRefDialogState extends State<FindRefDialog> {
   @override
   void initState() {
     super.initState();
+    _focus = FocusRepository.of(context);
     _defaultHost = _MainWindowFindRefHost(
       AppWindowKeys.of(context).mainWindowScreen,
     );
@@ -414,7 +418,7 @@ class _FindRefDialogState extends State<FindRefDialog> {
 
     // בחירת הטקסט הקיים כאשר חוזרים למסך
     // מבוצע מיד ולא ב-postFrameCallback כדי למנוע אובדן פוקוס באנדרואיד
-    final controller = FocusRepository().findRefSearchController;
+    final controller = _focus.findRefSearchController;
     _queryIsEmpty = controller.text.isEmpty;
     _typedQuery.value = FindRefBloc.normalizeQuery(controller.text);
     controller.addListener(_onQueryTextChanged);
@@ -426,13 +430,13 @@ class _FindRefDialogState extends State<FindRefDialog> {
     }
 
     // רישום כ-active restorer כדי שהדיאלוג יקבל שחזור פוקוס לאחר אירועי חלון
-    _focusRestorer = FocusRepository().registerActiveRestorer(
+    _focusRestorer = _focus.registerActiveRestorer(
       restore: () {
-        if (mounted) FocusRepository().findRefSearchFocusNode.requestFocus();
+        if (mounted) _focus.findRefSearchFocusNode.requestFocus();
       },
       canRestore: () =>
           mounted &&
-          FocusRepository().findRefSearchFocusNode.canRequestFocus &&
+          _focus.findRefSearchFocusNode.canRequestFocus &&
           (ModalRoute.of(context)?.isCurrent ?? false),
     );
 
@@ -449,19 +453,19 @@ class _FindRefDialogState extends State<FindRefDialog> {
     _resultsScrollController.removeListener(_updateHasMoreBelow);
     _resultsScrollController.dispose();
     _hasMoreBelow.dispose();
-    FocusRepository().findRefSearchController.removeListener(
+    _focus.findRefSearchController.removeListener(
       _onQueryTextChanged,
     );
     _selectedIndex.dispose();
     _typedQuery.dispose();
     final restorer = _focusRestorer;
-    if (restorer != null) FocusRepository().unregisterActiveRestorer(restorer);
+    if (restorer != null) _focus.unregisterActiveRestorer(restorer);
     super.dispose();
   }
 
   /// כפתור הניקוי תלוי רק בשאלה אם השדה ריק — בנייה מחדש רק כשזה מתהפך.
   void _onQueryTextChanged() {
-    final text = FocusRepository().findRefSearchController.text;
+    final text = _focus.findRefSearchController.text;
     final normalized = FindRefBloc.normalizeQuery(text);
     // גם שינוי שלא דרך ההקלדה (קישור איתור חיצוני) מבטל Enter ממתין.
     if (normalized != _typedQuery.value) _pendingEnter = false;
@@ -481,7 +485,7 @@ class _FindRefDialogState extends State<FindRefDialog> {
     // גם תוצאות עדכניות אינן מוכיחות שאין חיפוש ישן ב-debounce.
     // הבלוק מבטל אותו ומדלג על חיפוש חוזר כשכבר מוצגות אותן תוצאות.
     final bloc = context.read<FindRefBloc>();
-    final text = FocusRepository().findRefSearchController.text;
+    final text = _focus.findRefSearchController.text;
     if (text.length >= 2) {
       _selectedIndex.value = 0;
       bloc.add(SearchRefRequested(text, includePersonalBooks: stored));
@@ -520,7 +524,7 @@ class _FindRefDialogState extends State<FindRefDialog> {
     final selection = const HiddenLibraryStore().load();
     if (selection == _lastVisibilitySelection) return;
     _lastVisibilitySelection = selection;
-    final query = FocusRepository().findRefSearchController.text;
+    final query = _focus.findRefSearchController.text;
     _visibilityRevision++;
     final bloc = context.read<FindRefBloc>();
     _supersededVisibilityState = bloc.state is FindRefSuccess
@@ -807,6 +811,7 @@ class _FindRefDialogState extends State<FindRefDialog> {
             final tabsBloc = context.read<TabsBloc>();
             final navigationBloc = context.read<NavigationBloc>();
             final historyBloc = context.read<HistoryBloc>();
+            final layoutWidth = readingLayoutWidthResolverOf(context);
             Navigator.of(context).pop();
             // כמו ב-BookOpenCoordinator.openBook: שמירת מיקום הקריאה של הטאב
             // הנוכחי להיסטוריה לפני שהטאב הדחוי תופס את המוקד.
@@ -815,11 +820,14 @@ class _FindRefDialogState extends State<FindRefDialog> {
                 CaptureStateForHistory(tabsBloc.state.currentTab!),
               );
             }
-            final openLeftPane = shouldAutoOpenReadingLeftPane();
+            final openLeftPane = shouldAutoOpenReadingLeftPane(
+              screenWidth: layoutWidth(),
+            );
             final coordinator = BookOpenCoordinator(
               tabsBloc: tabsBloc,
               historyBloc: historyBloc,
               navigationBloc: navigationBloc,
+              layoutWidth: layoutWidth,
             );
             final resolvingTab = buildTalmudBavliResolvingTab(
               target: target,

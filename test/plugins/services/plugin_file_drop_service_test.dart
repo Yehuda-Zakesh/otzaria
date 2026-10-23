@@ -1,3 +1,8 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_inappwebview_windows/flutter_inappwebview_windows.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/plugins/services/plugin_file_drop_service.dart';
@@ -70,4 +75,133 @@ void main() {
 
     expect(service.drag.value?.paths, isEmpty);
   });
+
+  group('לפי תצוגה', () {
+    const channel = MethodChannel(
+      'com.pichillilorenzo/flutter_inappwebview_filedrop',
+    );
+    late List<MethodCall> calls;
+
+    setUp(() {
+      calls = [];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            calls.add(call);
+            return null;
+          });
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      PluginFileDropService.resetViewsForTesting();
+    });
+
+    test('התצוגה הראשית משתמשת בשירות הראשי', () {
+      expect(
+        PluginFileDropService.forView(null),
+        PluginFileDropService.instance,
+      );
+      expect(PluginFileDropService.forView(0), PluginFileDropService.instance);
+    });
+
+    test('השירות הראשי אינו שולח מזהה תצוגה', () async {
+      final main = PluginFileDropService();
+      await main.acquire();
+      await main.release();
+
+      expect(calls.map((call) => call.arguments), [
+        {'enabled': true},
+        {'enabled': false},
+      ]);
+    }, skip: !Platform.isWindows);
+
+    test('תצוגה אחרת מקבלת שירות משלה ששולח את המזהה שלה', () async {
+      final other = PluginFileDropService.forView(7);
+      expect(other, isNot(PluginFileDropService.instance));
+      expect(PluginFileDropService.forView(7), same(other));
+
+      await other.acquire();
+      await other.release();
+
+      expect(calls.map((call) => call.arguments), [
+        {'enabled': true, 'viewId': 7},
+        {'enabled': false, 'viewId': 7},
+      ]);
+      // האזור האחרון שוחרר — התצוגה הבאה במזהה הזה תקבל שירות חדש.
+      expect(PluginFileDropService.forView(7), isNot(same(other)));
+    }, skip: !Platform.isWindows);
+
+    testWidgets('אזור בתצוגה אחרת נקשר לשירות שלה ומשחרר אותו', (
+      tester,
+    ) async {
+      final zoneKey = GlobalKey<_ZoneState>();
+      final secondary = _SecondaryTestView(tester.view);
+      Widget host({required bool inSecondary}) => ViewCollection(
+        views: [
+          View(
+            view: tester.view,
+            child: inSecondary ? const SizedBox() : _Zone(key: zoneKey),
+          ),
+          View(
+            view: secondary,
+            child: inSecondary ? _Zone(key: zoneKey) : const SizedBox(),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(host(inSecondary: true), wrapWithView: false);
+      expect(zoneKey.currentState!.dropService.viewId, 7);
+      expect(calls.single.arguments, {'enabled': true, 'viewId': 7});
+
+      // מעבר לתצוגה הראשית: משחרר את של 7 ונקשר לשירות הראשי.
+      calls.clear();
+      await tester.pumpWidget(host(inSecondary: false), wrapWithView: false);
+      expect(
+        zoneKey.currentState!.dropService,
+        same(PluginFileDropService.instance),
+      );
+      expect(calls.map((call) => call.arguments), [
+        {'enabled': false, 'viewId': 7},
+        {'enabled': true},
+      ]);
+
+      calls.clear();
+      await tester.pumpWidget(const SizedBox(), wrapWithView: true);
+      expect(calls.single.arguments, {'enabled': false});
+    }, skip: !Platform.isWindows);
+  });
+}
+
+class _SecondaryTestView extends TestFlutterView {
+  _SecondaryTestView(TestFlutterView base)
+    : super(
+        view: base,
+        platformDispatcher: base.platformDispatcher,
+        display: base.display,
+      );
+
+  @override
+  int get viewId => 7;
+
+  @override
+  void render(ui.Scene scene, {Size? size}) {}
+}
+
+class _Zone extends StatefulWidget {
+  const _Zone({super.key});
+
+  @override
+  State<_Zone> createState() => _ZoneState();
+}
+
+class _ZoneState extends State<_Zone> with PluginFileDropZoneBinding {
+  @override
+  void onFileDragChanged() {}
+
+  @override
+  void onFileDropped(PluginFileDrag drop) {}
+
+  @override
+  Widget build(BuildContext context) => const SizedBox();
 }

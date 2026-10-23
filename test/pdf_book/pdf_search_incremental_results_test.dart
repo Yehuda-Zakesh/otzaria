@@ -2,29 +2,45 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/pdf_book/view/pdf_search_screen.dart';
 import 'package:pdfrx/pdfrx.dart';
 
-PdfPageTextRange _match(int page) => PdfPageTextRange(
-  pageText: PdfPageText(
-    pageNumber: page,
-    fullText: 'שלום עולם',
-    charRects: const [],
-    fragments: const [],
-  ),
-  start: 0,
-  end: 4,
-);
-
-PdfPageTextRange _rangeIn(String fullText, String word) {
-  final start = fullText.indexOf(word);
-  return PdfPageTextRange(
+PdfTextSearchResult _match(int page) => PdfTextSearchResult.fromRange(
+  PdfPageTextRange(
     pageText: PdfPageText(
-      pageNumber: 1,
-      fullText: fullText,
-      charRects: const [],
+      pageNumber: page,
+      fullText: 'שלום עולם',
+      charRects: List.filled(9, const PdfRect(0, 1, 1, 0)),
       fragments: const [],
     ),
-    start: start,
-    end: start + word.length,
+    start: 0,
+    end: 4,
+  ),
+);
+
+PdfTextSearchResult _rangeIn(String fullText, String word) {
+  final start = fullText.indexOf(word);
+  return PdfTextSearchResult.fromRange(
+    PdfPageTextRange(
+      pageText: PdfPageText(
+        pageNumber: 1,
+        fullText: fullText,
+        charRects: List.filled(fullText.length, const PdfRect(0, 1, 1, 0)),
+        fragments: const [],
+      ),
+      start: start,
+      end: start + word.length,
+    ),
+    contextLength: 160,
   );
+}
+
+class _InvalidMatch extends Fake implements PdfTextSearchResult {
+  @override
+  String get contextText => 'קצר';
+  @override
+  int get contextStart => 0;
+  @override
+  int get start => 2;
+  @override
+  int get end => 99;
 }
 
 void main() {
@@ -50,28 +66,22 @@ void main() {
     });
 
     test('טווח לא תקין — חוזר לשאילתה', () {
-      final broken = PdfPageTextRange(
-        pageText: const PdfPageText(
-          pageNumber: 1,
-          fullText: 'קצר',
-          charRects: [],
-          fragments: [],
-        ),
-        start: 2,
-        end: 99,
-      );
+      final broken = _InvalidMatch();
       expect(PdfBookSearchView.matchLineSnippet(broken, 'שאילתה'), 'שאילתה');
     });
 
     test('שכבת טקסט ללא שורות אינה משכפלת עמוד שלם לכל התאמה', () {
       final page =
           '${List.filled(10000, 'א').join()}שלום${List.filled(10000, 'ב').join()}';
-      final snippet = PdfBookSearchView.matchLineSnippet(
-        _rangeIn(page, 'שלום'),
-        'שלום',
+      final match = _rangeIn(page, 'שלום');
+      final snippet = PdfBookSearchView.matchLineSnippet(match, 'שלום');
+      expect(match.contextText.length, 324);
+      expect(match.pageTextLength, page.length);
+      expect(
+        snippet,
+        '…${List.filled(80, 'א').join()}שלום${List.filled(156, 'ב').join()}…',
       );
-      expect(snippet, contains('שלום'));
-      expect(snippet.length, lessThanOrEqualTo(242));
+      expect(snippet.length, 242);
     });
   });
 

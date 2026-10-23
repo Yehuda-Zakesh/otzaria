@@ -16,6 +16,9 @@ class CommentarySearchBloc
   final String Function(Link) keyOf;
   CommentarySearchRequested? _request;
   List<String> _keys = const [];
+
+  /// הקישורים ש-[_keys] נגזרו מהם; בקשה על אותם קישורים אינה גוזרת אותם שוב.
+  List<Link> _keyedLinks = const [];
   Set<String> _keySet = const {};
   int _generation = 0;
   Timer? _computeTimer;
@@ -38,7 +41,10 @@ class CommentarySearchBloc
     CommentarySearchRequested event,
     Emitter<CommentarySearchState> emit,
   ) {
-    final keys = event.links.map(keyOf).toList();
+    final keys = listEquals(_keyedLinks, event.links)
+        ? _keys
+        : event.links.map(keyOf).toList();
+    _keyedLinks = event.links;
     final previous = _request;
     if (previous != null &&
         previous.query == event.query &&

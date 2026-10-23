@@ -58,6 +58,8 @@ void main() {
       final sources = _sources(csp, 'default-src');
       expect(sources, contains('http://127.0.0.1:53111/f/test.plugin/'));
       expect(sources, contains('http://127.0.0.1:53111/w/'));
+      expect(sources, contains('http://127.0.0.1:53111/fonts/'));
+      expect(sources, contains('http://localhost:53111/fonts/'));
       expect(sources.where((s) => s.contains(':*/')), isEmpty);
     });
 

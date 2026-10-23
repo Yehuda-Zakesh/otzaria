@@ -12,6 +12,9 @@ class SearchState {
   final List<SearchResult> results;
   final Set<Book> booksToSearch;
   final bool isLoading;
+
+  /// הספירה הכוללת עדיין אינה סופית; אפס אינו מעיד שאין התאמות.
+  final bool isCounting;
   final String searchQuery;
   final String negativeQuery;
   final int totalResults;
@@ -43,6 +46,7 @@ class SearchState {
     this.results = const [],
     this.booksToSearch = const {},
     this.isLoading = false,
+    this.isCounting = false,
     this.searchQuery = '',
     this.negativeQuery = '',
     this.totalResults = 0,
@@ -58,6 +62,7 @@ class SearchState {
     List<SearchResult>? results,
     Set<Book>? booksToSearch,
     bool? isLoading,
+    bool? isCounting,
     String? searchQuery,
     String? negativeQuery,
     int? totalResults,
@@ -72,6 +77,7 @@ class SearchState {
       results: results ?? this.results,
       booksToSearch: booksToSearch ?? this.booksToSearch,
       isLoading: isLoading ?? this.isLoading,
+      isCounting: isCounting ?? this.isCounting,
       searchQuery: searchQuery ?? this.searchQuery,
       negativeQuery: negativeQuery ?? this.negativeQuery,
       totalResults: totalResults ?? this.totalResults,

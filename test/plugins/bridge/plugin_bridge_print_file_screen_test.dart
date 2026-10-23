@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
+import 'package:otzaria/core/windowing/app_window_id.dart';
 
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
@@ -135,6 +137,8 @@ void main() {
   late Uint8List pdfBytes;
   late PluginFileServer fileServer;
   late PluginBridgeAdapter adapter;
+  late PluginBridgeDependencies dependencies;
+  PluginBridgeWindowDependencies? requestWindow;
   final originalModulePath = Pdfrx.pdfiumModulePath;
 
   setUpAll(() async {
@@ -169,26 +173,28 @@ void main() {
 
   setUp(() {
     fileServer = PluginFileServer();
+    requestWindow = null;
+    dependencies = PluginBridgeDependencies(
+      historyBloc: _MockHistoryBloc(),
+      tabsBloc: _MockTabsBloc(),
+      navigationBloc: _MockNavigationBloc(),
+      calendarCubit: _MockCalendarCubit(),
+      workspaceBloc: _MockWorkspaceBloc(),
+      searchRepository: _MockSearchRepository(),
+      personalNotesRepository: _MockPersonalNotesRepository(),
+      bookOpenCoordinator: _MockBookOpenCoordinator(),
+      themePayloadBuilder: () => <String, dynamic>{},
+      showConfirmDialog: ({required title, required content}) async => true,
+      showWarningDialog:
+          ({required title, required content, required subtitle}) async => true,
+      pickFile: ({allowedExtensions, title}) async => pdf.path,
+      hasUserActivation: (pluginId, instanceId) async => true,
+      // בכוונה בלי printPluginFile: הבדיקה היא על ברירת המחדל האמיתית.
+    );
     adapter = PluginBridgeAdapter(
       _plugin(),
-      dependencies: PluginBridgeDependencies(
-        historyBloc: _MockHistoryBloc(),
-        tabsBloc: _MockTabsBloc(),
-        navigationBloc: _MockNavigationBloc(),
-        calendarCubit: _MockCalendarCubit(),
-        workspaceBloc: _MockWorkspaceBloc(),
-        searchRepository: _MockSearchRepository(),
-        personalNotesRepository: _MockPersonalNotesRepository(),
-        bookOpenCoordinator: _MockBookOpenCoordinator(),
-        themePayloadBuilder: () => <String, dynamic>{},
-        showConfirmDialog: ({required title, required content}) async => true,
-        showWarningDialog:
-            ({required title, required content, required subtitle}) async =>
-                true,
-        pickFile: ({allowedExtensions, title}) async => pdf.path,
-        hasUserActivation: (pluginId, instanceId) async => true,
-        // בכוונה בלי printPluginFile: הבדיקה היא על ברירת המחדל האמיתית.
-      ),
+      dependencies: dependencies,
+      windowDependenciesResolver: () => requestWindow ?? dependencies.window,
       pluginRepository: _Registry(),
       fileServer: fileServer,
     );
@@ -253,6 +259,48 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
   }
+
+  testWidgets(
+    'printing uses the request window when another window is active',
+    (tester) async {
+      final a = AppWindowKeys(id: const AppWindowId('a'));
+      final b = AppWindowKeys(id: const AppWindowId('b'));
+      addTearDown(AppWindowKeys.resetForTest);
+      AppWindowKeys.activate(b);
+      final token = await mountWindow(tester);
+      final initial = dependencies.window;
+      requestWindow = (
+        context: b.navigator.currentContext,
+        viewId: tester.view.viewId,
+        windowKeys: b,
+        tabsBloc: initial.tabsBloc,
+        historyBloc: initial.historyBloc,
+        navigationBloc: initial.navigationBloc,
+        workspaceBloc: initial.workspaceBloc,
+        bookOpenCoordinator: initial.bookOpenCoordinator,
+        customFoldersBloc: initial.customFoldersBloc,
+        waitForLibraryRefresh: initial.waitForLibraryRefresh,
+      );
+      AppWindowKeys.activate(a);
+      final result = adapter.execute('ui', 'printFile', {'token': token});
+      expect(
+        await _pumpUntil(
+          tester,
+          () => find.byType(PrintingScreen).evaluate().isNotEmpty,
+        ),
+        isTrue,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(b.navigator),
+          matching: find.byType(PrintingScreen),
+        ),
+        findsOneWidget,
+      );
+      await closeWithEscape(tester);
+      expect(await result, {'printed': false});
+    },
+  );
 
   testWidgets(
     'ui.printFile פותח את מסך ההדפסה של אוצריא על הקובץ; סגירה: printed:false',

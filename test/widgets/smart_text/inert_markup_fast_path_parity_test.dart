@@ -6,8 +6,8 @@ import 'package:otzaria/widgets/smart_text/render_settings.dart';
 import 'package:otzaria/widgets/smart_text/smart_text_widget.dart';
 
 // markup שאינו מצייר דבר (עוגני מפרשים ריקים, spans של mam) וישויות רווח
-// נשארים במסלול המהיר, ומוצגים בדיוק כמו ב-HtmlWidget. הייחוס נבנה מ-markup
-// שקול בפרסור HTML שהמסלול המהיר אינו מזהה (רווח לפני `>`, ישות מספרית).
+// נשארים במסלול המהיר, ומוצגים בדיוק כמו ב-HtmlWidget. הייחוס הוא markup
+// שקול בפרסור HTML, מוצג בכפייה ב-HtmlWidget.
 class _Rendered {
   final String text;
   final Rect root;
@@ -21,8 +21,12 @@ Future<_Rendered> _render(
   WidgetTester tester,
   String html, {
   required bool expectHtmlWidget,
+  bool forceHtmlWidget = false,
 }) async {
   final key = GlobalKey();
+  // הייחוס: ה-HTML מוצג ב-HtmlWidget.
+  SmartTextWidget.debugForceHtmlWidget = forceHtmlWidget;
+  addTearDown(() => SmartTextWidget.debugForceHtmlWidget = false);
   await tester.pumpWidget(
     MaterialApp(
       home: Directionality(
@@ -46,6 +50,7 @@ Future<_Rendered> _render(
     ),
   );
   await tester.pumpAndSettle();
+  SmartTextWidget.debugForceHtmlWidget = false;
   expect(
     find.byType(HtmlWidget),
     expectHtmlWidget ? findsOneWidget : findsNothing,
@@ -91,6 +96,7 @@ Future<void> _expectParity(
     tester,
     referenceHtml,
     expectHtmlWidget: true,
+    forceHtmlWidget: true,
   );
   expect(fast.text, reference.text, reason: fastHtml);
   expect(fast.root, reference.root, reason: fastHtml);
@@ -130,7 +136,7 @@ void main() {
       }
     });
 
-    testWidgets('עוגן עם תוכן או בלי מירכאות — נשאר ב-HtmlWidget', (
+    testWidgets('עוגן עם תוכן או בלי מירכאות — זהה ל-HtmlWidget', (
       tester,
     ) async {
       for (final html in const [
@@ -138,7 +144,7 @@ void main() {
         'א <i data-commentator=Mishnah Berurah" data-label="א"></i> ג',
         'א <i class="x"></i> ג',
       ]) {
-        await _render(tester, html, expectHtmlWidget: true);
+        await _expectParity(tester, html, html);
       }
     });
   });
@@ -173,12 +179,9 @@ void main() {
       }
     });
 
-    testWidgets('mam עם class נוסף — נשאר ב-HtmlWidget', (tester) async {
-      await _render(
-        tester,
-        'א <span class="mam-kq x">ב</span> ג',
-        expectHtmlWidget: true,
-      );
+    testWidgets('mam עם class נוסף — זהה ל-HtmlWidget', (tester) async {
+      const html = 'א <span class="mam-kq x">ב</span> ג';
+      await _expectParity(tester, html, html);
     });
   });
 
@@ -213,8 +216,10 @@ void main() {
       }
     });
 
-    testWidgets('ישות אחרת — נשארת ב-HtmlWidget', (tester) async {
-      await _render(tester, 'א&amp;nbsp;ב', expectHtmlWidget: true);
+    testWidgets('ישות אחרת — זהה ל-HtmlWidget', (tester) async {
+      for (final html in const ['א&amp;nbsp;ב', 'א&lt;ב&gt; &#1488;']) {
+        await _expectParity(tester, html, html);
+      }
     });
   });
 }

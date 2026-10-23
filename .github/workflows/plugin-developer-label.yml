@@ -1,0 +1,29 @@
+name: Close plugin-developer issues
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  issues: write
+
+jobs:
+  close:
+    if: github.event.label.name == 'plugin-developer' && github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v9.0.0
+        with:
+          script: |
+            const body = [
+              'תודה על הפנייה!',
+              '',
+              'הנושא שייך לתוסף. התוספים באוצריא נכתבים ומתוחזקים בידי מפתחים עצמאיים, ולצוות אוצריא אין אפשרות לתקן או לשנות אותם.',
+              '',
+              'כדי שהפנייה תגיע למי שיכול לטפל בה, נא לפנות למפתח התוסף דרך דף התוסף ב[חנות התוספים באתר אוצריא](https://otzaria.org/plugins).',
+              '',
+              'אם יתברר שהבעיה היא בתוכנה עצמה ולא בתוסף, אפשר לפתוח דיווח חדש.',
+            ].join('\n');
+            const issue = { owner: context.repo.owner, repo: context.repo.repo, issue_number: context.payload.issue.number };
+            await github.rest.issues.createComment({ ...issue, body });
+            await github.rest.issues.update({ ...issue, state: 'closed', state_reason: 'not_planned' });

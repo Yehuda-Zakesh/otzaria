@@ -2684,6 +2684,8 @@ class _LibraryBrowserState extends State<LibraryBrowser>
     if (PluginLibraryBooksRegistry.instance.open(
       book,
       actionDispatcher: _pluginBookActionDispatcher(),
+      viewId: View.of(context).viewId,
+      windowKeys: AppWindowKeys.of(context),
     )) {
       return;
     }

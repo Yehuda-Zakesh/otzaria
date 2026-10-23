@@ -8,6 +8,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/diagnostics/developer_diagnostics.dart';
 import 'package:otzaria/core/diagnostics/frame_stats_overlay.dart';
+import 'package:otzaria/core/diagnostics/process_tree_sampler.dart';
+import 'package:otzaria/core/windowing/app_window_controller.dart';
+import 'package:otzaria/core/windowing/app_window_id.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
+import 'package:otzaria/core/windowing/app_window_scope.dart';
 
 class _Probe extends StatefulWidget {
   const _Probe();
@@ -21,6 +26,9 @@ class _ProbeState extends State<_Probe> {
   Widget build(BuildContext context) => const SizedBox.expand();
 }
 
+class _FakeWindow extends Fake
+    implements AppWindowController, AppWindowGeometry {}
+
 void main() {
   late String outputPath;
 
@@ -30,7 +38,8 @@ void main() {
     DeveloperDiagnostics.instance
       ..resetForTesting()
       ..outputPath = outputPath
-      ..errorLogWriter = (_) {};
+      ..errorLogWriter = (_) {}
+      ..processSampler = () async => null;
   });
 
   tearDown(() => DeveloperDiagnostics.instance.resetForTesting());
@@ -48,6 +57,55 @@ void main() {
     await tester.sendKeyUpEvent(modifier);
     await tester.pump();
   }
+
+  testWidgets(
+    'diagnostics describe the active window across focus and disposal',
+    (
+      tester,
+    ) async {
+      final first = AppWindowKeys();
+      final second = AppWindowKeys(id: AppWindowId('view:2'));
+      AppWindowKeys.register(first);
+      AppWindowKeys.register(second);
+      addTearDown(AppWindowKeys.resetForTest);
+
+      Widget window(AppWindowKeys keys, String title) => AppWindowScope(
+        controller: _FakeWindow(),
+        geometry: _FakeWindow(),
+        keys: keys,
+        child: FrameStatsOverlay(
+          contextProvider: () => {'title': title},
+          child: const SizedBox(),
+        ),
+      );
+      Widget host({bool showSecond = true}) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Column(
+          children: [
+            window(first, 'ראשון'),
+            if (showSecond) window(second, 'שני'),
+          ],
+        ),
+      );
+
+      AppWindowKeys.activate(first);
+      await tester.pumpWidget(host());
+      expect(
+        DeveloperDiagnostics.instance.contextProvider!()['title'],
+        'ראשון',
+      );
+      AppWindowKeys.activate(second);
+      expect(DeveloperDiagnostics.instance.contextProvider!()['title'], 'שני');
+      AppWindowKeys.unregister(second);
+      await tester.pumpWidget(host(showSecond: false));
+      expect(
+        DeveloperDiagnostics.instance.contextProvider!()['title'],
+        'ראשון',
+      );
+      await tester.pumpWidget(const SizedBox());
+      expect(DeveloperDiagnostics.instance.contextProvider!(), isEmpty);
+    },
+  );
 
   testWidgets('Ctrl+Shift+I turns developer mode on and off', (tester) async {
     await tester.pumpWidget(host());
@@ -175,9 +233,80 @@ void main() {
     expect(text, contains('rebuild   10x TextBookScreen'));
   });
 
+  test('formatFrameStats shows the WebView process tree when sampled', () {
+    final text = formatFrameStats(
+      const FrameStats(
+        rssMb: 300,
+        peakRssMb: 320,
+        processes: ProcessTreeSample(
+          hostPrivMb: 262,
+          webview: {
+            'BROWSER': (count: 1, privMb: 61, eachMb: [61], pages: []),
+            'RENDERER': (count: 2, privMb: 130, eachMb: [70, 60], pages: []),
+          },
+        ),
+      ),
+    );
+    expect(text, contains('memory    300 MB  peak 320 MB  priv 262 MB'));
+    expect(text, contains('webview   191 MB  3 proc  2 rend 130 MB (max 70)'));
+  });
+
+  test('formatFrameStats has no process line without a sample', () {
+    expect(formatFrameStats(const FrameStats()), isNot(contains('webview')));
+  });
+
+  test('formatFrameStats shows estimate refreshes when there were any', () {
+    final text = formatFrameStats(
+      const FrameStats(
+        estimates: EstimateRefreshWindow(
+          count: 2,
+          totalMs: 12.5,
+          items: 380000,
+          deferred: 1,
+          skipped: 3,
+        ),
+      ),
+    );
+    expect(
+      text,
+      contains('estimates 2x  12.5 ms  380000 items  deferred 1  skipped 3'),
+    );
+    expect(formatFrameStats(const FrameStats()), isNot(contains('estimates')));
+  });
+
   test('formatFrameStats handles an idle window', () {
     final text = formatFrameStats(const FrameStats());
     expect(text, contains('frames/s  0'));
     expect(text, contains('avg -  max -'));
+  });
+
+  testWidgets('two windows in one isolate toggle once, from the active one', (
+    tester,
+  ) async {
+    final original = AppWindowKeys.current;
+    addTearDown(() => AppWindowKeys.activate(original));
+    final window = _FakeWindow();
+    final a = AppWindowKeys(id: const AppWindowId('a'));
+    final b = AppWindowKeys(id: const AppWindowId('b'));
+    Widget tree(AppWindowKeys keys) => Expanded(
+      child: AppWindowScope(
+        controller: window,
+        geometry: window,
+        keys: keys,
+        child: const FrameStatsOverlay(child: _Probe()),
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Row(children: [tree(a), tree(b)]),
+      ),
+    );
+    AppWindowKeys.activate(b);
+
+    await pressShortcut(tester);
+    expect(DeveloperDiagnostics.instance.isCollecting, isTrue);
+
+    await pressShortcut(tester);
+    expect(DeveloperDiagnostics.instance.isCollecting, isFalse);
   });
 }

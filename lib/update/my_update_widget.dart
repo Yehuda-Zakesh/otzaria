@@ -23,7 +23,7 @@ import 'package:path/path.dart' as p;
 import 'package:otzaria/core/windowing/app_window_controller.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
 import 'app_release_version.dart';
 import 'differential/differential_update_service.dart';
@@ -111,14 +111,17 @@ final _initialSoftwareCheck = InitialSoftwareCheck();
 /// האם בדיקת התוכנה של העלייה מצאה גרסה חדשה.
 /// `false` כשהבדיקה לא רצה (תדירות, מנותק) או נכשלה; בזמן סיור ממתינה לסופו.
 Future<bool> initialSoftwareUpdateAvailable() =>
+    managesUpdatesHere() ? _initialSoftwareCheck.result : Future.value(false);
+
+/// [managesUpdatesInThisWindow] עבור החלון הזה; הבעלות נקבעת ב-[ProcessDuties].
+@visibleForTesting
+bool managesUpdatesHere({bool isDebug = kDebugMode, ProcessDuties? duties}) =>
     managesUpdatesInThisWindow(
-      isDebug: kDebugMode,
-      isSecondaryWindow: WindowRole.isSecondary,
+      isDebug: isDebug,
+      isSecondaryWindow: !(duties ?? ProcessDuties.current).isProcessOwner,
       isWeb: kIsWeb,
       operatingSystem: Platform.operatingSystem,
-    )
-    ? _initialSoftwareCheck.result
-    : Future.value(false);
+    );
 
 /// מנסה את מסלול העדכון המצומצם ומחזיר `null` בכל כשל או חוסר זמינות.
 ///
@@ -682,14 +685,7 @@ class MyUpdatWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     // אסור שצורת העץ תלויה בהגדרות משתנות (מנותק/עדכונים) — החלפת העוטף
     // בזמן ריצה בונה מחדש את כל תת-העץ וה-PageView מאבד את העמוד הפעיל.
-    if (!managesUpdatesInThisWindow(
-      isDebug: kDebugMode,
-      isSecondaryWindow: WindowRole.isSecondary,
-      isWeb: kIsWeb,
-      operatingSystem: Platform.operatingSystem,
-    )) {
-      return child;
-    }
+    if (!managesUpdatesHere(duties: ProcessDuties.of(context))) return child;
     return _ManagedUpdatWidget(child: child);
   }
 }

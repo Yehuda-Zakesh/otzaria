@@ -43,6 +43,7 @@ import 'package:otzaria/shortcuts/keyboard_shortcuts.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
 import 'package:otzaria/workspaces/bloc/workspace_event.dart';
 import 'package:otzaria/workspaces/bloc/workspace_state.dart';
+import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:window_manager/window_manager.dart' show TitleBarStyle;
 import '../test_helpers/memory_cache_provider.dart';
@@ -167,6 +168,12 @@ void main() {
                   BlocProvider<NavigationBloc>.value(value: navigation),
                   BlocProvider<WorkStatusCubit>.value(value: workStatus),
                   BlocProvider<SettingsBloc>.value(value: settings),
+                  BlocProvider<WindowFullscreenCubit>(
+                    create: (_) => WindowFullscreenCubit(
+                      initial: false,
+                      persist: (_) async {},
+                    ),
+                  ),
                   BlocProvider<IndexingBloc>.value(value: indexing),
                   BlocProvider<HistoryBloc>.value(value: history),
                   BlocProvider<LibraryBloc>.value(value: library),
@@ -291,6 +298,8 @@ class _FakeWindow implements AppWindowController, AppWindowGeometry {
   Future<Rect> getBounds() async => Rect.zero;
   @override
   Future<bool> isFullScreen() async => false;
+  @override
+  Listenable get stateChanges => Listenable.merge(const []);
   @override
   Future<bool> isMaximized() async => false;
   @override

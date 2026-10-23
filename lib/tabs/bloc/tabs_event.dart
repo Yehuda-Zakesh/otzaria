@@ -16,6 +16,9 @@ class AddTab extends TabsEvent {
   // אחרת – נוסף בסוף רשימת הטאבים, כברירת מחדל לפתיחת ספר חדש.
   final bool insertAdjacent;
 
+  /// מיקום מפורש ברצועה, למשל בהעברה מחלון אחר.
+  final int? index;
+
   /// פתיחה ברקע ("פתח בכרטיסייה חדשה"): הטאב נוסף אך המשתמש נשאר על הנוכחי.
   final bool inBackground;
 
@@ -23,10 +26,11 @@ class AddTab extends TabsEvent {
     this.tab, {
     this.insertAdjacent = false,
     this.inBackground = false,
+    this.index,
   });
 
   @override
-  List<Object?> get props => [tab, insertAdjacent, inBackground];
+  List<Object?> get props => [tab, insertAdjacent, inBackground, index];
 }
 
 class OpenOrFocusTab extends TabsEvent {
@@ -34,9 +38,10 @@ class OpenOrFocusTab extends TabsEvent {
   final String? targetTitle;
   final bool insertAdjacent;
 
-  /// כשטאב קיים מאותר ועושים לו focus - האם להעביר אליו את המיקום (index/page)
-  /// של הטאב הנכנס. משמש סימניות והיסטוריה - שם המשתמש בוחר מיקום ספציפי ולא
-  /// רק את הספר, ולכן רוצים שהטאב הקיים ייגלל לאותו מיקום.
+  /// רשומת היסטוריה ממוקדת לפי מקום הקריאה, גם כשכותרות המקומות זהות.
+  final bool matchHistorySlot;
+
+  /// מנווט את הטאב הממוחזר למיקום הנכנס כשנבחר יעד מפורש בסימניה או קישור.
   final bool navigateToPositionIfReused;
 
   /// פתיחה ברקע: תמיד טאב חדש (בלי מיקוד טאב קיים), והמשתמש נשאר על הנוכחי.
@@ -47,6 +52,7 @@ class OpenOrFocusTab extends TabsEvent {
     this.targetTitle,
     this.insertAdjacent = false,
     this.navigateToPositionIfReused = false,
+    this.matchHistorySlot = false,
     this.inBackground = false,
   });
 
@@ -56,6 +62,7 @@ class OpenOrFocusTab extends TabsEvent {
     targetTitle,
     insertAdjacent,
     navigateToPositionIfReused,
+    matchHistorySlot,
     inBackground,
   ];
 }

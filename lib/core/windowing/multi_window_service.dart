@@ -9,7 +9,10 @@ import 'package:hive_ce/hive.dart';
 import 'package:otzaria/core/messages/window_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/windowing/drag_preview_colors.dart';
+import 'package:otzaria/core/windowing/new_window_placement.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
+import 'package:otzaria/core/windowing/window_opener.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/library/hidden/hidden_library_selection.dart';
 import 'package:otzaria/core/messages/settings_messages.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
@@ -31,6 +34,22 @@ typedef SystemDragOutcome = ({
   int? slot,
   bool isSelf,
   bool isShellTray,
+  bool inWorkArea,
+  bool atTaskbarEdge,
+  int? hwnd,
+});
+
+/// מה שתחת הסמן — ראו [MultiWindowService.windowAtCursor].
+typedef CursorTarget = ({
+  int? slot,
+  bool isSelf,
+  bool isShellTray,
+  bool inWorkArea,
+  bool approachingTop,
+  int minUpwardTravel,
+  int x,
+  int y,
+  int? hwnd,
 });
 
 typedef VisibilityChangeResult = ({
@@ -63,7 +82,7 @@ typedef VisibilityChangeResult = ({
 /// (בדיקה 10 של P-2, שטרם הורצה מול המימוש). שתי דרכים לא-בדוקות אם
 /// ההרעה גדולה מפי 2: יצירה על ה-thread הראשי ואז העברת בעלות ל-thread
 /// ייעודי, או הדגל `RunOnSeparateThread` — שעובד אך המנוע מכריז שיוסר.
-class MultiWindowService {
+class MultiWindowService implements WindowOpener {
   const MultiWindowService();
 
   /// הערוץ מול ה-runner.
@@ -121,13 +140,26 @@ class MultiWindowService {
   /// [bounds] היא מסגרת מדויקת שדוחה את [origin] — כך חלון שהמשתמש
   /// **הצמיד** בגרירה נוצר בדיוק במסגרת שההצמדה נתנה. בלעדיה ההצמדה
   /// שהמשתמש ראה נעלמת ברגע שהחלון האמיתי מופיע.
+  ///
+  /// בלי שתיהן, ועם [inheritPlacement], החלון יורש גודל ומיקסום מהחלון הזה
+  /// ונפתח מדורג ממנו (#2989). שחזור חלונות שמורים מעביר false.
+  @override
   Future<bool> openWindow({
     OpenedTab? tab,
     ({int x, int y})? origin,
     ({int left, int top, int width, int height})? bounds,
+    bool inheritPlacement = true,
   }) async {
     if (!canOpenWindows) return false;
     try {
+      var maximized = false;
+      if (origin == null && bounds == null && inheritPlacement) {
+        final placement = await _inheritedPlacement();
+        if (placement != null) {
+          bounds = placement.bounds;
+          maximized = placement.maximized;
+        }
+      }
       // המידות נשלחות ל-runner כדי שייצור את החלון בגודל הנכון מלכתחילה.
       // שינוי גודל אחרי היצירה היה מאתחל את ה-swapchain של המנוע וגורם
       // להבהוב, בדיוק כמו שקורה בחלון הראשון (ראו initSettingsAndWindow).
@@ -151,6 +183,7 @@ class MultiWindowService {
                 'width': bounds.width,
                 'height': bounds.height,
               },
+            if (maximized) 'maximized': true,
           })
           // ⚠️ רשת ביטחון. התשובה מגיעה מלולאת ההודעות של ה-runner,
           // ואם החלון הפותח נהרס לפני שההודעה טופלה — אין מי שיענה.
@@ -168,10 +201,31 @@ class MultiWindowService {
     }
   }
 
+  /// המסגרת של חלון חדש לפי מיקום החלון הזה; null כשה-runner לא דיווח.
+  Future<({PhysicalRect bounds, bool maximized})?> _inheritedPlacement() async {
+    try {
+      final source = SourceWindowPlacement.fromMap(
+        await channel.invokeMapMethod<Object?, Object?>('windowPlacement'),
+      );
+      if (source == null) return null;
+      var fullScreen = false;
+      try {
+        fullScreen = await windowManager.isFullScreen();
+      } catch (_) {
+        // בלי התשובה נשען על דגל המיקסום בלבד.
+      }
+      return cascadeNewWindowPlacement(source, fullScreen: fullScreen);
+    } catch (e) {
+      debugPrint('windowPlacement failed: $e');
+      return null;
+    }
+  }
+
   /// פותח חלון חדש **ריק**, בלי כרטיסיה.
   ///
   /// התקרה נבדקת מראש כדי שהמשתמש לא ימתין ל-`openWindow` ורק אז יקבל
   /// "אפשר לפתוח עד N חלונות". מחזיר true רק אם החלון נוצר בפועל.
+  @override
   Future<bool> openEmptyWindow() async {
     if (!canOpenWindows) return false;
     if (!await canOpenAnotherWindow()) {
@@ -222,6 +276,7 @@ class MultiWindowService {
   ///
   /// ⚠️ מחזיר `null` כש**לא ידוע** (הערוץ זרק). "חלון יחיד" מוחזר רק כשזו
   /// באמת התשובה — הנחת "אני האחרון" בכשל הרגה את שאר החלונות ב-`exit(0)`.
+  @override
   Future<({int count, int max, int engines})?> windowCount() async {
     if (!canOpenWindows) return _singleWindow;
     try {
@@ -266,9 +321,11 @@ class MultiWindowService {
   /// ⚠️ הם היו מקודדים קשיח בגוונים בהירים בצד הנייטיב. בערכה כהה זה
   /// נראה כמו מלבן לבן זוהר על מסך כהה — הפוך בדיוק ממה שהמשתמש מצפה
   /// שייגרר.
+  /// [sourceHwnd] — חלון Dart שממנו גוררים; בלעדיו המקור הוא החלון הראשי.
   Future<void> beginTabDrag(
     String title, {
     required DragPreviewColors colors,
+    int? sourceHwnd,
   }) => _guarded(
     canDragTabsOut,
     'beginTabDrag',
@@ -276,6 +333,7 @@ class MultiWindowService {
     () => channel.invokeMethod<void>('beginTabDrag', {
       'title': title,
       ...colors.toArgb(),
+      'sourceHwnd': ?sourceHwnd,
     }),
   );
 
@@ -313,26 +371,37 @@ class MultiWindowService {
   ///
   /// ⚠️ הקריאה חוסמת לכל משך הגרירה, וזה במתכוון: התשובה היא המסגרת
   /// הסופית — כולל הצמדה, אם המשתמש הצמיד.
-  Future<SystemDragOutcome?> dragOutToSystem() =>
-      _guarded(canDragTabsOut, 'dragOutToSystem', null, () async {
-        final info = await channel.invokeMapMethod<String, dynamic>(
-          'dragOutToSystem',
-        );
-        if (info == null) return null;
-        return (
-          ran: info['ran'] == true,
-          snapped: info['snapped'] == true,
-          left: (info['left'] as int?) ?? 0,
-          top: (info['top'] as int?) ?? 0,
-          width: (info['width'] as int?) ?? 0,
-          height: (info['height'] as int?) ?? 0,
-          x: (info['x'] as int?) ?? 0,
-          y: (info['y'] as int?) ?? 0,
-          slot: info['slot'] as int?,
-          isSelf: info['isSelf'] == true,
-          isShellTray: info['isShellTray'] == true,
-        );
-      });
+  ///
+  /// [withHwnd] (חלונות Dart): התשובה כוללת את ה-HWND שתחת הסמן, ו-isSelf
+  /// נמדד מול [selfHwnd] (בלעדיו — החלון הראשי).
+  Future<SystemDragOutcome?> dragOutToSystem({
+    int? selfHwnd,
+    bool withHwnd = false,
+  }) => _guarded(canDragTabsOut, 'dragOutToSystem', null, () async {
+    final info = await channel.invokeMapMethod<String, dynamic>(
+      'dragOutToSystem',
+      withHwnd ? {'selfHwnd': ?selfHwnd} : null,
+    );
+    if (info == null) return null;
+    return (
+      ran: info['ran'] == true,
+      snapped: info['snapped'] == true,
+      left: (info['left'] as int?) ?? 0,
+      top: (info['top'] as int?) ?? 0,
+      width: (info['width'] as int?) ?? 0,
+      height: (info['height'] as int?) ?? 0,
+      x: (info['x'] as int?) ?? 0,
+      y: (info['y'] as int?) ?? 0,
+      slot: info['slot'] as int?,
+      isSelf: info['isSelf'] == true,
+      isShellTray: info['isShellTray'] == true,
+      // runner ישן אינו מדווח — בתוך אזור העבודה.
+      inWorkArea: info['inWorkArea'] != false,
+      // הסמן נכלא בקצה אזור העבודה ליד שורת המשימות.
+      atTaskbarEdge: info['atTaskbarEdge'] == true,
+      hwnd: info['hwnd'] as int?,
+    );
+  });
 
   /// עוצר את המעקב ומשאיר את התצוגה **גלויה במקום השחרור**.
   ///
@@ -352,6 +421,7 @@ class MultiWindowService {
   ///
   /// ⚠️ אפשרי **רק** מפני שחלון סגור מוסתר ולא נהרס: המנוע שלו חי עם
   /// הכרטיסיות שהיו בו, ולכן השחזור הוא הצגה בלבד ולא טעינה מחדש.
+  @override
   Future<bool> restoreLastClosedWindow() => _guarded(
     canOpenWindows,
     'restoreLastClosedWindow',
@@ -365,18 +435,23 @@ class MultiWindowService {
   ///
   /// ⚠️ ההמרה ב-runner ולא כאן: המיקום מגיע מחלון אחר, ו-Flutter אינו
   /// יודע היכן החלון שלו יושב על המסך.
-  Future<Offset?> screenToClient(int x, int y, double devicePixelRatio) =>
-      _guarded(canDragTabsOut, 'screenToClient', null, () async {
-        final p = await channel.invokeMapMethod<String, dynamic>(
-          'screenToClient',
-          {'x': x, 'y': y},
-        );
-        if (p == null) return null;
-        return Offset(
-          ((p['x'] as int?) ?? 0) / devicePixelRatio,
-          ((p['y'] as int?) ?? 0) / devicePixelRatio,
-        );
-      });
+  /// [hwnd] — חלון Dart שאליו ממירים; בלעדיו — החלון הראשי.
+  Future<Offset?> screenToClient(
+    int x,
+    int y,
+    double devicePixelRatio, {
+    int? hwnd,
+  }) => _guarded(canDragTabsOut, 'screenToClient', null, () async {
+    final p = await channel.invokeMapMethod<String, dynamic>(
+      'screenToClient',
+      {'x': x, 'y': y, 'hwnd': ?hwnd},
+    );
+    if (p == null) return null;
+    return Offset(
+      ((p['x'] as int?) ?? 0) / devicePixelRatio,
+      ((p['y'] as int?) ?? 0) / devicePixelRatio,
+    );
+  });
 
   /// מודיע ל-runner באיזו משבצת באפיק החלון הזה יושב.
   ///
@@ -400,34 +475,30 @@ class MultiWindowService {
   /// של "שוחרר על שולחן העבודה". כלומר כשל ערוץ פתח חלון חדש בפינה (0,0)
   /// ומחק את הכרטיסיה מהמקור.
   /// ערכי ההתקרבות מחושבים בנייטיב לפי הצג וה-DPI שמתחת לסמן.
-  Future<
-    ({
-      int? slot,
-      bool isSelf,
-      bool isShellTray,
-      bool approachingTop,
-      int minUpwardTravel,
-      int x,
-      int y,
-    })?
-  >
-  windowAtCursor() =>
-      _guarded(canOpenWindows, 'windowAtCursor', null, () async {
-        final info = await channel.invokeMapMethod<String, dynamic>(
-          'windowAtCursor',
-        );
-        if (info == null) return null;
-        return (
-          slot: info['slot'] as int?,
-          isSelf: info['isSelf'] == true,
-          isShellTray: info['isShellTray'] == true,
-          approachingTop: info['approachingTop'] == true,
-          // ערך חסר דורש נסיעה שמרנית יותר.
-          minUpwardTravel: (info['minUpwardTravel'] as int?) ?? 24,
-          x: (info['x'] as int?) ?? 0,
-          y: (info['y'] as int?) ?? 0,
-        );
-      });
+  /// [selfHwnd] ו-[withHwnd] — כמו ב-[dragOutToSystem].
+  Future<CursorTarget?> windowAtCursor({
+    int? selfHwnd,
+    bool withHwnd = false,
+  }) => _guarded(canOpenWindows, 'windowAtCursor', null, () async {
+    final info = await channel.invokeMapMethod<String, dynamic>(
+      'windowAtCursor',
+      withHwnd ? {'selfHwnd': ?selfHwnd} : null,
+    );
+    if (info == null) return null;
+    return (
+      slot: info['slot'] as int?,
+      isSelf: info['isSelf'] == true,
+      isShellTray: info['isShellTray'] == true,
+      // runner ישן אינו מדווח — בתוך אזור העבודה.
+      inWorkArea: info['inWorkArea'] != false,
+      approachingTop: info['approachingTop'] == true,
+      // ערך חסר דורש נסיעה שמרנית יותר.
+      minUpwardTravel: (info['minUpwardTravel'] as int?) ?? 24,
+      x: (info['x'] as int?) ?? 0,
+      y: (info['y'] as int?) ?? 0,
+      hwnd: info['hwnd'] as int?,
+    );
+  });
 
   /// סוגר את החלון הנוכחי בלי לסיים את התהליך.
   ///
@@ -476,7 +547,7 @@ class MultiWindowService {
   static String _encodePayload(OpenedTab? tab) {
     return jsonEncode({
       'version': 1,
-      if (tab != null) 'tab': tab.toJson(),
+      if (tab != null) 'tab': tab.toTransferJson(),
       'settings': _snapshotPreferences(),
     });
   }
@@ -598,7 +669,7 @@ class MultiWindowService {
   /// לסרב (שינויים שלא נשמרו), וסירוב אינו כשל שהקורא יכול או צריך לטפל בו.
   static void closePeers() {
     closingAll = true;
-    if (!canOpenWindows) return;
+    if (MultiViewMode.enabled || !canOpenWindows) return;
     WindowBus.instance.broadcast({'type': requestCloseWindow});
   }
 
@@ -607,6 +678,9 @@ class MultiWindowService {
 
   /// פעולת אינדוקס בבקשת [requestIndex] — מחיקת האינדקס.
   static const String indexOpClear = 'clearIndex';
+
+  /// פעולת אינדוקס בבקשת [requestIndex] — מחיקת האינדקס ואחריה אינדוקס מלא.
+  static const String indexOpResetAndIndex = 'resetAndIndex';
 
   static const String indexOpVisibility = 'indexVisibility';
   static const String requestIndexVisibilityResult = 'indexVisibilityResult';
@@ -809,6 +883,7 @@ class MultiWindowService {
   ///
   /// ⚠️ מקום אחד. הלוגיקה `windowCount → count >= max` והמחרוזות שלה
   /// שוכפלו בשלושה אתרי קריאה, ובכל אחד מהם נוסחו מחדש.
+  @override
   Future<void> reportOpenWindowFailure() async {
     final info = await windowCount();
     if (info != null && info.count >= info.max) {
@@ -823,6 +898,7 @@ class MultiWindowService {
   /// ⚠️ בלי הבדיקה המוקדמת המשתמש משלים גרירה שלמה (כולל בחירת אזור
   /// ב-Snap Layouts) או ממתין ל-`openWindow` עד 20 שניות, ורק אז מקבל
   /// "אפשר לפתוח עד N חלונות".
+  @override
   Future<bool> canOpenAnotherWindow() async {
     if (!canOpenWindows) return false;
     final info = await windowCount();

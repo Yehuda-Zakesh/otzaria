@@ -17,6 +17,15 @@ String _referenceNormalizeFindText(String rawText) {
   return cleaned.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
 }
 
+// העותק של המימוש מבוסס ה-RegExp, שמולו נבדקים השקילות והמהירות.
+String _regexNormalizeFindText(String rawText) {
+  var cleaned = rawText.replaceAll(RegExp(r'[־׀|]'), ' ');
+  cleaned = cleaned.replaceAll(RegExp(r'[֑-ׇ]'), '');
+  cleaned = cleaned.replaceAll(RegExp(r'''["'״׳]'''), '');
+  cleaned = cleaned.replaceAll(RegExp(r'[^a-zA-Z0-9\u0590-\u05FF\s/]'), ' ');
+  return cleaned.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
 Future<void> main() async {
   // sanitizeQuery/splitQueryWords מאצילים למנוע ה-Rust; הטסטים שלהם דורשים
   // את הספרייה הנייטיבית ומדולגים כשאין build זמין.
@@ -91,6 +100,59 @@ Future<void> main() async {
       expect(normalizeFindText(value), _referenceNormalizeFindText(value));
     }
   });
+
+  test('normalizeFindText זהה למימוש ה-RegExp על כל תווי ה-BMP', () {
+    for (var c = 0; c <= 0xFFFF; c++) {
+      final ch = String.fromCharCode(c);
+      for (final value in [ch, 'א$chב', ' $ch Z$ch$ch', '$chשׁ"ב׳ $ch']) {
+        expect(
+          normalizeFindText(value),
+          _regexNormalizeFindText(value),
+          reason: 'U+${c.toRadixString(16)}',
+        );
+      }
+    }
+    for (final value in [
+      '😀א',
+      'a\u{1F600}b',
+      ' \uD800 ',
+      '',
+      '  ',
+      'ABC/xyz',
+    ]) {
+      expect(normalizeFindText(value), _regexNormalizeFindText(value));
+    }
+  });
+
+  test(
+    'normalizeFindText על כותרות תוכן עניינים מהיר פי 3 לפחות מה-RegExp',
+    () {
+      // היקף של ספר כמו כף החיים: כ-30,000 כותרות.
+      final titles = [
+        for (var i = 0; i < 30000; i++)
+          i.isEven
+              ? 'סִימָן ${i % 700} - סעיף קטן "${i % 97}" (א׳)'
+              : 'הלכות שבת, ס״ק $i',
+      ];
+      int timeOf(String Function(String) normalize) {
+        final sw = Stopwatch()..start();
+        for (final title in titles) {
+          normalize(title);
+        }
+        return sw.elapsedMicroseconds;
+      }
+
+      final fast = <int>[];
+      final regex = <int>[];
+      for (var round = 0; round < 5; round++) {
+        fast.add(timeOf(normalizeFindText));
+        regex.add(timeOf(_regexNormalizeFindText));
+      }
+      fast.sort();
+      regex.sort();
+      expect(fast[2] * 3, lessThan(regex[2]));
+    },
+  );
 
   test('findNormalizedTextMatchRank מעדיף התאמה מדויקת על contains', () {
     const query = 'שבת דף ע';

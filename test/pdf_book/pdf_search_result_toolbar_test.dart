@@ -51,16 +51,16 @@ class _FakeReadyController extends PdfViewerController {
 }
 
 /// מצב סריקה והתאמות נשלטים מהבדיקה; פעולות הניווט נרשמות.
-class _ControlledSearcher extends PdfTextSearcher {
+class _ControlledSearcher extends PdfTextSearchSession {
   _ControlledSearcher(super.controller);
 
-  List<PdfPageTextRange> current = const [];
+  List<PdfTextSearchResult> current = const [];
   bool scanning = false;
   int? index;
   final actions = <String>[];
 
   @override
-  List<PdfPageTextRange> get matches => current;
+  List<PdfTextSearchResult> get matches => current;
 
   @override
   bool get isSearching => scanning;
@@ -100,18 +100,23 @@ class _ControlledSearcher extends PdfTextSearcher {
   void stopTextSearch() => actions.add('stop');
 }
 
-PdfPageTextRange _match(int page) => PdfPageTextRange(
-  pageText: PdfPageText(
-    pageNumber: page,
-    fullText: 'שלום עולם',
-    charRects: const [],
-    fragments: const [],
+PdfTextSearchResult _match(int page) => PdfTextSearchResult.fromRange(
+  PdfPageTextRange(
+    pageText: PdfPageText(
+      pageNumber: page,
+      fullText: 'שלום עולם',
+      charRects: List.filled(9, const PdfRect(0, 1, 1, 0)),
+      fragments: const [],
+    ),
+    start: 0,
+    end: 4,
   ),
-  start: 0,
-  end: 4,
 );
 
-Future<_ControlledSearcher> _pump(WidgetTester tester) async {
+Future<_ControlledSearcher> _pump(
+  WidgetTester tester, {
+  ValueChanged<int>? onNavigationStarted,
+}) async {
   final settingsBloc = _MockSettingsBloc();
   whenListen(
     settingsBloc,
@@ -153,6 +158,7 @@ Future<_ControlledSearcher> _pump(WidgetTester tester) async {
               searchController: searchController,
               focusNode: focusNode,
               pdfFilePath: '/nonexistent/test.pdf',
+              onNavigationStarted: onNavigationStarted,
             ),
           ),
         ),
@@ -178,6 +184,25 @@ Future<void> main() async {
   });
 
   group('סרגל התוצאות בחיפוש הפשוט', () {
+    testWidgets('נקודת החזרה נשמרת לפני ניווט לתוצאה הבאה', (tester) async {
+      late _ControlledSearcher searcher;
+      final targets = <int>[];
+      searcher = await _pump(
+        tester,
+        onNavigationStarted: (page) {
+          expect(searcher.actions, isEmpty);
+          targets.add(page);
+        },
+      );
+      searcher
+        ..current = [_match(2), _match(3), _match(5)]
+        ..index = 0;
+      await _notify(tester, searcher);
+      await tester.tap(find.byTooltip('התוצאה הבאה'));
+      expect(targets, [3]);
+      expect(searcher.actions, ['next']);
+    });
+
     testWidgets('בזמן סריקה — כפתור עצירה שעוצר את ה-searcher', (tester) async {
       final searcher = await _pump(tester);
       searcher

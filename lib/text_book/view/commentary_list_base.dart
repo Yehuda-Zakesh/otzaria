@@ -1,3 +1,4 @@
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/data/book_identity.dart';
 import 'package:otzaria/book_common/bloc/commentary_search_bloc.dart';
 import 'package:flutter/material.dart';
@@ -52,6 +53,7 @@ import 'package:otzaria/book_common/utils/commentator_group_builder.dart';
 import 'package:otzaria/book_common/utils/link_anchor_markers.dart';
 import 'package:otzaria/text_book/view/commentators_list_screen.dart';
 import 'package:otzaria/widgets/misc/commentators_filter_button.dart';
+import 'package:otzaria/widgets/misc/link_preview_overlay.dart';
 import 'package:otzaria/widgets/layout/commentators_filter_screen.dart';
 import 'package:otzaria/widgets/lists/commentators_selection_panel.dart';
 import 'package:otzaria/widgets/feedback/otzaria_empty_state.dart';
@@ -222,6 +224,9 @@ class CommentaryListBase extends StatefulWidget {
   /// דרך GlobalKey).
   final ValueListenable<CommentaryScrollRequest?>? scrollTargetListenable;
 
+  /// false כשהחלונית שמכילה את הרשימה סגורה אך נשארת בעץ.
+  final bool isPaneOpen;
+
   const CommentaryListBase({
     super.key,
     required this.openBookCallback,
@@ -256,6 +261,7 @@ class CommentaryListBase extends StatefulWidget {
     this.personalNotesLoader,
     this.contentMaxWidth,
     this.scrollTargetListenable,
+    this.isPaneOpen = true,
   });
 
   @override
@@ -1771,6 +1777,18 @@ class CommentaryListBaseState extends State<CommentaryListBase>
     textsByKey: _renderedTextByKey,
   );
 
+  Widget? _lastView;
+
+  /// חלונית סגורה נשארת בעץ; בלי זה כל גלילה בספר טוענת ובונה את מפרשי הקטע.
+  Widget Function(BuildContext, TextBookLoaded) _skipWhilePaneClosed(
+    Widget Function(BuildContext, TextBookLoaded) build,
+  ) => (context, state) {
+    if (widget.isPaneOpen || _lastView == null || _hasPendingAnchorScroll) {
+      return _lastView = build(context, state);
+    }
+    return _lastView!;
+  };
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -1801,7 +1819,7 @@ class CommentaryListBaseState extends State<CommentaryListBase>
             _commentaryCopyProfile(previous) != _commentaryCopyProfile(current);
       },
       loadingWidget: const Center(),
-      builder: (context, state) {
+      builder: _skipWhilePaneClosed((context, state) {
         final selectedCommentators = _selectedCommentators(state);
         _syncSectionScroll(_currentIndexes(state));
         // איפוס ה-latch: ברגע שיש בחירה לא-ריקה, ריקון עתידי שלה צריך
@@ -1885,6 +1903,8 @@ class CommentaryListBaseState extends State<CommentaryListBase>
                   state.content,
                   currentIndexes,
                   dbNotes: state.bookNotes,
+                  decorateBody: (line, note, body) =>
+                      noteBodyWithAnchors(state, line, note, body),
                 );
                 if (relevantNotes.isNotEmpty) {
                   notesWidget = _NotesCommentaryWidget(
@@ -2334,7 +2354,7 @@ class CommentaryListBaseState extends State<CommentaryListBase>
             ],
           );
         }
-      },
+      }),
     );
   }
 
@@ -2815,6 +2835,36 @@ class _CommentaryLinkItemState extends State<_CommentaryLinkItem> {
   }
 }
 
+/// עוגני הקישורים של שורה [lineIndex] בספר, בסדר שה-href של הסמנים מפנה אליו.
+List<Link> _bookAnchorLinksAt(TextBookLoaded state, int lineIndex) =>
+    (state.linksByLine[lineIndex + 1] ?? const <Link>[])
+        .where((link) => link.anchorStart != null)
+        .toList();
+
+/// גוף ההערה [note] של שורה [lineIndex] עם חלקי עוגני השורה שבו, כמו בגוף הספר.
+@visibleForTesting
+String noteBodyWithAnchors(
+  TextBookLoaded state,
+  int lineIndex,
+  int note,
+  String body,
+) {
+  if (!state.bodyDisplayProfile.showAnchorMarkers ||
+      state.book.versionTitle != null) {
+    return body;
+  }
+  final anchorLinks = _bookAnchorLinksAt(state, lineIndex);
+  if (anchorLinks.isEmpty) return body;
+  return injectLinkAnchorMarkers(
+    rawLine: body,
+    anchorLinks: anchorLinks,
+    styleIndexByCommentator: anchorStyleIndexByCommentator(anchorLinks),
+    lineIndex: lineIndex,
+    notes: state.bookNotes.notesAt(lineIndex),
+    note: note,
+  );
+}
+
 /// תצוגת המפרש הוירטואלי 'הערות' — מציגה את גוף ההערות ה-inline
 /// (<i class="footnote">) של השורות הנבחרות כאילו היו רשימת מפרשים.
 class _NotesCommentaryWidget extends StatefulWidget {
@@ -2870,6 +2920,38 @@ class _NotesCommentaryWidgetState extends State<_NotesCommentaryWidget> {
   void dispose() {
     widget.selectionSyncController?.clear(_selectionOwner);
     super.dispose();
+  }
+
+  /// הקישור של סמן `otzaria://anchor?ref=<line>_<i>` שבגוף הערה.
+  Link? _anchorLink(String url) {
+    final parts = Uri.tryParse(url)?.queryParameters['ref']?.split('_');
+    if (parts == null || parts.length != 2) return null;
+    final line = int.tryParse(parts[0]);
+    final index = int.tryParse(parts[1]);
+    if (line == null || index == null || index < 0) return null;
+    final links = _bookAnchorLinksAt(widget.state, line);
+    return index < links.length ? links[index] : null;
+  }
+
+  void _openAnchor(String url) {
+    final link = _anchorLink(url);
+    if (link == null) return;
+    LinkPreviewOverlay.dismiss(window: AppWindowKeys.of(context));
+    openLinkTarget(link, (tab) => widget.openBookCallback(tab));
+  }
+
+  void _previewAnchor(String url, Offset globalPosition) {
+    final link = _anchorLink(url);
+    if (link == null) return;
+    LinkPreviewOverlay.cancelScheduledHide(AppWindowKeys.of(context));
+    LinkPreviewOverlay.show(
+      context,
+      link: link,
+      globalPosition: globalPosition,
+      hoverMode: true,
+      displayProfile: widget.displayProfile,
+      onOpen: () => _openAnchor(url),
+    );
   }
 
   /// ההערות הן טקסט הספר עצמו: בספר מוגן Ctrl+C עובר דרך מגבלת ההעתקה.
@@ -3009,6 +3091,12 @@ class _NotesCommentaryWidgetState extends State<_NotesCommentaryWidget> {
                                 widget.openBookCallback(tab);
                               }
                             },
+                            onAnchorTap: _openAnchor,
+                            onAnchorHover: _previewAnchor,
+                            onAnchorHoverExit: (_) =>
+                                LinkPreviewOverlay.scheduleHide(
+                                  AppWindowKeys.of(context),
+                                ),
                           ),
                         );
                       }),

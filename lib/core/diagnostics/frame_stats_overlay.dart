@@ -7,6 +7,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria/core/diagnostics/developer_diagnostics.dart';
 import 'package:otzaria/core/messages/common_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 
 /// Wraps the app, toggles developer mode on Ctrl+Shift+I, and shows the
 /// diagnostics panel in a corner while it is on.
@@ -27,23 +28,41 @@ class FrameStatsOverlay extends StatefulWidget {
 }
 
 class _FrameStatsOverlayState extends State<FrameStatsOverlay> {
+  static final _windows = <_FrameStatsOverlayState, AppWindowKeys>{};
+
+  static Map<String, Object?> _activeContext() {
+    for (final window in _windows.entries) {
+      if (identical(window.value, AppWindowKeys.current)) {
+        return window.key.widget.contextProvider?.call() ?? const {};
+      }
+    }
+    return const {};
+  }
+
   DeveloperDiagnostics get _diagnostics => DeveloperDiagnostics.instance;
 
   @override
   void initState() {
     super.initState();
-    _diagnostics.contextProvider = widget.contextProvider;
+    _diagnostics.contextProvider = _activeContext;
     HardwareKeyboard.instance.addHandler(_onKey);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _windows[this] = AppWindowKeys.of(context);
   }
 
   @override
   void didUpdateWidget(FrameStatsOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _diagnostics.contextProvider = widget.contextProvider;
+    _diagnostics.contextProvider = _activeContext;
   }
 
   @override
   void dispose() {
+    _windows.remove(this);
     HardwareKeyboard.instance.removeHandler(_onKey);
     super.dispose();
   }
@@ -52,6 +71,8 @@ class _FrameStatsOverlayState extends State<FrameStatsOverlay> {
     if (!isDeveloperModeShortcut(event, HardwareKeyboard.instance)) {
       return false;
     }
+    // מצב הלוח משותף; מאזין בכל חלון היה מחליף אותו פעמיים.
+    if (!AppWindowKeys.isActiveWindow(context)) return false;
     _diagnostics.toggle();
     return true;
   }
@@ -248,6 +269,23 @@ String formatFrameStats(FrameStats stats) {
       '(${DeveloperDiagnostics.window.inSeconds}s)  total ${stats.slowTotal}',
     )
     ..write('memory    ${stats.rssMb} MB  peak ${stats.peakRssMb} MB');
+  final processes = stats.processes;
+  if (processes?.hostPrivMb case final priv?) buffer.write('  priv $priv MB');
+  if (processes != null && processes.webview.isNotEmpty) {
+    final count = processes.webview.values.fold(0, (n, k) => n + k.count);
+    buffer.write('\nwebview   ${processes.webviewPrivMb} MB  $count proc');
+    if (processes.renderers case final r?) {
+      buffer.write('  ${r.count} rend ${r.privMb} MB (max ${r.eachMb.first})');
+    }
+  }
+  final estimates = stats.estimates;
+  if (estimates != null) {
+    buffer.write(
+      '\nestimates ${estimates.count}x  ${ms(estimates.totalMs)} ms  '
+      '${estimates.items} items  deferred ${estimates.deferred}  '
+      'skipped ${estimates.skipped}',
+    );
+  }
   for (final entry in stats.topRebuilds.take(5)) {
     buffer.write('\nrebuild   ${entry.value}x ${entry.key}');
   }

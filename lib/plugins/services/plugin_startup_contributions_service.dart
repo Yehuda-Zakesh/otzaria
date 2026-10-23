@@ -319,6 +319,7 @@ class PluginStartupContributionsService {
       }
       _lazyActivation.syncPlugin(
         plugin.pluginId,
+        version: plugin.version,
         broadcastTopics: broadcastTopics,
         scheduleStartup: scheduleStartup,
         activationConditions: activationConditions,

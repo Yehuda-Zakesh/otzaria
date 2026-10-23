@@ -177,6 +177,18 @@ Future<void> main() async {
         expect(selection, {expectedFacet});
         expect(checkboxOf(tester, 'בראשית').value, isTrue);
       });
+
+      testWidgets('ריחוף אינו בונה מחדש את התפריט (perf)', (tester) async {
+        await pumpMenu(tester, {'/'});
+        await typeQuery(tester, 'בראשית');
+
+        // בנייה מחדש של התפריט מריצה שוב את החיפוש בכל העץ, ויוצרת שורות חדשות.
+        final labelBefore = tester.widget<Text>(textInList('בראשית'));
+        await hoverOver(tester, 'בראשית');
+
+        expect(find.text('רק'), findsOneWidget);
+        expect(tester.widget<Text>(textInList('בראשית')), same(labelBefore));
+      });
     },
     skip: engineReady ? false : searchEngineSkipReason,
   );

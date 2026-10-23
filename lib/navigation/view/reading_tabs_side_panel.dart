@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria/plugins/services/plugin_new_tab_page_registry.dart';
 import 'package:otzaria/navigation/view/tab_search_menu.dart';
@@ -175,7 +176,10 @@ class _ReadingTabsSidePanelState extends State<ReadingTabsSidePanel> {
               visualDensity: VisualDensity.compact,
               tooltip: context.settingsText('כרטיסייה חדשה'),
               icon: const Icon(FluentIcons.add_24_regular),
-              onPressed: PluginNewTabPageRegistry.instance.open,
+              onPressed: () => PluginNewTabPageRegistry.instance.open(
+                windowKeys: AppWindowKeys.of(context),
+                viewId: View.of(context).viewId,
+              ),
             ),
         ];
         if (collapsed) {

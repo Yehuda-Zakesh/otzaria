@@ -9,6 +9,7 @@ import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/library/view/book_preview_panel.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:pdfrx/pdfrx.dart';
+import '../../test_helpers/pdf_document_dispose.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
@@ -118,6 +119,7 @@ void main() {
     }
 
     expect(await pumpUntil(hasLayout), isTrue);
+    final document = controller.document;
 
     final selecting = controller.textSelectionDelegate.selectAllText();
     expect(
@@ -175,6 +177,6 @@ void main() {
     expect(find.byType(AdaptiveTextSelectionToolbar), findsNothing);
 
     await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump(const Duration(milliseconds: 200));
+    await disposePdfDocument(tester, document);
   });
 }

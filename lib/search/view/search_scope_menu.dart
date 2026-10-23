@@ -705,7 +705,9 @@ class _ScopeMenuPanelState extends State<_ScopeMenuPanel> {
   _View _view = _View.root;
   final List<ScopeNode> _stack = [];
   int _highlight = 0;
-  int _hoveredRow = -1;
+  // ריחוף משנה רק את כפתור "רק" בשורה; בנייה מחדש של התפריט
+  // מריצה שוב את החיפוש בכל העץ.
+  final ValueNotifier<int> _hoveredRow = ValueNotifier<int>(-1);
 
   List<String> _authorResults = const [];
   int _authorRequestId = 0;
@@ -755,6 +757,7 @@ class _ScopeMenuPanelState extends State<_ScopeMenuPanel> {
   void dispose() {
     widget.searchController.removeListener(_onQueryChanged);
     _scrollController.dispose();
+    _hoveredRow.dispose();
     super.dispose();
   }
 
@@ -1284,22 +1287,20 @@ class _ScopeMenuPanelState extends State<_ScopeMenuPanel> {
     }
 
     // במגע אין hover — "רק" מוצג תמיד; בעכבר הוא נחשף בריחוף או בניווט מקלדת.
-    final showOnly =
-        item.onOnly != null &&
-        (Platform.isAndroid ||
-            Platform.isIOS ||
-            Platform.isWindows ||
-            index == _hoveredRow ||
-            highlighted);
+    final alwaysShowOnly =
+        Platform.isAndroid ||
+        Platform.isIOS ||
+        Platform.isWindows ||
+        highlighted;
 
     return InkWell(
       canRequestFocus: false,
       onTap: onRowTap,
       onHover: (hovering) {
         if (hovering) {
-          setState(() => _hoveredRow = index);
-        } else if (_hoveredRow == index) {
-          setState(() => _hoveredRow = -1);
+          _hoveredRow.value = index;
+        } else if (_hoveredRow.value == index) {
+          _hoveredRow.value = -1;
         }
       },
       child: Container(
@@ -1359,30 +1360,41 @@ class _ScopeMenuPanelState extends State<_ScopeMenuPanel> {
                 ],
               ),
             ),
-            if (showOnly) ...[
-              const SizedBox(width: 4),
-              Tooltip(
-                message: 'בחר רק את זה',
-                child: TextButton(
-                  onPressed: () {
-                    item.onOnly!();
-                    widget.onKeepFocus();
-                  },
-                  style: TextButton.styleFrom(
-                    minimumSize: Size.zero,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
+            if (item.onOnly != null)
+              ValueListenableBuilder<int>(
+                valueListenable: _hoveredRow,
+                builder: (context, hovered, onlyButton) =>
+                    alwaysShowOnly || hovered == index
+                    ? onlyButton!
+                    : const SizedBox.shrink(),
+                child: Padding(
+                  padding: const EdgeInsetsDirectional.only(start: 4),
+                  child: Tooltip(
+                    message: 'בחר רק את זה',
+                    child: TextButton(
+                      onPressed: () {
+                        item.onOnly!();
+                        widget.onKeepFocus();
+                      },
+                      style: TextButton.styleFrom(
+                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text(
+                        'רק',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: const Text(
-                    'רק',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                   ),
                 ),
               ),
-            ],
             if (item.onDelete != null)
               IconButton(
                 icon: const Icon(FluentIcons.delete_24_regular, size: 18),

@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/plugins/models/plugin_search_field_action.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 
@@ -28,6 +29,8 @@ class PluginSearchFieldSession {
   final String pluginId;
   final String actionId;
   final PluginSearchFieldBinding binding;
+  final int? viewId;
+  final AppWindowKeys? windowKeys;
 
   /// הטקסט שמחוץ לבחירה ברגע הלחיצה — נשמר כמות שהוא בכל כתיבה של התוסף.
   final String before;
@@ -46,6 +49,8 @@ class PluginSearchFieldSession {
     required this.pluginId,
     required this.actionId,
     required this.binding,
+    required this.viewId,
+    required this.windowKeys,
     required this.before,
     required this.after,
     required this.expectedText,
@@ -59,6 +64,8 @@ typedef PluginSearchFieldEventDispatcher =
       Map<String, dynamic> payload, {
       bool preferBackground,
       String? instanceId,
+      int? viewId,
+      AppWindowKeys? windowKeys,
     });
 
 class PluginSearchFieldSessionException implements Exception {
@@ -76,14 +83,23 @@ class PluginSearchFieldSessionException implements Exception {
 class PluginSearchFieldSessionService extends ChangeNotifier {
   static final PluginSearchFieldSessionService instance =
       PluginSearchFieldSessionService._(
-        (pluginId, topic, payload, {preferBackground = false, instanceId}) =>
-            PluginRuntimeDispatcher.instance.dispatchEventToPlugin(
-              pluginId,
-              topic,
-              payload,
-              preferBackground: preferBackground,
-              instanceId: instanceId,
-            ),
+        (
+          pluginId,
+          topic,
+          payload, {
+          preferBackground = false,
+          instanceId,
+          viewId,
+          windowKeys,
+        }) => PluginRuntimeDispatcher.instance.dispatchEventToPlugin(
+          pluginId,
+          topic,
+          payload,
+          preferBackground: preferBackground,
+          instanceId: instanceId,
+          viewId: viewId,
+          windowKeys: windowKeys,
+        ),
       );
 
   PluginSearchFieldSessionService._(this._dispatch);
@@ -106,6 +122,10 @@ class PluginSearchFieldSessionService extends ChangeNotifier {
 
   final PluginSearchFieldEventDispatcher _dispatch;
   final Map<String, PluginSearchFieldSession> _sessions = {};
+
+  /// האם ל-[pluginId] יש סשן פתוח בשדה חיפוש.
+  bool hasSessionFor(String pluginId) =>
+      _sessions.values.any((s) => s.pluginId == pluginId);
   final Random _random = Random.secure();
 
   PluginSearchFieldSession? sessionFor(
@@ -132,6 +152,8 @@ class PluginSearchFieldSessionService extends ChangeNotifier {
     required PluginSearchFieldBinding binding,
     required String pluginId,
     required String actionId,
+    int? viewId,
+    AppWindowKeys? windowKeys,
   }) async {
     final existing = sessionFor(binding, pluginId, actionId);
     if (existing != null) {
@@ -163,6 +185,8 @@ class PluginSearchFieldSessionService extends ChangeNotifier {
       pluginId: pluginId,
       actionId: actionId,
       binding: binding,
+      viewId: viewId,
+      windowKeys: windowKeys,
       before: text.substring(0, start),
       after: text.substring(end),
       expectedText: text,
@@ -390,6 +414,8 @@ class PluginSearchFieldSessionService extends ChangeNotifier {
         payload,
         preferBackground: session.instanceId == null && preferBackground,
         instanceId: session.instanceId,
+        viewId: session.viewId,
+        windowKeys: session.windowKeys,
       );
     } catch (error) {
       debugPrint('PluginSearchFieldSessionService: $topic failed: $error');

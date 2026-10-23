@@ -1,4 +1,3 @@
-// דהיית חיצי הדפדוף בריחוף ניתקה את הסמנטיקה ('!child.attached') והקריסה את התוכנה.
 import 'dart:io';
 
 import 'package:flutter/gestures.dart';
@@ -25,6 +24,7 @@ import 'package:otzaria/tabs/tabs_repository.dart';
 import 'package:otzaria/tour/bloc/tour_cubit.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdfrx/pdfrx.dart';
+import '../test_helpers/pdf_document_dispose.dart';
 
 import '../helpers/memory_settings_cache.dart';
 
@@ -107,6 +107,7 @@ void main() {
       for (var i = 0; i < 200 && bloc.state is! PdfBookLoaded; i++) {
         await settle(1);
       }
+      final document = tab.pdfViewerController.document;
       bloc.add(const events.SetLayoutMode(PdfLayoutMode.bookView));
       await settle(30);
       bloc.add(const events.ZoomIn());
@@ -123,7 +124,7 @@ void main() {
 
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pump(const Duration(milliseconds: 200));
+      await disposePdfDocument(tester, document);
       semantics.dispose();
     },
   );

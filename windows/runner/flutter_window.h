@@ -33,6 +33,9 @@ class FlutterWindow : public Win32Window {
   // הראשון הוא מסך הטעינה של האפליקציה, וזו התשובה הוויזואלית המיידית.
   void RevealOnFirstFrame();
 
+  // האם החשיפה הראשונה תמקסם את החלון — כשהחלון שפתח אותו ממוקסם (#2989).
+  void SetRevealMaximized(bool maximized) { reveal_maximized_ = maximized; }
+
   // מחזיר לשימוש חלון שנסגר (הוסתר) עם מטען חדש.
   //
   // ⚠️ זה מה שהופך פתיחת חלון למיידית. המנוע כבר עלה, ה-blocs חיים,
@@ -44,7 +47,7 @@ class FlutterWindow : public Win32Window {
   // שהמשתמש הצמיד בגרירה נוצר בדיוק במסגרת שההצמדה נתנה.
   void ReviveWith(const std::string& payload, int width, int height,
                   int origin_x = 0, int origin_y = 0,
-                  const RECT* bounds = nullptr);
+                  const RECT* bounds = nullptr, bool maximized = false);
 
  protected:
   // Win32Window:
@@ -72,6 +75,8 @@ class FlutterWindow : public Win32Window {
 
   // When true, skip Show() in the first-frame callback. Used by CLI commands.
   bool headless_ = false;
+  // ראו [SetRevealMaximized].
+  bool reveal_maximized_ = false;
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
@@ -101,6 +106,8 @@ class FlutterWindow : public Win32Window {
     // האמיתי מופיע.
     bool has_bounds = false;
     RECT bounds{};
+    // החלון שפתח אותו ממוקסם — החדש נחשף ממוקסם, ו-[bounds] היא המסגרת הרגילה.
+    bool maximized = false;
     std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result;
   };
   // נכתב בטיפול בערוץ ונקרא בלולאת ההודעות של אותו thread, ולכן אין כאן
@@ -111,8 +118,13 @@ class FlutterWindow : public Win32Window {
   // ⚠️ נענות **אחרי** שהמשתמש שחרר, כי התשובה היא המסגרת הסופית — כולל
   // הצמדה. הן אינן מבוצעות בתוך הטיפול בערוץ: `DragWithSystem` נכנס
   // ללולאה מודאלית, וחסימה מתוך קריאת ערוץ היא ריאנטרנטית.
-  std::queue<std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>>
-      pending_system_drags_;
+  struct PendingSystemDrag {
+    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result;
+    // חלון המקור (חלון Dart), או nullptr לחלון הזה.
+    HWND self = nullptr;
+    bool report_hwnd = false;
+  };
+  std::queue<PendingSystemDrag> pending_system_drags_;
   // ערוץ לסגירת חלון ה-splash הנייטיב (otzaria/splash) — Dart קורא "close"
   // בעת חשיפת החלון הראשי.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>

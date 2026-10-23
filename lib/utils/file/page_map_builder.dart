@@ -60,12 +60,38 @@ class PageMap {
 /// Dashes are folded to ASCII `-` first: stripping a maqaf or en-dash instead
 /// would glue "דף כב־א" into "דף כבא" and read it as daf 23.
 String normalizeRef(String s) {
-  return s
+  final collapsed = s
       .replaceAll(RegExp(r'[־‐-―]'), '-')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .replaceAll(RegExp(r'[^\p{L}\p{N}\s/.-]', unicode: true), '')
-      .toLowerCase()
-      .trim();
+      .replaceAll(RegExp(r'\s+'), ' ');
+  return stripNonRefChars(collapsed).toLowerCase().trim();
+}
+
+final _nonRefChars = RegExp(r'[^\p{L}\p{N}\s/.-]', unicode: true);
+
+/// מסיר מ-[s] את מה שאינו אות, ספרה, רווח או `/.-`, כמו [_nonRefChars].
+/// ה-regex היוניקודי איטי (פי 7), ולכן עברית ו-ASCII מסווגים כאן והשאר עובר אליו.
+String stripNonRefChars(String s) {
+  final kept = StringBuffer();
+  for (var i = 0; i < s.length; i++) {
+    final c = s.codeUnitAt(i);
+    if ((c >= 0x30 && c <= 0x39) ||
+        ((c | 0x20) >= 0x61 && (c | 0x20) <= 0x7A) ||
+        (c >= 0x09 && c <= 0x0D) ||
+        c == 0x20 ||
+        (c >= 0x2D && c <= 0x2F) ||
+        (c >= 0x5D0 && c <= 0x5EA) ||
+        (c >= 0x5EF && c <= 0x5F2)) {
+      kept.writeCharCode(c);
+    } else if (!(c < 0x80 ||
+        (c >= 0x591 && c <= 0x5C7) ||
+        c == 0x5F3 ||
+        c == 0x5F4)) {
+      if (i == 0) return s.replaceAll(_nonRefChars, '');
+      kept.write(s.substring(i).replaceAll(_nonRefChars, ''));
+      break;
+    }
+  }
+  return kept.toString();
 }
 
 /// ערכי אותיות הגימטריה (כולל אותיות סופיות).

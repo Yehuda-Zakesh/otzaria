@@ -398,6 +398,30 @@ class HoverableDayCell extends StatefulWidget {
 class _HoverableDayCellState extends State<HoverableDayCell> {
   bool _showButton = false;
   bool _isHovered = false;
+  Widget? _addButton;
+  ColorScheme? _addButtonScheme;
+
+  // אותו מופע בין בנייה לבנייה: בבחירת יום ובריחוף כל התאים נבנים מחדש,
+  // ועדכון 42 הכפתורים הנסתרים היה רוב הזמן.
+  Widget _buildAddButton(ColorScheme cs) {
+    if (_addButton != null && _addButtonScheme == cs) return _addButton!;
+    _addButtonScheme = cs;
+    return _addButton = Tooltip(
+      message: 'צור אירוע',
+      verticalOffset: -40.0,
+      child: IconButton.filled(
+        icon: const Icon(FluentIcons.add_24_regular, size: 16),
+        onPressed: () => widget.onAdd(),
+        style: IconButton.styleFrom(
+          minimumSize: const Size(24, 24),
+          backgroundColor: cs.primaryContainer,
+          foregroundColor: cs.onPrimaryContainer,
+          visualDensity: VisualDensity.compact,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -428,21 +452,7 @@ class _HoverableDayCellState extends State<HoverableDayCell> {
               padding: const EdgeInsets.only(top: 12),
               child: IgnorePointer(
                 ignoring: !_showButton,
-                child: Tooltip(
-                  message: 'צור אירוע',
-                  verticalOffset: -40.0,
-                  child: IconButton.filled(
-                    icon: const Icon(FluentIcons.add_24_regular, size: 16),
-                    onPressed: widget.onAdd,
-                    style: IconButton.styleFrom(
-                      minimumSize: const Size(24, 24),
-                      backgroundColor: cs.primaryContainer,
-                      foregroundColor: cs.onPrimaryContainer,
-                      visualDensity: VisualDensity.compact,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                  ),
-                ),
+                child: _buildAddButton(cs),
               ),
             ),
           ),

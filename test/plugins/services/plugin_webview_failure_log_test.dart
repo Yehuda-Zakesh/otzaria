@@ -1,9 +1,12 @@
 import 'dart:io';
 
+import 'package:flutter_inappwebview_windows/flutter_inappwebview_windows.dart'
+    show WindowsWebViewHwndFallback;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/plugins/services/plugin_webview_failure_log.dart';
+import 'package:otzaria/plugins/services/webview2_creation_diagnostics.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
@@ -51,5 +54,60 @@ void main() {
     final content = errorsFile().readAsStringSync();
     expect(content, contains('Plugin: my-plugin'));
     expect(content, isNot(contains('ExitCode')));
+  });
+
+  group('נסיגה למצב HWND', () {
+    late int diagnosticsRuns;
+
+    setUp(() {
+      debugResetPluginWebViewHwndFallbackLog();
+      WebView2CreationDiagnostics.debugReset();
+      WebView2CreationDiagnostics.debugIsWindowsOverride = true;
+      diagnosticsRuns = 0;
+      WebView2CreationDiagnostics.debugRunnerOverride = (_) async {
+        diagnosticsRuns++;
+        return null;
+      };
+    });
+
+    tearDown(() {
+      WebView2CreationDiagnostics.debugReset();
+      WebView2CreationDiagnostics.debugIsWindowsOverride = null;
+      WebView2CreationDiagnostics.debugRunnerOverride = null;
+    });
+
+    test('נרשמת פעם אחת לתהליך, עם השלב וה-HRESULT', () async {
+      const fallback = WindowsWebViewHwndFallback(
+        stage: 'CreateCoreWebView2CompositionController callback',
+        hresult: 0x8007139F,
+        requestedUrl: 'otzaria-plugin://my.plugin/index.html',
+      );
+      logPluginWebViewHwndFallback(fallback);
+      logPluginWebViewHwndFallback(fallback);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      final content = errorsFile().readAsStringSync();
+      expect('Plugin WebView HWND fallback'.allMatches(content), hasLength(1));
+      expect(
+        content,
+        contains('Stage: CreateCoreWebView2CompositionController callback'),
+      );
+      expect(content, contains('HRESULT: 0x8007139F'));
+      expect(
+        content,
+        contains('RequestedUrl: otzaria-plugin://my.plugin/index.html'),
+      );
+      expect(diagnosticsRuns, 1, reason: 'נסיגה אמיתית מריצה את האבחון');
+    });
+
+    test('מצב כפוי לבדיקה נרשם בלי להריץ אבחון', () async {
+      logPluginWebViewHwndFallback(
+        const WindowsWebViewHwndFallback(stage: 'forced'),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(errorsFile().readAsStringSync(), contains('Stage: forced'));
+      expect(diagnosticsRuns, 0);
+    });
   });
 }

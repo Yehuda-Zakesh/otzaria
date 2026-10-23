@@ -307,7 +307,11 @@ class HistoryBloc extends Bloc<HistoryEvent, HistoryState> {
       );
     }
 
-    return bookmarkFromReadingTab(tab, workspaceName: workspaceName);
+    final bookmark = await bookmarkFromReadingTab(
+      tab,
+      workspaceName: workspaceName,
+    );
+    return bookmark?.copyWith(historySlot: tab.historySlot);
   }
 
   String _buildFormattedQuery(SearchingTab tab) {

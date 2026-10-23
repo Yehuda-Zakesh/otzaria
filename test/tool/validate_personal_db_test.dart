@@ -66,10 +66,13 @@ void main() {
         CREATE TABLE author(id INTEGER);
         CREATE TABLE book_version(id INTEGER);
         CREATE TABLE line_dh(bookId INTEGER, dhDisplay TEXT);
-        CREATE TABLE line_note(lineId INTEGER, noteIndex INTEGER, charPos INTEGER, marker TEXT, body TEXT);
-        CREATE TABLE line_note_divine_name(lineId INTEGER, noteIndex INTEGER, charStart INTEGER, charEnd INTEGER, kind INTEGER);
+        CREATE TABLE line_note(lineId INTEGER, noteIndex INTEGER, charPos INTEGER, hasMarker INTEGER NOT NULL, body TEXT);
+        CREATE TABLE line_note_divine_name(lineId INTEGER, noteIndex INTEGER, charStart INTEGER, span INTEGER);
         CREATE VIEW connection_type AS SELECT 1 AS id;
         CREATE TABLE external_link(sourceBookId INTEGER, sourceLineIndex INTEGER, targetTitle TEXT);
+        CREATE TABLE banner(id INTEGER PRIMARY KEY, text TEXT);
+        CREATE TABLE book_banner(bookId INTEGER PRIMARY KEY, bannerId INTEGER);
+        CREATE TABLE book_protection(bookId INTEGER PRIMARY KEY, level INTEGER);
         CREATE INDEX idx_line_book_index ON line(bookId, lineIndex);
       ''');
       final report = validatePersonalDb(path);
@@ -106,9 +109,13 @@ void main() {
         'hasDefaultCommentators': caps.hasDefaultCommentators,
         'hasDefaultTargums': caps.hasDefaultTargums,
         'hasCategoryClosure': caps.hasCategoryClosure,
+        'hasBookBanners': caps.hasBookBanners,
+        'hasBookProtection': caps.hasBookProtection,
         'hasExternalLinks': caps.hasExternalLinks,
       };
       expect(caps.hasBookNotes, isTrue);
+      expect(caps.hasBookBanners, isTrue);
+      expect(caps.hasBookProtection, isTrue);
       expect(caps.hasBookNoteDivineNames, isTrue);
       expect(report.capabilities, expected);
       expect(report.impostors, {'connection_type'});
@@ -149,6 +156,40 @@ void main() {
     final report = validatePersonalDb(path);
     expect(codes(report), isNot(contains('missing_columns')));
     expect(report.capabilities['hasLines'], isTrue);
+  });
+
+  test('banners in the old shape or without banner get a warning', () {
+    const disabled = 'Feature "book banners" is disabled';
+    for (final (name, sql, message) in [
+      (
+        'old.db',
+        'CREATE TABLE book_banner(bookId INTEGER PRIMARY KEY, text TEXT);',
+        '$disabled: missing banner.',
+      ),
+      (
+        'old_with_banner.db',
+        'CREATE TABLE banner(id INTEGER PRIMARY KEY, text TEXT);'
+            'CREATE TABLE book_banner(bookId INTEGER PRIMARY KEY, text TEXT);',
+        '$disabled.',
+      ),
+      (
+        'partial.db',
+        'CREATE TABLE book_banner(bookId INTEGER PRIMARY KEY, bannerId INTEGER);',
+        '$disabled: missing banner.',
+      ),
+    ]) {
+      final path = build(name, '''
+        CREATE TABLE book(id INTEGER PRIMARY KEY, title TEXT NOT NULL);
+        $sql
+      ''');
+      final report = validatePersonalDb(path);
+      expect(report.capabilities['hasBookBanners'], isFalse, reason: name);
+      expect(
+        report.issues.map((i) => i.message),
+        contains(message),
+        reason: name,
+      );
+    }
   });
 
   test('no book table is fatal', () {

@@ -2,7 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:otzaria/divine_names/models/divine_name_spans.dart';
 
 /// הערת שוליים אחת של שורה (`line_note`). [marker] null — אין לה אות-הפניה;
-/// [charPos] — האופסט הגלוי בשורה השמורה שבו עמד הגוף, או -1 לסוף השורה.
+/// [charPos] — האופסט הגלוי בשורה השמורה שבו עמד הגוף, או -1 כשאינו ידוע: אז
+/// השחזור מציב את הגוף אחרי הסמן או בסוף השורה, ועוגני השורה אינם מוצבים.
 typedef BookNote = ({int noteIndex, int charPos, String? marker, String body});
 
 /// הערות השוליים של ספר שלם מטבלת `line_note`, לפי `lineIndex`, ומופעי שמות

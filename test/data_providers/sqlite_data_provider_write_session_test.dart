@@ -342,8 +342,10 @@ void main() {
       await writeExternally([
         'CREATE TABLE IF NOT EXISTS book_protection '
             '(bookId INTEGER PRIMARY KEY NOT NULL, level INTEGER NOT NULL)',
+        'CREATE TABLE IF NOT EXISTS banner '
+            '(id INTEGER PRIMARY KEY NOT NULL, text TEXT NOT NULL)',
         'CREATE TABLE IF NOT EXISTS book_banner '
-            '(bookId INTEGER PRIMARY KEY NOT NULL, text TEXT NOT NULL)',
+            '(bookId INTEGER PRIMARY KEY NOT NULL, bannerId INTEGER NOT NULL)',
         'INSERT INTO book_protection VALUES (7, 1)',
       ]);
       expect((await provider.repository!.getBookProtectionTables()).levels, {
@@ -354,7 +356,11 @@ void main() {
       await writeExternally([
         'DELETE FROM book_protection',
         'INSERT INTO book_protection VALUES (7, 2)',
-        "INSERT INTO book_banner VALUES (7, 'באנר')",
+        "INSERT INTO source (id, name) VALUES (1, 'מקור')",
+        "INSERT INTO book (id, categoryId, sourceId, title) "
+            "VALUES (7, (SELECT MIN(id) FROM category), 1, 'ספר')",
+        "INSERT INTO banner VALUES (1, 'באנר')",
+        'INSERT INTO book_banner VALUES (7, 1)',
       ]);
       final tables = await provider.repository!.getBookProtectionTables();
       expect(tables.levels, {7: 2});

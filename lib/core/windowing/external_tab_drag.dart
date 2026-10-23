@@ -1,6 +1,4 @@
-import 'dart:ui' show Offset;
-
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 /// מצב גרירת כרטיסיה שמגיעה **מחלון אחר**.
 ///
@@ -41,6 +39,11 @@ class ExternalTabDragState {
   /// המצב של החלון שה-isolate הזה מציג; היום כל חלון הוא isolate משלו.
   static final ExternalTabDragState current = ExternalTabDragState();
 
+  /// המצב של החלון ש-[context] יושב בו; בלי [ExternalTabDragScope] — [current].
+  static ExternalTabDragState of(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<ExternalTabDragScope>()?.state ??
+      current;
+
   /// הגרירה החיצונית הפעילה בחלון הזה, או null כשאין.
   final ValueNotifier<ExternalTabDrag?> drag = ValueNotifier<ExternalTabDrag?>(
     null,
@@ -53,6 +56,21 @@ class ExternalTabDragState {
   /// יודעת היכן הכרטיסיות שלה יושבות על המסך, וההודעה מהאפיק נושאת נקודה
   /// גלובלית בלבד.
   final ValueNotifier<int?> dropIndex = ValueNotifier<int?>(null);
+}
+
+/// מצב גרירה חיצונית לחלון אחד, כשכמה חלונות חולקים isolate (חלונות Dart).
+class ExternalTabDragScope extends InheritedWidget {
+  const ExternalTabDragScope({
+    super.key,
+    required this.state,
+    required super.child,
+  });
+
+  final ExternalTabDragState state;
+
+  @override
+  bool updateShouldNotify(ExternalTabDragScope oldWidget) =>
+      !identical(state, oldWidget.state);
 }
 
 /// [ExternalTabDragState.drag] של החלון של ה-isolate הזה.

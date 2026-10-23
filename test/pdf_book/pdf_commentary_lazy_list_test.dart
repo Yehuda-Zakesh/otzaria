@@ -447,6 +447,73 @@ void main() {
       expect(find.text(_title(20)).hitTestable(), findsOneWidget);
     });
   });
+
+  testWidgets('הקלדה בחיפוש אינה גוזרת מחדש את מפתחות כל המפרשים (perf)', (
+    tester,
+  ) async {
+    const count = 300;
+    final tab = _bigGroupTab(count);
+    addTearDown(tab.dispose);
+    tab.links = [
+      for (final link in tab.links)
+        _CountingLink(
+          heRef: link.heRef,
+          index1: link.index1,
+          path2: link.path2,
+          index2: link.index2,
+          connectionType: link.connectionType,
+          targetCategoryId: link.targetCategoryId,
+          targetFileType: link.targetFileType,
+        ),
+    ];
+    final search = TextEditingController();
+    addTearDown(search.dispose);
+    await tester.pumpWidget(
+      _wrap(
+        PdfCommentaryPanel(
+          displayProfile: TextDisplayProfile.defaults,
+          tab: tab,
+          linksCount: tab.links.length,
+          openBookCallback: (_) {},
+          fontSize: 16,
+          externalSearchController: search,
+          commentaryGroupsLoader: (links) async => [
+            LinkGroup(bookTitle: tab.activeCommentators.single, links: links),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    _CountingLink.index1Reads = 0;
+    search.text = 'טהור';
+    await tester.pump();
+
+    // רק הפריטים הבנויים גוזרים את מפתחם, ולא כל מפרשי הקטע.
+    expect(_CountingLink.index1Reads, lessThan(count));
+    await tester.pumpAndSettle();
+  });
+}
+
+/// סופר קריאות של [index1], שממנו נגזר מפתח הפריט.
+class _CountingLink extends Link {
+  _CountingLink({
+    required super.heRef,
+    required super.index1,
+    required super.path2,
+    required super.index2,
+    required super.connectionType,
+    super.targetCategoryId,
+    super.targetFileType,
+  });
+
+  static int index1Reads = 0;
+
+  @override
+  int get index1 {
+    index1Reads++;
+    return super.index1;
+  }
 }
 
 /// [groups] commentators with [perGroup] commentaries each.

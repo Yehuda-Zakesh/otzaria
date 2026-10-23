@@ -29,6 +29,7 @@ import 'package:otzaria/tools/shamor_zachor/providers/shamor_zachor_progress_pro
 import 'package:otzaria/tour/bloc/tour_cubit.dart';
 import 'package:provider/provider.dart';
 import 'package:otzaria/tour/tour_target_keys.dart';
+import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
 import '../../support/search_engine_test_init.dart';
@@ -110,6 +111,12 @@ Future<void> main() async {
             BlocProvider<TextBookBloc>.value(value: bloc),
             BlocProvider<TabsBloc>.value(value: tabsBloc),
             BlocProvider<SettingsBloc>.value(value: settingsBloc),
+            BlocProvider<WindowFullscreenCubit>(
+              create: (_) => WindowFullscreenCubit(
+                initial: false,
+                persist: (_) async {},
+              ),
+            ),
             BlocProvider<BookmarkBloc>.value(value: bookmarkBloc),
             BlocProvider<PersonalNotesBloc>.value(value: personalNotesBloc),
             BlocProvider<TourCubit>.value(value: tourCubit),

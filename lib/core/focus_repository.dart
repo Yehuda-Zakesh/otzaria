@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/widgets.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 
 /// מייצג owner של הפוקוס שמסוגל לשחזר אותו לאחר אירועי חלון.
 ///
@@ -30,10 +31,25 @@ class FocusRestorer {
 ///
 /// [_effectiveRestorer] עובר מהcstack מלמעלה למטה — dialog קודם מנצח,
 /// ובהיעדר dialog תקף: בעלים של המסך.
+///
+/// לכל [AppWindowKeys] מופע משלו. [of] — לפי החלון של ה-context; [current]
+/// (וגם `FocusRepository()`) — לפי [AppWindowKeys.current], למי שאין context.
 class FocusRepository {
-  static final FocusRepository _instance = FocusRepository._internal();
-  factory FocusRepository() => _instance;
+  static final Expando<FocusRepository> _perWindow = Expando('FocusRepository');
+
+  factory FocusRepository() => current;
   FocusRepository._internal();
+
+  /// המופע של החלון [keys]; נוצר בשימוש הראשון וחי כמו המפתחות.
+  static FocusRepository forWindow(AppWindowKeys keys) =>
+      _perWindow[keys] ??= FocusRepository._internal();
+
+  /// המופע של החלון הנוכחי, למי שאין לו `BuildContext`.
+  static FocusRepository get current => forWindow(AppWindowKeys.current);
+
+  /// המופע של החלון ש-[context] יושב בו. בלי רישום תלות, כמו [AppWindowKeys.of].
+  static FocusRepository of(BuildContext context) =>
+      forWindow(AppWindowKeys.of(context));
 
   final FocusNode librarySearchFocusNode = FocusNode();
   final FocusNode findRefSearchFocusNode = FocusNode();
@@ -308,10 +324,13 @@ class FocusRepository {
 /// [registerDialogFocusRestorer] מ-initState. ביטול הרישום אוטומטי ב-dispose.
 mixin DialogFocusRestorerMixin<T extends StatefulWidget> on State<T> {
   FocusRestorer? _dialogFocusRestorer;
+  late final FocusRepository _dialogFocusRepository = FocusRepository.of(
+    context,
+  );
 
   /// רושם את [focusNode] כ-owner של שכבת הדיאלוג. קרא מ-initState.
   void registerDialogFocusRestorer(FocusNode focusNode) {
-    _dialogFocusRestorer = FocusRepository().registerActiveRestorer(
+    _dialogFocusRestorer = _dialogFocusRepository.registerActiveRestorer(
       restore: () {
         if (mounted && focusNode.canRequestFocus) focusNode.requestFocus();
       },
@@ -325,7 +344,9 @@ mixin DialogFocusRestorerMixin<T extends StatefulWidget> on State<T> {
   @override
   void dispose() {
     final restorer = _dialogFocusRestorer;
-    if (restorer != null) FocusRepository().unregisterActiveRestorer(restorer);
+    if (restorer != null) {
+      _dialogFocusRepository.unregisterActiveRestorer(restorer);
+    }
     super.dispose();
   }
 }

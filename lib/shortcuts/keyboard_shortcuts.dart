@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/window_opener.dart';
+import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
 import 'package:otzaria/navigation/bloc/navigation_event.dart';
 import 'package:otzaria/navigation/bloc/navigation_state.dart';
@@ -82,8 +84,12 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
     super.dispose();
   }
 
+  /// FocusManager אחד לכל החלונות ב-isolate: כל מקש מגיע ל-handlers של כולם,
+  /// ולכן רק החלון הפעיל מבצע קיצורים.
+  bool get _isActiveWindow => mounted && AppWindowKeys.isActiveWindow(context);
+
   KeyEventResult _handleLateKeyEvent(KeyEvent event) {
-    if (!mounted) return KeyEventResult.ignored;
+    if (!_isActiveWindow) return KeyEventResult.ignored;
     final focusContext = FocusManager.instance.primaryFocus?.context;
     final route = focusContext == null ? null : ModalRoute.of(focusContext);
     if (route != null &&
@@ -121,10 +127,11 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
 
   /// בעריכת טקסט השדה קודם, והקיצור הדינמי נבדק רק ב-late handler.
   KeyEventResult _handleEarlyKeyEvent(KeyEvent event) {
+    if (!_isActiveWindow) return KeyEventResult.ignored;
     if (event is KeyRepeatEvent && event.physicalKey == _dynamicKey) {
       return KeyEventResult.handled;
     }
-    if (event is! KeyDownEvent || !mounted) return KeyEventResult.ignored;
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final result = ShortcutHelper.isEditingText
         ? null
         : _handleDynamicShortcut(event);
@@ -262,6 +269,8 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
               'app.command',
               {'command': target.command, 'shortcutId': target.shortcutId},
               preferBackground: true,
+              viewId: View.of(context).viewId,
+              windowKeys: AppWindowKeys.of(context),
             ),
           );
           return KeyEventResult.handled;
@@ -419,13 +428,13 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
           );
         }
       } else {
-        unawaited(const MultiWindowService().restoreLastClosedWindow());
+        unawaited(WindowOpener.current.restoreLastClosedWindow());
       }
       return KeyEventResult.handled;
     }
 
     // החלונית עצמה היא route פתוח ולכן isReadingScreen שקרי; הקיצור צריך לסגור אותה.
-    if ((isReadingScreen || isTabSearchMenuOnTop) &&
+    if ((isReadingScreen || isTabSearchMenuOnTop(context)) &&
         ShortcutHelper.matchesShortcut(event, searchTabsShortcut)) {
       showTabSearchMenu(context);
       return KeyEventResult.handled;
@@ -528,7 +537,7 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
     if (MultiWindowService.canOpenWindows &&
         newWindowShortcut.isNotEmpty &&
         ShortcutHelper.matchesShortcut(event, newWindowShortcut)) {
-      unawaited(const MultiWindowService().openEmptyWindow());
+      unawaited(WindowOpener.current.openEmptyWindow());
       return KeyEventResult.handled;
     }
 
@@ -613,16 +622,14 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
       if (!FullscreenHelper.isAllowedInContext(context)) {
         return KeyEventResult.ignored;
       }
-      final settingsBloc = context.read<SettingsBloc>();
-      final newFullscreenState = !settingsBloc.state.isFullscreen;
+      final newFullscreenState = !context.read<WindowFullscreenCubit>().state;
       FullscreenHelper.toggleFullscreen(context, newFullscreenState);
       return KeyEventResult.handled;
     }
 
     // ESC - יציאה ממסך מלא
     if (ShortcutHelper.matchesShortcut(event, 'escape')) {
-      final settingsBloc = context.read<SettingsBloc>();
-      if (settingsBloc.state.isFullscreen) {
+      if (context.read<WindowFullscreenCubit>().state) {
         FullscreenHelper.toggleFullscreen(context, false);
         return KeyEventResult.handled;
       }

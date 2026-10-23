@@ -218,7 +218,7 @@ void main() {
   setUp(() {
     repo = _FakeRepo();
     libraryBooks = PluginLibraryBooksRegistry.forTesting(
-      dispatch: (_, _, _) async {},
+      dispatch: (_, _, _, {viewId, windowKeys}) async {},
       conditions: PluginConditionEvaluator.forTesting(
         settingReader: (_) => null,
       ),
@@ -268,6 +268,8 @@ void main() {
         payload, {
         preferBackground = false,
         instanceId,
+        viewId,
+        windowKeys,
       }) async {
         if (payload['reason'] case final String reason) endReasons.add(reason);
       });

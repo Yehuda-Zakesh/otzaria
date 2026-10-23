@@ -74,6 +74,8 @@ void main() {
         payload, {
         preferBackground = false,
         instanceId,
+        viewId,
+        windowKeys,
       }) async {
         sent.add((topic, payload));
       });

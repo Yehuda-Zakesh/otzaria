@@ -414,6 +414,43 @@ void main() {
     expect(find.byType(AdaptiveTextSelectionToolbar), findsNothing);
   });
 
+  // issue #3034: Quill לא מבקש פוקוס בגרירת בחירה, והמחיקה לא הגיעה לעורך.
+  testWidgets('גרירת בחירה בעכבר בעורך בלי פוקוס מאפשרת למחוק אותה', (
+    tester,
+  ) async {
+    final quillController = await pumpEditorWith(tester, 'אחת שתים שלוש');
+    final focusNode = tester
+        .widget<quill.QuillEditor>(find.byType(quill.QuillEditor))
+        .focusNode;
+    expect(focusNode.hasFocus, isFalse);
+
+    final line = tester.getRect(
+      find.text('אחת שתים שלוש', findRichText: true),
+    );
+    final gesture = await tester.startGesture(
+      line.centerLeft + const Offset(2, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+    for (var step = 1; step <= 5; step++) {
+      await gesture.moveBy(const Offset(6, 0));
+      await tester.pump();
+    }
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    final selection = quillController.selection;
+    expect(selection.isCollapsed, isFalse);
+    final expected =
+        selection.textBefore('אחת שתים שלוש') +
+        selection.textAfter('אחת שתים שלוש');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.pumpAndSettle();
+
+    expect(quillController.document.toPlainText().trimRight(), expected);
+  });
+
   testWidgets('גובה העורך מתכווץ במסך נמוך עם מקלדת פתוחה', (tester) async {
     final controller = buildPersonalNoteEditorController(
       initialContent: '',

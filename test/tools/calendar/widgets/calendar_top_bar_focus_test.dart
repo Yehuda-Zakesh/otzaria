@@ -11,6 +11,7 @@ import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/tools/calendar/bloc/calendar_cubit.dart';
+import 'package:otzaria/tools/calendar/widgets/calendar_date_picker_panel.dart';
 import 'package:otzaria/tools/calendar/widgets/calendar_side_panel.dart';
 import 'package:otzaria/tools/calendar/widgets/calendar_top_bar.dart';
 
@@ -36,7 +37,9 @@ void main() {
 
   Future<int> pumpAndDispatch(
     WidgetTester tester, {
-    required List<AppLifecycleState> states,
+    List<AppLifecycleState> states = const [],
+    CalendarState? state,
+    bool open = true,
   }) async {
     int closeCount = 0;
     await tester.pumpWidget(
@@ -45,7 +48,7 @@ void main() {
           value: settingsBloc,
           child: Scaffold(
             body: CalendarTopBar(
-              state: CalendarState.initial(),
+              state: state ?? CalendarState.initial(),
               onJumpToToday: () {},
               onPreviousPeriod: () {},
               onNextPeriod: () {},
@@ -57,7 +60,7 @@ void main() {
               onToggleEventsPanel: () {},
               onToggleSettingsPanel: () {},
               onPrint: () {},
-              isJumpToDateSearchOpen: true,
+              isJumpToDateSearchOpen: open,
               onToggleJumpToDateSearch: () {},
               onCloseJumpToDateSearch: () => closeCount++,
               parseInputDate: (_) => null,
@@ -98,5 +101,36 @@ void main() {
     );
     // רק paused סוגר — inactive/hidden שקדמו לו לא.
     expect(closeCount, 1);
+  });
+
+  testWidgets('היום מסומן בבורר ולא התאריך הנבחר בלוח (issue #2492)', (
+    tester,
+  ) async {
+    final initial = CalendarState.initial();
+    final today = initial.todayGregorianDate;
+    // תאריך אחר באותו חודש, כדי שגם היום יוצג בבורר.
+    final other = DateTime(
+      today.year,
+      today.month,
+      today.day < 28 ? today.day + 1 : today.day - 1,
+    );
+    final state = initial.copyWith(
+      selectedGregorianDate: other,
+      calendarType: CalendarType.gregorian,
+    );
+    // החלונית נפתחת במעבר מסגור לפתוח.
+    await pumpAndDispatch(tester, state: state, open: false);
+    await pumpAndDispatch(tester, state: state);
+    FontWeight? weightOf(DateTime date) => tester
+        .widget<Text>(
+          find.descendant(
+            of: find.byType(CalendarDatePickerPanel),
+            matching: find.text('${date.day}'),
+          ),
+        )
+        .style
+        ?.fontWeight;
+    expect(weightOf(today), FontWeight.bold);
+    expect(weightOf(other), FontWeight.normal);
   });
 }

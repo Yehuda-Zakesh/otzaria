@@ -1,10 +1,12 @@
 #include "flutter_window.h"
 
+#include <commctrl.h>
 #include <dwmapi.h>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cwchar>
 #include <limits>
 #include <map>
 #include <optional>
@@ -281,7 +283,9 @@ constexpr int kUpwardTravelLogical = 24;
 // ⚠️ עוזר משותף ל-`windowAtCursor` ול-`dragOutToSystem`, ובמכוון: שני
 // המסלולים מקבלים את אותה החלטה — "מה נמצא שם" — ושתי גרסאות שלה היו
 // נפרדות בשקט ברגע שאחת מהן משתנה.
-flutter::EncodableMap DescribeTarget(HWND under, POINT cursor, HWND self) {
+// [report_hwnd] (חלונות Dart): גם ה-HWND שתחת הסמן, ו-isSelf מול [self] בכל חלון.
+flutter::EncodableMap DescribeTarget(HWND under, POINT cursor, HWND self,
+                                     bool report_hwnd = false) {
   flutter::EncodableMap info;
   info[flutter::EncodableValue("x")] =
       flutter::EncodableValue(static_cast<int>(cursor.x));
@@ -305,6 +309,7 @@ flutter::EncodableMap DescribeTarget(HWND under, POINT cursor, HWND self) {
 
   // בודקים את הצג שמתחת לסמן, כולל אזור העבודה לשורת משימות עליונה.
   bool approaching_top = false;
+  bool in_work_area = false;
   int upward_travel = kUpwardTravelLogical;
   const HMONITOR monitor = ::MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
   MONITORINFO monitor_info{};
@@ -318,6 +323,8 @@ flutter::EncodableMap DescribeTarget(HWND under, POINT cursor, HWND self) {
     upward_travel = ::MulDiv(kUpwardTravelLogical, dpi, 96);
     approaching_top = cursor.y - monitor_info.rcMonitor.top <= band ||
                       cursor.y - monitor_info.rcWork.top <= band;
+    // הצגים אינם חופפים: נקודה מחוץ לאזור העבודה של הקרוב היא מחוץ לכולם.
+    in_work_area = ::PtInRect(&monitor_info.rcWork, cursor) != FALSE;
   }
   info[flutter::EncodableValue("approachingTop")] =
       flutter::EncodableValue(approaching_top);
@@ -332,14 +339,67 @@ flutter::EncodableMap DescribeTarget(HWND under, POINT cursor, HWND self) {
     info[flutter::EncodableValue("isSelf")] =
         flutter::EncodableValue(under == self);
   }
+  if (report_hwnd) {
+    if (under) {
+      info[flutter::EncodableValue("hwnd")] = flutter::EncodableValue(
+          static_cast<int64_t>(reinterpret_cast<intptr_t>(under)));
+    }
+    info[flutter::EncodableValue("isSelf")] =
+        flutter::EncodableValue(under != nullptr && under == self);
+  }
+  // שורת משימות או appbar גם כשהמחלקה אינה מזוהה כ-`isShellTray`.
+  info[flutter::EncodableValue("inWorkArea")] =
+      flutter::EncodableValue(in_work_area);
   return info;
+}
+
+// HWND שהגיע מ-Dart, רק אם הוא חלון חי של התהליך הזה; אחרת nullptr.
+HWND OwnWindowArg(const flutter::EncodableValue* arguments, const char* key) {
+  const auto* args = std::get_if<flutter::EncodableMap>(arguments);
+  if (!args) return nullptr;
+  const auto it = args->find(flutter::EncodableValue(key));
+  if (it == args->end()) return nullptr;
+  int64_t raw = 0;
+  if (const auto* wide = std::get_if<int64_t>(&it->second)) {
+    raw = *wide;
+  } else if (const auto* narrow = std::get_if<int>(&it->second)) {
+    raw = *narrow;
+  } else {
+    return nullptr;
+  }
+  const HWND hwnd = reinterpret_cast<HWND>(static_cast<intptr_t>(raw));
+  if (!hwnd || !::IsWindow(hwnd)) return nullptr;
+  DWORD pid = 0;
+  ::GetWindowThreadProcessId(hwnd, &pid);
+  return pid == ::GetCurrentProcessId() ? hwnd : nullptr;
+}
+
+// ⚠️ לולאת ההזזה של Windows כולאת את הסמן באזור העבודה, ולכן שחרור מעל
+// שורת המשימות נמדד בשורה האחרונה שלו, מעל מה שנמצא שם (BUG-7).
+bool HeldAtReservedEdge(POINT cursor) {
+  constexpr int kTolerance = 2;
+  const HMONITOR monitor = ::MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO mi{};
+  mi.cbSize = sizeof(mi);
+  if (!monitor || !::GetMonitorInfoW(monitor, &mi)) return false;
+  const RECT& work = mi.rcWork;
+  const RECT& mon = mi.rcMonitor;
+  if (!::PtInRect(&work, cursor)) return false;
+  return (work.bottom < mon.bottom && cursor.y >= work.bottom - kTolerance) ||
+         (work.top > mon.top && cursor.y < work.top + kTolerance) ||
+         (work.left > mon.left && cursor.x < work.left + kTolerance) ||
+         (work.right < mon.right && cursor.x >= work.right - kTolerance);
 }
 
 // מתאר גרירה שהמערכת ניהלה: היעד, והמסגרת שהמשתמש עצר בה.
 flutter::EncodableValue DescribeSystemDrag(
-    const drag_preview::SystemDragResult& drag, HWND self) {
-  flutter::EncodableMap info = DescribeTarget(drag.under, drag.cursor, self);
+    const drag_preview::SystemDragResult& drag, HWND self,
+    bool report_hwnd = false) {
+  flutter::EncodableMap info =
+      DescribeTarget(drag.under, drag.cursor, self, report_hwnd);
   info[flutter::EncodableValue("ran")] = flutter::EncodableValue(drag.ran);
+  info[flutter::EncodableValue("atTaskbarEdge")] =
+      flutter::EncodableValue(drag.ran && HeldAtReservedEdge(drag.cursor));
   // ⚠️ `snapped` הוא מה שמבדיל בין "פתח כאן" לבין "פתח **במסגרת הזו**".
   // התצוגה היא בגודל כרטיסיה, ושימוש עיוור במסגרת היה יוצר חלון אוצריא
   // של 176×40.
@@ -372,7 +432,8 @@ bool CreateSecondaryWindowOnThisThread(const flutter::DartProject& base,
                                        const std::string& payload,
                                        int inherited_width,
                                        int inherited_height, int origin_x,
-                                       int origin_y, const RECT* bounds) {
+                                       int origin_y, const RECT* bounds,
+                                       bool maximized) {
   // ניקוי חלונות שנסגרו, כדי שהרשימה לא תגדל בלי גבול.
   auto& windows = SecondaryWindowsOnThisThread();
   windows.erase(
@@ -402,7 +463,7 @@ bool CreateSecondaryWindowOnThisThread(const flutter::DartProject& base,
   }
   if (reusable != nullptr) {
     reusable->ReviveWith(payload, inherited_width, inherited_height, origin_x,
-                         origin_y, bounds);
+                         origin_y, bounds, maximized);
     return true;
   }
 
@@ -494,17 +555,19 @@ bool CreateSecondaryWindowOnThisThread(const flutter::DartProject& base,
   // האתחול משאירה שניות שבהן לא קורה כלום על המסך, והמשתמש אינו יודע אם
   // הלחיצה נקלטה. הפריים הראשון הוא מסך הטעינה של האפליקציה: מופיע כמעט
   // מיד, ואינו ריק.
+  window->SetRevealMaximized(maximized);
   window->RevealOnFirstFrame();
 
   // רשת ביטחון: אם הפריים הראשון לא הגיע, חלון בלתי-נראה לתמיד גרוע
   // מחלון שמופיע מאוחר.
   const HWND handle = window->GetHandle();
   auto hidden = window->hidden_flag();
+  const int show_cmd = maximized ? SW_SHOWMAXIMIZED : SW_SHOW;
   // ⚠️ ה-`try` אינו קוסמטי: הפונקציה נקראת מ-`MessageHandler`, שהוא
   // `noexcept`, וכשל בהקצאת thread היה מגיע ל-`std::terminate` — כלומר
   // קריסת התהליך כולו במקום חלון שנחשף מאוחר.
   try {
-    std::thread([handle, hidden]() {
+    std::thread([handle, hidden, show_cmd]() {
       ::Sleep(20000);
       // ⚠️ רק אם המשתמש לא סגר אותו בינתיים: `IsWindowVisible` לבדו היה
       // מחזיר לחיים חלון שנסגר לפני שהשעון פקע.
@@ -515,7 +578,7 @@ bool CreateSecondaryWindowOnThisThread(const flutter::DartProject& base,
         // (זה היה חטיפת פוקוס שניות אחרי החשיפה). בלי זה חלון שנחשף
         // במסלול הזה היה מופיע מאחורי החלון שפתח אותו.
         Win32Window::AllowActivation(handle);
-        ::ShowWindow(handle, SW_SHOW);
+        ::ShowWindow(handle, show_cmd);
         ::BringWindowToTop(handle);
         ::SetForegroundWindow(handle);
       }
@@ -528,6 +591,137 @@ bool CreateSecondaryWindowOnThisThread(const flutter::DartProject& base,
   return true;
 }
 
+// חלון שנוצר מ-Dart (ריבוי תצוגות). חי על המנוע של החלון הראשי, באותו thread.
+bool IsDartHostWindow(HWND hwnd) {
+  wchar_t name[32] = {};
+  return ::GetClassNameW(hwnd, name, ARRAYSIZE(name)) > 0 &&
+         wcscmp(name, L"FLUTTER_HOST_WINDOW") == 0;
+}
+
+BOOL CALLBACK FindVisibleDartHostWindow(HWND hwnd, LPARAM found) {
+  if (!::IsWindowVisible(hwnd) || !IsDartHostWindow(hwnd)) return TRUE;
+  *reinterpret_cast<bool*>(found) = true;
+  return FALSE;
+}
+
+bool HasVisibleDartHostWindow() {
+  bool found = false;
+  ::EnumThreadWindows(::GetCurrentThreadId(), FindVisibleDartHostWindow,
+                      reinterpret_cast<LPARAM>(&found));
+  return found;
+}
+
+// מתקין על תצוגת Flutter של חלון Dart את אותם תיקוני קלט של החלון הראשי.
+// רק חלון Dart של ה-thread הזה; התקנה חוזרת אינה עושה דבר.
+bool InstallDartViewHooks(HWND root) {
+  if (!::IsWindow(root) || !IsDartHostWindow(root) ||
+      ::GetWindowThreadProcessId(root, nullptr) != ::GetCurrentThreadId()) {
+    return false;
+  }
+  const HWND view = ::FindWindowExW(root, nullptr, L"FLUTTERVIEW", nullptr);
+  if (!view) return false;
+  InstallPhantomMouseButtonFilter(view);
+  InstallShiftKeyNormalizer(view);
+  return true;
+}
+
+constexpr UINT_PTR kFramelessSubclassId = 0x0F1F;
+
+// כמו `IsWindows11OrGreater` של window_manager: ב-10 נשאר פס עליון של פיקסל.
+bool IsWindows11OrGreaterForFrame() {
+#pragma warning(push)
+#pragma warning(disable : 4996)
+  const DWORD version = ::GetVersion();
+#pragma warning(pop)
+  const DWORD build = version < 0x80000000 ? HIWORD(version) : 0;
+  return build >= 22000;
+}
+
+// `adjustNCCALCSIZE` של window_manager: חלון ממוקסם ממלא את אזור העבודה.
+void AdjustMaximizedClientRect(NCCALCSIZE_PARAMS* sz) {
+  LONG l = 8;
+  LONG t = 8;
+  const HMONITOR monitor =
+      ::MonitorFromRect(&sz->rgrc[0], MONITOR_DEFAULTTONEAREST);
+  MONITORINFO info = {sizeof(MONITORINFO)};
+  if (monitor && ::GetMonitorInfo(monitor, &info)) {
+    l = sz->rgrc[0].left - info.rcWork.left;
+    t = sz->rgrc[0].top - info.rcWork.top;
+  }
+  sz->rgrc[0].left -= l;
+  sz->rgrc[0].top -= t;
+  sz->rgrc[0].right += l;
+  sz->rgrc[0].bottom += t;
+}
+
+// מה ש-window_manager עושה לחלון הראשי ב-`TitleBarStyle.hidden`, לחלון Dart.
+// בלי WS_THICKFRAME (מסך מלא של ה-engine) הכול עובר כרגיל.
+LRESULT CALLBACK FramelessViewProc(HWND hwnd, UINT message, WPARAM wparam,
+                                   LPARAM lparam, UINT_PTR, DWORD_PTR) {
+  const bool framed =
+      (::GetWindowLongPtr(hwnd, GWL_STYLE) & WS_THICKFRAME) != 0;
+  switch (message) {
+    case WM_NCCALCSIZE:
+      if (wparam && framed) {
+        auto* sz = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+        if (::IsZoomed(hwnd)) {
+          AdjustMaximizedClientRect(sz);
+        } else {
+          sz->rgrc[0].top += IsWindows11OrGreaterForFrame() ? 0 : 1;
+          sz->rgrc[0].right -= 8;
+          sz->rgrc[0].bottom -= 8;
+          sz->rgrc[0].left += 8;
+        }
+        return 0;
+      }
+      break;
+    case WM_NCACTIVATE:
+      if (framed) return 1;
+      break;
+    case WM_NCDESTROY:
+      ::RemoveWindowSubclass(hwnd, FramelessViewProc, kFramelessSubclassId);
+      break;
+  }
+  return ::DefSubclassProc(hwnd, message, wparam, lparam);
+}
+
+// חלון Dart בלי כותרת, כמו החלון הראשי. רק חלון Dart של ה-thread הזה.
+bool InstallFramelessViewFrame(HWND root) {
+  if (!::IsWindow(root) || !IsDartHostWindow(root) ||
+      ::GetWindowThreadProcessId(root, nullptr) != ::GetCurrentThreadId()) {
+    return false;
+  }
+  DWORD_PTR existing = 0;
+  if (::GetWindowSubclass(root, FramelessViewProc, kFramelessSubclassId,
+                          &existing)) {
+    return true;
+  }
+  if (!::SetWindowSubclass(root, FramelessViewProc, kFramelessSubclassId, 0)) {
+    return false;
+  }
+  // כמו `SetTitleBarStyle`: מאפס את הרחבת ה-DWM ומחשב מחדש את המסגרת.
+  const MARGINS margins = {0, 0, 0, 0};
+  ::DwmExtendFrameIntoClientArea(root, &margins);
+  ::SetWindowPos(root, nullptr, 0, 0, 0, 0,
+                 SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOMOVE | SWP_NOSIZE |
+                     SWP_NOACTIVATE | SWP_FRAMECHANGED);
+  return true;
+}
+
+// ה-HWND מארגומנט `{hwnd}` של הערוץ; 0 כשחסר או אינו מספר.
+HWND HwndArgument(const flutter::EncodableValue* arguments) {
+  const auto* args = std::get_if<flutter::EncodableMap>(arguments);
+  if (!args) return nullptr;
+  const auto it = args->find(flutter::EncodableValue("hwnd"));
+  if (it == args->end()) return nullptr;
+  int64_t hwnd = 0;
+  if (const auto* wide = std::get_if<int64_t>(&it->second)) {
+    hwnd = *wide;
+  } else if (const auto* narrow = std::get_if<int>(&it->second)) {
+    hwnd = *narrow;
+  }
+  return reinterpret_cast<HWND>(static_cast<intptr_t>(hwnd));
+}
 
 }  // namespace
 
@@ -733,8 +927,12 @@ bool FlutterWindow::OnCreate() {
           // אינו רואה בה חלון שנגרר, ואין Snap Layouts), ולכן היא הייתה
           // מחזירה את עצמה כיעד וכל שחרור מעל חלון אחר לא היה מזוהה.
           const HWND under = drag_preview::WindowUnderCursor(cursor);
-          result->Success(flutter::EncodableValue(
-              DescribeTarget(under, cursor, GetHandle())));
+          // ארגומנטים רק מחלונות Dart: בלעדיהם התשובה זהה לזו של היום.
+          const bool report_hwnd =
+              std::get_if<flutter::EncodableMap>(call.arguments()) != nullptr;
+          const HWND self = OwnWindowArg(call.arguments(), "selfHwnd");
+          result->Success(flutter::EncodableValue(DescribeTarget(
+              under, cursor, self ? self : GetHandle(), report_hwnd)));
           return;
         }
 
@@ -782,8 +980,9 @@ bool FlutterWindow::OnCreate() {
           }
           // חלון המקור מועבר במפורש: התצוגה מוסתרת רק מעליו, ולא מעל
           // חלונות אוצריא אחרים. ראו ההערה ב-`drag_preview::Begin`.
-          drag_preview::Begin(drag_preview::Utf16FromUtf8(title), GetHandle(),
-                              colors);
+          const HWND source = OwnWindowArg(call.arguments(), "sourceHwnd");
+          drag_preview::Begin(drag_preview::Utf16FromUtf8(title),
+                              source ? source : GetHandle(), colors);
           result->Success();
           return;
         }
@@ -828,7 +1027,10 @@ bool FlutterWindow::OnCreate() {
                 DescribeSystemDrag(drag_preview::SystemDragResult{}, nullptr));
             return;
           }
-          pending_system_drags_.push(std::move(result));
+          const HWND source = OwnWindowArg(call.arguments(), "selfHwnd");
+          pending_system_drags_.push(PendingSystemDrag{
+              std::move(result), source,
+              std::get_if<flutter::EncodableMap>(call.arguments()) != nullptr});
           ::PostMessageW(self, kMsgDragOutToSystem, 0, 0);
           return;
         }
@@ -871,13 +1073,49 @@ bool FlutterWindow::OnCreate() {
               if (const auto* v = std::get_if<int>(&y_it->second)) pt.y = *v;
             }
           }
-          if (const HWND self = GetHandle()) ::ScreenToClient(self, &pt);
+          // חלון Dart מעביר את ה-HWND שלו; בלעדיו — החלון הזה.
+          const HWND target = OwnWindowArg(call.arguments(), "hwnd");
+          if (const HWND self = target ? target : GetHandle()) {
+            ::ScreenToClient(self, &pt);
+          }
           flutter::EncodableMap out;
           out[flutter::EncodableValue("x")] =
               flutter::EncodableValue(static_cast<int>(pt.x));
           out[flutter::EncodableValue("y")] =
               flutter::EncodableValue(static_cast<int>(pt.y));
           result->Success(flutter::EncodableValue(out));
+          return;
+        }
+
+        // חלון Dart חדש: תיקוני הקלט של #1441 ו-#1645 לתצוגה שלו.
+        if (call.method_name() == "installViewHooks") {
+          bool installed = false;
+          if (const auto* args =
+                  std::get_if<flutter::EncodableMap>(call.arguments())) {
+            const auto it = args->find(flutter::EncodableValue("hwnd"));
+            // `LongValue` זורק על ערך שאינו מספר; חריגה כאן מפילה את התהליך.
+            int64_t hwnd = 0;
+            if (it != args->end()) {
+              if (const auto* wide = std::get_if<int64_t>(&it->second)) {
+                hwnd = *wide;
+              } else if (const auto* narrow = std::get_if<int>(&it->second)) {
+                hwnd = *narrow;
+              }
+            }
+            if (hwnd != 0) {
+              installed = InstallDartViewHooks(
+                  reinterpret_cast<HWND>(static_cast<intptr_t>(hwnd)));
+            }
+          }
+          result->Success(flutter::EncodableValue(installed));
+          return;
+        }
+
+        // חלון Dart בלי כותרת המערכת, כמו החלון הראשי (P1f).
+        if (call.method_name() == "makeFrameless") {
+          const HWND hwnd = HwndArgument(call.arguments());
+          result->Success(flutter::EncodableValue(
+              hwnd != nullptr && InstallFramelessViewFrame(hwnd)));
           return;
         }
 
@@ -905,6 +1143,53 @@ bool FlutterWindow::OnCreate() {
             }
           }
           result->Success();
+          return;
+        }
+        // מיקום החלון הזה, לחלון חדש שנפתח ממנו (#2989). הכול פיזי.
+        // ⚠️ ממוקסם: המסגרת הרגילה ולא מסגרת המיקסום, שאותה `getSize` מחזיר.
+        if (call.method_name() == "windowPlacement") {
+          const HWND self = GetHandle();
+          WINDOWPLACEMENT placement{};
+          placement.length = sizeof(placement);
+          MONITORINFO info{};
+          info.cbSize = sizeof(info);
+          if (!self || !::GetWindowPlacement(self, &placement) ||
+              !::GetMonitorInfoW(
+                  ::MonitorFromWindow(self, MONITOR_DEFAULTTONEAREST),
+                  &info)) {
+            result->Success();
+            return;
+          }
+          const bool maximized = ::IsZoomed(self) != FALSE;
+          RECT normal{};
+          if (maximized || ::IsIconic(self)) {
+            // `rcNormalPosition` בקואורדינטות workspace — יחסית לאזור העבודה.
+            normal = placement.rcNormalPosition;
+            if ((::GetWindowLongPtrW(self, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) ==
+                0) {
+              ::OffsetRect(&normal, info.rcWork.left - info.rcMonitor.left,
+                           info.rcWork.top - info.rcMonitor.top);
+            }
+          } else {
+            ::GetWindowRect(self, &normal);
+          }
+          const auto put = [](flutter::EncodableMap& map, const char* key,
+                              int value) {
+            map[flutter::EncodableValue(key)] = flutter::EncodableValue(value);
+          };
+          flutter::EncodableMap out;
+          put(out, "left", normal.left);
+          put(out, "top", normal.top);
+          put(out, "width", normal.right - normal.left);
+          put(out, "height", normal.bottom - normal.top);
+          put(out, "workLeft", info.rcWork.left);
+          put(out, "workTop", info.rcWork.top);
+          put(out, "workWidth", info.rcWork.right - info.rcWork.left);
+          put(out, "workHeight", info.rcWork.bottom - info.rcWork.top);
+          put(out, "dpi", static_cast<int>(::GetDpiForWindow(self)));
+          out[flutter::EncodableValue("maximized")] =
+              flutter::EncodableValue(maximized);
+          result->Success(flutter::EncodableValue(out));
           return;
         }
         // אילו חלונות אוצריא **מוצגים** על המסך כרגע.
@@ -1025,6 +1310,14 @@ bool FlutterWindow::OnCreate() {
                 pending.bounds.bottom = pending.bounds.top + h;
               }
             }
+          }
+        }
+        if (const auto* args =
+                std::get_if<flutter::EncodableMap>(call.arguments())) {
+          const auto m_it = args->find(flutter::EncodableValue("maximized"));
+          if (m_it != args->end()) {
+            const auto* v = std::get_if<bool>(&m_it->second);
+            pending.maximized = v != nullptr && *v;
           }
         }
         // ⚠️ הבקשה מתפרסמת ל-thread של החלון ואינה מבוצעת כאן ישירות.
@@ -1236,9 +1529,9 @@ void FlutterWindow::OnDestroy() {
   while (!pending_system_drags_.empty()) {
     auto pending = std::move(pending_system_drags_.front());
     pending_system_drags_.pop();
-    if (pending) {
-      pending->Success(
-          DescribeSystemDrag(drag_preview::SystemDragResult{}, nullptr));
+    if (pending.result) {
+      pending.result->Success(DescribeSystemDrag(
+          drag_preview::SystemDragResult{}, nullptr, pending.report_hwnd));
     }
   }
   // ⚠️ **לא** לפי `GetHandle()`. במסלול `WM_DESTROY` השדה `window_handle_`
@@ -1292,7 +1585,7 @@ bool RestoreLastHiddenWindow() {
 
 void FlutterWindow::ReviveWith(const std::string& payload, int width,
                                int height, int origin_x, int origin_y,
-                               const RECT* bounds) {
+                               const RECT* bounds, bool maximized) {
   const HWND self = GetHandle();
   if (!self) return;
 
@@ -1322,7 +1615,27 @@ void FlutterWindow::ReviveWith(const std::string& payload, int width,
       width > 400 ? static_cast<int>(width * scale) : 0;
   const int final_height =
       height > 300 ? static_cast<int>(height * scale) : 0;
-  if (bounds != nullptr) {
+  // ⚠️ `SetWindowPos` על חלון ממוקסם משאיר אותו ממוקסם. כאן המסגרת היא
+  // המסגרת הרגילה, והמיקסום נקבע לפי המקור (#2989) — בקריאה אחת שגם מציגה.
+  WINDOWPLACEMENT placement{};
+  placement.length = sizeof(placement);
+  const bool use_placement = bounds != nullptr &&
+                             (maximized || ::IsZoomed(self)) &&
+                             ::GetWindowPlacement(self, &placement);
+  if (use_placement) {
+    RECT normal = *bounds;
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    // `rcNormalPosition` בקואורדינטות workspace — יחסית לאזור העבודה.
+    if (::GetMonitorInfoW(::MonitorFromRect(bounds, MONITOR_DEFAULTTONEAREST),
+                          &info)) {
+      ::OffsetRect(&normal, info.rcMonitor.left - info.rcWork.left,
+                   info.rcMonitor.top - info.rcWork.top);
+    }
+    placement.flags = 0;
+    placement.rcNormalPosition = normal;
+    placement.showCmd = maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+  } else if (bounds != nullptr) {
     // ⚠️ המסגרת שההצמדה נתנה, מילה במילה. חישוב מחדש ממיקום וגודל היה
     // מחמיץ אותה בפיקסלים, וחלון "כמעט מוצמד" נראה שבור.
     ::SetWindowPos(self, nullptr, bounds->left, bounds->top,
@@ -1346,7 +1659,11 @@ void FlutterWindow::ReviveWith(const std::string& payload, int width,
   // ⚠️ החזרת חלון לשימוש היא כוונה מפורשת — ראו
   // [Win32Window::ShouldVetoActivation].
   NoteUserActivation(self);
-  ::ShowWindow(self, SW_SHOW);
+  if (use_placement) {
+    ::SetWindowPlacement(self, &placement);
+  } else {
+    ::ShowWindow(self, SW_SHOW);
+  }
   ::BringWindowToTop(self);
   ::SetForegroundWindow(self);
   // החלון האמיתי כאן — הרוח שהוקפאה במקום השחרור סיימה את תפקידה.
@@ -1370,12 +1687,14 @@ void FlutterWindow::ReviveWith(const std::string& payload, int width,
 // `ShowWindow`/`SetForegroundWindow` כאן תקינים, ואין טעם לחפש כאן שוב.
 void FlutterWindow::RevealOnFirstFrame() {
   if (!flutter_controller_ || !flutter_controller_->engine()) {
-    ::ShowWindow(GetHandle(), SW_SHOW);
+    ::ShowWindow(GetHandle(), reveal_maximized_ ? SW_SHOWMAXIMIZED : SW_SHOW);
     return;
   }
   const HWND hwnd = GetHandle();
   const DWORD started = ::GetTickCount();
-  flutter_controller_->engine()->SetNextFrameCallback([hwnd, started]() {
+  const int show_cmd = reveal_maximized_ ? SW_SHOWMAXIMIZED : SW_SHOW;
+  flutter_controller_->engine()->SetNextFrameCallback([hwnd, started,
+                                                       show_cmd]() {
     if (!::IsWindow(hwnd)) return;
     // ⚠️ לפני ההצגה. עד כאן החלון לא היה יכול להיות מופעל כלל
     // ([kNoActivateUntilRevealed]) — זה מה שמנע את תנודת ההפעלות.
@@ -1383,7 +1702,7 @@ void FlutterWindow::RevealOnFirstFrame() {
     // ⚠️ חשיפת חלון חדש היא כוונה מפורשת — ראו
     // [Win32Window::ShouldVetoActivation].
     Win32Window::NoteUserActivation(hwnd);
-    ::ShowWindow(hwnd, SW_SHOW);
+    ::ShowWindow(hwnd, show_cmd);
     ::BringWindowToTop(hwnd);
     ::SetForegroundWindow(hwnd);
     // החלון האמיתי על המסך — הרוח שהוקפאה במקום השחרור מוסתרת בדיוק
@@ -1414,6 +1733,9 @@ void FlutterWindow::OnWindowHidden() {
   if (g_live_window_count.fetch_sub(1) > 1) {
     return;
   }
+  // חלון Dart עדיין גלוי: הוא חי על המנוע הזה, ויציאה הייתה הורגת אותו.
+  // הסגירה שלו היא שתסיים את התהליך (מסלול הסגירה של Dart).
+  if (HasVisibleDartHostWindow()) return;
 
   // ⚠️ נסגר החלון האחרון. **לא** `PostQuitMessage`.
   //
@@ -1455,7 +1777,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       created = CreateSecondaryWindowOnThisThread(
           project_, pending.payload, pending.width, pending.height,
           pending.origin_x, pending.origin_y,
-          pending.has_bounds ? &pending.bounds : nullptr);
+          pending.has_bounds ? &pending.bounds : nullptr, pending.maximized);
     } catch (...) {
       created = false;
     }
@@ -1492,14 +1814,21 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     bool replied = false;
     try {
       const auto drag = drag_preview::DragWithSystem();
-      if (pending) {
+      if (pending.result) {
         replied = true;
-        pending->Success(DescribeSystemDrag(drag, GetHandle()));
+        // חלון המקור עלול להיהרס במהלך הלולאה המודאלית.
+        const HWND self = pending.self && ::IsWindow(pending.self)
+                              ? pending.self
+                              : GetHandle();
+        pending.result->Success(
+            DescribeSystemDrag(drag, self, pending.report_hwnd));
       }
     } catch (...) {
       drag_preview::End();
       // `null` ל-Dart פירושו "לא ידוע", והוא מטפל בו כ"אל תעשה כלום".
-      if (pending && !replied) pending->Success(flutter::EncodableValue());
+      if (pending.result && !replied) {
+        pending.result->Success(flutter::EncodableValue());
+      }
     }
     return 0;
   }

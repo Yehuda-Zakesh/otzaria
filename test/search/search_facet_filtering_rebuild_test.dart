@@ -147,6 +147,23 @@ void main() {
 
   const counts = {'/': 5, '/תנ"ך': 5, '/תנ"ך/id:7': 5};
 
+  testWidgets('תוצאות בלי ספירות אינן מציגות עץ ריק כאילו אין התאמות', (
+    tester,
+  ) async {
+    final base = SearchState(
+      searchQuery: 'ניגונים',
+      results: [result(1)],
+      isLoading: true,
+      isCounting: true,
+    );
+    await pumpPanel(tester, base);
+    expect(find.byType(SearchNavigationTree), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    await emit(tester, base.copyWith(isCounting: false, facetCounts: counts));
+    expect(tree(tester).facetCounts, counts);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
   testWidgets('פעימות שאינן נוגעות בעץ אינן בונות אותו מחדש', (tester) async {
     final base = SearchState(
       searchQuery: 'ניגונים',

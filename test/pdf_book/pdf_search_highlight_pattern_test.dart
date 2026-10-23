@@ -31,7 +31,7 @@ class _FakeDocument extends Fake implements PdfDocument {
   Stream<PdfDocumentEvent> get events => const Stream.empty();
 }
 
-/// קונטרולר "מוכן" בלי PdfViewer אמיתי — [PdfTextSearcher] דורש מסמך חי
+/// קונטרולר "מוכן" בלי PdfViewer אמיתי — [PdfTextSearchSession] דורש מסמך חי
 /// בבנייה, ו-useDocument מוחזר null כדי שהחיפוש לא יגע ב-pdfium.
 class _FakeReadyController extends PdfViewerController {
   @override
@@ -57,15 +57,15 @@ class _FakeReadyController extends PdfViewerController {
 
 /// מתעד את התבניות שנשלחו לסריקה ומחזיר התאמות שהטסט קובע, במקום לסרוק
 /// מסמך אמיתי.
-class _RecordingTextSearcher extends PdfTextSearcher {
+class _RecordingTextSearcher extends PdfTextSearchSession {
   _RecordingTextSearcher(super.controller, this.pageFullText);
 
   final String pageFullText;
   final List<Pattern> searches = [];
-  List<PdfPageTextRange> fakeMatches = const [];
+  List<PdfTextSearchResult> fakeMatches = const [];
 
   @override
-  List<PdfPageTextRange> get matches => fakeMatches;
+  List<PdfTextSearchResult> get matches => fakeMatches;
 
   @override
   bool get isSearching => false;
@@ -93,10 +93,14 @@ class _RecordingTextSearcher extends PdfTextSearcher {
     final pageText = PdfPageText(
       pageNumber: 1,
       fullText: pageFullText,
-      charRects: const [],
+      charRects: List.filled(pageFullText.length, const PdfRect(0, 1, 1, 0)),
       fragments: const [],
     );
-    fakeMatches = [PdfPageTextRange(pageText: pageText, start: 0, end: 1)];
+    fakeMatches = [
+      PdfTextSearchResult.fromRange(
+        PdfPageTextRange(pageText: pageText, start: 0, end: 1),
+      ),
+    ];
   }
 
   /// התבניות שנשלחו לסריקה, בלי איפוסי השדה הריק.

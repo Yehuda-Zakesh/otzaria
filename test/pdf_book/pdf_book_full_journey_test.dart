@@ -34,7 +34,7 @@ import '../helpers/memory_settings_cache.dart';
 
 class _FakeDocumentRef extends Fake implements PdfDocumentRef {}
 
-class _FakePdfPageText extends Fake implements PdfPageText {}
+class _FakePdfTextSearchResult extends Fake implements PdfTextSearchResult {}
 
 class _FakeTabsRepository extends TabsRepository {
   @override
@@ -140,13 +140,8 @@ PdfHeadings _sampleHeadings() => PdfHeadings(
   },
 );
 
-List<PdfPageTextRange> _fakeMatches(int count) {
-  final fakeText = _FakePdfPageText();
-  return List.generate(
-    count,
-    (_) => PdfPageTextRange(pageText: fakeText, start: 0, end: 1),
-  );
-}
+List<PdfTextSearchResult> _fakeMatches(int count) =>
+    List.generate(count, (_) => _FakePdfTextSearchResult());
 
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,6 +23,8 @@ import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
+import 'package:otzaria/text_book/models/search_results.dart';
+import 'package:otzaria/widgets/lists/nav_tree_tile.dart';
 import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/text_book/view/text_book_screen.dart';
 import 'package:otzaria/text_book/view/text_book_search_screen.dart';
@@ -34,10 +37,7 @@ import 'package:provider/provider.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
 
-/// חלונית הניווט של ספר טקסט חייבת לשרוד מעבר בין טאב פעיל לטאב רקע.
-///
-/// `TourTargetsScope.enabled` מתהפך בכל מעבר טאב, וכשהוא שינה את מבנה העץ של החלונית
-/// Flutter השמיד את כל תת-העץ שלה — ולכן החיפוש-בספר רץ מחדש בכל חזרה לטאב.
+/// החלפת הטאב הפעיל משנה את TourTargetsScope; עליה לשמר את חלונית הניווט.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -69,9 +69,7 @@ void main() {
     focusRepository.resetForTesting();
   });
 
-  /// מעלה את מסך הספר עם חלונית הניווט פתוחה, ומחזיר בקר להחלפת הטאב הפעיל.
-  /// [tabSearchText] פותח את לשונית החיפוש מיד; `settle: false` עוצר אחרי
-  /// הפריים הראשון, לפני שבדיקת הכותרות החלופיות עדכנה את מספר הלשוניות.
+  /// [settle] מאפשר לעצור לפני סיום בדיקת הכותרות החלופיות.
   Future<_ActiveTabController> pumpScreen(
     WidgetTester tester, {
     String tabSearchText = '',
@@ -104,6 +102,7 @@ void main() {
 
     late StateSetter setHostState;
     var isActiveTab = true;
+    var theme = ThemeData.light();
 
     await tester.pumpWidget(
       MultiProvider(
@@ -129,12 +128,15 @@ void main() {
             home: StatefulBuilder(
               builder: (context, setState) {
                 setHostState = setState;
-                return TourTargetsScope(
-                  enabled: isActiveTab,
-                  child: TextBookViewerBloc(
-                    tab: tab,
-                    isInCombinedView: false,
-                    openBookCallback: (_) {},
+                return Theme(
+                  data: theme,
+                  child: TourTargetsScope(
+                    enabled: isActiveTab,
+                    child: TextBookViewerBloc(
+                      tab: tab,
+                      isInCombinedView: false,
+                      openBookCallback: (_) {},
+                    ),
                   ),
                 );
               },
@@ -152,6 +154,7 @@ void main() {
     return _ActiveTabController(
       tester: tester,
       setActiveTab: (value) => setHostState(() => isActiveTab = value),
+      setTheme: (value) => setHostState(() => theme = value),
     );
   }
 
@@ -206,6 +209,144 @@ void main() {
     );
   });
 
+  testWidgets('ניווט תוצאות שומר קטעים גם כשהקורא נבנה בעקבות אירועי הבחירה', (
+    tester,
+  ) async {
+    final host = await pumpScreen(tester);
+    await tester.tap(find.text('חיפוש'));
+    await tester.pumpAndSettle();
+    final search = find.byType(TextBookSearchView);
+    final state = tester.state<TextBookSearchViewState>(search);
+    state.searchTextController.text = 'אור';
+    state.searchResults = [
+      for (var i = 0; i < 3; i++)
+        TextSearchResult(
+          index: i,
+          snippet: 'קטע $i אוֹר',
+          query: 'אור',
+          address: 'פרק',
+        ),
+    ];
+    tester.element(search).markNeedsBuild();
+    await tester.pump();
+    Finder snippet(int i) => find.byWidgetPredicate(
+      (w) => w is RichText && w.text.toPlainText().startsWith('קטע $i'),
+    );
+    bool selected(int i) => tester
+        .widget<NavTreeContentRow>(
+          find.ancestor(
+            of: snippet(i),
+            matching: find.byType(NavTreeContentRow),
+          ),
+        )
+        .isSelected;
+    final bloc = tester.element(search).read<TextBookBloc>();
+
+    await tester.tap(find.byTooltip('התוצאה הבאה'));
+    await tester.pump();
+    final untouched = tester.widget(snippet(2));
+    expect((bloc.state as TextBookLoaded).selectedIndex, 0);
+    expect((bloc.state as TextBookLoaded).highlightedLine, 0);
+    expect(selected(0), isTrue);
+
+    await tester.tap(find.byTooltip('התוצאה הבאה'));
+    await tester.pump();
+    expect((bloc.state as TextBookLoaded).selectedIndex, 1);
+    expect((bloc.state as TextBookLoaded).highlightedLine, 1);
+    expect(selected(0), isFalse);
+    expect(selected(1), isTrue);
+    expect(tester.widget(snippet(2)), same(untouched));
+
+    state.widget.focusNode.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump();
+    expect((bloc.state as TextBookLoaded).selectedIndex, 2);
+    expect(selected(2), isTrue);
+    await tester.tap(snippet(0));
+    await tester.pump();
+    expect((bloc.state as TextBookLoaded).selectedIndex, 0);
+    expect((bloc.state as TextBookLoaded).highlightedLine, 0);
+    expect(selected(0), isTrue);
+    expect(tester.widget(snippet(2)), same(untouched));
+
+    await host.changeTheme(ThemeData.dark());
+    final darkSnippet = tester.widget<RichText>(snippet(2));
+    expect(
+      darkSnippet.text.style!.color,
+      ThemeData.dark().colorScheme.onSurface,
+    );
+    expect(darkSnippet, isNot(same(untouched)));
+    final settings =
+        tester.element(search).read<SettingsBloc>() as _TestSettingsBloc;
+    settings.update(settings.state.copyWith(fontFamily: 'TaameyDavidCLM'));
+    await tester.pump();
+    expect(
+      tester.widget<RichText>(snippet(2)).text.style!.fontFamily,
+      'TaameyDavidCLM',
+    );
+    state.widget.closeLeftPaneCallback();
+    await tester.pump();
+    expect((bloc.state as TextBookLoaded).showLeftPane, isFalse);
+  });
+
+  testWidgets('שינוי תצורת חיפוש ובקשה חיצונית מגיעים לחלונית השמורה', (
+    tester,
+  ) async {
+    await pumpScreen(tester);
+    await tester.tap(find.text('חיפוש'));
+    await tester.pumpAndSettle();
+    final search = find.byType(TextBookSearchView);
+    final bloc =
+        tester.element(search).read<TextBookBloc>() as _TestTextBookBloc;
+    final original = tester.widget<TextBookSearchView>(search);
+    bloc.update(
+      (bloc.state as TextBookLoaded).copyWith(
+        searchOptions: const {
+          'אור_0': {'prefix': true},
+        },
+        alternativeWords: const {
+          0: ['אורות'],
+        },
+        spacingValues: const {'0-1': '2'},
+        searchDistance: 3,
+        searchMode: SearchMode.fuzzy,
+        matchPolicy: const SearchMatchPolicy(anyOrder: true),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    final changed = tester.widget<TextBookSearchView>(search);
+    expect(changed, isNot(same(original)));
+    expect(changed.initialSearchOptions, {
+      'אור_0': {'prefix': true},
+    });
+    expect(changed.initialAlternativeWords, {
+      0: ['אורות'],
+    });
+    expect(changed.initialSpacingValues, {'0-1': '2'});
+    expect(changed.initialSearchDistance, 3);
+    expect(changed.initialSearchMode, SearchMode.fuzzy);
+    expect(changed.initialMatchPolicy.anyOrder, isTrue);
+
+    bloc.update((bloc.state as TextBookLoaded).copyWith(searchText: '/[/'));
+    await tester.pump();
+    await tester.pump();
+    expect(
+      tester.state<TextBookSearchViewState>(search).searchTextController.text,
+      '/[/',
+    );
+    expect(tester.widget<TextBookSearchView>(search).initialQuery, '/[/');
+    bloc.update((bloc.state as TextBookLoaded).copyWith(searchText: ''));
+    await tester.pump();
+    await tester.pump();
+    expect(
+      tester.state<TextBookSearchViewState>(search).searchTextController.text,
+      isEmpty,
+    );
+    await tester.pump();
+  });
+
   testWidgets('יעד הסיור מצביע על חלונית הניווט של הטאב הפעיל', (tester) async {
     final controller = await pumpScreen(tester);
 
@@ -229,10 +370,20 @@ void main() {
 }
 
 class _ActiveTabController {
-  _ActiveTabController({required this.tester, required this.setActiveTab});
+  _ActiveTabController({
+    required this.tester,
+    required this.setActiveTab,
+    required this.setTheme,
+  });
 
   final WidgetTester tester;
   final void Function(bool) setActiveTab;
+  final void Function(ThemeData) setTheme;
+
+  Future<void> changeTheme(ThemeData value) async {
+    setTheme(value);
+    await tester.pump();
+  }
 
   Future<void> setActive(bool value) async {
     setActiveTab(value);
@@ -268,8 +419,25 @@ TextBookLoaded _loadedState(TextBook book) {
 class _TestTextBookBloc extends Bloc<TextBookEvent, TextBookState>
     implements TextBookBloc {
   _TestTextBookBloc(super.initialState) {
-    on<TextBookEvent>((event, emit) {});
+    on<TextBookEvent>((event, emit) {
+      final current = state;
+      if (current is! TextBookLoaded) return;
+      if (event is UpdateSelectedIndex) {
+        emit(
+          current.copyWith(
+            selectedIndex: event.index,
+            selectedIndices: {event.index!},
+          ),
+        );
+      } else if (event is HighlightLine) {
+        emit(current.copyWith(highlightedLine: event.lineIndex));
+      } else if (event is ToggleLeftPane) {
+        emit(current.copyWith(showLeftPane: event.show));
+      }
+    });
   }
+
+  void update(TextBookLoaded next) => emit(next);
 
   @override
   final TextBookRepository repository = TextBookRepository(
@@ -282,6 +450,8 @@ class _TestTextBookBloc extends Bloc<TextBookEvent, TextBookState>
 
 class _TestSettingsBloc extends Bloc<SettingsEvent, SettingsState>
     implements SettingsBloc {
+  void update(SettingsState next) => emit(next);
+
   _TestSettingsBloc(super.initialState) {
     on<SettingsEvent>((event, emit) {});
   }

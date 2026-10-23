@@ -1,3 +1,4 @@
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
@@ -31,6 +32,14 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
   /// הערות השוליים מהמסד של ספר הקטע (`line_note`) — במסד חדש הן מחליפות
   /// את קישורי FOOTNOTES של "הערות על ...", למשל בחברותא.
   BookNotes _targetNotes = BookNotes.empty;
+
+  /// עוגני הקטע נמדדים על השורה המלאה, עם גופי ההערות: עד שההערות נטענו
+  /// אין להם מקום בטקסט, וכשהטעינה נכשלה ([targetNotesError]) — לא יהיה.
+  bool _targetNotesLoaded = false;
+  Object? _targetNotesError;
+
+  /// כשל בטעינת הערות ספר הקטע; העוגנים שלו אינם מוצבים.
+  Object? get targetNotesError => _targetNotesError;
   DivineNameSpans _targetNames = DivineNameSpans.empty;
   List<LinkContentLine>? _targetLines;
   int _anchorHoverGeneration = 0;
@@ -40,6 +49,9 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
 
   /// כיבוי לפי פרופיל התצוגה של הכרטיסייה.
   bool get anchorLinksEnabled;
+
+  /// האם הקטע מדגיש את הציטוט המקושר ([Link.linkedAnchorStart]); אז גם בהערה.
+  bool get highlightsLinkedAnchor => false;
 
   bool get hasPanelLinks =>
       _anchorLinks.isNotEmpty || _noteLinks.isNotEmpty || _hasStoredNotes;
@@ -71,6 +83,8 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
     _anchorLinks = const [];
     _noteLinks = const [];
     _targetNotes = BookNotes.empty;
+    _targetNotesLoaded = false;
+    _targetNotesError = null;
     _targetNames = DivineNameSpans.empty;
     _targetLines = null;
     _requestAnchorLinks();
@@ -97,7 +111,7 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
     required void Function(Link link) onOpen,
     TextDisplayProfile? displayProfile,
   }) {
-    LinkPreviewOverlay.cancelScheduledHide();
+    LinkPreviewOverlay.cancelScheduledHide(AppWindowKeys.of(context));
     _cancelAnchorHoverTimer();
     final generation = _anchorHoverGeneration;
     final isNoteMarker = url.startsWith('otzaria://note-marker');
@@ -129,7 +143,7 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
         hoverMode: true,
         displayProfile: displayProfile,
         onOpen: () {
-          LinkPreviewOverlay.dismiss();
+          LinkPreviewOverlay.dismiss(window: AppWindowKeys.of(context));
           onOpen(link);
         },
       );
@@ -153,17 +167,22 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
     if (lineNotes.isEmpty) return;
     final String? note;
     if (url.startsWith('otzaria://book-note')) {
-      note = inlineNoteFromPreviewUrl(const [], url, dbNotes: _targetNotes);
+      note = inlineNoteFromPreviewUrl(
+        const [],
+        url,
+        dbNotes: _targetNotes,
+        decorateBody: _noteBodyWithAnchors,
+      );
     } else {
       final match = numberedBookNoteFromUrl(url, lineNotes);
       note = match == null
           ? null
           : BookNotes.toInlineHtml(
               match,
-              body: bookNoteBodyWithDivineNames(
-                _targetNotes,
+              body: _noteBodyWithAnchors(
                 lineIndex,
-                match,
+                lineNotes.indexOf(match),
+                bookNoteBodyWithDivineNames(_targetNotes, lineIndex, match),
               ),
             );
     }
@@ -175,19 +194,77 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
       contentBuilder: (_) => InlineBookNotePreviewContent(
         content: note!,
         displayProfile: displayProfile,
+        onAnchorTap: _openNoteAnchor,
       ),
     );
   }
 
+  /// גוף ההערה [note] (מיקום ב-`notesAt`) של שורה [lineIndex] בקטע, עם חלקי
+  /// הציטוטים שבו — ה-href מפנה לאותה רשימה כמו בשורה.
+  String _noteBodyWithAnchors(int lineIndex, int note, String body) {
+    final notes = _targetNotes.notesAt(lineIndex);
+    final anchors = _anchorsAt(lineIndex);
+    var html = !anchorLinksEnabled || anchors.isEmpty
+        ? body
+        : injectLinkAnchorMarkers(
+            rawLine: body,
+            anchorLinks: anchors,
+            styleIndexByCommentator: const {},
+            lineIndex: lineIndex,
+            rangesOnly: true,
+            notes: notes,
+            note: note,
+          );
+    if (highlightsLinkedAnchor && lineIndex == anchorSourceLink.index2 - 1) {
+      final linked = linkedAnchorSpan(note: note);
+      if (linked != null) {
+        html = wrapVisibleRange(
+          html: html,
+          start: linked.start,
+          end: linked.end!,
+          openTag: '<span class="link-anchor-range">',
+          closeTag: '</span>',
+        );
+      }
+    }
+    return html;
+  }
+
+  void _openNoteAnchor(String url) {
+    final link = anchorLinkFromUrl(url);
+    if (link == null) return;
+    LinkPreviewOverlay.dismiss(window: AppWindowKeys.of(context));
+    openPanelAnchor(link);
+  }
+
+  /// ניווט מציטוט בקטע — כמו לחיצה עליו בטקסט עצמו.
+  void openPanelAnchor(Link link);
+
+  /// הציטוט המקושר ([Link.linkedAnchorStart]) בשורה הראשונה של הקטע: חלקו
+  /// בטקסט השמור ([note] null) או בגוף ההערה [note]; null עד שההערות נטענו
+  /// או כשאין לו חלק שם.
+  LinkAnchorSpan? linkedAnchorSpan({int? note}) {
+    final start = anchorSourceLink.linkedAnchorStart;
+    final end = anchorSourceLink.linkedAnchorEnd;
+    if (start == null || end == null || end <= start) return null;
+    if (!_targetNotesLoaded) return null;
+    final spans = projectAnchorSpans(
+      [LinkAnchorSpan(start: start, end: end)],
+      _targetNotes.notesAt(anchorSourceLink.index2 - 1),
+      note: note,
+    );
+    return spans.isEmpty ? null : spans.single;
+  }
+
   void handleAnchorHoverExit(String url) {
     _cancelAnchorHoverTimer();
-    LinkPreviewOverlay.scheduleHide();
+    LinkPreviewOverlay.scheduleHide(AppWindowKeys.of(context));
   }
 
   /// לחיצה על הציטוט מנווטת — ריחוף ממתין היה פותח חלונית אחרי הניווט.
   void cancelAnchorHover() {
     _cancelAnchorHoverTimer();
-    LinkPreviewOverlay.dismiss();
+    LinkPreviewOverlay.dismiss(window: AppWindowKeys.of(context));
   }
 
   void _requestAnchorLinks() {
@@ -199,15 +276,42 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
 
   Future<void> _loadTargetNotes() async {
     final link = anchorSourceLink;
-    if (link.path2.isEmpty) return;
-    final notes = await BookNotesRepository.instance.notesFor(
-      utils.getTitleFromPath(link.path2),
-      categoryId: link.targetCategoryId,
-      source: link.targetSource,
-      fileType: link.targetFileType,
-    );
+    // בלי ספר אין הערות: העוגנים (אם יש) נמדדים על השורה עצמה.
+    if (link.path2.isEmpty) {
+      _targetNotesLoaded = true;
+      return;
+    }
+    final title = utils.getTitleFromPath(link.path2);
+    final BookNotes notes;
+    try {
+      notes = await BookNotesRepository.instance.notesFor(
+        title,
+        categoryId: link.targetCategoryId,
+        source: link.targetSource,
+        fileType: link.targetFileType,
+      );
+    } catch (error, stack) {
+      if (!mounted || !identical(anchorSourceLink, link)) return;
+      setState(() => _targetNotesError = error);
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stack,
+          library: 'otzaria',
+          context: ErrorDescription(
+            'while loading the footnotes of "$title"; its link anchors are not shown',
+          ),
+        ),
+      );
+      return;
+    }
+    if (!mounted || !identical(anchorSourceLink, link)) return;
+    setState(() {
+      _targetNotes = notes;
+      _targetNotesLoaded = true;
+    });
     final names = await DivineNamesRepository.instance.spansFor(
-      utils.getTitleFromPath(link.path2),
+      title,
       categoryId: link.targetCategoryId,
       source: link.targetSource,
       fileType: link.targetFileType,
@@ -215,7 +319,6 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
     final lines = _isSingleLine ? null : await link.contentLines;
     if (!mounted || !identical(anchorSourceLink, link)) return;
     setState(() {
-      _targetNotes = notes;
       _targetNames = names;
       _targetLines = lines;
     });
@@ -288,7 +391,7 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
 
   String _injectLineLinks(String rawLine, int lineIndex) {
     final anchors = _anchorsAt(lineIndex);
-    final html = anchors.isEmpty
+    final html = anchors.isEmpty || !_targetNotesLoaded
         ? rawLine
         : injectLinkAnchorMarkers(
             rawLine: rawLine,
@@ -296,6 +399,7 @@ mixin PanelAnchorLinksMixin<T extends StatefulWidget> on State<T> {
             styleIndexByCommentator: const {},
             lineIndex: lineIndex,
             rangesOnly: true,
+            notes: _targetNotes.notesAt(lineIndex),
           );
     final marked = injectDivineNameMarkers(html, _targetNames, lineIndex);
     if (!anchorLinksEnabled) return marked;
@@ -386,6 +490,9 @@ class _PanelAnchoredTextState extends State<PanelAnchoredText>
     widget.onAnchorActivated?.call();
     await _navigateTo(link);
   }
+
+  @override
+  void openPanelAnchor(Link link) => _openAnchorTarget(link);
 
   // בלי onAnchorActivated: הלחיצה על כותרת החלונית אינה הקשה על הפריט שמתחת.
   Future<void> _navigateTo(Link link) =>

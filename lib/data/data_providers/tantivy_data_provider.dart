@@ -37,7 +37,45 @@ class TantivyDataProvider {
     return _engineInit.ensure(_initAll);
   }
 
-  set engine(Future<SearchEngine> value) => _engineInit.current = value;
+  set engine(Future<SearchEngine> value) =>
+      _engineInit.start(() => value.then(_restoreEconomyIndexing));
+
+  bool _economyIndexing = false;
+  Future<void> _economyUpdate = Future<void>.value();
+  bool get isEconomyIndexing => _economyIndexing;
+
+  /// בחירת המשתמש נשמרת בהפעלה, גם כששחזור פותח מנוע חדש.
+  Future<void> setEconomyIndexing(bool enabled) {
+    final update = _economyUpdate.then((_) async {
+      while (true) {
+        final current = engine;
+        try {
+          await (await current).setEconomyIndexing(enabled: enabled);
+        } catch (_) {
+          if (_engineInit.current != null &&
+              !identical(current, _engineInit.current)) {
+            continue;
+          }
+          rethrow;
+        }
+        if (!identical(current, _engineInit.current)) continue;
+        _economyIndexing = enabled;
+        return;
+      }
+    });
+    _economyUpdate = update.then<void>((_) {}, onError: (Object _) {});
+    return update;
+  }
+
+  Future<SearchEngine> _restoreEconomyIndexing(SearchEngine engine) async {
+    try {
+      if (_economyIndexing) await engine.setEconomyIndexing(enabled: true);
+    } catch (_) {
+      engine.dispose();
+      rethrow;
+    }
+    return engine;
+  }
 
   final RetryableInit<SearchEngine> _engineInit = RetryableInit<SearchEngine>();
 
@@ -51,6 +89,9 @@ class TantivyDataProvider {
   /// (otzaria_index_meta.json או meta.json של Tantivy) דרך מנוע החיפוש.
   IndexCompatibility? _indexCompatibility;
   IndexCompatibility? get indexCompatibility => _indexCompatibility;
+  @visibleForTesting
+  set indexCompatibility(IndexCompatibility? value) =>
+      _indexCompatibility = value;
 
   /// Indicates whether the indexing process is currently running
   ValueNotifier<bool> isIndexing = ValueNotifier(false);
@@ -76,6 +117,11 @@ class TantivyDataProvider {
 
   TantivyDataProvider._internal() {
     _startEngineInit();
+  }
+
+  @visibleForTesting
+  TantivyDataProvider.forTesting(Future<SearchEngine> initialEngine) {
+    engine = initialEngine;
   }
 
   Future<SearchEngine> _startEngineInit() => _engineInit.start(_initAll);
@@ -109,6 +155,7 @@ class TantivyDataProvider {
 
     // indexedFilePaths כעת משקפת את מצב האינדקס בפועל. צרכנים שמסיקים
     // "אין אינדקס" מתוך הקבוצה צריכים לחכות לסימן הזה כדי לא להציג שגוי בהפעלה.
+    await _restoreEconomyIndexing(engine);
     isInitialized.value = true;
     return engine;
   }

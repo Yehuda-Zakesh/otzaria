@@ -87,6 +87,7 @@ List<ContentBlocker> buildPluginContentBlockers({
     for (final server in fileServers) ...[
       _allow('$server${_escape('f/${Uri.encodeComponent(pluginId)}/')}'),
       _allow('${server}w/'),
+      _allow('${server}fonts/'),
     ],
   ];
 }

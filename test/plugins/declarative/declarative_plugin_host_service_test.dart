@@ -15,6 +15,30 @@ import 'package:otzaria/plugins/services/plugin_toolbar_registry.dart';
 import 'package:otzaria/tabs/models/external_book_matches.dart';
 
 void main() {
+  test('חלונות עם ספרים שונים שומרים פעולות ופקדים עצמאיים', () async {
+    final a = _Fixture();
+    final b = _Fixture();
+    addTearDown(a.dispose);
+    await a.host.syncPlugins([a.plugin]);
+    await b.host.syncPlugins([b.plugin]);
+    await a.host.readerBookChanged(
+      TextBook(id: 1, title: 'ספר א'),
+      context: 'reader-text',
+    );
+    final actionA = a.toolbar.getAll().first.$2.hostAction!;
+    await b.host.readerBookChanged(
+      TextBook(id: 2, title: 'ספר ב'),
+      context: 'reader-text',
+    );
+    await a.host.executeAction(a.plugin.pluginId, actionA);
+    expect(a.access.opened, hasLength(1));
+    expect(b.access.opened, isEmpty);
+    b.dispose();
+    expect(a.toolbar.getAll(), hasLength(2));
+    await a.host.executeAction(a.plugin.pluginId, actionA);
+    expect(a.access.opened, hasLength(2));
+  });
+
   test('ביטול הרשאת קריאה מונע קריאת ערכים והצגתם', () async {
     final fixture = _Fixture(
       declaredPermissions: const [

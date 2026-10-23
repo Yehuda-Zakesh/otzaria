@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/data/cache/books_cache.dart';
 import 'package:otzaria/data/cache/acronyms_cache.dart';
 import 'package:otzaria/data/data_providers/book_composite_key.dart';
@@ -491,7 +491,7 @@ class ReferenceBooksCache {
     if (maxConcurrent <= 0) {
       throw ArgumentError.value(maxConcurrent, 'maxConcurrent', 'must be > 0');
     }
-    if (WindowRole.isSecondary) return;
+    if (!ProcessDuties.current.isProcessOwner) return;
     final gen = _generation;
     final paths = _fsPdfBooks
         .map((entry) => entry.$2.filePath)

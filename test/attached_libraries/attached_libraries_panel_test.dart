@@ -172,7 +172,7 @@ void main() {
       expect(find.text(message), findsOneWidget);
     });
 
-    testWidgets('חלון משני אינו מציע לבנות מחדש את אינדקס המסד', (
+    testWidgets('חלון משני מציע לבנות מחדש את אינדקס המסד', (
       tester,
     ) async {
       final previousRole = WindowRole.isSecondary;
@@ -186,7 +186,7 @@ void main() {
       final repository = _FakeRepository([_library('dbA')]);
       AttachedLibrariesRepository.instance = repository;
       await pumpPanel(tester, repository);
-      expect(find.text('בנה אינדקס מחדש'), findsNothing);
+      expect(find.text('בנה אינדקס מחדש'), findsOneWidget);
     });
 
     testWidgets('אינדקס קישורים בבנייה או שנקטע מציג הודעה בשורת המסד', (

@@ -1100,14 +1100,20 @@ class LibraryGridKeyNavigator extends StatelessWidget {
     if (delta == null) return KeyEventResult.ignored;
 
     // ברשת עצלה כרטיס שנבנה בגלילה מעלה נרשם בסוף עץ הפוקוס; הסדר נקבע לפי המיקום.
-    final cards = node.traversalDescendants.toList()
-      ..sort((a, b) {
-        final byRow = a.rect.top.compareTo(b.rect.top);
-        if (byRow != 0) return byRow;
-        final byX = a.rect.left.compareTo(b.rect.left);
-        return isRtl ? -byX : byX;
-      });
-    final index = primary == null ? -1 : cards.indexOf(primary);
+    // rect עולה בעץ הרינדור עד השורש, ולכן נמדד פעם אחת לכרטיס ולא בכל השוואה.
+    final cards = [
+      for (final card in node.traversalDescendants)
+        (node: card, rect: card.rect),
+    ];
+    cards.sort((a, b) {
+      final byRow = a.rect.top.compareTo(b.rect.top);
+      if (byRow != 0) return byRow;
+      final byX = a.rect.left.compareTo(b.rect.left);
+      return isRtl ? -byX : byX;
+    });
+    final index = primary == null
+        ? -1
+        : cards.indexWhere((card) => card.node == primary);
     if (index < 0) return KeyEventResult.ignored;
 
     var target = index + delta;
@@ -1119,7 +1125,7 @@ class LibraryGridKeyNavigator extends StatelessWidget {
     if (target == index || target >= cards.length) {
       return KeyEventResult.handled;
     }
-    focusCard(cards[target]);
+    focusCard(cards[target].node);
     return KeyEventResult.handled;
   }
 

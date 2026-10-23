@@ -32,6 +32,7 @@ import 'package:otzaria/tabs/models/searching_tab.dart';
 import 'package:otzaria/theme/app_tokens.dart';
 import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
+import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 
 /// מדור תוצאות ממקור חיצוני של תוסף (למשל היברובוקס) בטאב החיפוש המובנה.
 ///
@@ -556,6 +557,7 @@ class _ExternalSearchResultsSectionState
           tabsBloc: context.read<TabsBloc>(),
           historyBloc: context.read<HistoryBloc>(),
           navigationBloc: context.read<NavigationBloc>(),
+          layoutWidth: readingLayoutWidthResolverOf(context),
         ),
       );
 

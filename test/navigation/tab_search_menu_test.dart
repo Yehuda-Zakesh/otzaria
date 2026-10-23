@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/core/windowing/app_window_controller.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
+import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';
 import 'package:otzaria/history/bloc/history_event.dart';
 import 'package:otzaria/history/bloc/history_state.dart';
@@ -205,7 +208,81 @@ void main() {
     expect(find.text('נסגרו לאחרונה'), findsNothing);
     expect(find.byTooltip('נקה את הרשימה'), findsNothing);
   });
+
+  testWidgets('חלונית פתוחה בחלון אחד אינה נסגרת מהפתיחה בחלון אחר', (
+    tester,
+  ) async {
+    tabsBloc = _TestTabsBloc(
+      TabsState(tabs: [_StubTab('בראשית')], currentTabIndex: 0),
+    );
+    historyBloc = _TestHistoryBloc();
+    addTearDown(() async {
+      await tabsBloc.close();
+      await historyBloc.close();
+    });
+    final window = _FakeWindow();
+    final a = AppWindowKeys();
+    final b = AppWindowKeys();
+
+    Widget windowTree(AppWindowKeys keys, String label) => AppWindowScope(
+      controller: window,
+      geometry: window,
+      keys: keys,
+      child: MaterialApp(
+        navigatorKey: keys.navigator,
+        home: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Scaffold(
+            body: Column(children: [Text(label), const TabSearchButton()]),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MultiBlocProvider(
+        providers: [
+          BlocProvider<TabsBloc>.value(value: tabsBloc),
+          BlocProvider<HistoryBloc>.value(value: historyBloc),
+        ],
+        child: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Row(
+            children: [
+              Expanded(child: windowTree(a, 'חלון א')),
+              Expanded(child: windowTree(b, 'חלון ב')),
+            ],
+          ),
+        ),
+      ),
+    );
+    final contextA = tester.element(find.text('חלון א'));
+    final contextB = tester.element(find.text('חלון ב'));
+    Finder panelIn(AppWindowKeys keys) => find.descendant(
+      of: find.byKey(keys.navigator),
+      matching: find.byType(TabSearchPanel),
+    );
+
+    await tester.tap(find.byType(TabSearchButton).first);
+    await tester.pumpAndSettle();
+    expect(isTabSearchMenuOnTop(contextA), isTrue);
+    expect(isTabSearchMenuOnTop(contextB), isFalse);
+
+    // פתיחה ב-ב אינה מתפרשת כ"סגור את הפתוחה" של א.
+    showTabSearchMenu(contextB);
+    await tester.pumpAndSettle();
+    expect(panelIn(a), findsOneWidget);
+    expect(panelIn(b), findsOneWidget);
+
+    showTabSearchMenu(contextB);
+    await tester.pumpAndSettle();
+    expect(panelIn(b), findsNothing);
+    expect(panelIn(a), findsOneWidget);
+  });
 }
+
+class _FakeWindow extends Fake
+    implements AppWindowController, AppWindowGeometry {}
 
 class _TestTabsBloc extends Cubit<TabsState> implements TabsBloc {
   _TestTabsBloc(super.initialState);

@@ -47,11 +47,13 @@ class UserStateDatabase {
   Database? get openDatabase => _database;
 
   Database _open(String path) {
-    final db = sqlite3.open(path);
     // ההמתנה חוסמת את ה-thread המשותף לכל החלונות, ולכן קצרה: היא עוזרת
     // רק מול תהליך אחר (גיבוי, checkpoint).
-    db.execute('PRAGMA busy_timeout=1000');
-    enableWalBestEffort(db, 'UserStateDatabase');
+    final db = openWritableDatabase(
+      path,
+      'UserStateDatabase',
+      busyTimeoutMs: 1000,
+    );
     _createSchema(db);
     _migrateSchema(db);
     return db;

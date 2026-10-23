@@ -62,6 +62,9 @@ class MySettingsScreen extends StatefulWidget {
 }
 
 class _MySettingsScreenState extends State<MySettingsScreen> {
+  /// מאגר הפוקוס של החלון; נשמר כאן כי ב-dispose אסור לחפש ב-context.
+  late final FocusRepository _focus;
+
   int _selectedIndex = 0;
   bool _showMobileMenu = true;
 
@@ -78,16 +81,17 @@ class _MySettingsScreenState extends State<MySettingsScreen> {
   @override
   void initState() {
     super.initState();
+    _focus = FocusRepository.of(context);
     widget.controller?.addListener(_handleRequestedTab);
     _applyRequestedTab(widget.controller?.takeRequestedTab());
-    FocusRepository().registerSettingsFocusRequester(_requestSettingsFocus);
+    _focus.registerSettingsFocusRequester(_requestSettingsFocus);
     SettingsSearchRegistry.instance.addListener(_handleSearchNavigation);
     _handleSearchNavigation(); // handle a request set before this screen mounted
   }
 
   @override
   void dispose() {
-    FocusRepository().unregisterSettingsFocusRequester(_requestSettingsFocus);
+    _focus.unregisterSettingsFocusRequester(_requestSettingsFocus);
     SettingsSearchRegistry.instance.removeListener(_handleSearchNavigation);
     widget.controller?.removeListener(_handleRequestedTab);
     _contentFocusNode.dispose();
@@ -236,7 +240,7 @@ class _MySettingsScreenState extends State<MySettingsScreen> {
     if (!mounted) return;
     // מעדכן את ה-screen restorer עם canRestore תלוי-layout —
     // במוד mobile ה-contentFocusNode לא מחובר לעץ הפוקוס ולכן canRestore=false.
-    FocusRepository().setScreenRestorer(
+    _focus.setScreenRestorer(
       restore: () {
         if (mounted && _contentFocusNode.enclosingScope != null) {
           _contentFocusNode.requestFocus();

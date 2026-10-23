@@ -45,7 +45,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:path/path.dart' as path;
-import 'package:otzaria/core/windowing/window_role.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/messages/plugin_messages.dart';
@@ -60,6 +60,8 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
   final PluginDevLoaderService devLoader;
   final PluginDevWatchService devWatchService;
   final DeclarativePluginHost? declarativeHost;
+  final PluginToolbarRegistry? toolbarRegistry;
+  final bool _sharedDevWatcher;
   StreamSubscription<PluginDevFsChange>? _devWatchSub;
   StreamSubscription<TabsState>? _readerStateSub;
 
@@ -69,6 +71,11 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
   String? _lastDeclarativeSyncSignature;
 
   final PluginInstallResultsLog _installResultsLog;
+
+  /// `null` — [ProcessDuties.current], שנקרא בכל אירוע ולא נלכד ביצירה.
+  final ProcessDuties? processDuties;
+  bool get _isProcessOwner =>
+      (processDuties ?? ProcessDuties.current).isProcessOwner;
 
   /// התקנות מקישור install-local שממתינות להחלטת המשתמש, לפי תיקיית ה-temp.
   final Map<String, ({String path, String pluginId, String version})>
@@ -85,10 +92,12 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     PluginDevWatchService? devWatchService,
     BundledPluginSeedService? bundledSeedService,
     this.declarativeHost,
+    this.toolbarRegistry,
     Stream<TabsState>? readerStates,
     TabsState? initialReaderState,
     PluginInstallResultsLog? installResultsLog,
     CalendarAlertsClient? alertsClient,
+    this.processDuties,
   }) : _alertsOverride = alertsClient,
        _installResultsLog =
            installResultsLog ?? PluginInstallResultsLog.instance,
@@ -99,7 +108,8 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
            bundledSeedService ??
            BundledPluginSeedService(repository: repository),
        devLoader = devLoader ?? PluginDevLoaderService(repository: repository),
-       devWatchService = devWatchService ?? PluginDevWatchService(),
+       _sharedDevWatcher = devWatchService == null,
+       devWatchService = devWatchService ?? PluginDevWatchService.acquire(),
        super(PluginSystemInitial()) {
     on<LoadPlugins>(_onLoadPlugins, transformer: sequential());
     on<SeedBundledPlugins>(_onSeedBundledPlugins);
@@ -135,20 +145,7 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     PluginShortcutRegistry.instance.addListener(_onPluginShortcutsChanged);
 
     _devWatchSub = this.devWatchService.events.listen((change) {
-      if (change.manifestChanged) {
-        add(DevelopmentPluginManifestChanged(change.pluginId));
-      } else {
-        unawaited(
-          PluginRuntimeDispatcher.instance
-              .reloadPlugin(change.pluginId)
-              .then(
-                (_) {},
-                onError: (e) => debugPrint(
-                  'Plugin dev reload error [${change.pluginId}]: $e',
-                ),
-              ),
-        );
-      }
+      unawaited(_handleDevChange(change));
     });
     if (declarativeHost != null) {
       if (initialReaderState != null) {
@@ -163,9 +160,35 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     PluginShortcutRegistry.instance.removeListener(_onPluginShortcutsChanged);
     await _devWatchSub?.cancel();
     await _readerStateSub?.cancel();
-    devWatchService.dispose();
+    if (_sharedDevWatcher) {
+      PluginDevWatchService.release();
+    } else {
+      devWatchService.dispose();
+    }
     declarativeHost?.dispose();
+    toolbarRegistry?.dispose();
     await super.close();
+  }
+
+  Future<void> _handleDevChange(PluginDevFsChange change) async {
+    try {
+      await devWatchService.handleOnce(change, () async {
+        try {
+          if (change.manifestChanged) {
+            _removeSearchProviders(change.pluginId);
+            final plugin = await repository.getPlugin(change.pluginId);
+            if (plugin?.devRootPath case final root?) {
+              await devLoader.loadDevelopmentPlugin(root);
+            }
+          }
+        } finally {
+          await PluginRuntimeDispatcher.instance.reloadPlugin(change.pluginId);
+        }
+      });
+      if (change.manifestChanged && !isClosed) add(LoadPlugins());
+    } catch (error) {
+      debugPrint('Plugin dev reload error [${change.pluginId}]: $error');
+    }
   }
 
   Future<void> _onLoadPlugins(
@@ -221,7 +244,7 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     Emitter<PluginSystemState> emit,
   ) async {
     // פר-מחשב: חלון משני היה מתקין במקביל לראשי לאותה תיקייה ו-DB.
-    if (WindowRole.isSecondary) return;
+    if (!_isProcessOwner) return;
     await PluginSafeMode.ready;
     if (PluginSafeMode.isActive) return;
     try {
@@ -940,7 +963,9 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       final grantedPermissions = await repository.getGrantedPermissionNames(
         event.pluginId,
       );
-      PluginRuntimeDispatcher.instance.dispatchEvent(
+      // ההרשאות של התוסף הזה בלבד — לתוספים אחרים אין מה לדעת עליהן.
+      PluginRuntimeDispatcher.instance.dispatchStateEventToPlugin(
+        event.pluginId,
         'plugin.permissions_changed',
         {'permissions': grantedPermissions},
       );
@@ -1035,7 +1060,7 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
     Emitter<PluginSystemState> emit,
   ) async {
     // הרשומה משותפת לכל החלונות; חלון משני היה כותב אותה שוב על אותם נתונים.
-    if (WindowRole.isSecondary) return;
+    if (!_isProcessOwner) return;
     final devPlugins = await repository.getDevelopmentPlugins();
     for (final plugin in devPlugins) {
       // localhost_dev נטען מ-HTTP (HMR) ואין לו תיקייה לקרוא ממנה.

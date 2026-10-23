@@ -4,11 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
+import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 import 'package:otzaria/core/windowing/window_manager_app_window_controller.dart';
-import 'package:otzaria/settings/engine/settings_bloc.dart';
-import 'package:otzaria/settings/engine/settings_state.dart';
 import 'package:otzaria/utils/ui/fullscreen_helper.dart';
-import '../../unit/mocks/mock_settings_repository.mocks.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -40,10 +38,16 @@ void main() {
         .setMockMethodCallHandler(SystemChannels.platform, null);
   });
 
-  Future<SettingsBloc> buildSettingsBloc() async {
-    final bloc = SettingsBloc(repository: MockSettingsRepository());
-    addTearDown(bloc.close);
-    return bloc;
+  late List<bool> persisted;
+
+  WindowFullscreenCubit buildCubit() {
+    persisted = [];
+    final cubit = WindowFullscreenCubit(
+      initial: false,
+      persist: (value) async => persisted.add(value),
+    );
+    addTearDown(cubit.close);
+    return cubit;
   }
 
   Future<void> toggleAsDesktop(BuildContext context, bool isFullscreen) async {
@@ -56,17 +60,17 @@ void main() {
   }
 
   testWidgets(
-    'toggleFullscreen שנקרא מהקשר אחד משתקף מיד ב-SettingsBloc המשותף '
-    'שנקרא ממסך אחר',
+    'toggleFullscreen שנקרא מהקשר אחד משתקף מיד ב-WindowFullscreenCubit '
+    'של החלון שנקרא ממסך אחר',
     (tester) async {
-      final settingsBloc = await buildSettingsBloc();
+      final fullscreenCubit = buildCubit();
       late BuildContext readingScreenContext;
       late BuildContext settingsScreenContext;
 
       await pumpWithAppWindow(
         tester,
-        BlocProvider<SettingsBloc>.value(
-          value: settingsBloc,
+        BlocProvider<WindowFullscreenCubit>.value(
+          value: fullscreenCubit,
           child: MaterialApp(
             home: Column(
               children: [
@@ -89,7 +93,7 @@ void main() {
       );
 
       expect(
-        settingsScreenContext.read<SettingsBloc>().state.isFullscreen,
+        settingsScreenContext.read<WindowFullscreenCubit>().state,
         isFalse,
       );
 
@@ -97,10 +101,10 @@ void main() {
       await tester.pump();
 
       expect(
-        settingsScreenContext.read<SettingsBloc>().state.isFullscreen,
+        settingsScreenContext.read<WindowFullscreenCubit>().state,
         isTrue,
         reason:
-            'שני המסכים חולקים SettingsBloc אחד; שינוי מכל אחד מהם '
+            'שני המסכים חולקים את מצב החלון; שינוי מכל אחד מהם '
             'צריך להשתקף מיד באחר',
       );
     },
@@ -110,13 +114,13 @@ void main() {
     'toggleFullscreen(true) מסתיר את הכותרת לפני setFullScreen, ו-(false) '
     'משאיר אותה מוסתרת (CustomTitleBar) — עקבי בכל קריאה',
     (tester) async {
-      final settingsBloc = await buildSettingsBloc();
+      final fullscreenCubit = buildCubit();
       late BuildContext context;
 
       await pumpWithAppWindow(
         tester,
-        BlocProvider<SettingsBloc>.value(
-          value: settingsBloc,
+        BlocProvider<WindowFullscreenCubit>.value(
+          value: fullscreenCubit,
           child: MaterialApp(
             home: Builder(
               builder: (c) {
@@ -151,15 +155,15 @@ void main() {
   );
 
   testWidgets(
-    'קריאה חוזרת עם אותו מצב לא שולחת UpdateIsFullscreen כפול',
+    'קריאה חוזרת עם אותו מצב אינה פולטת ואינה שומרת שוב',
     (tester) async {
-      final settingsBloc = await buildSettingsBloc();
+      final fullscreenCubit = buildCubit();
       late BuildContext context;
 
       await pumpWithAppWindow(
         tester,
-        BlocProvider<SettingsBloc>.value(
-          value: settingsBloc,
+        BlocProvider<WindowFullscreenCubit>.value(
+          value: fullscreenCubit,
           child: MaterialApp(
             home: Builder(
               builder: (c) {
@@ -171,8 +175,8 @@ void main() {
         ),
       );
 
-      final emitted = <SettingsState>[];
-      final subscription = settingsBloc.stream.listen(emitted.add);
+      final emitted = <bool>[];
+      final subscription = fullscreenCubit.stream.listen(emitted.add);
       addTearDown(subscription.cancel);
 
       await toggleAsDesktop(context, true);
@@ -180,23 +184,23 @@ void main() {
       await toggleAsDesktop(context, true);
       await tester.pump();
 
-      final fullscreenEmits = emitted.where((s) => s.isFullscreen).toList();
       expect(
-        fullscreenEmits.length,
-        1,
-        reason: 'אין למנוע emit כפול כשהמצב לא באמת השתנה',
+        emitted,
+        [true],
+        reason: 'אין emit כפול כשהמצב לא באמת השתנה',
       );
+      expect(persisted, [true]);
     },
   );
 
   testWidgets('במובייל toggleFullscreen מפעיל את SystemChrome', (tester) async {
-    final settingsBloc = await buildSettingsBloc();
+    final fullscreenCubit = buildCubit();
     late BuildContext context;
 
     await pumpWithAppWindow(
       tester,
-      BlocProvider<SettingsBloc>.value(
-        value: settingsBloc,
+      BlocProvider<WindowFullscreenCubit>.value(
+        value: fullscreenCubit,
         child: MaterialApp(
           home: Builder(
             builder: (currentContext) {

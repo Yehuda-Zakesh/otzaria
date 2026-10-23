@@ -34,6 +34,9 @@ class LoadContent extends TextBookEvent {
   // לכבות מצב רצף שהמשתמש בחר.
   final bool preserveContinuousReadingMode;
 
+  /// רוחב החלון של הקורא, למדיניות החלונית השמאלית; null — ברירת המחדל.
+  final double? screenWidth;
+
   const LoadContent({
     this.startIndex,
     required this.fontSize,
@@ -46,6 +49,7 @@ class LoadContent extends TextBookEvent {
         false, // Default to false for backward compatibility
     this.preserveRemovePunctuation = false,
     this.preserveContinuousReadingMode = false,
+    this.screenWidth,
   });
 
   @override
@@ -60,6 +64,7 @@ class LoadContent extends TextBookEvent {
     preserveRemoveNikud,
     preserveRemovePunctuation,
     preserveContinuousReadingMode,
+    screenWidth,
   ];
 }
 

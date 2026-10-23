@@ -6,6 +6,7 @@ import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/models/books.dart';
 import "package:flutter_bloc/flutter_bloc.dart";
 import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
+import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 
 void openBook(
   BuildContext context,
@@ -26,6 +27,7 @@ void openBook(
     tabsBloc: context.read<TabsBloc>(),
     historyBloc: context.read<HistoryBloc>(),
     navigationBloc: context.read<NavigationBloc>(),
+    layoutWidth: readingLayoutWidthResolverOf(context),
   );
   coordinator.openBook(
     book,
@@ -53,6 +55,7 @@ void openPreparedTab(
     tabsBloc: context.read<TabsBloc>(),
     historyBloc: context.read<HistoryBloc>(),
     navigationBloc: context.read<NavigationBloc>(),
+    layoutWidth: readingLayoutWidthResolverOf(context),
   );
   coordinator.openTab(tab, insertAdjacent: insertAdjacent);
 }

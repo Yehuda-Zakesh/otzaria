@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/core/windowing/window_bus_host.dart';
@@ -106,6 +107,15 @@ void main() {
     verify(() => indexingBloc.add(any(that: isA<ClearIndex>()))).called(1);
   });
 
+  testWidgets('בקשת איפוס ובנייה נכנסת מפעילה ResetAndIndex', (tester) async {
+    final accepted = await sendIndexRequest(
+      tester,
+      MultiWindowService.indexOpResetAndIndex,
+    );
+    expect(accepted, isTrue);
+    verify(() => indexingBloc.add(ResetAndIndex(library))).called(1);
+  });
+
   testWidgets('פעולה לא מוכרת נדחית', (tester) async {
     final accepted = await sendIndexRequest(tester, 'הפעלה שאינה קיימת');
     expect(accepted, isFalse);
@@ -115,6 +125,21 @@ void main() {
   // המבצע הוא המארח בלבד — חלון משני שקיבל בקשה היה שולח אותה לעצמו.
   testWidgets('חלון משני דוחה בקשת אינדוקס נכנסת', (tester) async {
     WindowRole.isSecondary = true;
+    final accepted = await sendIndexRequest(
+      tester,
+      MultiWindowService.indexOpAll,
+    );
+    expect(accepted, isFalse);
+    verifyNever(() => indexingBloc.add(any()));
+  });
+
+  // הבעלות נקבעת ב-ProcessDuties, לא בתפקיד החלון.
+  testWidgets('מי שאינו בעל התהליך דוחה בקשת אינדוקס גם כשהחלון ראשי', (
+    tester,
+  ) async {
+    ProcessDuties.debugOverride = ProcessDuties(isProcessOwner: () => false);
+    addTearDown(() => ProcessDuties.debugOverride = null);
+    expect(WindowRole.isSecondary, isFalse);
     final accepted = await sendIndexRequest(
       tester,
       MultiWindowService.indexOpAll,

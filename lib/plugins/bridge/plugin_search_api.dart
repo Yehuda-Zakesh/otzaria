@@ -308,8 +308,7 @@ class PluginSearchApi {
   }
 
   /// ממיר תוצאת מנוע ל-JSON של ה-SDK. [book] הוא הספר שזוהה לפי
-  /// `filePath` של האינדקס — הוא שמאפשר להחזיר `id`/`source`, מה ש-
-  /// `search.fullText` הישן לא ידע לעשות.
+  /// `filePath` של האינדקס, וממנו נלקחים `id`/`source`.
   /// [textRestricted] — ספר עם הגבלת מו"ל: הטקסט מושמט והשורה מסומנת.
   /// [vocalizedSearch] — חיפוש מנוקד: הטקסט נמסר עם הניקוד, כמו שהמנוע מחזיר.
   static Map<String, dynamic> resultToJson(

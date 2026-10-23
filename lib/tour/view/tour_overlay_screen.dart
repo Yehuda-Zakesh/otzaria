@@ -15,6 +15,7 @@ import 'package:otzaria/tour/models/tour_step.dart';
 import 'package:otzaria/tour/widgets/live_tip_card.dart';
 import 'package:otzaria/tour/widgets/spotlight_overlay.dart';
 import 'package:otzaria/tour/widgets/tour_tooltip_card.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 
 const Duration tourCardSwitchDuration = Duration(milliseconds: 260);
 const int _targetMonitorMaxFramesAfterMove = 45;
@@ -105,7 +106,7 @@ class _TourOverlayScreenState extends State<TourOverlayScreen> {
         event.logicalKey != LogicalKeyboardKey.numpadEnter) {
       return false;
     }
-    if (!mounted) return false;
+    if (!mounted || !AppWindowKeys.isActiveWindow(context)) return false;
     final state = context.read<TourCubit>().state;
     final step = state.currentStep;
     if (!state.isActive || step == null || state.hasActiveLiveTip) {

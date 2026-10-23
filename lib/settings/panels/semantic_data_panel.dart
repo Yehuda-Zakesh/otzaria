@@ -116,13 +116,12 @@ class _SemanticDataCard extends StatelessWidget {
                 args: _nameArgs(context),
               ),
               actions: [
-                if (!availability.isSecondaryWindow)
-                  ActionButton.neutral(
-                    key: const ValueKey('semantic-data-remove'),
-                    text: context.settingsText('מחק'),
-                    isLoading: state.isRemoving,
-                    onPressed: () => _confirmRemoval(context, bloc),
-                  ),
+                ActionButton.neutral(
+                  key: const ValueKey('semantic-data-remove'),
+                  text: context.settingsText('מחק'),
+                  isLoading: state.isRemoving,
+                  onPressed: () => _confirmRemoval(context, bloc),
+                ),
               ],
             ),
           ],
@@ -142,13 +141,6 @@ class _SemanticDataCard extends StatelessWidget {
         'כדי להשתמש ב{name} יש להפעיל את "שיפור המנגנון"',
         args: _nameArgs(context),
       ),
-      _
-          when availability.isSecondaryWindow &&
-              availability.phase != SemanticAvailabilityPhase.ready =>
-        context.settingsText(
-          SemanticSearchMessages.secondaryWindow,
-          args: _nameArgs(context),
-        ),
       SemanticAvailabilityPhase.needsDownload when availability.pausedByUser =>
         context.settingsText('ההורדה הושהתה. אפשר להמשיך אותה מאותה נקודה.'),
       SemanticAvailabilityPhase.needsDownload
@@ -190,7 +182,6 @@ class _SemanticDataCard extends StatelessWidget {
     SemanticSearchBloc bloc,
     SemanticAvailability availability,
   ) {
-    if (availability.isSecondaryWindow) return const [];
     return switch (availability.phase) {
       SemanticAvailabilityPhase.needsDownload => [
         ActionButton.recommended(

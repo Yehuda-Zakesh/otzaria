@@ -23,6 +23,7 @@ void main() {
   setUpAll(() async {
     await Settings.init(cacheProvider: MemoryCacheProvider());
     registerFallbackValue(const UpdateFontSize(0));
+    registerFallbackValue(const UpdateTextMaxWidth(0));
   });
 
   late MockSettingsBloc settingsBloc;
@@ -116,5 +117,67 @@ void main() {
     await tester.pump();
 
     expect(sentFontSizes(), [tester.widget<Slider>(fontSizeSlider).value]);
+  });
+
+  group('סליידר רוחב הטקסט', () {
+    final widthSlider = find.byWidgetPredicate(
+      (widget) => widget is Slider && widget.min == 0 && widget.max == 14,
+    );
+
+    Future<TestGesture> dragWidth(WidgetTester tester) async {
+      final gesture = await tester.startGesture(tester.getCenter(widthSlider));
+      for (var i = 0; i < 6; i++) {
+        await gesture.moveBy(const Offset(60, 0));
+        await tester.pump();
+      }
+      return gesture;
+    }
+
+    List<double> sentWidths() => verify(
+      () => settingsBloc.add(captureAny(that: isA<UpdateTextMaxWidth>())),
+    ).captured.cast<UpdateTextMaxWidth>().map((e) => e.textMaxWidth).toList();
+
+    testWidgets('במסך ההגדרות המלא הגרירה מחילה את הרוחב פעם אחת, בסוף', (
+      tester,
+    ) async {
+      await pumpTab(tester, isDialog: false);
+
+      final gesture = await dragWidth(tester);
+      verifyNever(
+        () => settingsBloc.add(any(that: isA<UpdateTextMaxWidth>())),
+      );
+      final shownLevel = tester.widget<Slider>(widthSlider).value;
+      expect(shownLevel, greaterThan(1));
+
+      await gesture.up();
+      await tester.pump();
+
+      expect(sentWidths(), [-shownLevel]);
+    });
+
+    testWidgets('בחלונית שמעל הספר הגרירה מחילה את הרוחב בכל צעד', (
+      tester,
+    ) async {
+      await pumpTab(tester, isDialog: true);
+
+      final gesture = await dragWidth(tester);
+      await gesture.up();
+      await tester.pump();
+
+      expect(sentWidths().length, greaterThan(1));
+    });
+
+    testWidgets('במסך ההגדרות המלא לחיצה בודדת מחילה את הרוחב', (
+      tester,
+    ) async {
+      await pumpTab(tester, isDialog: false);
+
+      await tester.tapAt(tester.getCenter(widthSlider) + const Offset(100, 0));
+      await tester.pump();
+
+      final sent = sentWidths();
+      expect(sent, hasLength(1));
+      expect(sent.single, lessThan(0));
+    });
   });
 }

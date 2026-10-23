@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/plugins/services/plugin_page_launcher.dart';
 
@@ -42,7 +43,8 @@ class PluginNewTabPageRegistry extends ChangeNotifier {
   String? get activePluginId => _activePluginId;
 
   /// Opens the registered plugin page. With no registration the button is hidden.
-  Future<void> open() async {
+  Future<void> open({AppWindowKeys? windowKeys, int? viewId}) async {
+    final owner = windowKeys ?? AppWindowKeys.current;
     if (activePluginId == null) return;
     final pluginId = await (repositoryForTesting ?? _repository)
         .getNewTabPageOwner();
@@ -56,6 +58,8 @@ class PluginNewTabPageRegistry extends ChangeNotifier {
       pluginId,
       topic: 'plugin.page_opened',
       payload: const {'source': 'newTabButton'},
+      windowKeys: owner,
+      viewId: viewId,
     );
   }
 }

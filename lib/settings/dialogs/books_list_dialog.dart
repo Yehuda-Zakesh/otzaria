@@ -133,13 +133,18 @@ class _BooksListDialogState extends State<_BooksListDialog> {
               : Scrollbar(
                   controller: _scrollController,
                   thumbVisibility: true,
-                  child: ListView.separated(
+                  child: ListView.builder(
                     controller: _scrollController,
-                    itemCount: _visibleRows.length,
-                    separatorBuilder: (_, _) => Divider(
-                      height: 1,
-                      color: cs.surfaceContainerHighest,
+                    // גובה שורה קבוע: קפיצת פס הגלילה לא בונה את כל השורות בדרך
+                    prototypeItem: _BookListRow(
+                      row: _BookRow(
+                        title: ' ',
+                        author: ' ',
+                        category: '',
+                        fileType: '',
+                      ),
                     ),
+                    itemCount: _visibleRows.length,
                     itemBuilder: (_, i) => _BookListRow(
                       row: _visibleRows[i],
                     ),
@@ -183,23 +188,37 @@ class _BookListRow extends StatelessWidget {
       if (row.fileType.isNotEmpty) row.fileType,
     ].join(' · ');
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            row.title,
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          if (detailsLine.isNotEmpty) ...[
+    // שורה אחת לכל שדה, גם כשאין פרטים: הגובה חייב להיות זהה לתבנית.
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: cs.surfaceContainerHighest)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Tooltip(
+              message: row.title,
+              child: Text(
+                row.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
             const SizedBox(height: 2),
-            Text(
-              detailsLine,
-              style: subtitleStyle,
+            Tooltip(
+              message: detailsLine,
+              child: Text(
+                detailsLine,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: subtitleStyle,
+              ),
             ),
           ],
-        ],
+        ),
       ),
     );
   }

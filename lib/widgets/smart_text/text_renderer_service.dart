@@ -1,6 +1,7 @@
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
+import 'package:otzaria/core/diagnostics/smart_text_render_stats.dart';
 import 'package:otzaria/divine_names/utils/divine_name_markers.dart';
 import 'package:otzaria/text_book/utils/inline_notes_utils.dart' as notes;
 import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
@@ -36,10 +37,13 @@ class TextRendererService {
     final cached = _renderCache.remove(key);
     if (cached != null) {
       _renderCache[key] = cached;
+      SmartTextRenderStats.processTextHit();
       return cached;
     }
 
+    final start = SmartTextRenderStats.startMicros();
     final result = _processTextUncached(rawText, settings);
+    SmartTextRenderStats.processTextMiss(start);
 
     _renderCache[key] = result;
     _renderCacheChars += rawText.length + result.length;

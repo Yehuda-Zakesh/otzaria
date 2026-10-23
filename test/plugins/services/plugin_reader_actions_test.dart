@@ -184,16 +184,21 @@ void main() {
     });
   });
 
-  // ההוספה למנוע הדקלרטיבי בלי חיווט ב-main.dart נכשלת בשקט
+  // ההוספה למנוע הדקלרטיבי בלי חיווט בספקי החלון נכשלת בשקט
   // ב-declarative.service_unavailable, ולכן החיווט עצמו נשמר בבדיקה.
-  group('חיווט המנוע הדקלרטיבי ב-main.dart', () {
+  group('חיווט המנוע הדקלרטיבי בספקי החלון', () {
     test(
       'readerScroller ו-searchOpener מועברים ל-DeclarativePluginHostService',
       () {
-        final source = File('lib/main.dart').readAsStringSync();
+        final source = File(
+          'lib/app_scope/window_scope_providers.dart',
+        ).readAsStringSync();
         final start = source.indexOf('DeclarativePluginHostService(');
         expect(start, greaterThan(-1));
-        final block = source.substring(start, start + 1200);
+        final block = source.substring(
+          start,
+          (start + 1200).clamp(0, source.length),
+        );
         expect(block, contains('readerScroller:'));
         expect(block, contains('searchOpener:'));
         expect(block, contains('PluginDeclarativeReaderScroller'));

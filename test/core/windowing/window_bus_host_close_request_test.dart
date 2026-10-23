@@ -393,6 +393,8 @@ class _RecordingWindow implements AppWindowController, AppWindowGeometry {
   @override
   Future<bool> isFullScreen() async => false;
   @override
+  Listenable get stateChanges => Listenable.merge(const []);
+  @override
   Future<bool> isMaximized() async => false;
   @override
   Future<bool> isMinimized() async => false;

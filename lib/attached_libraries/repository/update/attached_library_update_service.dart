@@ -5,7 +5,7 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart'
-    show ValueListenable, ValueNotifier, debugPrint;
+    show ValueListenable, ValueNotifier, debugPrint, visibleForTesting;
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/attached_libraries/models/attached_library.dart';
 import 'package:otzaria/attached_libraries/models/attached_library_update_source.dart';
@@ -22,6 +22,8 @@ import 'package:otzaria/attached_libraries/repository/update/attached_update_hos
 import 'package:otzaria/attached_libraries/repository/update/attached_update_signature.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/update_check_frequency.dart';
+import 'package:otzaria/empty_library/services/library_space_estimate.dart'
+    show isSameVolume;
 import 'package:otzaria/migration/database/journal_mode.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/utils/file/disk_free_space.dart';
@@ -60,6 +62,7 @@ class AttachedLibraryUpdateService {
     bool Function()? areUpdatesEnabled,
     bool Function()? isAutoCheckDue,
     Future<void> Function()? recordCheck,
+    bool? isAndroid,
   }) : _repositoryOverride = repository,
        _fetcher = fetcher ?? AttachedUpdateFetcher(),
        _probe = probe ?? AttachedLibraryProbe.probe,
@@ -68,7 +71,8 @@ class AttachedLibraryUpdateService {
        _isOfflineMode = isOfflineMode ?? _readOfflineMode,
        _areUpdatesEnabled = areUpdatesEnabled ?? _readUpdatesEnabled,
        _isAutoCheckDue = isAutoCheckDue ?? _readAutoCheckDue,
-       _recordCheck = recordCheck ?? _writeLastCheck;
+       _recordCheck = recordCheck ?? _writeLastCheck,
+       _isAndroid = isAndroid ?? Platform.isAndroid;
 
   static AttachedLibraryUpdateService instance = AttachedLibraryUpdateService();
 
@@ -84,6 +88,7 @@ class AttachedLibraryUpdateService {
   final bool Function() _areUpdatesEnabled;
   final bool Function() _isAutoCheckDue;
   final Future<void> Function() _recordCheck;
+  final bool _isAndroid;
 
   /// Free-space headroom kept on each volume beyond the artifact itself.
   static const spaceMargin = 32 * 1024 * 1024;
@@ -251,7 +256,7 @@ class AttachedLibraryUpdateService {
         installedDbVersion: installed,
       );
       combined = await _combinedPathFor(library, manifest, plan);
-      await _ensureSpace(plan.artifact, staged: staged, combined: combined);
+      await ensureSpace(plan.artifact, staged: staged, combined: combined);
       try {
         await downloader.download(
           plan.artifact,
@@ -275,7 +280,7 @@ class AttachedLibraryUpdateService {
         await _deleteQuietly(combined);
         final fallback = AttachedUpdatePlan(manifest.full);
         combined = await _combinedPathFor(library, manifest, fallback);
-        await _ensureSpace(manifest.full, staged: staged, combined: combined);
+        await ensureSpace(manifest.full, staged: staged, combined: combined);
         await downloader.download(
           manifest.full,
           combinedPath: combined,
@@ -466,7 +471,8 @@ class AttachedLibraryUpdateService {
     await file.delete();
   }
 
-  Future<void> _ensureSpace(
+  @visibleForTesting
+  Future<void> ensureSpace(
     AttachedUpdateArtifact artifact, {
     required String staged,
     required String combined,
@@ -483,8 +489,13 @@ class AttachedLibraryUpdateService {
     final workInfo = await _diskSpace(p.dirname(combined));
     final sameVolume =
         uncompressed ||
-        (targetInfo.volumeId != null &&
-            targetInfo.volumeId == workInfo.volumeId);
+        isSameVolume(
+          p.dirname(staged),
+          targetInfo,
+          p.dirname(combined),
+          workInfo,
+          isAndroid: _isAndroid,
+        );
     final needs = <(DiskSpaceInfo, int)>[
       if (sameVolume)
         (targetInfo, (uncompressed ? download : artifact.size + download))

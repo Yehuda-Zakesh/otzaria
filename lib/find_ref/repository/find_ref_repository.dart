@@ -1454,7 +1454,7 @@ class FindRefRepository {
     await _addSecondaryBookResults(results, search);
 
     final unique = _dedupeRefs(results, queryTokens: queryTokens);
-    final pruned = _suppressDeeperVariants(unique);
+    final pruned = suppressDeeperVariants(unique);
     final ranked = _rankResults(
       pruned,
       queryTokens,
@@ -1908,34 +1908,40 @@ class FindRefRepository {
   /// משפיעים אחד על השני. רמת ה-TOC המוחלטת לא רלוונטית כי מבני AltToc
   /// מתחילים ב-DB מ-level 0 בעוד TOC רגיל מ-1 — מה שחשוב הוא היחס prefix
   /// בלבד (כולל רווח בסוף, להבטיח גבול מילה שלמה).
-  List<DbReferenceResult> _suppressDeeperVariants(
+  @visibleForTesting
+  static List<DbReferenceResult> suppressDeeperVariants(
     List<DbReferenceResult> entries,
   ) {
     if (entries.length < 2) return entries;
 
-    // reference → האם כל הערכים שלו התאמות חלקיות; אב חלקי אינו מסתיר צאצא מלא.
-    final referencesByGroup =
-        <(int, BookSource, bool, bool), Map<String, bool>>{};
+    final referencesByGroup = <(int, BookSource, bool, bool), _VariantGroup>{};
     for (final e in entries) {
-      final refs =
-          referencesByGroup[(e.bookId, e.source, e.isAltToc, e.isPdf)] ??= {};
+      final group =
+          referencesByGroup[(e.bookId, e.source, e.isAltToc, e.isPdf)] ??=
+              _VariantGroup();
+      final refs = group.references;
       refs[e.reference] = (refs[e.reference] ?? true) && e.isPartialTocMatch;
+      if (e.reference.length < group.shortest) {
+        group.shortest = e.reference.length;
+      }
     }
     return entries.where((entry) {
       // שורת מקור היא התוצאה הספציפית ביותר — לעולם אינה "וריאנט עמוק" של
       // כותרת. בלי הסייג, תוצאת ספר ("תוספות על ברכות") בלעה את הדיבור שתחתיה.
       if (entry.isSourceLine) return true;
-      final siblings =
+      final group =
           referencesByGroup[(
             entry.bookId,
             entry.source,
             entry.isAltToc,
             entry.isPdf,
           )]!;
+      final siblings = group.references;
       // אב = reference אחר שהוא תחילית עד גבול רווח ("פרק א" לא חוסם "פרק אבות").
+      // תחילית קצרה מהכתובת הקצרה בקבוצה אינה יכולה להיות אב.
       final reference = entry.reference;
       for (
-        var i = reference.indexOf(' ');
+        var i = reference.indexOf(' ', group.shortest);
         i >= 0;
         i = reference.indexOf(' ', i + 1)
       ) {
@@ -3280,6 +3286,13 @@ class FindRefRepository {
 }
 
 typedef _ExactLine = ({int lineIndex, int lineId, String? heRef});
+
+/// כתובות קבוצה אחת ב-[FindRefRepository.suppressDeeperVariants]: האם כל
+/// ערכי הכתובת התאמות חלקיות (אב חלקי אינו מסתיר צאצא מלא), ואורך הקצרה.
+class _VariantGroup {
+  final references = <String, bool>{};
+  int shortest = 1 << 30;
+}
 
 /// גרסת התוכן של user_books.db: חיבור ה-worker, data_version שלו וחתימת התוכן.
 typedef _UserBooksVersion = ({

@@ -24,6 +24,14 @@ abstract class PluginMessages {
   static const String textReaderSettings = 'הגדרות קורא התוסף';
   static const String externalBookNotFound = 'הספר לא נמצא בקטלוג החיצוני';
 
+  // ===== התאוששות מנפילת תהליך =====
+  static String pluginRecoveredAfterCrash(
+    String name, {
+    required bool hadUnsavedChanges,
+  }) => hadUnsavedChanges
+      ? 'התוסף "$name" הפסיק לפעול ונטען מחדש. שינויים שלא נשמרו בו אבדו.'
+      : 'התוסף "$name" הפסיק לפעול ונטען מחדש.';
+
   // ===== התקנה והסרה =====
   static const String pluginInstalledSuccess = 'התוסף הותקן בהצלחה';
   static String safeModeChoiceSaved({required bool enabled}) => enabled

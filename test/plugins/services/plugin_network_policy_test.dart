@@ -220,6 +220,10 @@ void main() {
       );
       expect(_allowed(rules, 'http://127.0.0.1:53111/w/token'), isTrue);
       expect(
+        _allowed(rules, 'http://127.0.0.1:53111/fonts/token/b-x.ttf'),
+        isTrue,
+      );
+      expect(
         _allowed(rules, 'http://127.0.0.1:53111/f/other.plugin/abc'),
         isFalse,
       );

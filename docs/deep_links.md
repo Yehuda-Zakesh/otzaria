@@ -438,12 +438,12 @@ System.Diagnostics.Process.Start(new ProcessStartInfo {
 2. מוסיף אותם לקובץ `%APPDATA%\otzaria\pending_external_activations.jsonl` כשורות JSONL.
 3. יוצא מיד עם `EXIT_SUCCESS`.
 
-המופע הראשון מאזין לשינויים בקובץ דרך [`ExternalActivationQueue`](../lib/core/external_activation_queue.dart) ב־[`main_window_screen.dart`](../lib/navigation/view/main_window_screen.dart):
+המופע הראשון מאזין לשינויים בקובץ דרך [`ExternalActivationQueue`](../lib/core/external_activation_queue.dart) ב־[`ExternalActivationService`](../lib/app_scope/external_activation_service.dart), שחי ברמת התהליך ומוסר את הקישור לחלון שנרשם אליו:
 
 ```dart
-_externalActivationWatchSub = queueFile.parent.watch().listen((event) {
+_watchSub = _watchDirectory(queueFile.parent).listen((event) {
   if (normalizedPath != normalizedQueuePath) return;
-  unawaited(_processPendingExternalActivations());
+  unawaited(processPending());
 });
 ```
 
@@ -494,7 +494,7 @@ _externalActivationWatchSub = queueFile.parent.watch().listen((event) {
    - **`OpenBookAction`** — `await DataRepository.instance.library`, מחפש לפי `b.id`. אם נמצא — `openBook(context, book, index ?? 0, searchQuery ?? '', markSection: markSection, markText: markText)`. אם לא — `UiSnack.showError`.
    - **`RunSearchAction`** — יוצר `SearchingTab` חדש עם הקוורי, מוסיף ל‑`HistoryBloc` ול‑`TabsBloc`, ומנווט ל‑`Screen.search`. ה‑`UpdateSearchQuery` מופעל אוטומטית מ‑`TantivyFullTextSearch.initState` ברגע שהלשונית מוצגת.
    - **`OpenAppReportAction`** — `showAppReportDialog`, נדחה לפוסט‑פריים מאותה סיבה כמו `ShowInfoAction`. כל עוד טופס פתוח, קישור נוסף מתעלם.
-   - **`ShowInfoAction`** — `AppInfoService.collect` ואז `showAppInfoDialog`. אין ניווט ואין שינוי מצב. הדיאלוג נדחה לפוסט‑פריים ואינו מומתן, משתי סיבות: המתנה לסגירתו הייתה חוסמת את `_processPendingExternalActivations` (שמתנקז רק בעקבות אירוע קובץ, כך ש‑URI שנכנס בזמן שהפופאפ פתוח לא היה מטופל), וה‑`Navigator.pop` של דיאלוג איתור מקורות היה סוגר את הפופאפ הזה במקום את עצמו.
+   - **`ShowInfoAction`** — `AppInfoService.collect` ואז `showAppInfoDialog`. אין ניווט ואין שינוי מצב. הדיאלוג נדחה לפוסט‑פריים ואינו מומתן, משתי סיבות: המתנה לסגירתו הייתה חוסמת את `ExternalActivationService.processPending` (שמתנקז רק בעקבות אירוע קובץ, כך ש‑URI שנכנס בזמן שהפופאפ פתוח לא היה מטופל), וה‑`Navigator.pop` של דיאלוג איתור מקורות היה סוגר את הפופאפ הזה במקום את עצמו.
    - **`InstallPluginAction`** — `InstallRemotePluginRequested` ל‑PluginSystemBloc (ללא ניווט).
    - **`InstallLocalPluginAction`** — `InstallPluginRequested(archivePath)` ל‑PluginSystemBloc. הדיאלוג נפתח אוטומטית דרך `BlocListener` כשמתקבל `PluginSystemInstallRequiresPermissions`.
 

@@ -129,6 +129,26 @@ void main() {
   tearDown(TargetLineLinksService.resetInstanceForTesting);
   tearDown(LibraryProviderManager.instance.resetForTesting);
 
+  testWidgets('כשל בטעינת הערות הספר — הציטוטים אינם מוצבים והכשל מדווח', (
+    tester,
+  ) async {
+    BookNotesRepository.instance.debugLoader =
+        (title, {categoryId, required source}) async =>
+            throw StateError('גוף שאינו מתפענח');
+    await _pumpPanel(
+      tester,
+      loaded: [_anchored(index1: 3, charStart: 2, charEnd: 6)],
+    );
+
+    expect(tester.takeException(), isA<StateError>());
+    expect(_renderedHtml(tester), isNot(contains('link-anchor-range')));
+    final state = tester.state(find.byType(PanelAnchoredText));
+    expect(
+      (state as PanelAnchorLinksMixin).targetNotesError,
+      isA<StateError>(),
+    );
+  });
+
   testWidgets('ציטוט בשורה המוצגת נעטף כקישור לחיץ', (tester) async {
     await _pumpPanel(
       tester,

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
@@ -21,7 +22,10 @@ void main() {
     repository = IndexingRepository(provider);
   });
 
-  tearDown(() => WindowRole.isSecondary = false);
+  tearDown(() {
+    WindowRole.isSecondary = false;
+    ProcessDuties.debugOverride = null;
+  });
 
   group('חלון משני', () {
     setUp(() => WindowRole.isSecondary = true);
@@ -43,6 +47,26 @@ void main() {
         Library(categories: []),
       );
       expect(removed, 0);
+    });
+  });
+
+  // ההחלטה היא של ProcessDuties: הוא גובר על תפקיד החלון בשני הכיוונים.
+  group('בעלות לפי ProcessDuties', () {
+    test('לא-בעלים מסרב גם כשהחלון ראשי', () async {
+      ProcessDuties.debugOverride = ProcessDuties(isProcessOwner: () => false);
+      expect(await repository.clearIndex(), isFalse);
+      expect(
+        await repository.dropBookIndexEntries([TextBook(title: 'ספר')]),
+        isFalse,
+      );
+      expect(provider.clearCount, 0);
+    });
+
+    test('בעלים מוחק גם כשהחלון משני', () async {
+      WindowRole.isSecondary = true;
+      ProcessDuties.debugOverride = ProcessDuties(isProcessOwner: () => true);
+      expect(await repository.clearIndex(), isTrue);
+      expect(provider.clearCount, 1);
     });
   });
 

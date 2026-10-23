@@ -354,11 +354,13 @@ class _PersonalNoteContentViewState extends State<PersonalNoteContentView> {
 class PersonalNotesListView extends StatelessWidget {
   final List<PersonalNote> notes;
   final double maxHeight;
+  final void Function(String url)? onLinkTap;
 
   const PersonalNotesListView({
     super.key,
     required this.notes,
     this.maxHeight = 400,
+    this.onLinkTap,
   });
 
   @override
@@ -372,7 +374,7 @@ class PersonalNotesListView extends StatelessWidget {
           children: [
             for (var i = 0; i < notes.length; i++) ...[
               if (i > 0) const Divider(height: 24),
-              PersonalNoteContentView(note: notes[i]),
+              PersonalNoteContentView(note: notes[i], onLinkTap: onLinkTap),
             ],
           ],
         ),

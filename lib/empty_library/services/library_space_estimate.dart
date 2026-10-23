@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:otzaria/data/constants/database_constants.dart';
+import 'package:otzaria/utils/file/disk_free_space.dart';
 import 'package:otzaria/utils/text/byte_size_text.dart';
 import 'package:path/path.dart' as p;
 
@@ -265,4 +266,17 @@ String? comparableVolumeId(
 }) {
   if (volumeId == null || !isAndroid) return volumeId;
   return _androidInternalPath.hasMatch(path) ? 'android-internal' : volumeId;
+}
+
+/// האם [a] ו-[b] על אותו כונן, לפי [comparableVolumeId].
+bool isSameVolume(
+  String a,
+  DiskSpaceInfo aInfo,
+  String b,
+  DiskSpaceInfo bInfo, {
+  required bool isAndroid,
+}) {
+  final aId = comparableVolumeId(a, aInfo.volumeId, isAndroid: isAndroid);
+  return aId != null &&
+      aId == comparableVolumeId(b, bInfo.volumeId, isAndroid: isAndroid);
 }

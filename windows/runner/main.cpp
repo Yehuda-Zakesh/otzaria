@@ -20,6 +20,8 @@
 
 static const wchar_t* kSingleInstanceMutexName = L"OtzariaAppSingleInstance";
 static const wchar_t* kFlutterWindowClassName = L"FLUTTER_RUNNER_WIN32_WINDOW";
+// חלון Dart של המנוע (ריבוי תצוגות, OTZARIA_MULTIVIEW). בלי הדגל אין כזה.
+static const wchar_t* kDartHostWindowClassName = L"FLUTTER_HOST_WINDOW";
 static const wchar_t* kMainWindowTitle = L"אוצריא";
 
 // מאפיין חלון שמסמן את החלון **הראשי**, לזיהוי מתהליך אחר.
@@ -116,7 +118,13 @@ BOOL CALLBACK FindMainWindowProc(HWND hwnd, LPARAM param) {
   wchar_t class_name[64] = {0};
   ::GetClassNameW(hwnd, class_name,
                   sizeof(class_name) / sizeof(class_name[0]));
-  if (::wcscmp(class_name, kFlutterWindowClassName) != 0) return TRUE;
+  const bool is_runner_window =
+      ::wcscmp(class_name, kFlutterWindowClassName) == 0;
+  // חלון Dart גלוי הוא יעד כשהראשי מוסתר; הראשי הגלוי עדיין מועדף.
+  if (!is_runner_window &&
+      ::wcscmp(class_name, kDartHostWindowClassName) != 0) {
+    return TRUE;
+  }
   auto* search = reinterpret_cast<MainWindowSearch*>(param);
   if (!SameDataRoot(DataRootOfWindowProcess(hwnd), search->data_root)) {
     return TRUE;
@@ -134,7 +142,7 @@ BOOL CALLBACK FindMainWindowProc(HWND hwnd, LPARAM param) {
     }
     return TRUE;
   }
-  if (search->any == nullptr &&
+  if (is_runner_window && search->any == nullptr &&
       ::GetPropW(hwnd, kMainWindowPropName) != nullptr) {
     search->any = hwnd;
   }
@@ -277,9 +285,9 @@ static std::wstring SingleInstanceMutexName() {
 
 // Appends a URI string to the external-activation queue file so the already-
 // running instance can pick it up.
-static void EnqueueUri(const std::string& uri_utf8) {
+static bool EnqueueUri(const std::string& uri_utf8) {
   const std::wstring dir = DataRootPath();
-  if (dir.empty()) return;
+  if (dir.empty()) return false;
   std::wstring queue_path =
       dir + L"\\pending_external_activations.jsonl";
 
@@ -305,10 +313,12 @@ static void EnqueueUri(const std::string& uri_utf8) {
   if (fh != INVALID_HANDLE_VALUE) {
     std::string line = record + "\n";
     DWORD written = 0;
-    WriteFile(fh, line.c_str(), static_cast<DWORD>(line.size()), &written,
-              nullptr);
+    const bool queued = WriteFile(fh, line.c_str(), static_cast<DWORD>(line.size()),
+                                  &written, nullptr) && written == line.size();
     CloseHandle(fh);
+    return queued;
   }
+  return false;
 }
 
 // Restores a minimized window and brings it to the foreground.
@@ -374,19 +384,27 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
       (mutex != nullptr && GetLastError() == ERROR_ALREADY_EXISTS);
 
   if (is_second_instance) {
+    const HWND running_window = FindRunningMainWindow();
+    DWORD running_pid = 0;
+    if (running_window && GetWindowThreadProcessId(running_window, &running_pid)) {
+      // המופע הקיים יעלה את יעד הקישור בלי להחליף קודם את החלון הפעיל.
+      AllowSetForegroundWindow(running_pid);
+    }
     // Enqueue any otzaria:// URIs (and .otzplugin file paths) passed on the
     // command line so the first instance can handle them via its file-watcher,
     // then exit immediately.
+    bool queued_uri = false;
     for (const auto& arg : early_args) {
       if (arg.size() >= 8 &&
           _strnicmp(arg.c_str(), "otzaria:", 8) == 0) {
-        EnqueueUri(arg);
+        queued_uri |= EnqueueUri(arg);
       } else if (EndsWithIgnoreCase(arg, ".otzplugin")) {
-        EnqueueUri("otzaria://plugin/install-local?path=" +
-                   UrlEncodeQueryComponent(arg));
+        queued_uri |= EnqueueUri("otzaria://plugin/install-local?path=" +
+                                 UrlEncodeQueryComponent(arg));
       }
     }
-    BringWindowToFront(FindRunningMainWindow());
+    // המנתב מעלה את חלון היעד; העלאת הראשי כאן דורסת את החלון הפעיל האחרון.
+    if (!queued_uri) BringWindowToFront(running_window);
     CloseHandle(mutex);
     return EXIT_SUCCESS;
   }

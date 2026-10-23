@@ -51,6 +51,12 @@ class StartIndexing extends RunIndexing {
   const StartIndexing(super.library, {super.onSettled});
 }
 
+/// מחיקת האינדקס ואחריה אינדוקס מלא, באותו תור סדרתי — כדי שהאינדוקס
+/// לא ירוץ לפני שהמחיקה הסתיימה.
+class ResetAndIndex extends RunIndexing {
+  const ResetAndIndex(super.library);
+}
+
 /// מעדכן במנוע את סדר הקטלוג והדורות של העץ המלא, בלי פליטת מצב.
 class SyncBookOrder extends IndexingWorkEvent {
   final Library library;
@@ -135,7 +141,7 @@ class PauseIndexing extends IndexingEvent {}
 
 class ResumeIndexing extends IndexingEvent {}
 
-/// הפעלה/כיבוי של מצב אינדוקס חסכוני — תקציב writer מוקטן במנוע.
+/// הפעלה/כיבוי של מצב אינדוקס חסכוני — הכנת ספרים ו-writer בתקציבים חסכוניים.
 class SetEconomyIndexing extends IndexingEvent {
   final bool enabled;
 

@@ -85,6 +85,24 @@ class _HiddenBooksListDialogState extends State<_HiddenBooksListDialog> {
         ),
     ];
 
+    Widget row(({String label, IconData icon, VoidCallback remove}) entry) =>
+        ListTile(
+          shape: Border(bottom: BorderSide(color: cs.surfaceContainerHighest)),
+          leading: Icon(entry.icon, size: 20),
+          title: Tooltip(
+            message: entry.label,
+            child: Text(
+              entry.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          trailing: ActionButton.ghost(
+            text: context.settingsText('בטל הסתרה'),
+            onPressed: entry.remove,
+          ),
+        );
+
     return ListDialogFrame(
       icon: FluentIcons.eye_off_24_regular,
       title: context.settingsText('בחירות הסתרה ישירות'),
@@ -112,24 +130,18 @@ class _HiddenBooksListDialogState extends State<_HiddenBooksListDialog> {
                     style: TextStyle(color: cs.onSurfaceVariant),
                   ),
                 )
-              : ListView.separated(
+              : ListView.builder(
                   shrinkWrap: true,
-                  itemCount: entries.length,
-                  separatorBuilder: (_, _) => Divider(
-                    height: 1,
-                    color: cs.surfaceContainerHighest,
+                  // גובה שורה קבוע: קפיצת פס הגלילה לא בונה את כל השורות בדרך
+                  prototypeItem: row(
+                    (
+                      label: '',
+                      icon: FluentIcons.folder_24_regular,
+                      remove: () {},
+                    ),
                   ),
-                  itemBuilder: (_, i) {
-                    final entry = entries[i];
-                    return ListTile(
-                      leading: Icon(entry.icon, size: 20),
-                      title: Text(entry.label),
-                      trailing: ActionButton.ghost(
-                        text: context.settingsText('בטל הסתרה'),
-                        onPressed: entry.remove,
-                      ),
-                    );
-                  },
+                  itemCount: entries.length,
+                  itemBuilder: (_, i) => row(entries[i]),
                 ),
         ),
         const SizedBox(height: 12),

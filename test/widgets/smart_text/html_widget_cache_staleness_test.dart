@@ -33,27 +33,36 @@ TextSpan _spanWithText(WidgetTester tester, String text) {
 }
 
 void main() {
-  testWidgets('החלפת נושא בלי שינוי html צובעת מחדש את סמן-המספר', (
-    tester,
-  ) async {
-    const red = Color(0xFFCC0000);
-    const blue = Color(0xFF0000CC);
-    Widget build(Color primary) => _app(
-      primary: primary,
-      child: const SmartTextWidget(
-        text: _markerHtml,
-        settings: RenderSettings(fontSize: 20),
-      ),
+  for (final viaHtml in [true, false]) {
+    testWidgets(
+      'החלפת נושא בלי שינוי html צובעת מחדש את סמן-המספר'
+      '${viaHtml ? '' : ' (מסלול הספאנים)'}',
+      (tester) async {
+        SmartTextWidget.debugForceHtmlWidget = viaHtml;
+        addTearDown(() => SmartTextWidget.debugForceHtmlWidget = false);
+        const red = Color(0xFFCC0000);
+        const blue = Color(0xFF0000CC);
+        Widget build(Color primary) => _app(
+          primary: primary,
+          child: const SmartTextWidget(
+            text: _markerHtml,
+            settings: RenderSettings(fontSize: 20),
+          ),
+        );
+
+        await tester.pumpWidget(build(red));
+        expect(
+          find.byType(HtmlWidget),
+          viaHtml ? findsOneWidget : findsNothing,
+        );
+        expect(_spanWithText(tester, '(9)').style?.color, red);
+
+        await tester.pumpWidget(build(blue));
+        await tester.pumpAndSettle();
+        expect(_spanWithText(tester, '(9)').style?.color, blue);
+      },
     );
-
-    await tester.pumpWidget(build(red));
-    expect(find.byType(HtmlWidget), findsOneWidget);
-    expect(_spanWithText(tester, '(9)').style?.color, red);
-
-    await tester.pumpWidget(build(blue));
-    await tester.pumpAndSettle();
-    expect(_spanWithText(tester, '(9)').style?.color, blue);
-  });
+  }
 
   testWidgets('החלפת onNoteTap בלי שינוי html מפעילה את ה-callback החדש', (
     tester,

@@ -583,77 +583,8 @@ class PersonalNotesSidebarState extends State<PersonalNotesSidebar>
     );
   }
 
-  Future<void> _handleNoteLinkTap(BuildContext context, String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-    if (uri.scheme == 'http' || uri.scheme == 'https') {
-      final launched = await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication,
-      );
-      if (!launched) UiSnack.showError(NotesMessages.cannotOpenLink(url));
-      return;
-    }
-    if (uri.scheme != 'otzaria' && uri.scheme != 'zayit') {
-      UiSnack.show(NotesMessages.externalLink(url));
-      return;
-    }
-
-    switch (uri.scheme == 'otzaria' ? uri.host : '') {
-      case 'book':
-        final bookId = uri.queryParameters['bookId'] ?? '';
-        final line = int.tryParse(uri.queryParameters['line'] ?? '');
-        if (line == null) return;
-        if (bookId.isEmpty || bookId == widget.bookId) {
-          widget.onNavigateToLine(line);
-          return;
-        }
-        UiSnack.show(NotesMessages.linkToAnotherBook(bookId));
-        return;
-      case 'note':
-        final noteId = uri.queryParameters['id'];
-        if (noteId == null) return;
-        final state = context.read<PersonalNotesBloc>().state;
-        final allNotes = [...state.locatedNotes, ...state.missingNotes];
-        PersonalNote? note;
-        for (final candidate in allNotes) {
-          if (candidate.id == noteId) {
-            note = candidate;
-            break;
-          }
-        }
-        if (note == null) return;
-        if (note.lineNumber != null) {
-          widget.onNavigateToLine(note.lineNumber!, note: note);
-          return;
-        }
-        await showDialog<void>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('הערה מקושרת'),
-            content: PersonalNoteContentView(note: note!),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('סגור'),
-              ),
-            ],
-          ),
-        );
-        return;
-      default:
-        // קישור עמוק (otzaria://open/... או zayit://) — מנותב למסך הראשי.
-        final handled =
-            await AppWindowKeys.of(
-              context,
-            ).mainWindowScreen.currentState?.handleInternalDeepLink(
-              url,
-            ) ??
-            false;
-        if (!handled) UiSnack.showError(NotesMessages.unsupportedLink(url));
-        return;
-    }
-  }
+  Future<void> _handleNoteLinkTap(BuildContext context, String url) =>
+      openNoteLink(context, url, widget.bookId, widget.onNavigateToLine);
 
   Future<void> _confirmDelete(BuildContext context, PersonalNote note) async {
     final bloc = context.read<PersonalNotesBloc>();
@@ -758,5 +689,83 @@ class PersonalNotesSidebarState extends State<PersonalNotesSidebar>
     if (newLine != null) {
       _reanchorToSelectedLineWith(bloc, note, newLine);
     }
+  }
+}
+
+/// פותח קישור מהערה אישית של [currentBookId]: פנימי באפליקציה, אינטרנט בדפדפן.
+Future<void> openNoteLink(
+  BuildContext context,
+  String url,
+  String currentBookId,
+  void Function(int lineNumber, {PersonalNote? note}) onNavigateToLine,
+) async {
+  final uri = Uri.tryParse(url);
+  if (uri == null) return;
+  if (uri.scheme == 'http' || uri.scheme == 'https') {
+    final launched = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!launched) UiSnack.showError(NotesMessages.cannotOpenLink(url));
+    return;
+  }
+  if (uri.scheme != 'otzaria' && uri.scheme != 'zayit') {
+    UiSnack.show(NotesMessages.externalLink(url));
+    return;
+  }
+
+  switch (uri.scheme == 'otzaria' ? uri.host : '') {
+    case 'book':
+      final bookId = uri.queryParameters['bookId'] ?? '';
+      final line = int.tryParse(uri.queryParameters['line'] ?? '');
+      if (line == null) return;
+      if (bookId.isEmpty || bookId == currentBookId) {
+        onNavigateToLine(line);
+        return;
+      }
+      UiSnack.show(NotesMessages.linkToAnotherBook(bookId));
+      return;
+    case 'note':
+      final noteId = uri.queryParameters['id'];
+      if (noteId == null) return;
+      final state = context.read<PersonalNotesBloc>().state;
+      final allNotes = [...state.locatedNotes, ...state.missingNotes];
+      PersonalNote? note;
+      for (final candidate in allNotes) {
+        if (candidate.id == noteId) {
+          note = candidate;
+          break;
+        }
+      }
+      if (note == null) return;
+      if (note.lineNumber != null) {
+        onNavigateToLine(note.lineNumber!, note: note);
+        return;
+      }
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('הערה מקושרת'),
+          content: PersonalNoteContentView(note: note!),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('סגור'),
+            ),
+          ],
+        ),
+      );
+      return;
+    default:
+      // קישור עמוק (otzaria://open/... או zayit://) — מנותב למסך הראשי.
+      final handled =
+          await AppWindowKeys.of(
+            context,
+          ).mainWindowScreen.currentState?.handleInternalDeepLink(
+            url,
+          ) ??
+          false;
+      if (!handled) UiSnack.showError(NotesMessages.unsupportedLink(url));
+      return;
   }
 }

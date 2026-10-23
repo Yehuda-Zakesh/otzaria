@@ -23,6 +23,7 @@ import 'package:otzaria/tabs/tabs_repository.dart';
 import 'package:otzaria/tour/bloc/tour_cubit.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdfrx/pdfrx.dart';
+import '../test_helpers/pdf_document_dispose.dart';
 
 import '../helpers/memory_settings_cache.dart';
 
@@ -118,6 +119,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(bloc.state, isA<PdfBookLoaded>());
+    final document = tab.pdfViewerController.document;
     await settle(tester, rounds: 30);
 
     bloc.add(const ToggleRightPane(show: true));
@@ -146,7 +148,7 @@ void main() {
     expect(panel(tester), isNot(same(hidden)));
 
     await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump(const Duration(milliseconds: 200));
+    await disposePdfDocument(tester, document);
   });
 }
 

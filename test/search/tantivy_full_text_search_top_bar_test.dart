@@ -160,6 +160,23 @@ Future<void> main() async {
     return searchBloc;
   }
 
+  testWidgets('ספירה שטרם הושלמה אינה מציגה אפס כספירה סופית', (
+    tester,
+  ) async {
+    await pumpSearch(
+      tester,
+      width: 1400,
+      externalProvider: false,
+      state: const SearchState(
+        searchQuery: 'בדיקה',
+        isLoading: true,
+        isCounting: true,
+      ),
+    );
+    expect(find.text('0 תוצאות (הספירה מתעדכנת)'), findsOneWidget);
+    expect(find.text('0/0 תוצאות'), findsNothing);
+  });
+
   testWidgets('פעימות מונים במסך האמיתי אינן בונות שוב את עץ הסינון', (
     tester,
   ) async {

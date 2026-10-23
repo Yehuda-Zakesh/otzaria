@@ -17,7 +17,18 @@ abstract class OpenedTab {
   String title;
   bool isPinned;
   final String? dedupeKey;
+
+  /// מזהה רשומת ההיסטוריה שהטאב מעדכן, כדי ששני טאבים של אותו ספר יישמרו
+  /// כשני מקומות. null = הרשומה היחידה של הספר (כמו ברשומות ישנות).
+  String? historySlot;
+
   OpenedTab(this.title, {this.isPinned = false, this.dedupeKey});
+
+  static int _historySlotCounter = 0;
+
+  static String newHistorySlot() =>
+      '${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}'
+      '-${(_historySlotCounter++).toRadixString(36)}';
 
   /// Called when the tab is being disposed.
   /// Override this method to perform cleanup.
@@ -27,6 +38,18 @@ abstract class OpenedTab {
   OpenedTab clone();
 
   factory OpenedTab.from(OpenedTab tab) => tab.clone();
+
+  /// מטען להעברה עם בעלות נפרדת על מצב התוספים, גם בחלוניות מפוצלות.
+  Map<String, dynamic> toTransferJson() {
+    Map<String, dynamic> detach(Map<String, dynamic> json) => {
+      for (final entry in json.entries)
+        entry.key: entry.value is Map<String, dynamic>
+            ? detach(entry.value as Map<String, dynamic>)
+            : entry.value,
+      if (json['type'] == 'ToolTab') 'instanceId': ToolTab.newInstanceId(),
+    };
+    return detach(toJson());
+  }
 
   factory OpenedTab.fromBook(
     Book book,
@@ -94,18 +117,7 @@ abstract class OpenedTab {
     throw UnsupportedError("Unsupported book type: ${book.runtimeType}");
   }
 
-  /// המפענח **היחיד** של טאב שמור.
-  ///
-  /// ⚠️ קודם לכן הוא הכיר חמישה טיפוסים בלבד, ושלושה קוראים עקפו אותו עם
-  /// מפענחים מקבילים משלהם (`TabsRepository`, `Workspace.fromJson`,
-  /// `decodeCombinedTab`). התוצאה: כרטיסיית מפרשים לא הייתה ניתנת להעברה
-  /// בין חלונות — `canTransfer` חסם אותה — בעוד אותה כרטיסיה בדיוק כן
-  /// נטענה מהדיסק, כי המסלול הזה עבר במפענח אחר. שכפול של טבלת טיפוסים
-  /// מתיישן בכיוונים שונים, וזו בדיוק הדרך שבה זה קרה.
-  ///
-  /// טיפוס לא מוכר זורק ולא נופל בשקט ל-[SearchingTab]: נפילה כזו יצרה טאב
-  /// רפאים בשם הכלי/הספר בכל ירידת גרסה, וההצפה נשמרה חזרה לדיסק. הקוראים
-  /// (`TabsRepository.loadTabs`, `Workspace.fromJson`) מדלגים על טאב שנכשל.
+  /// מפענח טאב שמור; טיפוס לא מוכר זורק כדי שלא יישמר במקומו טאב שגוי.
   factory OpenedTab.fromJson(Map<String, dynamic> json) {
     String type = json['type'];
     if (type == 'TextBookTab') {

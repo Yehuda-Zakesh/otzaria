@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/rendering.dart';
+import 'package:otzaria/widgets/smart_text/long_line_chunks.dart';
 
 /// המיקום של הטקסט המסומן בשורה מסוימת ביחס לטקסט המלא של הפסקה.
 ///
@@ -59,7 +60,7 @@ int? renderedSelectionStartAtPosition({
   if (paragraph == null) return null;
   final paragraphText = _paragraphText(paragraph, lineRange);
   if (paragraphText == null) return null;
-  final (:text, :base) = paragraphText;
+  final (:text, :base, length: _) = paragraphText;
   final occurrences = <int>[];
   for (var from = 0; ;) {
     final found = text.indexOf(selectedSegment, from);
@@ -97,7 +98,7 @@ int? renderedTextOffsetAtPosition({
       .offset;
   final paragraphText = _paragraphText(paragraph, lineRange);
   if (paragraphText == null) return null;
-  final (:text, :base) = paragraphText;
+  final (:text, :base, length: _) = paragraphText;
   return (offset - base).clamp(0, text.length).toInt();
 }
 
@@ -131,7 +132,7 @@ bool? clickIsOnRenderedSelection({
 
   final paragraphText = _paragraphText(paragraph, lineRange);
   if (paragraphText == null) return null;
-  final (text: pText, :base) = paragraphText;
+  final (text: pText, base: _, length: _) = paragraphText;
   if (pText.isEmpty) return null;
 
   final int selStart;
@@ -176,8 +177,11 @@ bool? clickIsOnRenderedSelection({
   }
   if (selStart >= selEnd) return null;
 
+  final selection = _selectionInParagraph(paragraphText, selStart, selEnd);
+  // במקטע של שורה ארוכה הבחירה יכולה להיות כולה במקטע אחר.
+  if (selection.isCollapsed) return false;
   final boxes = paragraph.getBoxesForSelection(
-    TextSelection(baseOffset: base + selStart, extentOffset: base + selEnd),
+    selection,
     boxHeightStyle: ui.BoxHeightStyle.includeLineSpacingMiddle,
   );
   if (boxes.isEmpty) return null;
@@ -254,7 +258,7 @@ bool? clickIsOnTextOccurrence({
 
   final paragraphText = _paragraphText(paragraph, lineRange);
   if (paragraphText == null) return null;
-  final (text: pText, :base) = paragraphText;
+  final (text: pText, base: _, length: _) = paragraphText;
   if (pText.isEmpty) return null;
 
   final starts = <int>[];
@@ -277,10 +281,7 @@ bool? clickIsOnTextOccurrence({
   final local = paragraph.globalToLocal(globalPosition);
   for (final start in candidates) {
     final boxes = paragraph.getBoxesForSelection(
-      TextSelection(
-        baseOffset: base + start,
-        extentOffset: base + start + text.length,
-      ),
+      _selectionInParagraph(paragraphText, start, start + text.length),
       boxHeightStyle: ui.BoxHeightStyle.includeLineSpacingMiddle,
     );
     for (final box in boxes) {
@@ -329,20 +330,43 @@ int _overlapLen(String a, String b, {required bool suffixOfFirst}) {
   return 0;
 }
 
-/// טקסט הפסקה, או רק השורה [lineRange] שבתוכה, עם אופסט תחילתה בפסקה.
-/// null כש-[lineRange] אינו תואם לטקסט — אופסטים מהפסקה כולה היו שגויים.
-({String text, int base})? _paragraphText(
+/// טקסט הפסקה או השורה [lineRange] שבה (null כשאינו תואם), ואופסט תחילתו.
+/// במקטע של שורה ארוכה — השורה כולה, ו-base הוא מינוס תחילת המקטע.
+({String text, int base, int length})? _paragraphText(
   RenderParagraph paragraph,
   TextRange? lineRange,
 ) {
   final text = paragraph.text.toPlainText(includeSemanticsLabels: false);
-  if (lineRange == null) return (text: text, base: 0);
+  if (lineRange == null) {
+    final chunk = longLineChunkOf(paragraph);
+    if (chunk != null) {
+      return (text: chunk.lineText, base: -chunk.start, length: text.length);
+    }
+    return (text: text, base: 0, length: text.length);
+  }
   if (!lineRange.isValid ||
       !lineRange.isNormalized ||
       lineRange.end > text.length) {
     return null;
   }
-  return (text: lineRange.textInside(text), base: lineRange.start);
+  return (
+    text: lineRange.textInside(text),
+    base: lineRange.start,
+    length: text.length,
+  );
+}
+
+/// הטווח [start, end) של [paragraphText] באופסטים של הפסקה, חתוך לגבולותיה.
+TextSelection _selectionInParagraph(
+  ({String text, int base, int length}) paragraphText,
+  int start,
+  int end,
+) {
+  final (text: _, :base, :length) = paragraphText;
+  return TextSelection(
+    baseOffset: (base + start).clamp(0, length).toInt(),
+    extentOffset: (base + end).clamp(0, length).toInt(),
+  );
 }
 
 /// מאתר את ה-RenderParagraph העמוק ביותר בתת-העץ של [root] שתיבתו מכילה את

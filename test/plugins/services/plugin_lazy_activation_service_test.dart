@@ -400,6 +400,34 @@ void main() {
     expect(activations, ['p1', 'p1']);
   });
 
+  test(
+    'work from a crashed background page cannot finish its replacement job',
+    () {
+      service.syncPlugin(
+        'p1',
+        broadcastTopics: const {},
+        scheduleStartup: false,
+      );
+      final oldGeneration = service.activationGeneration('p1');
+      service.trackIdleTeardown('p1', generation: oldGeneration);
+      service.beginWork('p1');
+
+      service.onBackgroundProcessGone('p1', generation: oldGeneration);
+      expect(service.isBusy('p1'), isTrue);
+      final newGeneration = service.activationGeneration('p1');
+      expect(newGeneration, oldGeneration + 1);
+      service.trackIdleTeardown('p1', generation: newGeneration);
+      service.beginWork('p1');
+
+      service.onBackgroundInstanceClosed('p1', generation: oldGeneration);
+      service.endWork('p1');
+      expect(service.isBusy('p1'), isTrue);
+      service.endWork('p1');
+      expect(service.isBusy('p1'), isFalse);
+      service.removePlugin('p1');
+    },
+  );
+
   group('תנאי when על נושאי הפעלה', () {
     PluginWhenCondition darkModeIs(bool value) => PluginWhenCondition.fromJson({
       'setting': {'key': SettingsRepository.keyDarkMode, 'equals': value},
@@ -560,5 +588,74 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(activations, ['p1']);
     });
+  });
+
+  void crashLoop(int times) {
+    for (var i = 0; i < times; i++) {
+      service.queueTargetedEvent('p1', 'click', {});
+      service.onBackgroundProcessGone('p1');
+    }
+  }
+
+  test('שלוש נפילות תהליך בעשר דקות — התוסף לא מוער עוד', () {
+    service.syncPlugin('p1', broadcastTopics: const {}, scheduleStartup: false);
+    crashLoop(2);
+    expect(service.isFailureBlocked('p1'), isFalse);
+    crashLoop(1);
+
+    expect(service.isFailureBlocked('p1'), isTrue);
+    expect(service.queueTargetedEvent('p1', 'click', {}), isFalse);
+    expect(activations, hasLength(3));
+  });
+
+  test('כשל boot רגיל אינו נספר כנפילה', () {
+    service.syncPlugin('p1', broadcastTopics: const {}, scheduleStartup: false);
+    for (var i = 0; i < 5; i++) {
+      service.queueTargetedEvent('p1', 'click', {});
+      service.onBackgroundInstanceFailed('p1');
+    }
+    expect(service.isFailureBlocked('p1'), isFalse);
+  });
+
+  test('נפילות מפוזרות מעבר לחלון אינן חוסמות', () {
+    var now = DateTime(2026, 10, 21, 12);
+    service.clock = () => now;
+    service.syncPlugin('p1', broadcastTopics: const {}, scheduleStartup: false);
+    for (var i = 0; i < 4; i++) {
+      crashLoop(1);
+      now = now.add(const Duration(minutes: 6));
+    }
+    expect(service.isFailureBlocked('p1'), isFalse);
+  });
+
+  test('הסרה או השבתה מאפסות את החסימה', () {
+    service.syncPlugin('p1', broadcastTopics: const {}, scheduleStartup: false);
+    crashLoop(3);
+    service.removePlugin('p1');
+    expect(service.isFailureBlocked('p1'), isFalse);
+  });
+
+  test('גרסה חדשה מאפסת את החסימה, וסנכרון חוזר באותה גרסה לא', () {
+    service.syncPlugin(
+      'p1',
+      broadcastTopics: const {},
+      scheduleStartup: false,
+      version: '1.0.0',
+    );
+    crashLoop(3);
+    service.syncPlugin(
+      'p1',
+      broadcastTopics: const {},
+      scheduleStartup: false,
+      version: '1.0.0',
+    );
+    expect(service.isFailureBlocked('p1'), isTrue);
+    service.syncPlugin(
+      'p1',
+      broadcastTopics: const {},
+      scheduleStartup: false,
+      version: '1.0.1',
+    );
+    expect(service.isFailureBlocked('p1'), isFalse);
   });
 }

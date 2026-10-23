@@ -10,6 +10,7 @@ import 'package:otzaria/book_common/utils/link_anchor_variants.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/text_book/view/widgets/continuous_reading_paragraph.dart';
 import 'package:otzaria/theme/app_fonts.dart';
+import 'package:otzaria/widgets/smart_text/inline_html_document.dart';
 import 'package:otzaria/widgets/smart_text/raised_markers.dart';
 import 'package:otzaria/widgets/smart_text/render_settings.dart';
 import 'package:otzaria/widgets/smart_text/simple_inline_html.dart';
@@ -347,13 +348,13 @@ void main() {
       'בכותרת הציור בגודל ובמשקל של הגליף שבשורה, ולא של טקסט הגוף (issue #2075)',
       (tester) async {
         for (final tag in ['h1', 'h2', 'h3', 'h4']) {
-          // ציון מפרש עובר ב-HtmlWidget, sup מורם במסלול המהיר.
-          for (final (raw, viaHtml) in [
-            (_inject('<$tag>פרק ראשון בענין</$tag>', [_point('מפרש', 5)]), 1),
-            ('<$tag>פרק ראשון<sup>ב</sup> בענין</$tag>', 0),
+          // ציון מפרש ו-sup מורם — שניהם במסלול הספאנים.
+          for (final raw in [
+            _inject('<$tag>פרק ראשון בענין</$tag>', [_point('מפרש', 5)]),
+            '<$tag>פרק ראשון<sup>ב</sup> בענין</$tag>',
           ]) {
             await _pumpSmart(tester, raw);
-            expect(find.byType(HtmlWidget), findsNWidgets(viaHtml));
+            expect(find.byType(HtmlWidget), findsNothing);
             final placement = _placements(tester).single;
             expect(
               placement.paintRect.height,
@@ -667,14 +668,27 @@ void main() {
     );
 
     test(
-      'שורה עם ציון לעולם אינה עוברת במסלול המהיר — שם הגליף לא היה שקוף (issue #2075)',
+      'במסלול הספאנים גליף הציון שבשורה שקוף — הציור המורם נושא אותו (issue #2075)',
       () {
         for (final lineIndex in [null, 0]) {
           final processed = TextRendererService.processText(
             _inject(line, [_point('מפרש', 7)], lineIndex: lineIndex),
             _settings,
           );
-          expect(SimpleInlineHtml.tryParse(processed, _base), isNull);
+          final document = InlineHtmlDocument.parseLine(
+            processed,
+            _base,
+          )!.document;
+          final anchorSize = _base.fontSize! * kLinkAnchorMarkerScale;
+          final anchorRuns = document.runs.where(
+            (run) => (run.style?.fontSize ?? 0) == anchorSize,
+          );
+          expect(anchorRuns, isNotEmpty, reason: processed);
+          for (final run in anchorRuns) {
+            expect(run.style!.color, const Color(0x00000000));
+            expect(run.style!.decorationColor, const Color(0x00000000));
+            expect(run.colorRole, isNull);
+          }
         }
       },
     );

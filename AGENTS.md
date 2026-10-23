@@ -249,8 +249,9 @@ under the crash-report setting (`lib/app_report/services/app_hang_report.dart`).
 ## Developer diagnostics (measuring the real app)
 
 To compare performance before and after a change, run the real app with developer diagnostics
-instead of guessing from code. It records frame timings, memory, slow frames with app context,
-the startup timeline and, in debug builds, rebuild counts per widget type.
+instead of guessing from code. It records frame timings, memory (the app and, on Windows, every
+WebView2 process by kind), slow frames with app context, the startup timeline and, in debug builds,
+rebuild counts per widget type.
 
 **Enable it** with Ctrl+Shift+I in the running app (for this run only), or at launch:
 
@@ -268,9 +269,14 @@ OTZARIA_DEV_DIAGNOSTICS=log flutter run -d windows --profile          # env var 
 | `session` | collection starts | version, buildMode, os, cores, pid, launchMode |
 | `startup` | once, after the window is revealed | revealMs, phases, marks |
 | `context` | the screen or current tab changed | screen, tabs, currentTab, currentTitle |
-| `stats` | every second with frames or rebuilds | fps, build/raster avg and max ms, slowInWindow, slowTotal, rssMb, peakRssMb, rebuilds (debug) |
+| `stats` | every second with frames, rebuilds, estimate refreshes or rendered lines, and every 5 s with a process sample | fps, build/raster avg and max ms, slowInWindow, slowTotal, rssMb, peakRssMb, rebuilds (debug), processes, estimates (reader lists' estimate refreshes in that second: count, totalMs when each list refreshed once, items, deferred, skipped; only when one of them is non-zero), smartText (SmartTextWidget lines per path, full-path reasons, processText cache, fwfh subtree build ms) |
 | `slow_frame` | a frame took 100 ms or more | buildMs, rasterMs, totalMs, context |
-| `snapshot` | the panel's camera button | stats + context + startup (also written to errors.txt) |
+| `snapshot` | the panel's camera button | stats + processes + context + startup (also written to errors.txt) |
+
+`processes` is private memory (commit charge) in MB: `hostPrivMb`, `webviewPrivMb`, and per kind
+`webview.<KIND>.count/privMb`, with `eachMb` and `pages` (the main frame of each renderer) for
+`RENDERER`. Kinds come from `WebViewEnvironment.getProcessInfos()`. It is sampled every 5 s, only
+after reveal, on Windows (Linux: WPE children via `/proc`); other platforms have no WebView pids.
 
 `t` is milliseconds since collection started. Use profile or release builds for timings; debug
 builds are several times slower but are the only ones with `rebuilds`, repaint rainbow and layout

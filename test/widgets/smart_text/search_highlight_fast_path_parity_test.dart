@@ -7,7 +7,7 @@ import 'package:otzaria/widgets/smart_text/render_settings.dart';
 import 'package:otzaria/widgets/smart_text/smart_text_widget.dart';
 
 // תגי הדגשת החיפוש של highLight מזוהים במסלול המהיר ומוצגים בדיוק כמו ב-HtmlWidget.
-// רווח לפני `>` זהה בפרסור HTML אך אינו מזוהה במסלול המהיר — כך נבנה הייחוס.
+// הייחוס הוא אותו HTML כשהוא מוצג בכפייה ב-HtmlWidget.
 const _needle = 'ברכה';
 const _opens = [
   '<span style="color: red">',
@@ -29,8 +29,12 @@ Future<_Rendered> _render(
   WidgetTester tester,
   String html, {
   required bool expectHtmlWidget,
+  bool forceHtmlWidget = false,
 }) async {
   final key = GlobalKey();
+  // הייחוס: אותו HTML מוצג ב-HtmlWidget.
+  SmartTextWidget.debugForceHtmlWidget = forceHtmlWidget;
+  addTearDown(() => SmartTextWidget.debugForceHtmlWidget = false);
   await tester.pumpWidget(
     MaterialApp(
       home: Directionality(
@@ -54,6 +58,7 @@ Future<_Rendered> _render(
     ),
   );
   await tester.pumpAndSettle();
+  SmartTextWidget.debugForceHtmlWidget = false;
   expect(
     find.byType(HtmlWidget),
     expectHtmlWidget ? findsOneWidget : findsNothing,
@@ -118,13 +123,13 @@ void main() {
 
   for (final open in _opens) {
     testWidgets('$open — זהה ל-HtmlWidget', (tester) async {
-      final reference = open.replaceFirst('">', '" >');
       for (final body in bodies) {
         final fast = await _render(tester, body(open), expectHtmlWidget: false);
         final html = await _render(
           tester,
-          body(reference),
+          body(open),
           expectHtmlWidget: true,
+          forceHtmlWidget: true,
         );
         final reason = body(open);
         expect(fast.root, html.root, reason: reason);
@@ -147,14 +152,31 @@ void main() {
     });
   }
 
-  testWidgets('הדגשה מקוננת או style אחר — נשארים ב-HtmlWidget', (
+  testWidgets('הדגשה מקוננת או style אחר — זהים ל-HtmlWidget', (
     tester,
   ) async {
     for (final html in [
       '${_opens[0]}א ${_opens[2]}$_needle</span></span>',
       '<span style="color: green">$_needle</span>',
     ]) {
-      await _render(tester, html, expectHtmlWidget: true);
+      final fast = await _render(tester, html, expectHtmlWidget: false);
+      final reference = await _render(
+        tester,
+        html,
+        expectHtmlWidget: true,
+        forceHtmlWidget: true,
+      );
+      expect(fast.boxes, reference.boxes, reason: html);
+      expect(
+        fast.style.color?.toARGB32(),
+        reference.style.color?.toARGB32(),
+        reason: html,
+      );
+      expect(
+        fast.style.background?.color.toARGB32(),
+        reference.style.background?.color.toARGB32(),
+        reason: html,
+      );
     }
   });
 }

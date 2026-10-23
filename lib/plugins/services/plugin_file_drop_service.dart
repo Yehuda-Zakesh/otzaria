@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_inappwebview_windows/flutter_inappwebview_windows.dart';
 
 /// גרירת קבצים מהמערכת מעל חלון האפליקציה.
@@ -23,10 +24,35 @@ class PluginFileDrag {
 /// flutter_inappwebview — לכן הגרירה מגיעה מ-[WindowsFileDropManager].
 /// למנהל הזה יש מאזין יחיד, ולכן השירות הוא המנוי היחיד שמפצל לאזורים.
 class PluginFileDropService {
-  PluginFileDropService({WindowsFileDropManager? manager})
+  PluginFileDropService({WindowsFileDropManager? manager, this.viewId})
     : _manager = manager ?? WindowsFileDropManager.instance;
 
+  /// השירות של התצוגה הראשית (ה-implicit view).
   static PluginFileDropService instance = PluginFileDropService();
+
+  static final Map<int, PluginFileDropService> _byView = {};
+
+  /// השירות של התצוגה [viewId]. לתצוגה הראשית — [instance], בלי מזהה בערוץ.
+  static PluginFileDropService forView(int? viewId) {
+    if (viewId == null ||
+        viewId == PlatformDispatcher.instance.implicitView?.viewId) {
+      return instance;
+    }
+    return _byView.putIfAbsent(
+      viewId,
+      () => PluginFileDropService(manager: instance._manager, viewId: viewId),
+    );
+  }
+
+  /// השירות של התצוגה שבה [context] יושב, ונרשמת תלות בה.
+  static PluginFileDropService of(BuildContext context) =>
+      forView(View.maybeOf(context)?.viewId);
+
+  @visibleForTesting
+  static void resetViewsForTesting() => _byView.clear();
+
+  /// התצוגה שהגרירות שלה נקלטות; `null` — התצוגה הראשית.
+  final int? viewId;
 
   final WindowsFileDropManager _manager;
 
@@ -55,6 +81,7 @@ class PluginFileDropService {
         onDrag: _handleDrag,
         onDrop: _handleDrop,
         onLeave: _handleLeave,
+        viewId: viewId,
       );
     } on MissingPluginException {
       // בנייה ללא הצד ה-native של הפורק — גרירה פשוט לא תעבוד.
@@ -66,9 +93,13 @@ class PluginFileDropService {
     _zones--;
     if (_zones != 0) return;
     drag.value = null;
+    // תצוגה שנסגרה לא תשאיר שירות; האזור הבא בה יקבל שירות חדש.
+    if (viewId != null && identical(_byView[viewId], this)) {
+      _byView.remove(viewId);
+    }
     if (!isSupported) return;
     try {
-      await _manager.stop();
+      await _manager.stop(viewId: viewId);
     } on MissingPluginException {
       // כנ"ל.
     }
@@ -118,4 +149,48 @@ class PluginFileDropService {
   void handleLeave() => _handleLeave();
 
   void _handleLeave() => drag.value = null;
+}
+
+/// מחבר אזור קליטה לשירות של התצוגה שבה הוא יושב, ומחליף שירות כשהאזור
+/// עובר לתצוגה אחרת.
+mixin PluginFileDropZoneBinding<T extends StatefulWidget> on State<T> {
+  PluginFileDropService? _dropService;
+  StreamSubscription<PluginFileDrag>? _dropSubscription;
+
+  PluginFileDropService get dropService => _dropService!;
+
+  /// נקרא בכל שינוי בגרירה הפעילה של התצוגה.
+  void onFileDragChanged();
+
+  /// נקרא בשחרור קבצים מעל התצוגה.
+  void onFileDropped(PluginFileDrag drop);
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final service = PluginFileDropService.of(context);
+    if (identical(service, _dropService)) return;
+    _detachDropService();
+    _dropService = service;
+    service.acquire();
+    service.drag.addListener(onFileDragChanged);
+    _dropSubscription = service.drops.listen(onFileDropped);
+  }
+
+  void _detachDropService() {
+    final service = _dropService;
+    if (service == null) return;
+    service.drag.removeListener(onFileDragChanged);
+    _dropSubscription?.cancel();
+    _dropSubscription = null;
+    service.setZoneAccepting(this, false);
+    service.release();
+    _dropService = null;
+  }
+
+  @override
+  void dispose() {
+    _detachDropService();
+    super.dispose();
+  }
 }

@@ -50,7 +50,7 @@ void main() {
     );
     await tester.pump();
 
-    // סליידר רוחב הטקסט הוא היחיד עם 14 רמות
+    // סליידר רוחב הטקסט הוא היחיד עם 14 רמות; במסך המלא הערך נשלח בסוף הגרירה
     final finder = find.byWidgetPredicate(
       (widget) => widget is Slider && widget.max == 14,
     );
@@ -60,14 +60,14 @@ void main() {
 
   testWidgets('הזזת הסליידר שולחת רמה שלילית, לא פיקסלים', (tester) async {
     final slider = await pumpAndFindWidthSlider(tester);
-    slider.onChanged!(4);
+    (slider.onChangeEnd ?? slider.onChanged)!(4);
 
     verify(() => settingsBloc.add(const UpdateTextMaxWidth(-4.0))).called(1);
   });
 
   testWidgets('רמה 0 (רוחב מלא) שולחת 0', (tester) async {
     final slider = await pumpAndFindWidthSlider(tester);
-    slider.onChanged!(0);
+    (slider.onChangeEnd ?? slider.onChanged)!(0);
 
     verify(() => settingsBloc.add(const UpdateTextMaxWidth(0))).called(1);
   });

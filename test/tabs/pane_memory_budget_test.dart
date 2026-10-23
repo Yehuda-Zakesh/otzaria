@@ -26,17 +26,18 @@ void main() {
       expect(pdfImageCacheBytesForPanes(2), kPdfImageCacheBudgetBytes ~/ 2);
     });
 
-    test('ארבע חלוניות אינן יורדות מתחת לרצפה', () {
-      final perPane = pdfImageCacheBytesForPanes(4);
-      expect(perPane, kPdfImageCacheMinBytesPerPane);
-      // גם בארבע חלוניות הסכום קטן משמעותית מארבעה תקציבים מלאים.
-      expect(perPane * 4, lessThan(kPdfImageCacheBudgetBytes * 4));
+    test('התקציב הכולל נשמר בכל מספר חלוניות נתמך', () {
+      for (var count = 1; count <= 8; count++) {
+        final perPane = pdfImageCacheBytesForPanes(count);
+        expect(perPane, greaterThan(0));
+        expect(perPane * count, lessThanOrEqualTo(kPdfImageCacheBudgetBytes));
+      }
     });
 
     test('מספר חלוניות חריג אינו מייצר ערך לא חוקי', () {
       for (final count in [0, -3, 1, 8, 64]) {
         final bytes = pdfImageCacheBytesForPanes(count);
-        expect(bytes, greaterThanOrEqualTo(kPdfImageCacheMinBytesPerPane));
+        expect(bytes, greaterThan(0));
         expect(bytes, lessThanOrEqualTo(kPdfImageCacheBudgetBytes));
       }
     });

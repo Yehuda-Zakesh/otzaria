@@ -11,6 +11,7 @@ import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/plugins/services/plugin_file_drop_service.dart';
 import 'package:otzaria/theme/theme_exports.dart';
 import 'package:otzaria_report_contract/otzaria_report_contract.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 
 /// אזור צירוף צילומי מסך לדיווח: הדבקה (מכל מקום בטופס), שחרור קובץ
 /// או לחיצה לבחירת קובץ, ומתחתיו התמונות שצורפו.
@@ -32,28 +33,21 @@ class AppReportImagesSection extends StatefulWidget {
   State<AppReportImagesSection> createState() => _AppReportImagesSectionState();
 }
 
-class _AppReportImagesSectionState extends State<AppReportImagesSection> {
+class _AppReportImagesSectionState extends State<AppReportImagesSection>
+    with PluginFileDropZoneBinding {
   final _dropAreaKey = GlobalKey();
-  PluginFileDropService get _dropService => PluginFileDropService.instance;
-  StreamSubscription<PluginFileDrag>? _dropSubscription;
+  PluginFileDropService get _dropService => dropService;
   bool _isHovering = false;
 
   @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_onKey);
-    _dropService.acquire();
-    _dropService.drag.addListener(_onDragChanged);
-    _dropSubscription = _dropService.drops.listen(_onDrop);
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onKey);
-    _dropService.drag.removeListener(_onDragChanged);
-    _dropSubscription?.cancel();
-    _dropService.setZoneAccepting(this, false);
-    _dropService.release();
     super.dispose();
   }
 
@@ -63,6 +57,7 @@ class _AppReportImagesSectionState extends State<AppReportImagesSection> {
     if (event is! KeyDownEvent || !widget.enabled) return false;
     if (!_isPasteShortcut(event)) return false;
     if (!(ModalRoute.of(context)?.isCurrent ?? false)) return false;
+    if (!AppWindowKeys.isActiveWindow(context)) return false;
     unawaited(_paste());
     return false;
   }
@@ -146,7 +141,8 @@ class _AppReportImagesSectionState extends State<AppReportImagesSection> {
     return box.size.contains(local);
   }
 
-  void _onDragChanged() {
+  @override
+  void onFileDragChanged() {
     final drag = _dropService.drag.value;
     final hovering =
         widget.enabled &&
@@ -157,7 +153,8 @@ class _AppReportImagesSectionState extends State<AppReportImagesSection> {
     if (hovering != _isHovering) setState(() => _isHovering = hovering);
   }
 
-  Future<void> _onDrop(PluginFileDrag drop) async {
+  @override
+  Future<void> onFileDropped(PluginFileDrag drop) async {
     if (_isHovering) setState(() => _isHovering = false);
     if (!widget.enabled || !_contains(drop.physicalPosition)) return;
     if (!_hasImagePath(drop.paths)) return;

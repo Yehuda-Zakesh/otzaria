@@ -1,3 +1,4 @@
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/data/book_identity.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
@@ -60,6 +61,8 @@ Future<void> Function(BuildContext) makeChangeLocationCallback({
   final canMoveContents =
       (onAfterMove != null || onMoveContents != null) && currentPath.isNotEmpty;
   return (ctx) async {
+    final window = AppWindowKeys.of(ctx);
+    final notificationOwner = Object();
     final result = await showChangeLocationDialog(
       context: ctx,
       currentPath: currentPath,
@@ -81,24 +84,32 @@ Future<void> Function(BuildContext) makeChangeLocationCallback({
       return;
     }
 
-    UiSnack.showChecking(SettingsMessages.movingFolderFiles(folderName));
+    UiSnack.showChecking(
+      SettingsMessages.movingFolderFiles(folderName),
+      owner: notificationOwner,
+      window: window,
+    );
     try {
       final deleteWarning = await moveDirectory(currentPath, result.newPath);
       await onAfterMove!(result.newPath);
-      UiSnack.hide();
+      UiSnack.hide(owner: notificationOwner);
       if (deleteWarning != null) {
         UiSnack.showWarning(
+          window: window,
           SettingsMessages.folderMovedSourceNotDeleted(
             folderName,
             deleteWarning,
           ),
         );
       } else {
-        UiSnack.show(SettingsMessages.folderMoved(folderName));
+        UiSnack.show(SettingsMessages.folderMoved(folderName), window: window);
       }
     } catch (e) {
-      UiSnack.hide();
-      UiSnack.showError(SettingsMessages.folderMoveError(folderName, e));
+      UiSnack.hide(owner: notificationOwner);
+      UiSnack.showError(
+        SettingsMessages.folderMoveError(folderName, e),
+        window: window,
+      );
     }
   };
 }

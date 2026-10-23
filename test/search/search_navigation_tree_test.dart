@@ -398,6 +398,36 @@ void main() {
       expect(facet, '/תנ"ך/id:1');
     });
 
+    testWidgets('הרשימה השמורה מתחלפת יחד עם הספרייה (perf)', (tester) async {
+      Library withTitles(String first, String second) => makeLibraryFrom([
+        makeCategory(
+          'תנ"ך',
+          books: [makeBook(1, first, '/תנ"ך'), makeBook(2, second, '/תנ"ך')],
+        ),
+      ]);
+      final before = withTitles('ויקרא', 'במדבר');
+      final after = withTitles('ויקרא רבה', 'ויקרא');
+
+      for (final (library, expected) in [
+        (before, ['ויקרא']),
+        (after, ['ויקרא רבה', 'ויקרא']),
+        (before, ['ויקרא']),
+      ]) {
+        await pumpTree(
+          tester,
+          library: library,
+          facetCounts: const {'/תנ"ך/id:1': 1, '/תנ"ך/id:2': 1},
+          filterQuery: 'ויקרא',
+        );
+        expect([
+          for (final tile in tester.widgetList<NavTreeTile>(
+            find.byType(NavTreeTile),
+          ))
+            tile.title,
+        ], expected);
+      }
+    });
+
     testWidgets('גרשיים בשאילתה מוצאים כותרת עם ״ (issue #2031)', (
       tester,
     ) async {

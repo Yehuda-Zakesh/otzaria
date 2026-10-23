@@ -140,7 +140,10 @@ List<AppContextMenuEntry> buildReaderDictionaryEntries({
 }) {
   final lookupText = (selectedText?.trim().isNotEmpty == true)
       ? selectedText
-      : wordAtGlobalPosition(tapPosition);
+      : wordAtGlobalPosition(
+          tapPosition,
+          view: context.findAncestorWidgetOfExactType<View>()?.view,
+        );
   final entries = buildDictionaryContextMenuEntries(
     context: context,
     selectedText: lookupText,

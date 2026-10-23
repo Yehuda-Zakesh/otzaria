@@ -156,8 +156,9 @@ Future<Bookmark?> bookmarkFromReadingTab(
 
 /// הטאב שפותח את [bookmark]. לסימניית מפרשים נבנה טאב מקור בלתי-תלוי
 /// ונגזר ממנו PdfCommentatorsTab/CommentatorsTab; אחרת — טאב הספר עצמו.
-OpenedTab tabFromBookmark(Bookmark bookmark) {
-  final openLeftPane = shouldAutoOpenReadingLeftPane();
+/// [screenWidth] — רוחב החלון הפותח (ראה [readingLayoutWidthOf]).
+OpenedTab tabFromBookmark(Bookmark bookmark, {double? screenWidth}) {
+  final openLeftPane = shouldAutoOpenReadingLeftPane(screenWidth: screenWidth);
   if (bookmark.targetKind == BookmarkTargetKind.commentators) {
     if (bookmark.book is PdfBook) {
       final sourceTab = PdfBookTab(
@@ -185,7 +186,7 @@ OpenedTab tabFromBookmark(Bookmark bookmark) {
     initialReadingAnchor: bookmark.readingAnchor,
     commentators: bookmark.commentatorsToShow,
     openLeftPane: openLeftPane,
-  );
+  )..historySlot = bookmark.historySlot;
 }
 
 /// מוצא את הכותרת המתאימה לעמוד מסוים ב-outline של PDF.

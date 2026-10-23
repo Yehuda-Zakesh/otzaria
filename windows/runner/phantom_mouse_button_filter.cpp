@@ -73,6 +73,11 @@ LRESULT CALLBACK FilterProc(HWND hwnd,
 }  // namespace
 
 void InstallPhantomMouseButtonFilter(HWND flutter_view) {
+  // התקנה שנייה הייתה מחליפה את המצב ומדליפה את הקודם.
+  DWORD_PTR existing = 0;
+  if (GetWindowSubclass(flutter_view, FilterProc, kSubclassId, &existing)) {
+    return;
+  }
   auto* pressed = new WPARAM(0);
   if (!SetWindowSubclass(flutter_view, FilterProc, kSubclassId,
                          reinterpret_cast<DWORD_PTR>(pressed))) {

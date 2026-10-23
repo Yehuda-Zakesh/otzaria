@@ -80,6 +80,36 @@ void main() {
       expect(result.plainText, "ויאמר ה'");
       expect(result.htmlText, "<b>ויאמר ה'</b>");
     });
+
+    test('בחירה רב-שורתית בלי HTML אינה מפוענחת כ-HTML', () {
+      CopyUtils.debugHtmlParseCount = 0;
+      final result = CopyUtils.applyCopyPreferencesForClipboard(
+        plainText: 'בְּרֵאשִׁ֖ית בָּרָ֣א\nוַיֹּ֥אמֶר יהוה',
+        htmlText: 'בְּרֵאשִׁ֖ית בָּרָ֣א\nוַיֹּ֥אמֶר יהוה',
+        replaceHolyNames: true,
+        removeNikud: true,
+      );
+
+      expect(result.plainText, 'בראשית ברא\nויאמר יקוק');
+      expect(result.htmlText, 'בראשית ברא\nויאמר יקוק');
+      expect(CopyUtils.debugHtmlParseCount, 0);
+    });
+
+    test('טקסט פשוט עם תווי HTML נשאר מקודד כבעבר', () {
+      for (final (input, html) in [
+        ('יהוה & משה\nאהרן', 'יקוק &amp; משה\nאהרן'),
+        ('יהוה > משה', 'יקוק &gt; משה'),
+        ('יהוה משה', 'יקוק&nbsp;משה'),
+        ('יהוה\r\nמשה', 'יקוק\nמשה'),
+      ]) {
+        final result = CopyUtils.applyCopyPreferencesForClipboard(
+          plainText: input,
+          htmlText: input,
+          replaceHolyNames: true,
+        );
+        expect(result.htmlText, html);
+      }
+    });
   });
 
   group('CopyUtils.buildClipboardItem', () {

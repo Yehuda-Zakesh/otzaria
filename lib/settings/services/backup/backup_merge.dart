@@ -273,11 +273,13 @@ class BackupMerge {
     return '${_bookIdentityOf(m)}|${m['index']}|${_targetKindOf(m)}';
   }
 
-  /// זהות רשומת היסטוריה: אחת לכל ספר וסוג יעד,
-  /// כך שמיזוג משמר את מיקום הקריאה האחרון פר-ספר ולא כל ביקור.
+  /// זהות רשומת היסטוריה: אחת לכל ספר, סוג יעד ו-`historySlot`,
+  /// כך שמיזוג משמר את מיקום הקריאה האחרון של כל מקום ולא כל ביקור.
   static String _historyKey(Map<String, dynamic> m) {
     if (m['isSearch'] == true) return 'search:${m['ref']}';
-    return '${_targetKindOf(m)}:${_bookIdentityOf(m)}';
+    final slot = m['historySlot'];
+    return '${_targetKindOf(m)}:${_bookIdentityOf(m)}'
+        '${slot is String ? '#$slot' : ''}';
   }
 
   /// מיזוג הערות: איחוד לפי `note.id`, ה-`updatedAt` המאוחר מנצח.

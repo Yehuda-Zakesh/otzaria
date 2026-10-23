@@ -58,8 +58,11 @@ class WindowPersistence {
 
   /// ה-DPR שאיתו window_manager ממיר לוגי→פיזי (window.devicePixelRatio);
   /// שימוש באותו מקור מבטיח שההמרות מתבטלות במדויק.
-  static double _currentDevicePixelRatio() {
-    final dpr = PlatformDispatcher.instance.implicitView?.devicePixelRatio;
+  static double _currentDevicePixelRatio() =>
+      _validDevicePixelRatio(PlatformDispatcher.instance.implicitView);
+
+  static double _validDevicePixelRatio(FlutterView? view) {
+    final dpr = view?.devicePixelRatio;
     return (dpr != null && dpr > 0) ? dpr : 1.0;
   }
 
@@ -106,14 +109,19 @@ class WindowPersistenceBinding {
     int? Function()? slot,
     this._sessions,
     double Function()? devicePixelRatio,
+    FlutterView? view,
   }) : _window = controller,
        _slot = slot ?? (() => UserStateSlot.current),
        _devicePixelRatio =
-           devicePixelRatio ?? WindowPersistence._currentDevicePixelRatio;
+           devicePixelRatio ??
+           (view == null
+               ? WindowPersistence._currentDevicePixelRatio
+               : () => WindowPersistence._validDevicePixelRatio(view));
 
   final int? Function() _slot;
 
-  /// ה-DPR של התצוגה שהחלון הזה מוצג בה; ברירת המחדל היא ה-implicit view.
+  /// ה-DPR של התצוגה שהחלון הזה מוצג בה ([view], נקרא בכל שימוש); ברירת
+  /// המחדל היא ה-implicit view.
   final double Function() _devicePixelRatio;
   final WindowSessionStore? _sessions;
 
@@ -391,6 +399,14 @@ class WindowPersistenceBinding {
         dpr: _devicePixelRatio(),
       );
     }
+    // החלון נסגר בזמן השמירה: הכתיבה הייתה יוצרת מחדש את הסשן שנמחק.
+    if (_slot() != slot) return;
     await store.saveBounds(slot, next.encode());
+  }
+
+  /// מבטל שמירה ממתינה; החלון כבר לא קיים.
+  void dispose() {
+    _debounce?.cancel();
+    _debounce = null;
   }
 }

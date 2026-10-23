@@ -373,7 +373,7 @@ class TextSettingsTab extends StatelessWidget {
           },
         ),
 
-        _TextWidthSlider(state: state),
+        _TextWidthSlider(state: state, applyWhileDragging: isDialog),
         SettingsActionTile.segmentedTile<bool>(
           icon: FluentIcons.text_align_justify_24_regular,
           title: context.settingsText('מצב קריאה בתנ"ך ובתלמוד'),
@@ -705,13 +705,38 @@ class _FontDropdown extends StatelessWidget {
 class _TextWidthSlider extends StatefulWidget {
   final SettingsState state;
 
-  const _TextWidthSlider({required this.state});
+  /// כמו ב-[_FontSizeSlider]: במסך המלא הערך מוחל רק בסוף הגרירה.
+  final bool applyWhileDragging;
+
+  const _TextWidthSlider({
+    required this.state,
+    required this.applyWhileDragging,
+  });
 
   @override
   State<_TextWidthSlider> createState() => _TextWidthSliderState();
 }
 
 class _TextWidthSliderState extends State<_TextWidthSlider> {
+  int? _draggedLevel;
+
+  @override
+  void didUpdateWidget(_TextWidthSlider oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state.textMaxWidth != widget.state.textMaxWidth) {
+      _draggedLevel = null;
+    }
+  }
+
+  void _apply(double value) {
+    // נשמר כרמה שלילית (-level) כדי שהאחוז יחושב מרוחב
+    // עמודת הטקסט בפועל, לא מרוחב המסך בזמן השמירה
+    final level = value.toInt();
+    context.read<SettingsBloc>().add(
+      UpdateTextMaxWidth(level == 0 ? 0 : -level.toDouble()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentMaxWidth = widget.state.textMaxWidth;
@@ -726,6 +751,7 @@ class _TextWidthSliderState extends State<_TextWidthSlider> {
       final ratio = currentMaxWidth / MediaQuery.of(context).size.width;
       currentLevel = ((1.0 - ratio) / 0.05).round().clamp(0, 14);
     }
+    currentLevel = _draggedLevel ?? currentLevel;
 
     String getLevelDescription(int level) {
       if (level == 0) return context.settingsText('מלא');
@@ -767,14 +793,10 @@ class _TextWidthSliderState extends State<_TextWidthSlider> {
             divisions: 14,
             label: getLevelDescription(currentLevel),
             onChanged: (value) {
-              setState(() {});
-              // נשמר כרמה שלילית (-level) כדי שהאחוז יחושב מרוחב
-              // עמודת הטקסט בפועל, לא מרוחב המסך בזמן השמירה
-              final level = value.toInt();
-              context.read<SettingsBloc>().add(
-                UpdateTextMaxWidth(level == 0 ? 0 : -level.toDouble()),
-              );
+              setState(() => _draggedLevel = value.toInt());
+              if (widget.applyWhileDragging) _apply(value);
             },
+            onChangeEnd: widget.applyWhileDragging ? null : _apply,
           ),
         ),
       ],

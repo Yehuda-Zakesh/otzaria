@@ -123,6 +123,9 @@ abstract class PluginItemRegistry<T extends PluginRegistryItem>
     if (items.length != before) notifyListeners();
   }
 
+  /// האם למופע [key] יש פריטים רשומים משלו.
+  bool hasInstance(PluginInstanceKey key) => items[key]?.isNotEmpty ?? false;
+
   /// מסיר רק את הרישומים של המופע [key] (סגירת טאב אחד של התוסף).
   void removeInstance(PluginInstanceKey key) {
     if (items.remove(key) != null) notifyListeners();

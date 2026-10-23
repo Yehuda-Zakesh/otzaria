@@ -113,8 +113,8 @@ void main() {
   });
 
   group('ReadingSettingsPanel — זיהוי מצב צורת הדף', () {
-    Widget buildBody({required bool pageShape}) {
-      final textBloc = _TestTextBookBloc(_loaded(showPageShapeView: pageShape));
+    Widget buildBody({required bool pageShape, _TestTextBookBloc? textBloc}) {
+      textBloc ??= _TestTextBookBloc(_loaded(showPageShapeView: pageShape));
       final tab = TextBookTab(
         book: TextBook(title: 'ספר בדיקה'),
         index: 0,
@@ -158,6 +158,43 @@ void main() {
       // גופן המפרשים עדיין רלוונטי בצורת הדף (מפרשים עליונים).
       expect(find.text('גופן מפרשים'), findsOneWidget);
     });
+
+    // הפאנל נשאר חי גם כשהוא סגור, וגלילה בקורא משדרת מצב בכל שורה.
+    testWidgets('גלילה בקורא אינה בונה מחדש את ההגדרות', (tester) async {
+      await setWideSurface(tester);
+      final textBloc = _TestTextBookBloc(_loaded(showPageShapeView: false));
+      await tester.pumpWidget(buildBody(pageShape: false, textBloc: textBloc));
+      await tester.pump();
+      final before = tester.widget(find.byType(TextSettingsTab));
+
+      for (var line = 1; line <= 5; line++) {
+        textBloc.push(
+          (textBloc.state as TextBookLoaded).copyWith(visibleIndices: [line]),
+        );
+        await tester.pump();
+      }
+
+      expect(
+        identical(tester.widget(find.byType(TextSettingsTab)), before),
+        isTrue,
+      );
+    });
+
+    testWidgets('מעבר לצורת הדף מסתיר את הסליידר', (tester) async {
+      await setWideSurface(tester);
+      final textBloc = _TestTextBookBloc(_loaded(showPageShapeView: false));
+      await tester.pumpWidget(buildBody(pageShape: false, textBloc: textBloc));
+      await tester.pump();
+      expect(find.text('גודל גופן מפרשים'), findsOneWidget);
+
+      textBloc.push(_loaded(showPageShapeView: true));
+      await tester.pumpAndSettle();
+      expect(find.text('גודל גופן מפרשים'), findsNothing);
+
+      textBloc.push(_loaded(showPageShapeView: false));
+      await tester.pumpAndSettle();
+      expect(find.text('גודל גופן מפרשים'), findsOneWidget);
+    });
   });
 }
 
@@ -199,6 +236,8 @@ class _TestTextBookBloc extends Bloc<TextBookEvent, TextBookState>
   _TestTextBookBloc(super.initialState) {
     on<TextBookEvent>((event, emit) {});
   }
+
+  void push(TextBookState state) => emit(state);
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

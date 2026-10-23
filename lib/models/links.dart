@@ -101,7 +101,8 @@ class Link {
   final int? end;
 
   /// עוגן-מילה בשורת המקור, בתווים *גלויים* (מוסכמת line.charCount) — אלא אם
-  /// [anchorOffsetsAreRaw]. null כשאין לקישור עוגן-מילה.
+  /// [anchorOffsetsAreRaw]. null כשאין לקישור עוגן-מילה. בשורה שיש לה `line_note`
+  /// נמדד על השורה המלאה, עם גופי ההערות (`projectAnchorSpans`).
   final int? anchorStart;
 
   /// סוף טווח העוגן (אקסקלוסיבי), באותה מוסכמה. null לעוגן-נקודה.

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
 import 'package:otzaria/plugins/models/plugin_context_menu_item.dart';
 import 'package:otzaria/plugins/services/context_menu_registry.dart';
@@ -73,6 +74,8 @@ List<AppContextMenuEntry> buildPluginContextMenuSection({
   PluginSelectionActionDispatcher? selectionActionDispatcher,
 }) {
   final entries = buildPluginContextMenuEntries(
+    viewId: View.of(menuContext).viewId,
+    windowKeys: AppWindowKeys.of(menuContext),
     records: records ?? ContextMenuRegistry.instance.getAll(),
     selection: selection,
     context: context,
@@ -90,6 +93,8 @@ List<AppContextMenuEntry> buildPluginContextMenuEntries({
   required Map<String, dynamic> selection,
   String context = 'reader-selection',
   PluginRuntimeDispatcher? dispatcher,
+  int? viewId,
+  AppWindowKeys? windowKeys,
   PluginSelectionActionDispatcher? selectionActionDispatcher,
   PluginSelectedTextResolver? resolveSelectedText,
 }) {
@@ -117,6 +122,8 @@ List<AppContextMenuEntry> buildPluginContextMenuEntries({
         selection: selection,
         context: context,
         dispatcher: runtime,
+        viewId: viewId,
+        windowKeys: windowKeys,
         selectionActionDispatcher: selectionActionDispatcher,
         resolveSelectedText: resolveSelectedText,
       );
@@ -138,6 +145,8 @@ AppContextMenuEntry _buildEntry({
   required Map<String, dynamic> selection,
   required String context,
   required PluginRuntimeDispatcher dispatcher,
+  int? viewId,
+  AppWindowKeys? windowKeys,
   PluginSelectionActionDispatcher? selectionActionDispatcher,
   PluginSelectedTextResolver? resolveSelectedText,
 }) {
@@ -173,7 +182,9 @@ AppContextMenuEntry _buildEntry({
                 'selection': selection,
               },
               preferBackground: true,
-              instanceId: _targetInstanceId(dispatcher, pluginId, item),
+              viewId: viewId,
+              windowKeys: windowKeys,
+              instanceId: _targetInstanceId(dispatcher, pluginId, item, viewId),
             ),
           ),
         ),
@@ -193,6 +204,8 @@ AppContextMenuEntry _buildEntry({
               selection: selection,
               context: context,
               dispatcher: dispatcher,
+              viewId: viewId,
+              windowKeys: windowKeys,
               selectionActionDispatcher: selectionActionDispatcher,
               resolveSelectedText: resolveSelectedText,
             ),
@@ -219,6 +232,8 @@ AppContextMenuEntry _buildEntry({
     onTap: () => withSelection(
       (selection) => dispatchPluginContextMenuItemClick(
         dispatcher: dispatcher,
+        viewId: viewId,
+        windowKeys: windowKeys,
         pluginId: pluginId,
         item: item,
         selection: selection,
@@ -250,13 +265,17 @@ String? _targetInstanceId(
   PluginRuntimeDispatcher dispatcher,
   String pluginId,
   PluginContextMenuItem item,
+  int? viewId,
 ) => dispatcher.pickContributionTarget(
   pluginId,
   ContextMenuRegistry.instance.instanceIdsForItem(pluginId, item.id),
+  viewId: viewId,
 );
 
 Future<void> dispatchPluginContextMenuItemClick({
   required PluginRuntimeDispatcher dispatcher,
+  int? viewId,
+  AppWindowKeys? windowKeys,
   required String pluginId,
   required PluginContextMenuItem item,
   required Map<String, dynamic> selection,
@@ -273,22 +292,28 @@ Future<void> dispatchPluginContextMenuItemClick({
       pluginId,
       topic: item.onClickEvent ?? 'contextMenu.itemClicked',
       payload: payload,
+      viewId: viewId,
+      windowKeys: windowKeys,
     );
     if (item.onClickEvent == null) {
       PluginPageLauncher.instance.open(
         pluginId,
         topic: 'reader.context_menu_item_clicked',
         payload: payload,
+        viewId: viewId,
+        windowKeys: windowKeys,
       );
     }
     return;
   }
-  final instanceId = _targetInstanceId(dispatcher, pluginId, item);
+  final instanceId = _targetInstanceId(dispatcher, pluginId, item, viewId);
   await dispatcher.dispatchEventToPlugin(
     pluginId,
     item.onClickEvent ?? 'contextMenu.itemClicked',
     payload,
     preferBackground: true,
+    viewId: viewId,
+    windowKeys: windowKeys,
     instanceId: instanceId,
   );
   if (item.onClickEvent == null) {
@@ -297,6 +322,8 @@ Future<void> dispatchPluginContextMenuItemClick({
       'reader.context_menu_item_clicked',
       payload,
       preferBackground: true,
+      viewId: viewId,
+      windowKeys: windowKeys,
       instanceId: instanceId,
     );
   }

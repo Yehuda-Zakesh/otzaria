@@ -89,6 +89,9 @@ class PdfCommentatorsTabScreen extends StatefulWidget {
 
 class _PdfCommentatorsTabScreenState extends State<PdfCommentatorsTabScreen>
     with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  /// מאגר הפוקוס של החלון; נשמר כאן כי ב-dispose אסור לחפש ב-context.
+  late final FocusRepository _focus;
+
   // שומר את ה-State חי כשהטאב יוצא מתחום ה-PageView, כדי שבחירת הכותרת/פסקה
   // לא תאבד במעבר לטאב אחר וחזרה.
   @override
@@ -203,6 +206,7 @@ class _PdfCommentatorsTabScreenState extends State<PdfCommentatorsTabScreen>
   @override
   void initState() {
     super.initState();
+    _focus = FocusRepository.of(context);
     _displayOverride.addListener(() => setState(() {}));
     _navTabController = TabController(length: 3, vsync: this);
     _navTabController.addListener(_handleTabChanged);
@@ -216,7 +220,7 @@ class _PdfCommentatorsTabScreenState extends State<PdfCommentatorsTabScreen>
 
     // ממקד את חלונית המפרשים כשהטאב הופך פעיל (מעבר טאב) כדי שגלילה עם
     // החיצים תעבוד מיד בלי לחיצה.
-    FocusRepository().registerTabContentFocusRequester(
+    _focus.registerTabContentFocusRequester(
       widget.tab,
       () => _panelKey.currentState?.requestScrollFocus(),
     );
@@ -568,7 +572,7 @@ class _PdfCommentatorsTabScreenState extends State<PdfCommentatorsTabScreen>
   @override
   void dispose() {
     _hiddenSelectionSubscription?.cancel();
-    FocusRepository().unregisterTabContentFocusRequester(widget.tab);
+    _focus.unregisterTabContentFocusRequester(widget.tab);
     widget.tab.sourceTab.currentTitle.removeListener(_syncWithSourceTab);
     _navTabController.removeListener(_handleTabChanged);
     _navTabController.dispose();

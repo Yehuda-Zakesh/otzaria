@@ -351,6 +351,51 @@ void main() {
       expect(released.linksByLine[880], linksByLine[880]);
       expect(released.visibleLinks, seeded.visibleLinks);
     });
+
+    test('הסתרת טאב עם הרבה קישורים ובחירה גדולה: אותה תוצאה, בלי סריקה '
+        'של הבחירה לכל קישור', () async {
+      const types = ['reference', 'COMMENTARY', 'source', 'Related Passage'];
+      final links = [
+        for (var i = 0; i < 140000; i++)
+          _CountingLink(
+            index1: i % 3000 + 1,
+            index1End: i % 7 == 0 ? i % 3000 + 4 : null,
+            type: types[i % types.length],
+          ),
+      ];
+      final selected = {for (var i = 2000; i < 2500; i++) i};
+      const visible = 1000;
+      const start = visible - TextBookBloc.linkLookBehindLines + 1;
+      const end = visible + TextBookBloc.linkLookAheadLines + 1;
+      final expected = [
+        for (final link in links)
+          if (LinkTypes.isDependentTextLink(link.connectionType) ||
+              LinkTypes.isVirtualSource(link.connectionType) ||
+              link.overlapsSourceLines(start, end) ||
+              selected.any((i) => link.overlapsSourceLines(i + 1, i + 1)))
+            link,
+      ];
+      bloc.emit(
+        buildLoadedState(
+          content: longContent,
+          visibleIndices: const [visible],
+        ).copyWith(
+          links: links,
+          linksByLine: buildLinksByLineMap(links),
+          selectedIndices: selected,
+        ),
+      );
+      _CountingLink.reset();
+
+      bloc.add(const SetTabVisibility(false));
+      await pumpEventQueue();
+      final released = bloc.state as TextBookLoaded;
+
+      expect(released.links, orderedEquals(expected));
+      expect(released.links.length, lessThan(links.length));
+      expect(_CountingLink.typeReads, lessThanOrEqualTo(links.length));
+      expect(_CountingLink.overlapChecks, lessThanOrEqualTo(links.length));
+    });
   });
 
   blocTest<TextBookBloc, TextBookState>(
@@ -436,4 +481,27 @@ void main() {
     expect(requested.startLine, lessThanOrEqualTo(layout.firstLineOf(item)));
     expect(requested.endLine, greaterThanOrEqualTo(layout.lastLineOf(item)));
   });
+}
+
+class _CountingLink extends Link {
+  _CountingLink({required super.index1, super.index1End, required this.type})
+    : super(heRef: 'קישור', path2: 'ספר', index2: 1, connectionType: type);
+
+  final String type;
+  static int typeReads = 0;
+  static int overlapChecks = 0;
+
+  static void reset() => typeReads = overlapChecks = 0;
+
+  @override
+  String get connectionType {
+    typeReads++;
+    return type;
+  }
+
+  @override
+  bool overlapsSourceLines(int first, int last) {
+    overlapChecks++;
+    return super.overlapsSourceLines(first, last);
+  }
 }

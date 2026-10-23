@@ -1,5 +1,6 @@
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/plugins/declarative/models/declarative_program.dart';
 import 'package:otzaria/plugins/models/plugin_toolbar_item.dart';
 import 'package:otzaria/plugins/services/plugin_page_launcher.dart';
@@ -24,6 +25,8 @@ List<ActionButtonData> buildPluginToolbarActions({
   required Future<Map<String, dynamic>> Function() locationPayload,
   String placement = 'primary',
   PluginRuntimeDispatcher? dispatcher,
+  int? viewId,
+  AppWindowKeys? windowKeys,
   PluginHostActionDispatcher? hostActionDispatcher,
 }) {
   final runtime = dispatcher ?? PluginRuntimeDispatcher.instance;
@@ -38,6 +41,8 @@ List<ActionButtonData> buildPluginToolbarActions({
           compact: compact,
           locationPayload: locationPayload,
           dispatcher: runtime,
+          viewId: viewId,
+          windowKeys: windowKeys,
           hostActionDispatcher: hostActionDispatcher,
         ),
   ];
@@ -52,6 +57,8 @@ List<(int order, ActionButtonData action)> buildOrderedPluginOverflowActions({
   required bool compact,
   required Future<Map<String, dynamic>> Function() locationPayload,
   PluginRuntimeDispatcher? dispatcher,
+  int? viewId,
+  AppWindowKeys? windowKeys,
   PluginHostActionDispatcher? hostActionDispatcher,
 }) {
   final runtime = dispatcher ?? PluginRuntimeDispatcher.instance;
@@ -68,6 +75,8 @@ List<(int order, ActionButtonData action)> buildOrderedPluginOverflowActions({
             compact: compact,
             locationPayload: locationPayload,
             dispatcher: runtime,
+            viewId: viewId,
+            windowKeys: windowKeys,
             hostActionDispatcher: hostActionDispatcher,
           ),
         ),
@@ -99,6 +108,8 @@ ActionButtonData _buildAction({
   required bool compact,
   required Future<Map<String, dynamic>> Function() locationPayload,
   required PluginRuntimeDispatcher dispatcher,
+  int? viewId,
+  AppWindowKeys? windowKeys,
   required PluginHostActionDispatcher? hostActionDispatcher,
 }) {
   final icon =
@@ -113,6 +124,8 @@ ActionButtonData _buildAction({
       if (child == null) return;
       _dispatchItemClick(
         dispatcher: dispatcher,
+        viewId: viewId,
+        windowKeys: windowKeys,
         pluginId: pluginId,
         item: child,
         context: context,
@@ -140,6 +153,8 @@ ActionButtonData _buildAction({
         actionId: ToolbarActionId.plugin,
         onPressed: () => _dispatchItemClick(
           dispatcher: dispatcher,
+          viewId: viewId,
+          windowKeys: windowKeys,
           pluginId: pluginId,
           item: item,
           context: context,
@@ -177,6 +192,8 @@ ActionButtonData _buildAction({
     actionId: ToolbarActionId.plugin,
     onPressed: () => _dispatchItemClick(
       dispatcher: dispatcher,
+      viewId: viewId,
+      windowKeys: windowKeys,
       pluginId: pluginId,
       item: item,
       context: context,
@@ -188,6 +205,8 @@ ActionButtonData _buildAction({
 
 Future<void> _dispatchItemClick({
   required PluginRuntimeDispatcher dispatcher,
+  int? viewId,
+  AppWindowKeys? windowKeys,
   required String pluginId,
   required PluginToolbarItem item,
   required String context,
@@ -207,7 +226,13 @@ Future<void> _dispatchItemClick({
   };
   final topic = item.onClickEvent ?? 'reader.toolbar_item_clicked';
   if (item.openPlugin) {
-    PluginPageLauncher.instance.open(pluginId, topic: topic, payload: payload);
+    PluginPageLauncher.instance.open(
+      pluginId,
+      topic: topic,
+      payload: payload,
+      viewId: viewId,
+      windowKeys: windowKeys,
+    );
     return;
   }
   await dispatcher.dispatchEventToPlugin(
@@ -215,5 +240,7 @@ Future<void> _dispatchItemClick({
     topic,
     payload,
     preferBackground: true,
+    viewId: viewId,
+    windowKeys: windowKeys,
   );
 }

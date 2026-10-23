@@ -2,6 +2,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart'
     show ValueListenable, visibleForTesting;
+import 'package:flutter/cupertino.dart' show InheritedCupertinoTheme;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -99,10 +100,23 @@ class _ReadingScreenState extends State<ReadingScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    PluginTextReaderRegistry.instance.addListener(_onTextReaderChanged);
+  }
+
+  /// התצוגה (החלון) שהמסך יושב בה; הנראות של התוספים נשמרת לפיה.
+  int? _viewId;
+  bool _viewResolved = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final viewId = View.maybeOf(context)?.viewId;
+    if (_viewResolved && viewId == _viewId) return;
+    _viewResolved = true;
+    _viewId = viewId;
     // זריעה מיידית ולא רק מה-listener: בעלייה עם טאב תוסף משוחזר, קבוצה ריקה
     // הייתה גורמת ל-onForegroundInstanceReady להשהות מיד את התוסף שעל המסך.
     _syncVisiblePluginTabs(context.read<TabsBloc>().state);
-    PluginTextReaderRegistry.instance.addListener(_onTextReaderChanged);
   }
 
   void _onTextReaderChanged() {
@@ -123,6 +137,7 @@ class _ReadingScreenState extends State<ReadingScreen>
                   instanceId: registry.instanceIdFor(tab),
                 ),
       },
+      viewId: _viewId,
     );
   }
 
@@ -149,22 +164,28 @@ class _ReadingScreenState extends State<ReadingScreen>
 
   /// Handing Flutter the same widget instance skips rebuilding that subtree, so
   /// a tab switch only rebuilds the tabs whose content actually changed.
-  final Map<OpenedTab, Widget> _tabViewCache = Map.identity();
+  final Map<OpenedTab, ({Widget view, String titles})> _tabViewCache =
+      Map.identity();
   int? _tabViewCacheCounter;
 
-  Widget _cachedTabView(OpenedTab tab) =>
-      _tabViewCache[tab] ??= _buildTabView(tab);
+  static String _paneTitles(OpenedTab tab) =>
+      leafPanes(tab).map((pane) => pane.title).join('\n');
+
+  Widget _cachedTabView(OpenedTab tab) => (_tabViewCache[tab] ??= (
+    view: _buildTabView(tab),
+    titles: _paneTitles(tab),
+  )).view;
 
   void _pruneTabViewCache(TabsState state) {
-    // updateCounter marks tabs mutated in place (e.g. pin); their
-    // content must be rebuilt.
-    if (_tabViewCacheCounter != state.updateCounter) {
-      _tabViewCacheCounter = state.updateCounter;
-      _tabViewCache.clear();
-      return;
-    }
+    // updateCounter marks tabs mutated in place; of those mutations only a
+    // rename reaches tab content, so a pin keeps every cached view.
+    final mutated = _tabViewCacheCounter != state.updateCounter;
+    _tabViewCacheCounter = state.updateCounter;
     final open = Set<OpenedTab>.identity()..addAll(state.tabs);
-    _tabViewCache.removeWhere((tab, _) => !open.contains(tab));
+    _tabViewCache.removeWhere(
+      (tab, entry) =>
+          !open.contains(tab) || (mutated && entry.titles != _paneTitles(tab)),
+    );
   }
 
   void _ensurePageController(int initialIndex) {
@@ -678,8 +699,8 @@ class _ReadingScreenState extends State<ReadingScreen>
   }
 }
 
-/// מקפיא את מדדי החלון רק בטאבים מוסתרים לגמרי; בזמן החלקה שני הטאבים
-/// הנראים חייבים לקבל מדדים עדכניים גם לפני שהטאב הנבחר מתחלף.
+/// מקפיא את מדדי החלון וערכת הצבע רק בטאבים מוסתרים לגמרי; בזמן החלקה שני
+/// הטאבים הנראים חייבים לקבל ערכים עדכניים גם לפני שהטאב הנבחר מתחלף.
 class _BackgroundTabMediaQuery extends StatefulWidget {
   final bool frozen;
   final PageController controller;
@@ -700,10 +721,30 @@ class _BackgroundTabMediaQuery extends StatefulWidget {
 
 class _BackgroundTabMediaQueryState extends State<_BackgroundTabMediaQuery> {
   MediaQueryData? _data;
+  late Widget Function(Widget child) _theme;
 
   @override
   Widget build(BuildContext context) {
     final live = MediaQuery.of(context);
+    // Theme.of תלוי גם ב-CupertinoTheme, ו-MaterialApp מגדיר גם את צבע הבחירה;
+    // בלי להקפיא את שלושתם אנימציית ערכת הצבע בונה את טאבי הרקע בכל פריים.
+    final theme = Theme.of(context);
+    final cupertino = context
+        .dependOnInheritedWidgetOfExactType<InheritedCupertinoTheme>()
+        ?.theme;
+    final selection = DefaultSelectionStyle.of(context);
+    Widget liveTheme(Widget child) {
+      child = DefaultSelectionStyle(
+        selectionColor: selection.selectionColor,
+        cursorColor: selection.cursorColor,
+        mouseCursor: selection.mouseCursor,
+        child: Theme(data: theme, child: child),
+      );
+      return cupertino == null
+          ? child
+          : InheritedCupertinoTheme(theme: cupertino, child: child);
+    }
+
     return AnimatedBuilder(
       animation: widget.controller,
       child: widget.child,
@@ -717,8 +758,9 @@ class _BackgroundTabMediaQueryState extends State<_BackgroundTabMediaQuery> {
             (page - widget.index).abs() < 1 ||
             _data == null) {
           _data = live;
+          _theme = liveTheme;
         }
-        return MediaQuery(data: _data!, child: child!);
+        return MediaQuery(data: _data!, child: _theme(child!));
       },
     );
   }

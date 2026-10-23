@@ -77,6 +77,7 @@ class _BarSplitButtonState<T> extends State<BarSplitButton<T>> {
       widget.onArrowPressed!(anchorContext);
       return;
     }
+    final onSelected = widget.onSelected;
     final selected = await showAnchoredAppMenu<T>(
       context: context,
       anchorContext: anchorContext,
@@ -92,7 +93,7 @@ class _BarSplitButtonState<T> extends State<BarSplitButton<T>> {
           ),
       ],
     );
-    if (selected != null) widget.onSelected?.call(selected);
+    if (selected != null) onSelected?.call(selected);
   }
 
   @override

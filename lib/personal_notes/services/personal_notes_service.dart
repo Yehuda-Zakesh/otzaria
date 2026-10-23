@@ -21,6 +21,8 @@ class PersonalNotesService {
     required String bookContent,
   }) async {
     final notes = await _database.loadNotes(bookId);
+    // רוב הספרים בלי הערות, ופיצול ספר גדול לשורות עולה עשרות ms.
+    if (notes.isEmpty) return notes;
     final lines = splitBookContentIntoLines(bookContent);
 
     final changedNotes = <PersonalNote>[];

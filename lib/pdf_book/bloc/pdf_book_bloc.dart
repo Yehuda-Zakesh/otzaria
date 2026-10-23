@@ -86,6 +86,8 @@ class PdfBookBloc extends Bloc<PdfBookEvent, PdfBookState> {
 
     // Navigation events
     on<UpdatePageNumber>(_onUpdatePageNumber);
+    on<RememberPdfLocation>(_onRememberPdfLocation);
+    on<ReturnToPreviousPdfLocation>(_onReturnToPreviousPdfLocation);
     on<GoToPage>(_onGoToPage);
     on<GoToNextPage>(_onGoToNextPage);
     on<GoToPreviousPage>(_onGoToPreviousPage);
@@ -309,6 +311,7 @@ class PdfBookBloc extends Bloc<PdfBookEvent, PdfBookState> {
     final showLeftPane = resolveInitialReadingLeftPaneVisibility(
       explicitOpen: tab.showLeftPane.value,
       hasSearchText: searchText.isNotEmpty,
+      screenWidth: event.screenWidth,
     );
     // בלי סנכרון ה-notifier, כפתור הסגירה בסרגל מחשב כיוון הפוך ונתקע (issue #869)
     tab.showLeftPane.value = showLeftPane;
@@ -324,6 +327,7 @@ class PdfBookBloc extends Bloc<PdfBookEvent, PdfBookState> {
         documentRef: event.documentRef,
         outline: event.outline,
         currentPageNumber: tab.pageNumber,
+        canReturnToLocation: tab.navigationHistory.canGoBack,
         totalPages: event.totalPages,
         showLeftPane: showLeftPane,
         pinLeftPane: pinLeftPane,
@@ -506,6 +510,44 @@ class PdfBookBloc extends Bloc<PdfBookEvent, PdfBookState> {
   ) {
     if (!pdfController.isReady) return;
     pdfController.goToPage(pageNumber: event.pageNumber);
+  }
+
+  void _onRememberPdfLocation(
+    RememberPdfLocation event,
+    Emitter<PdfBookState> emit,
+  ) {
+    final current = state;
+    if (current is! PdfBookLoaded) return;
+    tab.navigationHistory.remember(event.location);
+    emit(current.copyWith(canReturnToLocation: true));
+  }
+
+  Future<void> _onReturnToPreviousPdfLocation(
+    ReturnToPreviousPdfLocation event,
+    Emitter<PdfBookState> emit,
+  ) async {
+    final current = state;
+    if (current is! PdfBookLoaded || !pdfController.isReady) return;
+    final pages = pdfController.layout.pageLayouts;
+    if (pages.isEmpty) return;
+    final location = tab.navigationHistory.takePrevious();
+    if (location == null) return;
+    final page = location.pageNumber.clamp(1, pages.length);
+    emit(
+      current.copyWith(
+        canReturnToLocation: tab.navigationHistory.canGoBack,
+        zoom: location.zoom,
+      ),
+    );
+    await pdfController.goTo(
+      pdfController.calcMatrixFor(
+        location.centerIn(pages[page - 1], pdfController.viewSize),
+        zoom: location.zoom,
+      ),
+      duration: Duration.zero,
+    );
+    tab.savedZoom = location.zoom;
+    if (!isClosed) add(const SavePerBookSettings());
   }
 
   void _onGoToNextPage(

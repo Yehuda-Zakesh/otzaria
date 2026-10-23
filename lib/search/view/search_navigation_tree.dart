@@ -194,23 +194,26 @@ class SearchNavigationTree extends StatelessWidget {
     List<String> selectedPaths,
   ) {
     for (final sub in _sortedSubCategories(category)) {
-      final count = facetCounts[sub.path] ?? 0;
-      final leadsToSelection = _leadsToSelection(sub.path, selectedPaths);
-      if (count == 0 && !leadsToSelection && !_isSelected(sub.path)) continue;
+      final subPath = sub.path;
+      final count = facetCounts[subPath] ?? 0;
+      final leadsToSelection = _leadsToSelection(subPath, selectedPaths);
+      if (count == 0 && !leadsToSelection && !_isSelected(subPath)) continue;
       // ספירה שמקורה רק בספק חיצוני (היברובוקס) יכולה לשבת על קטגוריה שאין
       // תחתיה שום שורה נראית — הענף העמוק אינו בקטלוג המקומי, או שהספר אינו
       // ספר ספרייה. בלי ילדים נראים אין חץ הרחבה; הלחיצה על השורה עצמה
       // מסננת ומציגה את התוצאות.
       final hasChildren = _hasVisibleChildren(sub, selectedPaths);
       final isExpanded =
-          hasChildren && (expansion[sub.path] ?? leadsToSelection);
+          hasChildren && (expansion[subPath] ?? leadsToSelection);
       rows.add(
         _FlatRow.category(sub, level + 1, count, isExpanded, hasChildren),
       );
       if (isExpanded) _flattenChildren(sub, level + 1, rows, selectedPaths);
     }
+    // path נבנה בהליכה עד השורש — פעם אחת לתיקייה ולא לכל ספר.
+    final categoryPath = category.path;
     for (final book in _uniqueBooks(category.books)) {
-      final facet = FacetHelper.buildBookFacet(category.path, book);
+      final facet = FacetHelper.buildBookFacet(categoryPath, book);
       final count = facetCounts[facet] ?? 0;
       if (count == 0 && !_isSelected(facet)) continue;
       rows.add(_FlatRow.book(book, facet, count, level + 1));
@@ -221,15 +224,17 @@ class SearchNavigationTree extends StatelessWidget {
   /// שבהם [_flattenChildren] מרנדר ילד (קטגוריה או ספר).
   bool _hasVisibleChildren(Category category, List<String> selectedPaths) {
     for (final sub in category.subCategories) {
-      final count = facetCounts[sub.path] ?? 0;
+      final subPath = sub.path;
+      final count = facetCounts[subPath] ?? 0;
       if (count > 0 ||
-          _leadsToSelection(sub.path, selectedPaths) ||
-          _isSelected(sub.path)) {
+          _leadsToSelection(subPath, selectedPaths) ||
+          _isSelected(subPath)) {
         return true;
       }
     }
+    final categoryPath = category.path;
     for (final book in category.books) {
-      final facet = FacetHelper.buildBookFacet(category.path, book);
+      final facet = FacetHelper.buildBookFacet(categoryPath, book);
       if ((facetCounts[facet] ?? 0) > 0 || _isSelected(facet)) return true;
     }
     return false;
@@ -466,8 +471,9 @@ class SearchNavigationTree extends StatelessWidget {
     Category category,
     List<String> selectedPaths,
   ) {
+    final categoryPath = category.path;
     final hasVisibleBook = category.books.any((book) {
-      final facet = FacetHelper.buildBookFacet(category.path, book);
+      final facet = FacetHelper.buildBookFacet(categoryPath, book);
       return (facetCounts[facet] ?? 0) > 0 || _isSelected(facet);
     });
     if (hasVisibleBook) return null;
@@ -536,17 +542,11 @@ class SearchNavigationTree extends StatelessWidget {
     // ספר ללא תוצאות מוסתר כאן בדיוק כמו בעץ: בחירתו הייתה מרוקנת את
     // התוצאות ומשאירה סינון שלא מיוצג בעץ אחרי ניקוי שדה האיתור.
     final matches = <_FilteredBook>[];
-    for (final book in _allBooks(library)) {
-      if (!_titleHaystack(book).contains(query)) {
-        continue;
-      }
-      final facet = FacetHelper.buildBookFacet(
-        FacetHelper.resolveCategoryPath(book),
-        book,
-      );
-      final count = facetCounts[facet] ?? 0;
+    for (final entry in _filterEntries[library] ??= _buildFilterEntries()) {
+      if (!entry.haystack.contains(query)) continue;
+      final count = facetCounts[entry.facet] ?? 0;
       if (count == 0) continue;
-      matches.add(_FilteredBook(book, facet, count));
+      matches.add(_FilteredBook(entry.book, entry.facet, count));
     }
 
     if (matches.isEmpty) {
@@ -575,11 +575,12 @@ class SearchNavigationTree extends StatelessWidget {
 
   // ── עזרי traversal ──────────────────────────────────────────────────────────
 
-  // כותרת מנורמלת לכל ספר מחושבת פעם אחת ולא בכל הקשה.
-  static final Expando<String> _haystacks = Expando();
+  // סדר הספרים, הכותרת המנורמלת וה-facet תלויים רק בספרייה — לא בכל הקשה.
+  static final Expando<List<_FilterEntry>> _filterEntries = Expando();
 
-  static String _titleHaystack(Book book) =>
-      _haystacks[book] ??= normalizeBookTitle(book.title).toLowerCase();
+  List<_FilterEntry> _buildFilterEntries() => [
+    for (final book in _allBooks(library)) _FilterEntry(book),
+  ];
 
   List<Book> _uniqueBooks(List<Book> books) {
     final unique = <String, Book>{};
@@ -628,6 +629,20 @@ class SearchNavigationTree extends StatelessWidget {
     final categoryKey = book.categoryId?.toString() ?? book.categoryPath ?? '';
     return '${book.title.trim()}|$categoryKey';
   }
+}
+
+/// ספר ברשימת הסינון; הכותרת המנורמלת וה-facet מחושבים בפעם הראשונה שנדרשים.
+class _FilterEntry {
+  final Book book;
+
+  _FilterEntry(this.book);
+
+  late final String haystack = normalizeBookTitle(book.title).toLowerCase();
+
+  late final String facet = FacetHelper.buildBookFacet(
+    FacetHelper.resolveCategoryPath(book),
+    book,
+  );
 }
 
 /// ספר שעבר את סינון שדה האיתור, יחד עם ה-facet והספירה שכבר חושבו עבורו.

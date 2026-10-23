@@ -388,7 +388,9 @@ void main() {
     testWidgets('מסלול HtmlWidget (תגים מורכבים) — אותה התנהגות', (
       tester,
     ) async {
-      // span זר מפיל את המסלול המהיר — מוודאים שהשכבה עובדת גם שם.
+      // השכבה עובדת גם כשהשורה מוצגת ב-HtmlWidget.
+      SmartTextWidget.debugForceHtmlWidget = true;
+      addTearDown(() => SmartTextWidget.debugForceHtmlWidget = false);
       final overlay = await pump(
         tester,
         'בראשית<sup>א</sup> ברא ואת<sup>ב</sup> הארץ <span class="x">.</span>',
@@ -406,13 +408,26 @@ void main() {
       }
     });
 
-    test('SimpleInlineHtml: span זר עדיין מפיל ל-HtmlWidget', () {
+    test('SimpleInlineHtml: span זר ותג יתום כמו ב-fwfh, sup מעוצב נופל', () {
       const style = TextStyle(fontSize: 18);
       expect(
-        SimpleInlineHtml.tryParse('טקסט <span class="x">זר</span>', style),
+        SimpleInlineHtml.tryParse(
+          'טקסט <span class="x">זר</span>',
+          style,
+        )?.toPlainText(),
+        'טקסט זר',
+      );
+      expect(
+        SimpleInlineHtml.tryParse('טקסט יתום</span>', style)?.toPlainText(),
+        'טקסט יתום',
+      );
+      expect(
+        SimpleInlineHtml.tryParse(
+          'טקסט <sup style="color: red">1</sup>',
+          style,
+        ),
         isNull,
       );
-      expect(SimpleInlineHtml.tryParse('טקסט יתום</span>', style), isNull);
     });
 
     test('SimpleInlineHtml: מרקר הערה מקבל 0.75 ונטוי, בתוך מודגש', () {

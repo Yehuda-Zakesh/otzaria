@@ -81,9 +81,13 @@ class PreviewRenderer {
   ) {
     final styles = <String, String>{};
 
-    // Base text direction
-    styles['direction'] = 'rtl';
-    styles['text-align'] = 'justify';
+    // direction ו-text-align עוברים בירושה ב-fwfh: מספיק לקבוע אותם בשורש,
+    // ומתחת ל-code/pre שדורסים אותם. מפה לכל אלמנט מפעילה css.parse לכל אחד.
+    final parentName = element.parent?.localName;
+    if (parentName == null || parentName == 'code' || parentName == 'pre') {
+      styles['direction'] = 'rtl';
+      styles['text-align'] = 'justify';
+    }
 
     // הכותרות מקבלות 'bold' למטה; במשפחה עם face בולד נפרד זה שולף אותן
     // מקובץ אחר מהגוף, ואז התצוגה המקדימה לא תואמת למה שיוצג בספר.

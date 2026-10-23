@@ -21,6 +21,7 @@ String buildPluginContentSecurityPolicy({
     for (final host in const ['127.0.0.1', 'localhost']) ...[
       'http://$host:$fileServerPort/f/${Uri.encodeComponent(pluginId)}/',
       'http://$host:$fileServerPort/w/',
+      'http://$host:$fileServerPort/fonts/',
     ],
     for (final prefix in policy.prefixes) ..._sourcesForPrefix(prefix),
     for (final host in policy.loopbackHosts)

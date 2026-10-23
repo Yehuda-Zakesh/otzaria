@@ -16,7 +16,7 @@ import 'package:otzaria/utils/file/zstd_stream_extractor.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
 import 'package:otzaria/empty_library/services/library_space_estimate.dart'
-    show comparableVolumeId;
+    show isSameVolume;
 import 'package:seforim_library_updater/seforim_library_updater.dart';
 
 import '../services/library_access_gate.dart';
@@ -302,6 +302,9 @@ class LibraryUpdateRepository implements LibraryUpdateService {
   }) async {
     final dbPath = dbPathProvider();
     await _ensureDbDirectoryWritable(dbPath);
+    if (_hasWindowsReadOnlyAttribute(dbPath)) {
+      throw LibraryUpdateReadOnlyException(p.dirname(dbPath));
+    }
     final cacheDir = Directory(
       p.join(await dataRootProvider(), 'library_update_cache'),
     );
@@ -603,12 +606,20 @@ class LibraryUpdateRepository implements LibraryUpdateService {
     } catch (_) {}
   }
 
-  /// בדיקת התיקייה מקדימה; הרשאות קובץ המסד נבדקות בעת ההחלה או ההחלפה.
+  /// בדיקה מקדימה חלקית: ACL של קובץ המסד מתגלה רק בעת ההחלה או ההחלפה.
   Future<void> _ensureDbDirectoryWritable(String dbPath) async {
     final dir = p.dirname(dbPath);
     if (!await isDirectoryWritable(dir)) {
       throw LibraryUpdateReadOnlyException(dir);
     }
+  }
+
+  // ב-Windows ביט הכתיבה משקף את מאפיין "קריאה בלבד" שחוסם דלתא.
+  // החלפה מלאה מזיזה את הקובץ לגיבוי ב-rename, שמותר גם כשהמאפיין מוגדר.
+  static bool _hasWindowsReadOnlyAttribute(String path) {
+    if (!Platform.isWindows) return false;
+    final stat = FileStat.statSync(path);
+    return stat.type == FileSystemEntityType.file && stat.mode & 0x80 == 0;
   }
 
   static bool _isPermissionError(FileSystemException error) =>
@@ -640,7 +651,13 @@ class LibraryUpdateRepository implements LibraryUpdateService {
     final dbInfo = await diskSpaceProvider(dbDir);
     String gb(int bytes) => (bytes / (1 << 30)).toStringAsFixed(1);
 
-    final sameVolume = _sameVolume(cacheDir.path, cacheInfo, dbDir, dbInfo);
+    final sameVolume = isSameVolume(
+      cacheDir.path,
+      cacheInfo,
+      dbDir,
+      dbInfo,
+      isAndroid: isAndroid,
+    );
     if (sameVolume) {
       final needed = cacheNeeded + walNeeded;
       if (cacheInfo.freeBytes >= 0 && cacheInfo.freeBytes < needed) {
@@ -663,17 +680,6 @@ class LibraryUpdateRepository implements LibraryUpdateService {
         'ליד הספרייה, פנוי ${gb(dbInfo.freeBytes)}GB',
       );
     }
-  }
-
-  bool _sameVolume(
-    String a,
-    DiskSpaceInfo aInfo,
-    String b,
-    DiskSpaceInfo bInfo,
-  ) {
-    final aId = comparableVolumeId(a, aInfo.volumeId, isAndroid: isAndroid);
-    return aId != null &&
-        aId == comparableVolumeId(b, bInfo.volumeId, isAndroid: isAndroid);
   }
 
   int _resumablePatchBytes(File partial, PatchFileEntry patchFile) {
@@ -842,11 +848,12 @@ class LibraryUpdateRepository implements LibraryUpdateService {
     final extractInfo = await diskSpaceProvider(dbDir);
     String gb(int bytes) => (bytes / (1 << 30)).toStringAsFixed(1);
 
-    final sameVolume = _sameVolume(
+    final sameVolume = isSameVolume(
       p.dirname(archivePath),
       archiveInfo,
       dbDir,
       extractInfo,
+      isAndroid: isAndroid,
     );
     if (sameVolume) {
       final needed = archiveNeeded + _extractedDbSizeEstimate;
@@ -941,8 +948,7 @@ class LibraryUpdateRepository implements LibraryUpdateService {
               toVersion: plan.targetVersion ?? 0,
               timestamp: nowTimestamp(),
             );
-            // beginApply מעתיק DB של כמה GB ועשוי להימשך דקות. זו בדיקת הביטול
-            // האחרונה; מכאן עד ה-rename אין await ולכן אין חלון race נוסף.
+            // מכאן עד ה-rename אין await, ולכן ביטול נבדק מיד אחרי יצירת הגיבוי.
             _throwIfCancelled(isCancelled);
             _deleteDbWithSidecarsQuietly(dbPath);
             File(newDbPath).renameSync(dbPath);

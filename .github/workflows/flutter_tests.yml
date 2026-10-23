@@ -154,6 +154,14 @@ jobs:
           dart analyze --fatal-infos
           dart test
 
+      - name: Context menu package
+        working-directory: packages/otzaria_context_menu
+        run: |
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze --fatal-infos
+          flutter test
+
   test:
     name: Test (shard ${{ matrix.shard }}/5)
     runs-on: ubuntu-latest

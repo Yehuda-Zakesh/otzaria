@@ -53,6 +53,7 @@ const Set<String> kValidatorKnownTables = {
   'schema_meta',
   'db_meta',
   'external_link',
+  'banner',
   'book_banner',
   'book_protection',
   'line_divine_name',
@@ -174,27 +175,25 @@ class _Caps {
           lines &&
           col('line_divine_name', 'lineId') &&
           col('line_divine_name', 'charStart') &&
-          col('line_divine_name', 'charEnd') &&
-          col('line_divine_name', 'kind'),
+          col('line_divine_name', 'span'),
       'hasBookNotes':
           lines &&
           col('line_note', 'lineId') &&
           col('line_note', 'noteIndex') &&
           col('line_note', 'charPos') &&
-          col('line_note', 'marker') &&
+          col('line_note', 'hasMarker') &&
           col('line_note', 'body'),
       'hasBookNoteDivineNames':
           lines &&
           col('line_note', 'lineId') &&
           col('line_note', 'noteIndex') &&
           col('line_note', 'charPos') &&
-          col('line_note', 'marker') &&
+          col('line_note', 'hasMarker') &&
           col('line_note', 'body') &&
           col('line_note_divine_name', 'lineId') &&
           col('line_note_divine_name', 'noteIndex') &&
           col('line_note_divine_name', 'charStart') &&
-          col('line_note_divine_name', 'charEnd') &&
-          col('line_note_divine_name', 'kind'),
+          col('line_note_divine_name', 'span'),
       'hasLineBookIndex': indexes.contains('idx_line_book_index'),
       'hasAuthors': books && has('author') && has('book_author'),
       'hasTopics': books && has('topic') && has('book_topic'),
@@ -205,6 +204,14 @@ class _Caps {
       'hasDefaultCommentators': books && has('default_commentator'),
       'hasDefaultTargums': books && has('default_targum'),
       'hasCategoryClosure': categories && has('category_closure'),
+      'hasBookBanners':
+          col('book', 'title') &&
+          col('banner', 'id') &&
+          col('banner', 'text') &&
+          col('book_banner', 'bookId') &&
+          col('book_banner', 'bannerId'),
+      'hasBookProtection':
+          col('book_protection', 'bookId') && col('book_protection', 'level'),
       'hasExternalLinks':
           books &&
           col('external_link', 'sourceBookId') &&
@@ -282,6 +289,12 @@ const List<(String, List<String>, List<String>, String)> _featureGroups = [
     ['category_closure'],
     ['category'],
     'hasCategoryClosure',
+  ),
+  (
+    'book banners',
+    ['banner', 'book_banner'],
+    ['book', 'banner', 'book_banner'],
+    'hasBookBanners',
   ),
 ];
 

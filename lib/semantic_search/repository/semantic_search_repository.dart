@@ -7,9 +7,11 @@ import 'package:archive/archive.dart'
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:http/http.dart' as http;
-import 'package:otzaria/core/windowing/window_role.dart';
+import 'package:otzaria/core/windowing/host_relay.dart';
+import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/library_update/services/companion_assets_service.dart';
 import 'package:otzaria/library_update/services/github_rate_limit.dart';
@@ -85,9 +87,22 @@ class SemanticSearchRepository {
     bool Function()? isPlatformSupported,
     Future<DiskSpaceInfo> Function(String path)? diskSpace,
     bool Function()? isSecondaryWindow,
+    Future<HostCommandResponse> Function(
+      String type,
+      Map<String, Object?> args,
+    )?
+    hostRequest,
     this._modelReleases = kSemanticModelReleases,
     this._busyRetryDelay = const Duration(minutes: 2),
-  }) : _isSecondaryWindow = isSecondaryWindow ?? (() => WindowRole.isSecondary),
+  }) : _isSecondaryWindow =
+           isSecondaryWindow ?? (() => !ProcessDuties.current.isProcessOwner),
+       _hostRequest =
+           hostRequest ??
+           ((type, args) => HostRelay.sendToHost(
+             type,
+             args: args,
+             timeout: Duration(seconds: type == requestState ? 3 : 8),
+           )),
        _backend = backend ?? createSemanticEngineBackend(),
        _consentFactory = consent ?? (() => SearchFeedbackService.instance),
        _settings = settings ?? const SettingsSemanticSettingsStore(),
@@ -133,7 +148,36 @@ class SemanticSearchRepository {
   final Future<DiskSpaceInfo> Function(String path) _diskSpace;
   final Map<SemanticQuantization, SemanticModelRelease?> _modelReleases;
   final bool Function() _isSecondaryWindow;
+  final Future<HostCommandResponse> Function(
+    String type,
+    Map<String, Object?> args,
+  )
+  _hostRequest;
   final Duration _busyRetryDelay;
+
+  /// פקודת הורדה, ביטול, דיוק או מחיקה מחלון משני — רק המארח מוריד ומוחק.
+  static const String requestCommand = 'semantic.command';
+
+  /// מצב העבודה של המארח: בקשה מחלון משני, או שידור שלו לחלונות המשניים.
+  static const String requestState = 'semantic.state';
+
+  /// בקשת המארח מחלון אחר לסגור את ה-session לפני מחיקת הקבצים.
+  static const String requestRelease = 'semantic.release';
+
+  static final HostStateBroadcaster _hostBroadcaster = HostStateBroadcaster(
+    requestState,
+    () => availabilityToMap(
+      _instance?.availability ?? SemanticAvailability.initial,
+    ),
+  );
+
+  /// עבודת ההורדה וההתקנה שרצה במארח, כפי שחלון משני רואה אותה.
+  SemanticAvailabilityPhase? _hostJobPhase;
+  SemanticDownloadProgress? _hostJobProgress;
+  SemanticFailure? _hostFailure;
+  int? _hostUnpublishedVersion;
+  bool _hostStateKnown = false;
+  Future<void>? _hostFetch;
 
   final StreamController<SemanticAvailability> _changes =
       StreamController<SemanticAvailability>.broadcast();
@@ -214,6 +258,9 @@ class SemanticSearchRepository {
   /// מחשב מחדש את מצב הזמינות. לעולם אינו זורק.
   Future<SemanticAvailability> refresh() async {
     _listenToConsent();
+    if (_isSecondaryWindow() && !_hostStateKnown) {
+      await (_hostFetch ??= _fetchHostState());
+    }
     final consentGranted = _isConsentGranted();
     SemanticAvailability next;
     try {
@@ -235,11 +282,7 @@ class SemanticSearchRepository {
   Future<void> enableAndDownload() async {
     _lastFailure = null;
     _unpublishedVersion = null;
-    if (_isSecondaryWindow()) {
-      _lastFailure = const SemanticFailure(SemanticFailureKind.secondaryWindow);
-      await refresh();
-      return;
-    }
+    if (_isSecondaryWindow()) return _runInMainWindow('download');
     if (!_isConsentGranted()) {
       await refresh();
       return;
@@ -274,6 +317,7 @@ class SemanticSearchRepository {
   /// עוצר הורדה או התקנה שרצות; קובץ חלקי נשמר להמשך. עדכוני ספרייה לא
   /// מחדשים את ההורדה עד [enableAndDownload].
   Future<void> cancelDownload() async {
+    if (_isSecondaryWindow()) return _runInMainWindow('cancel');
     _jobCancel.cancel();
     _compactCancel.cancel();
     await _settings.setDownloadPaused(true);
@@ -283,7 +327,10 @@ class SemanticSearchRepository {
   /// בוחר את דיוק המודל; מוריד את החבילה החסרה אם הנתונים מופעלים.
   Future<void> setQuantization(SemanticQuantization value) async {
     if (value == quantization || _modelReleases[value] == null) return;
-    if (_isSecondaryWindow()) return;
+    if (_isSecondaryWindow()) {
+      await _closeSession();
+      return _runInMainWindow('quantization', {'value': value.name});
+    }
     await _settings.setQuantization(value);
     await _closeSession();
     _lastFailure = null;
@@ -296,11 +343,7 @@ class SemanticSearchRepository {
 
   /// מוחק את המודל, הוקטורים וההורדות, ומפסיק את העדכון ברקע.
   Future<void> removeData() async {
-    if (_isSecondaryWindow()) {
-      _lastFailure = const SemanticFailure(SemanticFailureKind.secondaryWindow);
-      await refresh();
-      return;
-    }
+    if (_isSecondaryWindow()) return _runInMainWindow('remove');
     _jobCancel.cancel();
     _busyRetry?.cancel();
     await _job;
@@ -308,6 +351,8 @@ class SemanticSearchRepository {
     _busyRetry?.cancel();
     _cancelAllSearches();
     await _closeSession();
+    // ב-Windows קובץ שחלון אחר פתח אינו נמחק.
+    if (identical(this, _instance)) await _releasePeerSessions();
     await _settings.setDataEnabled(false);
     await _settings.setDownloadPaused(false);
     _vectors = null;
@@ -476,11 +521,10 @@ class SemanticSearchRepository {
       phase: phase,
       consentGranted: consentGranted,
       hiddenReason: hiddenReason,
-      progress: _jobProgress,
+      progress: _jobProgress ?? _hostJobProgress,
       failure: failure,
-      unpublishedLibraryVersion: _unpublishedVersion,
+      unpublishedLibraryVersion: _unpublishedVersion ?? _hostUnpublishedVersion,
       pausedByUser: _settings.downloadPaused,
-      isSecondaryWindow: _isSecondaryWindow(),
       stagedDataFound: stagedDataFound,
     );
 
@@ -498,9 +542,9 @@ class SemanticSearchRepository {
       );
     }
     if (!consentGranted) return of(SemanticAvailabilityPhase.consentRequired);
-    final jobPhase = _jobPhase;
+    final jobPhase = _jobPhase ?? _hostJobPhase;
     if (jobPhase != null) return of(jobPhase);
-    final failure = _lastFailure;
+    final failure = _lastFailure ?? _hostFailure;
     if (failure != null) {
       return of(SemanticAvailabilityPhase.failed, failure: failure);
     }
@@ -511,7 +555,7 @@ class SemanticSearchRepository {
       return of(SemanticAvailabilityPhase.failed, failure: found);
     }
     if (installed) return of(SemanticAvailabilityPhase.ready);
-    if (_unpublishedVersion != null) {
+    if ((_unpublishedVersion ?? _hostUnpublishedVersion) != null) {
       return of(SemanticAvailabilityPhase.vectorsNotPublished);
     }
     return of(
@@ -544,7 +588,168 @@ class SemanticSearchRepository {
     if (next == _availability) return;
     _availability = next;
     _changes.add(next);
-    if (identical(this, _instance)) _sharedChanges.add(next);
+    if (identical(this, _instance)) {
+      _sharedChanges.add(next);
+      _hostBroadcaster.changed();
+    }
+  }
+
+  // ── חלון משני ───────────────────────────────────────────────────────────
+
+  /// בחלון משני הפעולה רצה במארח, והתקדמותה חוזרת בשידור [requestState].
+  Future<void> _runInMainWindow(
+    String command, [
+    Map<String, Object?> args = const {},
+  ]) async {
+    _hostFailure = null;
+    final response = await _hostRequest(requestCommand, {
+      ...args,
+      'command': command,
+    });
+    if (!response.delivered || response.result != true) {
+      _lastFailure = const SemanticFailure(
+        SemanticFailureKind.mainWindowUnavailable,
+      );
+    }
+    await refresh();
+  }
+
+  /// פעם אחת: המשך המצב מגיע בשידורי המארח.
+  Future<void> _fetchHostState() async {
+    final response = await _hostRequest(requestState, const {});
+    final state = response.result;
+    if (state is Map) _applyHostState(availabilityFromMap(state));
+    _hostStateKnown = true;
+  }
+
+  void _applyHostState(SemanticAvailability? host) {
+    _hostStateKnown = true;
+    final phase = host?.phase;
+    final running =
+        phase == SemanticAvailabilityPhase.downloading ||
+        phase == SemanticAvailabilityPhase.installing;
+    _hostJobPhase = running ? phase : null;
+    _hostJobProgress = running ? host?.progress : null;
+    _hostFailure = phase == SemanticAvailabilityPhase.failed
+        ? host?.failure
+        : null;
+    _hostUnpublishedVersion =
+        phase == SemanticAvailabilityPhase.vectorsNotPublished
+        ? host?.unpublishedLibraryVersion
+        : null;
+    // המארח ענה, ולכן כשל ההעברה הקודם כבר אינו נכון.
+    if (_lastFailure?.kind == SemanticFailureKind.mainWindowUnavailable) {
+      _lastFailure = null;
+    }
+    // התקנה שהסתיימה במארח החליפה את הקבצים שנקראו כאן.
+    if (!running) _vectors = null;
+  }
+
+  static Future<void> _releasePeerSessions() async {
+    final bus = WindowBus.instance;
+    await Future.wait([
+      for (final slot in bus.otherRegisteredSlots())
+        // סגירת session ממתינה לפתיחה שרצה, ולכן ארוכה מברירת המחדל.
+        bus.request(
+          slot,
+          {'type': requestRelease},
+          timeout: const Duration(seconds: 15),
+        ),
+    ]);
+  }
+
+  /// מטפל בבקשות האפיק של החיפוש הסמנטי, במארח ובחלון משני.
+  static Future<Object?> handleWindowRequest(
+    Map<String, dynamic> request,
+  ) async {
+    switch (request['type']) {
+      case requestState:
+        if (ProcessDuties.current.isProcessOwner) {
+          return availabilityToMap(await instance.refresh());
+        }
+        final state = request['state'];
+        final repository = _instance;
+        if (state is! Map || repository == null) return true;
+        repository._applyHostState(availabilityFromMap(state));
+        await repository.refresh();
+        return true;
+      case requestRelease:
+        final repository = _instance;
+        if (repository == null) return true;
+        repository._cancelAllSearches();
+        await repository._closeSession();
+        return true;
+      case requestCommand:
+        if (!ProcessDuties.current.isProcessOwner) return false;
+        final repository = instance;
+        switch (request['command']) {
+          case 'download':
+            unawaited(repository.enableAndDownload());
+          case 'cancel':
+            unawaited(repository.cancelDownload());
+          case 'remove':
+            unawaited(repository.removeData());
+          case 'quantization':
+            final value = SemanticQuantization.values
+                .asNameMap()[request['value']];
+            if (value == null) return false;
+            unawaited(repository.setQuantization(value));
+          default:
+            return false;
+        }
+        return true;
+    }
+    return null;
+  }
+
+  @visibleForTesting
+  static Map<String, Object?> availabilityToMap(SemanticAvailability value) {
+    final progress = value.progress;
+    return {
+      'phase': value.phase.name,
+      'consentGranted': value.consentGranted,
+      'failure': value.failure?.kind.name,
+      'unpublishedLibraryVersion': value.unpublishedLibraryVersion,
+      if (progress != null)
+        'progress': {
+          'item': progress.item.name,
+          'receivedBytes': progress.receivedBytes,
+          'totalBytes': progress.totalBytes,
+          'step': progress.step,
+          'stepCount': progress.stepCount,
+          'checking': progress.checking,
+          'staged': progress.staged,
+        },
+    };
+  }
+
+  @visibleForTesting
+  static SemanticAvailability? availabilityFromMap(Map<Object?, Object?> map) {
+    final phase = SemanticAvailabilityPhase.values.asNameMap()[map['phase']];
+    if (phase == null) return null;
+    final failure = SemanticFailureKind.values.asNameMap()[map['failure']];
+    final progress = map['progress'];
+    final item = progress is Map
+        ? SemanticDownloadItem.values.asNameMap()[progress['item']]
+        : null;
+    int? number(Object? value) => value is int ? value : null;
+    return SemanticAvailability(
+      phase: phase,
+      consentGranted: map['consentGranted'] == true,
+      failure: failure == null ? null : SemanticFailure(failure),
+      unpublishedLibraryVersion: number(map['unpublishedLibraryVersion']),
+      progress: progress is Map && item != null
+          ? SemanticDownloadProgress(
+              item: item,
+              receivedBytes: number(progress['receivedBytes']) ?? 0,
+              totalBytes: number(progress['totalBytes']),
+              step: number(progress['step']) ?? 1,
+              stepCount: number(progress['stepCount']) ?? 1,
+              checking: progress['checking'] == true,
+              staged: progress['staged'] == true,
+            )
+          : null,
+    );
   }
 
   bool _isConsentGranted() {
@@ -746,7 +951,7 @@ class SemanticSearchRepository {
   Future<void> _performJob() async {
     if (!_isPlatformSupported()) return;
     if (_isSecondaryWindow()) {
-      return _skipOrThrow(SemanticFailureKind.secondaryWindow);
+      return _skipOrThrow(SemanticFailureKind.mainWindowUnavailable);
     }
     if (!_isConsentGranted()) {
       return _skipOrThrow(SemanticFailureKind.consentRequired);

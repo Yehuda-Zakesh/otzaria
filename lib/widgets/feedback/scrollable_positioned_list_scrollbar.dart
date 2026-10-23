@@ -51,9 +51,8 @@ class _ScrollablePositionedListScrollbarState
   double _thumbHeight = 1;
   bool _isDragging = false;
   bool _navigationStarted = false;
-  double? _lastJumpTarget;
   Duration? _lastDragFrame;
-  double? _pendingDragTarget;
+  double? _pendingDragDelta;
   int? _dragFrameCallback;
 
   final ScrollbarTargetLabelController _labelController =
@@ -217,7 +216,6 @@ class _ScrollablePositionedListScrollbarState
   }
 
   void _jumpToPixels(double target) {
-    _lastJumpTarget = target;
     _lastDragFrame = SchedulerBinding.instance.currentSystemFrameTimeStamp;
     final position = _position;
     if (position == null) return;
@@ -226,9 +224,25 @@ class _ScrollablePositionedListScrollbarState
     );
   }
 
-  void _requestDragJump(double target) {
-    // אירועי עכבר עשויים להקדים את הציור; שומרים את היעד האחרון לכל פריים.
-    if (target == _lastJumpTarget) {
+  double _targetFromDragDelta(double delta) {
+    final metrics = _position ?? _metrics!;
+    final reverse = metrics.axisDirection == AxisDirection.up;
+    if (_thumbPosition <= 0) {
+      return reverse ? metrics.maxScrollExtent : metrics.minScrollExtent;
+    }
+    if (_thumbPosition >= 1 - _thumbHeight) {
+      return reverse ? metrics.minScrollExtent : metrics.maxScrollExtent;
+    }
+    return (metrics.pixels + delta).clamp(
+      metrics.minScrollExtent,
+      metrics.maxScrollExtent,
+    );
+  }
+
+  void _requestDragJump(double delta) {
+    // תנועה יחסית נשמרת גם אם תיקון עיגון משנה את הפיקסלים עד הציור.
+    final target = _targetFromDragDelta(delta);
+    if (target == _position?.pixels) {
       _cancelPendingDrag();
       return;
     }
@@ -238,12 +252,14 @@ class _ScrollablePositionedListScrollbarState
       _jumpToPixels(target);
       return;
     }
-    _pendingDragTarget = target;
+    _pendingDragDelta = target - (_position?.pixels ?? _metrics!.pixels);
     _dragFrameCallback ??= SchedulerBinding.instance.scheduleFrameCallback((_) {
       _dragFrameCallback = null;
-      final pending = _pendingDragTarget;
-      _pendingDragTarget = null;
-      if (mounted && pending != null) _jumpToPixels(pending);
+      final pending = _pendingDragDelta;
+      _pendingDragDelta = null;
+      if (mounted && pending != null) {
+        _jumpToPixels(_targetFromDragDelta(pending));
+      }
     });
   }
 
@@ -253,26 +269,36 @@ class _ScrollablePositionedListScrollbarState
       SchedulerBinding.instance.cancelFrameCallbackWithId(callback);
     }
     _dragFrameCallback = null;
-    _pendingDragTarget = null;
+    _pendingDragDelta = null;
   }
 
   void _onDragUpdate(double delta, Offset pointer) {
     if (!_canScroll) return;
+    final previous = _thumbPosition;
     setState(
       () => _thumbPosition = (_thumbPosition + delta).clamp(
         0.0,
         1 - _thumbHeight,
       ),
     );
-    final target = _targetFromThumbPosition(_thumbPosition);
-    _requestDragJump(target);
+    final metrics = _position ?? _metrics!;
+    final pixelsDelta =
+        (_thumbPosition - previous) /
+        (1 - _thumbHeight) *
+        (metrics.maxScrollExtent - metrics.minScrollExtent) *
+        (metrics.axisDirection == AxisDirection.up ? -1 : 1);
+    final pending = (_pendingDragDelta ?? 0) + pixelsDelta;
+    final target = _targetFromDragDelta(pending);
+    _requestDragJump(pending);
     _showLabel(target, pointer);
   }
 
   void _onDragEnd({bool canceled = false}) {
-    final pending = _pendingDragTarget;
+    final pending = _pendingDragDelta;
     _cancelPendingDrag();
-    if (!canceled && pending != null) _jumpToPixels(pending);
+    if (!canceled && pending != null) {
+      _jumpToPixels(_targetFromDragDelta(pending));
+    }
     if (_isDragging) setState(() => _isDragging = false);
     _hideLabel();
     _updateScrollPosition();
@@ -312,7 +338,6 @@ class _ScrollablePositionedListScrollbarState
                     if (!_isDragging) {
                       _navigationStarted = false;
                       _lastDragFrame = null;
-                      _lastJumpTarget = null;
                     }
                   },
                   child: GestureDetector(

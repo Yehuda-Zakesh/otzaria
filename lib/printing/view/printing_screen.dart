@@ -369,6 +369,8 @@ class _PrintingScreenState extends State<PrintingScreen> {
     _holyName = exportProfile.holyName;
     _divineNamesDisplay = exportProfile.divineNames;
     _divineNamesReady = Future.wait([_loadDivineNames(), _loadBookNotes()]);
+    // כשל (למשל בהערות) מכשיל את יצירת המסמך שממתינה לו, לא כשגיאה לא-מטופלת.
+    _divineNamesReady.then<void>((_) {}, onError: (Object _) {});
 
     // במצב PDF חיצוני (כמו "צורת הדף") אין טווח שורות/כותרות.
     if (widget.createPdfOverride != null) {

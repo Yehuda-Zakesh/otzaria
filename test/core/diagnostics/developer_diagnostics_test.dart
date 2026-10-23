@@ -3,10 +3,15 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show FrameTiming;
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/rendering.dart';
 import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/core/diagnostics/developer_diagnostics.dart';
+import 'package:otzaria/core/diagnostics/process_tree_sampler.dart';
+import 'package:otzaria/core/diagnostics/smart_text_render_stats.dart';
+import 'package:otzaria/core/startup_timeline.dart';
+import 'package:positioned_sliver_list/positioned_list.dart';
 
 class _BlockedFile extends Fake implements File {
   _BlockedFile(this.delegate);
@@ -110,6 +115,78 @@ void main() {
     expect(stats.slowTotal, 7);
   });
 
+  group('estimateRefreshDelta', () {
+    const before = EstimateRefreshStats(
+      refreshCount: 2,
+      lastRefreshItemCount: 50,
+      deferredResizeCount: 1,
+      skippedResizeCount: 3,
+    );
+
+    test('sums the change of every list, counting a new list from zero', () {
+      final window = estimateRefreshDelta(const [
+        (
+          before,
+          EstimateRefreshStats(
+            refreshCount: 3,
+            lastRefreshItemCount: 50,
+            lastRefreshDuration: Duration(microseconds: 1500),
+            deferredResizeCount: 2,
+            skippedResizeCount: 3,
+          ),
+        ),
+        (
+          null,
+          EstimateRefreshStats(
+            refreshCount: 1,
+            lastRefreshItemCount: 1000,
+            lastRefreshDuration: Duration(microseconds: 2500),
+            skippedResizeCount: 4,
+          ),
+        ),
+      ]);
+      expect(window.toJson(), {
+        'count': 2,
+        'totalMs': 4.0,
+        'items': 1050,
+        'deferred': 1,
+        'skipped': 4,
+      });
+    });
+
+    test('omits the duration when a list refreshed more than once', () {
+      final window = estimateRefreshDelta(const [
+        (
+          before,
+          EstimateRefreshStats(
+            refreshCount: 5,
+            lastRefreshItemCount: 50,
+            lastRefreshDuration: Duration(milliseconds: 2),
+            deferredResizeCount: 1,
+            skippedResizeCount: 3,
+          ),
+        ),
+      ]);
+      expect(window.count, 3);
+      expect(window.items, 150);
+      expect(window.totalMs, isNull);
+      expect(window.toJson(), isNot(contains('totalMs')));
+    });
+
+    test('a tick without changes is left out of the stats', () {
+      final window = estimateRefreshDelta(const [(before, before)]);
+      expect(window.isEmpty, isTrue);
+      final stats = computeFrameStats(
+        const [],
+        window: const Duration(seconds: 2),
+        slowTotal: 0,
+        estimates: window,
+      );
+      expect(stats.estimates, isNull);
+      expect(stats.toJson(), isNot(contains('estimates')));
+    });
+  });
+
   group('DeveloperDiagnostics', () {
     late File output;
     late List<String> errorLog;
@@ -150,6 +227,22 @@ void main() {
       await diagnostics.snapshot();
       final types = records().map((r) => r['type']).toList();
       expect(types, ['session', 'snapshot']);
+    });
+
+    test('stats records carry the smartText counters', () async {
+      diagnostics.toggle();
+      expect(SmartTextRenderStats.enabled, isTrue);
+      SmartTextRenderStats.fastLine(heading: false);
+      SmartTextRenderStats.fullLine(columnMode: true);
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+      await diagnostics.snapshot();
+
+      final stats = records().firstWhere((r) => r['type'] == 'stats');
+      expect(stats['smartText'], containsPair('fastInline', 1));
+      expect(stats['smartText'], containsPair('fullHtml', 1));
+
+      diagnostics.toggle();
+      expect(SmartTextRenderStats.enabled, isFalse);
     });
 
     test('toggling off a launch request stops collecting', () {
@@ -387,6 +480,219 @@ void main() {
         expect(records().first['version'], '1.2.3+45');
       },
     );
+
+    group('process tree', () {
+      const sample = ProcessTreeSample(
+        hostPrivMb: 260,
+        webview: {
+          'RENDERER': (count: 2, privMb: 120, eachMb: [70, 50], pages: []),
+        },
+      );
+      late int calls;
+
+      setUp(() {
+        calls = 0;
+        diagnostics.processSampler = () async {
+          calls++;
+          return sample;
+        };
+      });
+
+      Future<void> settle() => Future<void>.delayed(Duration.zero);
+
+      // חייב לרוץ ראשון: אחריו ציר הזמן מסומן כחשוף לכל הקובץ.
+      test('is not sampled before the window is revealed', () async {
+        expect(StartupTimeline.instance.toJson()['revealMs'], isNull);
+        diagnostics.toggle();
+        for (var i = 0; i < 10; i++) {
+          diagnostics.debugTick();
+          await settle();
+        }
+        expect(calls, 0);
+      });
+
+      group('after reveal', () {
+        setUpAll(StartupTimeline.instance.finishAtReveal);
+
+        test('is sampled once every few ticks', () async {
+          diagnostics.toggle();
+          for (var i = 0; i < 11; i++) {
+            diagnostics.debugTick();
+            await settle();
+          }
+          expect(calls, 3);
+        });
+
+        test('a slow sample is never overlapped', () async {
+          final pending = Completer<ProcessTreeSample?>();
+          diagnostics.processSampler = () {
+            calls++;
+            return pending.future;
+          };
+          diagnostics.toggle();
+          for (var i = 0; i < 12; i++) {
+            diagnostics.debugTick();
+            await settle();
+          }
+          expect(calls, 1);
+          pending.complete(sample);
+        });
+
+        test(
+          'a fresh sample writes a stats line even without frames',
+          () async {
+            diagnostics.toggle();
+            diagnostics.debugTick();
+            await settle();
+            diagnostics.debugTick();
+            diagnostics.debugTick();
+            expect(diagnostics.stats.value.processes, sample);
+            await diagnostics.snapshot();
+
+            final stats = records().where((r) => r['type'] == 'stats');
+            expect(stats, hasLength(1));
+            expect(stats.single['processes'], sample.toJson());
+            final snapshot = records().singleWhere(
+              (r) => r['type'] == 'snapshot',
+            );
+            expect(snapshot['processes']['webviewPrivMb'], 120);
+            expect(snapshot['processes'], contains('ageMs'));
+          },
+        );
+
+        test('a failing sampler does not stop collection', () async {
+          diagnostics.processSampler = () async {
+            calls++;
+            throw StateError('no access');
+          };
+          diagnostics.toggle();
+          for (var i = 0; i < 6; i++) {
+            diagnostics.debugTick();
+            await settle();
+          }
+          expect(diagnostics.isCollecting, isTrue);
+          expect(calls, 2);
+          expect(diagnostics.stats.value.processes, isNull);
+        });
+
+        test('a sample that lands after stopping is dropped', () async {
+          final pending = Completer<ProcessTreeSample?>();
+          diagnostics.processSampler = () => pending.future;
+          diagnostics.toggle();
+          diagnostics.debugTick();
+          diagnostics.toggle();
+          pending.complete(sample);
+          await settle();
+          diagnostics.processSampler = () async => null;
+          diagnostics.toggle();
+          diagnostics.debugTick();
+          await settle();
+          expect(diagnostics.stats.value.processes, isNull);
+        });
+
+        test(
+          'a sample from an earlier session is dropped after restart',
+          () async {
+            final pending = Completer<ProcessTreeSample?>();
+            diagnostics.processSampler = () => pending.future;
+            diagnostics.toggle();
+            diagnostics.debugTick();
+            diagnostics
+              ..toggle()
+              ..toggle();
+            expect(diagnostics.isCollecting, isTrue);
+            pending.complete(sample);
+            await settle();
+            diagnostics.debugTick();
+            // הדגימה של ה-session הקודם לא נקלטה; ה-tick רק התחיל דגימה חדשה.
+            expect(diagnostics.stats.value.processes, isNull);
+          },
+        );
+
+        test(
+          'the default sampler uses the registered WebView lister',
+          () async {
+            diagnostics.resetForTesting();
+            var listed = 0;
+            diagnostics.webViewProcessLister = () async {
+              listed++;
+              return const [];
+            };
+            diagnostics.toggle();
+            diagnostics.debugTick();
+            await Future<void>.delayed(const Duration(milliseconds: 300));
+            expect(listed, Platform.isWindows ? 1 : 0);
+          },
+        );
+      });
+    });
+
+    testWidgets('stats count the estimate refreshes of a tracked list since '
+        'collection started', (tester) async {
+      final width = ValueNotifier(400.0);
+      final layoutKey = ValueNotifier<Object?>(null);
+      final controller = ItemScrollController();
+      addTearDown(width.dispose);
+      addTearDown(layoutKey.dispose);
+      // שני מופעים על אותו בקר, כמו בהחלפת תצוגה באותו פריים.
+      diagnostics
+        ..trackEstimateRefreshes(controller)
+        ..trackEstimateRefreshes(controller);
+      await tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.rtl,
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: ListenableBuilder(
+              listenable: Listenable.merge([width, layoutKey]),
+              builder: (_, _) => SizedBox(
+                width: width.value,
+                height: 300,
+                child: ScrollablePositionedList.builder(
+                  itemScrollController: controller,
+                  itemCount: 100,
+                  crossAxisLayoutKey: layoutKey.value == null
+                      ? null
+                      : (_) => layoutKey.value,
+                  estimateExtent: (_, crossAxis) => 40000 / crossAxis,
+                  itemBuilder: (_, index) => SizedBox(height: 100.0 + index),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      // לפני תחילת האיסוף: אינו נספר.
+      width.value = 380;
+      await tester.pump();
+
+      diagnostics.toggle();
+      await tester.pump(const Duration(seconds: 1));
+      expect(diagnostics.stats.value.estimates, isNull);
+      diagnostics.untrackEstimateRefreshes(controller);
+
+      width.value = 360;
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      final refreshed = diagnostics.stats.value.estimates!;
+      expect(refreshed.count, 1);
+      expect(refreshed.items, 100);
+      expect(refreshed.totalMs, isNotNull);
+      expect(refreshed.skipped, 0);
+
+      layoutKey.value = 'same';
+      await tester.pump();
+      width.value = 340;
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      final skipped = diagnostics.stats.value.estimates!;
+      expect(skipped.count, 0);
+      expect(skipped.skipped, 1);
+
+      diagnostics
+        ..untrackEstimateRefreshes(controller)
+        ..toggle();
+    });
 
     test('toggling it off stops collecting', () {
       diagnostics.toggle();

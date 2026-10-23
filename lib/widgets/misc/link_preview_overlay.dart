@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/text_display/models/text_display_profile.dart';
@@ -18,14 +19,12 @@ import 'package:otzaria/widgets/smart_text/smart_text.dart';
 /// עוזב אותה או בהקשה מחוצה לה — ונשארת פתוחה כשהסמן נכנס לתוכה (לסימון
 /// והעתקה). לחיצה בתוך החלונית מקבעת אותה: היא נשארת פתוחה גם כשהסמן יוצא,
 /// עד הקשה במקום אחר בדף, וזזה יחד עם גלילת התוכן שעליו נפתחה.
-/// לחיצה על הכותרת פותחת את היעד. מוצגת חלונית אחת בכל רגע.
+/// לחיצה על הכותרת פותחת את היעד. מוצגת חלונית אחת בכל רגע בכל חלון.
 class LinkPreviewOverlay {
   LinkPreviewOverlay._();
 
-  static OverlayEntry? _entry;
-  static Object? _token;
-  static VoidCallback? _onDismissed;
-  static _LinkPreviewPanelState? _activePanel;
+  /// חלונות שמוצגת בהם חלונית — כדי שקריאה עם מזהה תמצא אותה מכל חלון.
+  static final Set<_PreviewSlot> _liveSlots = {};
 
   /// מקפיצה תצוגה מקדימה של [link] ליד [globalPosition]. סוגרת חלונית קודמת.
   /// [onDismissed] נקרא כשהחלונית נסגרת (גם בהחלפה בחלונית אחרת).
@@ -130,24 +129,27 @@ class LinkPreviewOverlay {
   }) {
     final overlay = Overlay.maybeOf(context, rootOverlay: true);
     if (overlay == null) return null;
+    final slot = AppWindowKeys.of(context)._previewSlot;
     // חלונית מקובעת נסגרת רק בלחיצה — ריחוף על עוגן אחר לא מחליף אותה.
-    if (hoverMode && (_activePanel?._pinned ?? false)) return null;
-    dismiss();
+    if (hoverMode && (slot.activePanel?._pinned ?? false)) return null;
+    _dismissSlot(slot);
     // לכידת עוגן הגלילה חייבת להקדים את הוספת החלונית ל-overlay, אחרת
     // ה-hit-test יפגע בחלונית עצמה במקום בשורת הטקסט שמתחתיה.
     final anchor = captureScrollAnchor
         ? (scrollAnchor ?? OverlayScrollAnchor.capture(context, anchorPosition))
         : scrollAnchor;
     final token = Object();
-    _token = token;
-    _onDismissed = onDismissed;
-    _entry = OverlayEntry(
+    slot
+      ..token = token
+      ..onDismissed = onDismissed;
+    final entry = slot.entry = OverlayEntry(
       builder: (_) => _LinkPreviewPanel(
+        slot: slot,
         contentBuilder: contentBuilder,
         anchorPosition: anchorPosition,
         anchorRect: anchorRect,
         style: style,
-        onDismiss: dismiss,
+        onDismiss: () => _dismissSlot(slot),
         onPinned: onPinned,
         hoverMode: hoverMode,
         barrierBlocksBelow: barrierBlocksBelow,
@@ -155,36 +157,60 @@ class LinkPreviewOverlay {
         scrollOnPinOnly: scrollOnPinOnly,
       ),
     );
-    overlay.insert(_entry!);
+    _liveSlots.add(slot);
+    overlay.insert(entry);
     return token;
   }
 
-  /// האם [token] הוא של החלונית המוצגת כרגע. `null` — כל חלונית שתהיה.
-  static bool _isActive(Object? token) =>
-      token == null || identical(_token, token);
+  /// מזהה חלונית או מפתחות חלון; בלי מזהה — [window] או החלון הפעיל.
+  static _PreviewSlot? _slotFor(Object? token, AppWindowKeys? window) {
+    if (token == null) return (window ?? AppWindowKeys.current)._previewSlot;
+    if (token is AppWindowKeys) return token._previewSlot;
+    for (final slot in _liveSlots) {
+      if (identical(slot.token, token)) return slot;
+    }
+    return null;
+  }
 
   /// מתזמנת סגירה קרובה (הסמן עזב את העוגן). כניסת הסמן לחלונית מבטלת אותה.
   static void scheduleHide([Object? token]) {
-    if (!_isActive(token)) return;
-    _activePanel?._scheduleHide();
+    _slotFor(token, null)?.activePanel?._scheduleHide();
   }
 
   /// מבטלת סגירה מתוזמנת (הסמן חזר לעוגן בזמן שהחלונית פתוחה).
   static void cancelScheduledHide([Object? token]) {
-    if (!_isActive(token)) return;
-    _activePanel?._cancelHide();
+    _slotFor(token, null)?.activePanel?._cancelHide();
   }
 
   /// סוגרת את החלונית. [token] — סוגר רק אם היא עדיין המוצגת (ולא הוחלפה).
-  static void dismiss({Object? token}) {
-    if (!_isActive(token)) return;
-    _entry?.remove();
-    _entry = null;
-    _token = null;
-    final onDismissed = _onDismissed;
-    _onDismissed = null;
+  static void dismiss({Object? token, AppWindowKeys? window}) {
+    final slot = _slotFor(token, window);
+    if (slot != null) _dismissSlot(slot);
+  }
+
+  static void _dismissSlot(_PreviewSlot slot) {
+    slot.entry?.remove();
+    slot.entry = null;
+    slot.token = null;
+    _liveSlots.remove(slot);
+    final onDismissed = slot.onDismissed;
+    slot.onDismissed = null;
     onDismissed?.call();
   }
+}
+
+/// החלונית המוצגת בחלון אחד — חלונית מקובעת בחלון אחד אינה חוסמת ריחוף באחר.
+class _PreviewSlot {
+  OverlayEntry? entry;
+  Object? token;
+  VoidCallback? onDismissed;
+  _LinkPreviewPanelState? activePanel;
+}
+
+final _previewSlots = Expando<_PreviewSlot>();
+
+extension on AppWindowKeys {
+  _PreviewSlot get _previewSlot => _previewSlots[this] ??= _PreviewSlot();
 }
 
 /// עיצוב ומידות של חלונית התצוגה המקדימה: חלונית צפה ליד מילה, או חלונית
@@ -239,6 +265,9 @@ class InlineBookNotePreviewContent extends StatelessWidget {
   /// גודל הטקסט שעליו נפתחה החלונית; ראה [previewFontSize].
   final double? maxFontSize;
 
+  /// לחיצה על עוגן-קישור (`otzaria://anchor`) שבגוף ההערה.
+  final void Function(String url)? onAnchorTap;
+
   const InlineBookNotePreviewContent({
     super.key,
     required this.content,
@@ -246,6 +275,7 @@ class InlineBookNotePreviewContent extends StatelessWidget {
     this.removeNikud,
     this.removePunctuation,
     this.maxFontSize,
+    this.onAnchorTap,
   });
 
   @override
@@ -270,6 +300,7 @@ class InlineBookNotePreviewContent extends StatelessWidget {
                   : null,
               lineHeight: settings.lineHeight,
             ),
+            onAnchorTap: onAnchorTap,
           ),
         ),
       ),
@@ -278,6 +309,7 @@ class InlineBookNotePreviewContent extends StatelessWidget {
 }
 
 class _LinkPreviewPanel extends StatefulWidget {
+  final _PreviewSlot slot;
   final WidgetBuilder contentBuilder;
   final Offset anchorPosition;
 
@@ -298,6 +330,7 @@ class _LinkPreviewPanel extends StatefulWidget {
   final bool scrollOnPinOnly;
 
   const _LinkPreviewPanel({
+    required this.slot,
     required this.contentBuilder,
     required this.anchorPosition,
     required this.onDismiss,
@@ -333,7 +366,7 @@ class _LinkPreviewPanelState extends State<_LinkPreviewPanel> {
   @override
   void initState() {
     super.initState();
-    LinkPreviewOverlay._activePanel = this;
+    widget.slot.activePanel = this;
     if (!widget.scrollOnPinOnly) _startTrackingScroll();
     // מיקום דו-שלבי: בנייה סמויה למדידת הגודל, ואז הצמדה לנקודת הלחיצה.
     WidgetsBinding.instance.addPostFrameCallback((_) => _reposition());
@@ -341,8 +374,8 @@ class _LinkPreviewPanelState extends State<_LinkPreviewPanel> {
 
   @override
   void dispose() {
-    if (identical(LinkPreviewOverlay._activePanel, this)) {
-      LinkPreviewOverlay._activePanel = null;
+    if (identical(widget.slot.activePanel, this)) {
+      widget.slot.activePanel = null;
     }
     if (_tracksScroll) widget.scrollAnchor?.removeListener(_onScrollChanged);
     _hideTimer?.cancel();

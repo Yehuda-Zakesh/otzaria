@@ -13,6 +13,8 @@ import 'package:otzaria/attached_libraries/repository/attached_library_probe.dar
 import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/user_state/pending_report_store.dart';
+import 'package:otzaria/core/messages/window_messages.dart';
+import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/user_state_slot.dart';
@@ -39,6 +41,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart' as sqlite3;
 
 import '../../support/fake_line_source_engine.dart';
+import '../../test_helpers/fake_host_window.dart';
 import '../../models/direct_error_report_text_correction_test.dart'
     show buildCorrectionReport, trickyLine;
 
@@ -88,13 +91,134 @@ void main() {
     await tempDir.delete(recursive: true);
   });
 
-  test('שחזור גיבוי חסום בחלון משני', () async {
-    WindowRole.isSecondary = true;
+  group('שחזור מחלון משני רץ במארח', () {
+    const namespace = 'otzaria.test.backup.relay';
 
-    await expectLater(
-      BackupService.restoreFromBackup(p.join(tempDir.path, 'missing.json')),
-      throwsA(isA<StateError>()),
-    );
+    test('בלי מארח — הודעה שהבקשה לא הועברה', () async {
+      WindowRole.isSecondary = true;
+      WindowBus.namespace = namespace;
+      addTearDown(() => WindowBus.namespace = 'otzaria.window');
+
+      await expectLater(
+        BackupService.restoreFromBackup(p.join(tempDir.path, 'missing.json')),
+        throwsA(
+          isA<BackupRestoreFailure>().having(
+            (e) => e.toString(),
+            'message',
+            WindowMessages.mainWindowRequestFailed,
+          ),
+        ),
+      );
+    });
+
+    test('המארח משחזר ומחזיר את סיכום השחזור', () async {
+      final host = FakeHostWindow(
+        namespace: namespace,
+        respond: (_) => {
+          'skippedSections': ['סימניות'],
+          'missingCustomFolders': ['D:/ספרים'],
+          'hasLegacyPartialSettings': true,
+          'notesWithoutAnchor': 2,
+          'restoredPlugins': 1,
+          'userBooksNotReplaced': false,
+          'added': {'bookmarks': 4, 'history': 3},
+        },
+      )..register();
+      addTearDown(host.dispose);
+      WindowRole.isSecondary = true;
+
+      final result = await BackupService.restoreFromBackup(
+        'C:/backup.json',
+        mode: BackupImportMode.merge,
+      );
+
+      final request = host.ofType(BackupService.requestRestore).single;
+      expect(request['path'], 'C:/backup.json');
+      expect(request['mode'], 'merge');
+      expect(result.skippedSections, ['סימניות']);
+      expect(result.missingCustomFolders, ['D:/ספרים']);
+      expect(result.hasLegacyPartialSettings, isTrue);
+      expect(result.notesWithoutAnchor, 2);
+      expect(result.restoredPlugins, 1);
+      expect(result.added?.bookmarks, 4);
+      expect(result.added?.history, 3);
+      expect(result.added?.notes, 0);
+    });
+
+    test('כשל במארח מוצג בחלון המשני כפי שהוא', () async {
+      final host = FakeHostWindow(
+        namespace: namespace,
+        respond: (_) => {'error': 'קובץ הגיבוי לא נמצא'},
+      )..register();
+      addTearDown(host.dispose);
+      WindowRole.isSecondary = true;
+
+      await expectLater(
+        BackupService.restoreFromBackup('C:/missing.json'),
+        throwsA(
+          isA<BackupRestoreFailure>().having(
+            (e) => e.toString(),
+            'message',
+            'קובץ הגיבוי לא נמצא',
+          ),
+        ),
+      );
+    });
+
+    test('סיכום השחזור עובר את האפיק בלי אובדן', () {
+      final added = BackupImportCounts()
+        ..bookmarks = 1
+        ..bookmarkGroups = 2
+        ..history = 3
+        ..notes = 4
+        ..notesUpdated = 5
+        ..workspaces = 6
+        ..plugins = 7
+        ..shamorZachorBooks = 8;
+      final BackupRestoreResult result = (
+        skippedSections: ['א'],
+        missingCustomFolders: ['ב'],
+        hasLegacyPartialSettings: true,
+        notesWithoutAnchor: 9,
+        restoredPlugins: 10,
+        userBooksNotReplaced: true,
+        added: added,
+      );
+      final back = BackupService.restoreResultFromMap(
+        BackupService.restoreResultToMap(result),
+      );
+      expect(back.skippedSections, ['א']);
+      expect(back.missingCustomFolders, ['ב']);
+      expect(back.hasLegacyPartialSettings, isTrue);
+      expect(back.notesWithoutAnchor, 9);
+      expect(back.restoredPlugins, 10);
+      expect(back.userBooksNotReplaced, isTrue);
+      expect(
+        [
+          back.added!.bookmarks,
+          back.added!.bookmarkGroups,
+          back.added!.history,
+          back.added!.notes,
+          back.added!.notesUpdated,
+          back.added!.workspaces,
+          back.added!.plugins,
+          back.added!.shamorZachorBooks,
+        ],
+        [1, 2, 3, 4, 5, 6, 7, 8],
+      );
+    });
+
+    test('המארח מחזיר כשל במקום לזרוק', () async {
+      final response = await BackupService.handleRestoreRequest({
+        'path': p.join(tempDir.path, 'missing.json'),
+        'mode': 'replace',
+      });
+      expect(response, {'error': 'קובץ הגיבוי לא נמצא'});
+      expect(
+        await BackupService.handleRestoreRequest({'path': 'x', 'mode': '?'}),
+        {'error': WindowMessages.mainWindowRequestFailed},
+      );
+    });
   });
 
   test('createBackup מגבה מפתחות sz דינמיים מה-Box', () async {

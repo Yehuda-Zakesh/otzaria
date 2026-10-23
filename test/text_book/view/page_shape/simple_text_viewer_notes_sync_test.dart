@@ -294,6 +294,84 @@ void main() {
 
     expect(mainLine, findsNothing);
   });
+
+  testWidgets('הקלדה בחיפוש ההערות אינה בונה מחדש את הטקסט ואת טור המפרש', (
+    tester,
+  ) async {
+    final notes = [_note()];
+    personalNotesBloc.emit(_notesState('ספר בדיקה', notes));
+    await tester.pumpWidget(
+      harness(
+        Row(
+          children: [
+            Expanded(
+              child: SimpleTextViewer(
+                content: const ['שורה א'],
+                fontSize: 18,
+                openBookCallback: (_) {},
+                isMainText: true,
+                onOpenSidebarTab: (_) {},
+              ),
+            ),
+            Expanded(
+              child: SimpleTextViewer(
+                content: const ['שורת מפרש'],
+                fontSize: 18,
+                openBookCallback: (_) {},
+                bookTitle: 'רש"י',
+                notesRepository: _NotesRepository([]),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    List<SmartTextWidget> lines() => tester
+        .widgetList<SmartTextWidget>(find.byType(SmartTextWidget))
+        .toList();
+    final before = lines();
+    expect(before, hasLength(2));
+
+    personalNotesBloc.emit(
+      _notesState('ספר בדיקה', notes).copyWith(searchQuery: 'תו'),
+    );
+    await tester.pumpAndSettle();
+
+    // בנייה מחדש עלתה כ-10ms לכל הקשה בבראשית ורש"י.
+    final after = lines();
+    for (var i = 0; i < before.length; i++) {
+      expect(identical(after[i], before[i]), isTrue);
+    }
+  });
+
+  testWidgets('הטקסט הראשי מסיר את ההדגשה כשה-bloc עובר לספר אחר', (
+    tester,
+  ) async {
+    final notes = [_note()];
+    personalNotesBloc.emit(_notesState('ספר בדיקה', notes));
+    await tester.pumpWidget(
+      harness(
+        SimpleTextViewer(
+          content: const ['שורה א'],
+          fontSize: 18,
+          openBookCallback: (_) {},
+          isMainText: true,
+          onOpenSidebarTab: (_) {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final mainLine = find.byWidgetPredicate(
+      (w) => w is SmartTextWidget && w.text.contains('otzaria://note?line=0'),
+    );
+    expect(mainLine, findsOneWidget);
+
+    personalNotesBloc.emit(_notesState('ספר אחר', notes));
+    await tester.pumpAndSettle();
+
+    expect(mainLine, findsNothing);
+  });
 }
 
 class _SqliteRepository extends PersonalNotesRepository {

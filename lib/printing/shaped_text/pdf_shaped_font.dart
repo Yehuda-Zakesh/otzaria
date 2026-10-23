@@ -316,7 +316,7 @@ class PdfShapedFont extends PdfFont {
   /// Maps cluster characters to glyphs in RTL storage order; a merged cluster
   /// is attributed once, to its advancing glyph, for text extraction.
   void _recordGlyphText(ShapedRun run) {
-    if (!_recordedRuns.add(run)) {
+    if (!_recordedRuns.add(run) || _allGlyphsRecorded(run)) {
       return;
     }
     for (final cluster in run.clusters()) {
@@ -353,6 +353,15 @@ class PdfShapedFont extends PdfFont {
         _glyphText.putIfAbsent(glyph, () => index == carrier ? source : '');
       }
     }
+  }
+
+  /// Attribution only fills glyphs not yet in [_glyphText], so a word made of
+  /// known glyphs would change nothing and need not be split into clusters.
+  bool _allGlyphsRecorded(ShapedRun run) {
+    for (var index = 0; index < run.glyphCount; index++) {
+      if (!_glyphText.containsKey(run.glyphId(index))) return false;
+    }
+    return true;
   }
 
   /// CFF outlines cannot be embedded as a TrueType file: the descendant font

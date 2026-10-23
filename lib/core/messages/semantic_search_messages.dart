@@ -46,8 +46,8 @@ abstract class SemanticSearchMessages {
       'נתוני {name} מתעדכנים כרגע. הניסיון יחזור מעצמו בעוד כמה דקות.';
   static const String unsupportedRelease =
       'גרסה זו של נתוני {name} אינה נתמכת עדיין. יש לעדכן את התוכנה.';
-  static const String secondaryWindow =
-      'את נתוני {name} אפשר להוריד ולמחוק רק מהחלון הראשי של התוכנה.';
+  static const String mainWindowUnavailable =
+      'לא ניתן היה להעביר את הבקשה לחלון הראשי של אוצריא. נסה שוב.';
   static const String libraryMoving =
       'מיקום הספרייה מועבר כעת. נסו שוב בסיום ההעברה.';
 
@@ -105,7 +105,7 @@ abstract class SemanticSearchMessages {
     internal,
     vectorsBusy,
     unsupportedRelease,
-    secondaryWindow,
+    mainWindowUnavailable,
     libraryMoving,
   ];
 
@@ -121,7 +121,7 @@ abstract class SemanticSearchMessages {
     SemanticFailureKind.releaseUnverified => notOfficialRelease,
     SemanticFailureKind.vectorsBusy => vectorsBusy,
     SemanticFailureKind.unsupportedRelease => unsupportedRelease,
-    SemanticFailureKind.secondaryWindow => secondaryWindow,
+    SemanticFailureKind.mainWindowUnavailable => mainWindowUnavailable,
     SemanticFailureKind.libraryMoving => libraryMoving,
     SemanticFailureKind.insufficientDiskSpace => insufficientDiskSpace,
     SemanticFailureKind.modelMissing ||

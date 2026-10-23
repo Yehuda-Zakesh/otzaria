@@ -524,7 +524,7 @@ class _EnhancedSearchFieldState extends State<EnhancedSearchField> {
                             fillColor: colorScheme.surfaceContainerHigh,
                             border: const OutlineInputBorder(),
                             hintText: context.settingsText(
-                              'הקלד מילות חיפוש',
+                              'הקלד מילות חיפוש · לצמצום: מצה@רשי/פסחים',
                             ),
                             labelText: context.settingsText('חיפוש'),
                             prefixIcon: widget.showInlineSearchButton

@@ -135,6 +135,25 @@ void main() {
     );
   });
 
+  test('מפת תמיכת הטעמים נשמרת לפני הסריקה ומתעדכנת בטעינה מוקדמת', () async {
+    final regular = _face(
+      directory,
+      'PrDd-regular.ttf',
+      'PrDd',
+      false,
+      source: 'fonts/Rubik-VariableFont_wght.ttf',
+      weight: 400,
+    );
+    expect(AppFonts.familySupportsTaamim('PrDd'), isTrue);
+    expect(AppFonts.debugSystemFontsHebrewCache, isNull);
+    expect(AppFonts.debugTaamimSupportCache, isNotNull);
+
+    AppFonts.debugScanFamily = (_) async => AppFonts.debugBuildScan([regular]);
+    await AppFonts.ensureFontLoaded('PrDd');
+
+    expect(AppFonts.familySupportsTaamim('PrDd'), isFalse);
+  });
+
   test('טעינה מוקדמת שנכשלה אינה נשארת בתור ההשלמה וניתן לנסות שוב', () async {
     final regular = _face(directory, 'PrGg-regular.ttf', 'PrGg', false);
     final scan = AppFonts.debugBuildScan([regular]);

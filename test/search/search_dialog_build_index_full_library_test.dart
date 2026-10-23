@@ -4,6 +4,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:otzaria_search_engine/otzaria_search_engine.dart'
+    show IndexCompatibility;
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';
@@ -166,5 +168,32 @@ Future<void> main() async {
     await tester.pumpAndSettle();
     expect(find.text('בנה אינדקס'), findsOneWidget);
     expect(find.text(_deferredText), findsNothing);
+  }, skip: !engineReady);
+  // "בנה אינדקס" רגיל נדחה על אינדקס שדורש איפוס, והכפתור לא עשה דבר.
+  testWidgets('אינדקס בסכמה ישנה מציג "אפס ובנה מחדש" ולא "בנה אינדקס"', (
+    tester,
+  ) async {
+    final library = Library(categories: [])
+      ..books.add(TextBook(id: 1, title: 'ספר'));
+    final provider = TantivyDataProvider.instance;
+    final previousCompatibility = provider.indexCompatibility;
+    addTearDown(() => provider.indexCompatibility = previousCompatibility);
+    provider.indexCompatibility = const IndexCompatibility(
+      compatible: false,
+      status: 'rebuild_required',
+      foundSchemaVersion: 5,
+      requiredSchemaVersion: 6,
+      engineVersion: 'test',
+      metadataPath: '',
+    );
+    await _pumpMissingIndexDialog(
+      tester,
+      fullLibrary: library,
+      visibleLibrary: library,
+    );
+
+    expect(find.text('אינדקס החיפוש דורש בנייה מחדש'), findsOneWidget);
+    expect(find.text('אפס ובנה מחדש'), findsOneWidget);
+    expect(find.text('בנה אינדקס'), findsNothing);
   }, skip: !engineReady);
 }

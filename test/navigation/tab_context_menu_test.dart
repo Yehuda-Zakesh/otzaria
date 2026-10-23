@@ -7,6 +7,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
+import 'package:otzaria/core/windowing/window_opener.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';
 import 'package:otzaria/history/bloc/history_event.dart';
 import 'package:otzaria/history/bloc/history_state.dart';
@@ -282,6 +283,54 @@ void main() {
       expect(entries.any((entry) => entry.label == 'חלון חדש'), isFalse);
     });
   });
+
+  group('פתיחת חלון עוברת דרך WindowOpener.current', () {
+    late _FakeWindowOpener opener;
+
+    setUp(() {
+      MultiWindowService.debugSupportedOverride = true;
+      opener = _FakeWindowOpener();
+      WindowOpener.debugOverride = opener;
+    });
+
+    tearDown(() {
+      WindowOpener.debugOverride = null;
+      MultiWindowService.debugSupportedOverride = null;
+    });
+
+    testWidgets('"העבר לחלון חדש" פותח עם הכרטיסיה וסוגר אותה כאן', (
+      tester,
+    ) async {
+      final tab = ToolTab(toolId: 'builtin.calendar', title: 'לוח שנה');
+      final entries = await buildEntries(
+        tester,
+        tab: tab,
+        state: TabsState(tabs: [tab], currentTabIndex: 0),
+      );
+
+      entryOf(entries, 'העבר לחלון חדש').onTap!();
+      await tester.pump();
+
+      expect(opener.calls, ['canOpenAnotherWindow', 'openWindow']);
+      expect(opener.openedTabs.single, same(tab));
+      expect(tabsBloc.addedEvents.whereType<RemoveTab>().single.tab, same(tab));
+    });
+
+    testWidgets('"חלון חדש" פותח חלון ריק', (tester) async {
+      final tab = _StubTab('ספר א');
+      final entries = await buildEntries(
+        tester,
+        tab: tab,
+        state: TabsState(tabs: [tab], currentTabIndex: 0),
+      );
+
+      entryOf(entries, 'חלון חדש').onTap!();
+      await tester.pump();
+
+      expect(opener.calls, ['openEmptyWindow']);
+      expect(tabsBloc.addedEvents.whereType<RemoveTab>(), isEmpty);
+    });
+  });
 }
 
 /// ⚠️ קידומת ייחודית לסוויטה — [ui.IsolateNameServer] גלובלי לתהליך.
@@ -384,4 +433,48 @@ class _TestHistoryBloc extends Cubit<HistoryState> implements HistoryBloc {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeWindowOpener implements WindowOpener {
+  final List<String> calls = [];
+  final List<OpenedTab?> openedTabs = [];
+
+  @override
+  Future<bool> openWindow({
+    OpenedTab? tab,
+    ({int x, int y})? origin,
+    ({int left, int top, int width, int height})? bounds,
+    bool inheritPlacement = true,
+  }) async {
+    calls.add('openWindow');
+    openedTabs.add(tab);
+    return true;
+  }
+
+  @override
+  Future<bool> openEmptyWindow() async {
+    calls.add('openEmptyWindow');
+    return true;
+  }
+
+  @override
+  Future<bool> restoreLastClosedWindow() async {
+    calls.add('restoreLastClosedWindow');
+    return true;
+  }
+
+  @override
+  Future<bool> canOpenAnotherWindow() async {
+    calls.add('canOpenAnotherWindow');
+    return true;
+  }
+
+  @override
+  Future<({int count, int max, int engines})?> windowCount() async =>
+      (count: 1, max: 4, engines: 1);
+
+  @override
+  Future<void> reportOpenWindowFailure() async {
+    calls.add('reportOpenWindowFailure');
+  }
 }

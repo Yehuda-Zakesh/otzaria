@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:otzaria/plugins/services/plugin_asset_scheme.dart';
 import 'package:otzaria/plugins/services/plugin_content_security_policy.dart';
@@ -14,6 +15,12 @@ class PluginFileGrant {
 
   const PluginFileGrant({required this.pluginId, required this.canonicalPath});
 }
+
+/// טוען את הבייטים של גופן שמוגש לתוספים.
+typedef PluginFontLoader = Future<Uint8List> Function();
+
+/// ה-URL של גופן כולל את ה-token של ההרצה, ולכן התוכן שמאחוריו אינו משתנה.
+const String pluginFontCacheControl = 'max-age=31536000, immutable';
 
 /// תוצאת רישום קובץ חדש: ה-token שנוצר וה-URL לטעינה ב-WebView.
 typedef PluginFileRegistration = ({String token, String url});
@@ -102,6 +109,8 @@ class PluginFileServer {
   Future<void>? _starting;
   final Map<String, PluginFileGrant> _grants = {};
   final Map<String, _UploadSession> _uploads = {};
+  final Map<String, PluginFontLoader> _fonts = {};
+  String _fontToken = '';
 
   /// מטמון `network.fetchFile`, שהקבצים בו מוגשים כאן ונמחקים עם התוסף.
   final PluginRemoteFileCache _remoteFiles;
@@ -155,6 +164,7 @@ class PluginFileServer {
   Future<void> _start() async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _server = server;
+    _fontToken = _generateToken();
     server.listen(_handleRequest);
     // שאריות `.part` מריצה שקרסה — עד 100MB לכל אחת. הניקוי כאן ולא רק
     // ב-beginUpload, כדי שהן לא ימתינו לתוסף הבא שישמור.
@@ -193,6 +203,36 @@ class PluginFileServer {
       canonicalPath: canonicalPath,
     );
     return _urlFor(pluginId, token);
+  }
+
+  /// URL של גופן [id] בהרצה הזו; [load] נקרא בכל בקשה. ה-token משותף לכל
+  /// התוספים — בלעדיו כל דף ב-loopback היה מגיע לגופן המערכת שנבחר.
+  Future<String> fontUrl(String id, PluginFontLoader load) async {
+    await _ensureStarted();
+    _fonts[id] = load;
+    return '$origin/fonts/$_fontToken/${Uri.encodeComponent(id)}';
+  }
+
+  /// הבייטים של גופן רשום לפי ה-URL שלו, או null. לשער של Windows ו-Android,
+  /// שעונה בעצמו בלי בקשת רשת.
+  Future<Uint8List?> fontBytesFor(Uri uri) async =>
+      isServerUri(uri) ? _loadFont(uri.pathSegments) : null;
+
+  Future<Uint8List?> _loadFont(List<String> segments) async {
+    if (_fontToken.isEmpty ||
+        segments.length != 3 ||
+        segments[0] != 'fonts' ||
+        segments[1] != _fontToken) {
+      return null;
+    }
+    final load = _fonts[segments[2]];
+    if (load == null) return null;
+    try {
+      return await load();
+    } catch (_) {
+      // גופן מערכת שנמחק או asset חסר: הדף נופל ל-fallback.
+      return null;
+    }
   }
 
   /// ה-URL כולל את מזהה התוסף כדי שה-WebView של התוסף יוכל לחסום בקשה
@@ -352,6 +392,8 @@ class PluginFileServer {
   /// האפליקציה; משמש בעיקר לניקוי בין בדיקות.
   Future<void> close() async {
     _grants.clear();
+    _fonts.clear();
+    _fontToken = '';
     await _sweepExpiredUploads();
     // snapshot: PUT שבאוויר מסיר את ה-session שלו בזמן שאנחנו מוחקים temp,
     // וזה מבטל את האיטרטור.
@@ -455,7 +497,7 @@ class PluginFileServer {
   /// הפיתוח המקומי של תוסף development; [pluginAssetScheme] הוא ה-origin של
   /// תוסף שמוגש דרך הסכימה הייעודית (במק) — בלעדיו fetch מהדף נחסם ב-CORS
   /// ("Load failed") וכל שמירה בינארית נכשלת.
-  bool _isAllowedOrigin(String origin) {
+  static bool isAllowedOrigin(String origin) {
     if (origin == 'null') return true;
     final uri = Uri.tryParse(origin);
     if (uri == null) return false;
@@ -470,7 +512,7 @@ class PluginFileServer {
       // ה-WebView של תוסף רץ מ-origin file:// (Origin: null) או משרת פיתוח
       // מקומי. משקפים רק את אלה — כדי שדף אינטרנט לא יוכל לקרוא את הקובץ.
       final requestOrigin = request.headers.value('origin');
-      if (requestOrigin != null && _isAllowedOrigin(requestOrigin)) {
+      if (requestOrigin != null && isAllowedOrigin(requestOrigin)) {
         response.headers.set('Access-Control-Allow-Origin', requestOrigin);
         response.headers.set('Vary', 'Origin');
       }
@@ -503,6 +545,11 @@ class PluginFileServer {
 
       if (request.method != 'GET' && request.method != 'HEAD') {
         response.statusCode = HttpStatus.methodNotAllowed;
+        return;
+      }
+
+      if (segments.firstOrNull == 'fonts') {
+        await _handleFont(request, segments);
         return;
       }
 
@@ -572,6 +619,22 @@ class PluginFileServer {
         // התשובה כבר נסגרה (דחיית העלאה מנתקת את ה-socket), או שהלקוח נעלם.
       }
     }
+  }
+
+  Future<void> _handleFont(HttpRequest request, List<String> segments) async {
+    final response = request.response;
+    final bytes = await _loadFont(segments);
+    if (bytes == null) {
+      response.statusCode = HttpStatus.notFound;
+      return;
+    }
+    response.headers.contentType = ContentType.parse(
+      pluginAssetContentType(segments.last),
+    );
+    response.headers.set('Cache-Control', pluginFontCacheControl);
+    response.headers.contentLength = bytes.length;
+    if (request.method == 'HEAD') return;
+    response.add(bytes);
   }
 
   /// קולט את גוף ה-PUT אל קובץ ה-temp של ההעלאה.

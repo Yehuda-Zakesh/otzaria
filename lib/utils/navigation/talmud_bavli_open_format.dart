@@ -17,6 +17,7 @@ import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
 import 'package:otzaria/utils/file/page_converter.dart';
+import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 
 /// האם הגדרת פורמט הפתיחה של תלמוד בבלי היא PDF (ברירת המחדל: טקסט).
 bool talmudBavliOpensInPdf() =>
@@ -232,6 +233,7 @@ Future<bool> openLibraryBookPerTalmudBavliFormat(
     tabsBloc: context.read<TabsBloc>(),
     historyBloc: context.read<HistoryBloc>(),
     navigationBloc: context.read<NavigationBloc>(),
+    layoutWidth: readingLayoutWidthResolverOf(context),
   );
   final target = await resolveTalmudBavliPdfBook(book, forcePdf: forcePdf);
   if (target == null) return false;

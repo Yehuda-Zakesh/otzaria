@@ -12,6 +12,8 @@ import 'package:otzaria/migration/database/repository/seforim_repository.dart';
 import 'package:otzaria/migration/models/book.dart' as migration_models;
 import 'package:otzaria/migration/models/category.dart' as migration_models;
 import 'package:otzaria/models/book_source.dart';
+import 'package:otzaria/models/books.dart';
+import 'package:otzaria/services/book_details_service.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:path/path.dart' as path;
 
@@ -467,6 +469,39 @@ void main() {
         isNull,
       );
     });
+
+    test(
+      'אודות ספר מאוצר החכמה אינו מציג ספר אוצריא בשם זהה (issue #2870)',
+      () async {
+        await seforimRepo.insertBook(
+          migration_models.Book(
+            categoryId: await seforimRepo.insertCategory(
+              const migration_models.Category(title: 'מוסר'),
+            ),
+            sourceId: await seforimRepo.insertSource('אוצריא', -1),
+            title: 'אור הצפון',
+            heDesc: 'תיאור הספר של אוצריא',
+          ),
+        );
+
+        final info = await BookDetailsService().getBookInformation(
+          ExternalLibraryBook(
+            title: 'אור הצפון',
+            id: 7,
+            link: 'https://tablet.otzar.org/book/book.php?book=7',
+            externalLibraryId: 'oh:7',
+          ),
+        );
+
+        expect(info.databaseBook, isNull);
+        expect(info.source, isNull);
+        expect(info.fullDescription, isNull);
+        expect(
+          info.fileDetails['נתיב הקובץ'],
+          BookDetailsService.bookNotFoundText,
+        );
+      },
+    );
 
     test(
       'resolveBook עם preferSource=user מאתר ספר ב-user_books.db',

@@ -42,6 +42,8 @@ import '../test_helpers/memory_cache_provider.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  final themeMode = ValueNotifier(ThemeMode.light);
+
   late List<TextBookTab> tabs;
   late _TestTabsBloc tabsBloc;
 
@@ -76,6 +78,7 @@ void main() {
     tester.view.physicalSize = const Size(1600, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
+    addTearDown(() => themeMode.value = ThemeMode.light);
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -112,10 +115,16 @@ void main() {
             BlocProvider<TourCubit>.value(value: tourCubit),
             BlocProvider<HistoryBloc>.value(value: historyBloc),
           ],
-          child: MaterialApp(
-            home: Directionality(
-              textDirection: direction,
-              child: const ReadingScreen(),
+          child: ValueListenableBuilder<ThemeMode>(
+            valueListenable: themeMode,
+            builder: (context, mode, _) => MaterialApp(
+              theme: ThemeData(),
+              darkTheme: ThemeData.dark(),
+              themeMode: mode,
+              home: Directionality(
+                textDirection: direction,
+                child: const ReadingScreen(),
+              ),
             ),
           ),
         ),
@@ -151,6 +160,34 @@ void main() {
       reason:
           'טאב רקע אינו מוצג; בנייה ופריסה שלו בכל פריים מכפילות את עלות הגרירה',
     );
+  });
+
+  testWidgets('מעבר למצב כהה אינו בונה מחדש את תוכן טאבי הרקע', (
+    tester,
+  ) async {
+    await pumpReadingScreen(tester);
+
+    var backgroundRebuilds = 0;
+    debugOnRebuildDirtyWidget = (element, _) {
+      if (_isInsideBackgroundBook(element)) backgroundRebuilds++;
+    };
+    addTearDown(() => debugOnRebuildDirtyWidget = null);
+
+    themeMode.value = ThemeMode.dark;
+    await tester.pumpAndSettle();
+    debugOnRebuildDirtyWidget = null;
+
+    expect(
+      backgroundRebuilds,
+      0,
+      reason: 'אנימציית ערכת הצבע בנתה מחדש כל טאב רקע בכל פריים',
+    );
+    expect(bookTheme(tester, tabs[0]).brightness, Brightness.dark);
+
+    await showTab(tester, 1);
+    await tester.pumpAndSettle();
+    expect(bookTheme(tester, tabs[1]).brightness, Brightness.dark);
+    expect(bookTheme(tester, tabs[1]), bookTheme(tester, tabs[0]));
   });
 
   for (final touch in [true, false]) {
@@ -374,6 +411,18 @@ MediaQueryData bookMediaQuery(WidgetTester tester, TextBookTab tab) {
     matching: find.byType(Scaffold, skipOffstage: false),
   );
   return MediaQuery.of(tester.element(scaffold.first));
+}
+
+ThemeData bookTheme(WidgetTester tester, TextBookTab tab) {
+  final book = find.byWidgetPredicate(
+    (widget) => widget is TextBookViewerBloc && identical(widget.tab, tab),
+    skipOffstage: false,
+  );
+  final scaffold = find.descendant(
+    of: book,
+    matching: find.byType(Scaffold, skipOffstage: false),
+  );
+  return Theme.of(tester.element(scaffold.first));
 }
 
 HorizontalDragGestureRecognizer desktopSwipe(WidgetTester tester) {

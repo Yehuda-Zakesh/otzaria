@@ -1,11 +1,9 @@
-//
-// Super simple thumbnails view
-//
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:otzaria/pdf_book/utils/bounded_image_cache.dart';
+import 'package:otzaria/pdf_book/utils/pdf_image_budget.dart';
 import 'package:otzaria/theme/app_tokens.dart';
 import 'package:pdfrx/pdfrx.dart';
 
@@ -16,6 +14,7 @@ class ThumbnailsView extends StatefulWidget {
     this.onNavigateToPage,
     this.shownPagesFor,
     this.thumbnailCache,
+    this.isPaneOpen = true,
     super.key,
   });
 
@@ -31,6 +30,9 @@ class ThumbnailsView extends StatefulWidget {
 
   /// מטמון של הבעלים, שמרוקן אותו כשהטאב מוסתר; בלעדיו לתצוגה יש מטמון משלה.
   final PdfThumbnailCache? thumbnailCache;
+
+  /// חלונית סגורה או לשונית מוסתרת נשארות בעץ; בלי זה כל דפדוף גולל ובונה אותן.
+  final bool isPaneOpen;
 
   @override
   State<ThumbnailsView> createState() => _ThumbnailsViewState();
@@ -74,6 +76,12 @@ class _ThumbnailsViewState extends State<ThumbnailsView>
       widget.controller?.addListener(_onControllerChanged);
       _lastKnownPage = _currentPage;
     }
+    if (!oldWidget.isPaneOpen && widget.isPaneOpen) {
+      // קפיצה ולא אנימציה: חלונית פתוחה הייתה כבר נמצאת בעמוד הנוכחי.
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _scrollToActiveItem(animate: false),
+      );
+    }
     if (oldWidget.documentRef != widget.documentRef) {
       _thumbnailCache.clear();
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -96,6 +104,10 @@ class _ThumbnailsViewState extends State<ThumbnailsView>
     final page = _currentPage;
     if (page == _lastKnownPage) return;
     _lastKnownPage = page;
+    if (!widget.isPaneOpen) {
+      _lastScrolledPage = null;
+      return;
+    }
     setState(() {});
     _scrollToActiveItem();
   }
@@ -104,8 +116,13 @@ class _ThumbnailsViewState extends State<ThumbnailsView>
       ? widget.controller!.pageNumber
       : null;
 
-  void _scrollToActiveItem() {
-    if (_isManuallyScrolling || !(widget.controller?.isReady ?? false)) return;
+  void _scrollToActiveItem({bool animate = true}) {
+    if (!mounted ||
+        !widget.isPaneOpen ||
+        _isManuallyScrolling ||
+        !(widget.controller?.isReady ?? false)) {
+      return;
+    }
     final currentPage = widget.controller?.pageNumber;
     if (currentPage == null || _lastScrolledPage == currentPage) return;
     if (!_scrollController.hasClients) return;
@@ -116,11 +133,19 @@ class _ThumbnailsViewState extends State<ThumbnailsView>
         itemExtent * (currentPage - 1) -
         (viewportHeight / 2) +
         (itemExtent / 2);
-    _scrollController.animateTo(
-      target.clamp(0.0, _scrollController.position.maxScrollExtent),
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
+    final offset = target.clamp(
+      0.0,
+      _scrollController.position.maxScrollExtent,
     );
+    if (animate) {
+      _scrollController.animateTo(
+        offset,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+    } else {
+      _scrollController.jumpTo(offset);
+    }
     _lastScrolledPage = currentPage;
   }
 
@@ -181,7 +206,7 @@ class _ThumbnailsViewState extends State<ThumbnailsView>
                             pageNumber: index + 1,
                             anchor: PdfPageAnchor.top,
                           ),
-                      child: document == null
+                      child: document == null || !widget.isPaneOpen
                           ? const SizedBox()
                           : _PageThumbnail(
                               page: document.pages[index],
@@ -205,7 +230,7 @@ typedef PdfThumbnailCache =
     BoundedImageCache<(PdfPage page, int width, int height)>;
 
 PdfThumbnailCache createPdfThumbnailCache() =>
-    PdfThumbnailCache(maxBytes: 32 * 1024 * 1024);
+    PdfThumbnailCache(maxBytes: 32 * 1024 * 1024, budget: pdfSharedImageBudget);
 
 typedef _ThumbnailKey = (PdfPage page, int width, int height);
 
@@ -229,12 +254,45 @@ class _PageThumbnailState extends State<_PageThumbnail> {
 
   ui.Image? _image;
   _ThumbnailKey? _requestedKey;
+  _ThumbnailKey? _waitingForBudget;
+  PdfImageCacheEntry? _imageBudgetEntry;
   PdfPageRenderCancellationToken? _cancellationToken;
 
   @override
-  void dispose() {
-    _cancellationToken?.cancel();
+  void initState() {
+    super.initState();
+    widget.cache.budget?.addListener(_budgetChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _PageThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.cache.budget != widget.cache.budget) {
+      oldWidget.cache.budget?.removeListener(_budgetChanged);
+      widget.cache.budget?.addListener(_budgetChanged);
+    }
+  }
+
+  void _budgetChanged() {
+    if (!mounted || _waitingForBudget == null || _cancellationToken != null) {
+      return;
+    }
+    _waitingForBudget = null;
+    setState(() {});
+  }
+
+  void _releaseImage() {
+    _imageBudgetEntry?.dispose();
+    _imageBudgetEntry = null;
     _image?.dispose();
+    _image = null;
+  }
+
+  @override
+  void dispose() {
+    widget.cache.budget?.removeListener(_budgetChanged);
+    _cancellationToken?.cancel();
+    _releaseImage();
     super.dispose();
   }
 
@@ -280,44 +338,120 @@ class _PageThumbnailState extends State<_PageThumbnail> {
   void _requestImage(_ThumbnailKey key) {
     if (key == _requestedKey) return;
     _requestedKey = key;
+    _waitingForBudget = null;
     _cancellationToken?.cancel();
     _cancellationToken = null;
     final cached = widget.cache.lookup(key);
     if (cached != null) {
-      _image?.dispose();
-      _image = cached;
+      _adoptImage(cached, key);
       return;
     }
     _render(key);
   }
 
+  bool _adoptImage(
+    ui.Image image,
+    _ThumbnailKey key, {
+    PdfImageReservation? reservation,
+  }) {
+    final budget = widget.cache.budget;
+    final allocation =
+        reservation ?? _reserveImageBytes(image.width * image.height * 8);
+    if (budget != null && allocation == null) {
+      image.dispose();
+      _requestedKey = null;
+      _waitingForBudget = key;
+      return false;
+    }
+    try {
+      final entry = allocation?.commit(
+        retainedBytes: image.width * image.height * 8,
+        isPinned: true,
+        onEvict: () {
+          if (!identical(_image, image)) return;
+          _releaseImage();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() {});
+          });
+        },
+      );
+      if (budget != null && entry == null) {
+        image.dispose();
+        _requestedKey = null;
+        _waitingForBudget = key;
+        return false;
+      }
+      _releaseImage();
+      _image = image;
+      _imageBudgetEntry = entry;
+      return true;
+    } finally {
+      allocation?.dispose();
+    }
+  }
+
+  PdfImageReservation? _reserveImageBytes(int bytes) {
+    final budget = widget.cache.budget;
+    if (budget == null) return null;
+    var reservation = budget.tryReserve(bytes);
+    if (reservation == null && _image != null && bytes <= budget.maximumBytes) {
+      _releaseImage();
+      reservation = budget.tryReserve(bytes);
+    }
+    return reservation;
+  }
+
   Future<void> _render(_ThumbnailKey key) async {
     final (page, width, height) = key;
-    // אחרי clear() רינדור שהתחיל קודם שייך למסמך או לטאב שכבר שוחררו.
     final generation = widget.cache.generation;
+    final reservation = _reserveImageBytes(width * height * 12);
+    if (widget.cache.budget != null && reservation == null) {
+      _requestedKey = null;
+      _waitingForBudget = key;
+      return;
+    }
     final token = _cancellationToken = page.createCancellationToken();
-    final pageImage = await page.render(
-      fullWidth: width.toDouble(),
-      fullHeight: height.toDouble(),
-      cancellationToken: token,
-    );
-    if (pageImage == null) return;
     try {
-      final image = await pageImage.createImage();
-      widget.cache.put(key, image, generation: generation);
-      if (!mounted || key != _requestedKey) {
-        image.dispose();
-        return;
+      final pageImage = await page.render(
+        fullWidth: width.toDouble(),
+        fullHeight: height.toDouble(),
+        cancellationToken: token,
+        priority: PdfPageRenderPriority.low,
+      );
+      if (pageImage == null) return;
+      try {
+        if (!mounted ||
+            token.isCanceled ||
+            generation != widget.cache.generation) {
+          return;
+        }
+        final image = await pageImage.createImage();
+        if (!mounted ||
+            key != _requestedKey ||
+            token.isCanceled ||
+            generation != widget.cache.generation) {
+          image.dispose();
+          return;
+        }
+        if (_adoptImage(image, key, reservation: reservation)) {
+          widget.cache.put(key, image, generation: generation);
+          setState(() {});
+        }
+      } finally {
+        pageImage.dispose();
       }
-      setState(() {
-        _image?.dispose();
-        _image = image;
-      });
     } catch (_) {
       // בלי איפוס הבקשה העמוד היה נשאר ריק עד שגודלו ישתנה.
       if (key == _requestedKey) _requestedKey = null;
     } finally {
-      pageImage.dispose();
+      if (identical(_cancellationToken, token)) _cancellationToken = null;
+      reservation?.dispose();
+      if (mounted &&
+          generation != widget.cache.generation &&
+          key == _requestedKey) {
+        _requestedKey = null;
+        setState(() {});
+      }
     }
   }
 }

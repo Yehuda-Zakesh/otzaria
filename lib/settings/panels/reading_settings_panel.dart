@@ -18,6 +18,9 @@ import 'package:otzaria/text_book/bloc/text_book_state.dart';
 class ReadingSettingsPanel extends StatelessWidget {
   const ReadingSettingsPanel({super.key});
 
+  static bool _isPageShape(TextBookState state) =>
+      state is TextBookLoaded && state.showPageShapeView;
+
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<TabsBloc, TabsState>(
@@ -26,12 +29,13 @@ class ReadingSettingsPanel extends StatelessWidget {
         if (currentTab is TextBookTab) {
           return BlocBuilder<TextBookBloc, TextBookState>(
             bloc: currentTab.bloc,
+            // הפאנל נשאר חי גם כשהוא סגור, וגלילה בקורא משדרת מצב בכל שורה.
+            buildWhen: (previous, current) =>
+                _isPageShape(previous) != _isPageShape(current),
             builder: (context, textState) {
-              final isPageShape =
-                  textState is TextBookLoaded && textState.showPageShapeView;
               return TextSettingsTab(
                 isDialog: true,
-                hideCommentaryFontSize: isPageShape,
+                hideCommentaryFontSize: _isPageShape(textState),
               );
             },
           );

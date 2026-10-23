@@ -6,240 +6,25 @@ import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:otzaria/theme/theme_exports.dart';
-import 'package:otzaria/widgets/misc/app_menu_icon.dart';
+import 'package:otzaria_context_menu/otzaria_context_menu.dart' as menu;
+import 'package:otzaria_context_menu/otzaria_context_menu.dart'
+    show AppMenuEntry;
+import 'package:otzaria/widgets/misc/app_menu_presentation.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// AppMenuEntry — נתוני פריט בתפריט
-// ═══════════════════════════════════════════════════════════════════════════
-
-class AppMenuEntry<T> {
-  final T value;
-  final String label;
-  final IconData? icon;
-  final bool enabled;
-  final bool isDestructive;
-  final Widget? trailing;
-
-  /// תוכן מותאם להצגה במקום [label] (החיפוש עדיין מתבצע לפי [label]).
-  final Widget? labelWidget;
-
-  /// שמור מקום ריק בעמודת סימן ה-✓ גם כשהשורה אינה נבחרת.
-  final bool reserveTrailingGap;
-
-  /// רוחב בפיקסלים המוקצה ל-[trailing] בחישוב [labelMaxWidth].
-  /// 0 = ברירת מחדל (iconSize + 8).
-  final double trailingReservedWidth;
-
-  /// תת-כותרת המשויכת לאפשרות זו — נלקחת אוטומטית ע"י
-  /// [SettingsActionTile.dropdownTile] כשלא סופק subtitle מפורש.
-  final String? subtitle;
-
-  const AppMenuEntry({
-    required this.value,
-    required this.label,
-    this.icon,
-    this.enabled = true,
-    this.isDestructive = false,
-    this.trailing,
-    this.labelWidget,
-    this.reserveTrailingGap = false,
-    this.trailingReservedWidth = 0,
-    this.subtitle,
-  });
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// AppContextMenuIconAction — פעולת אייקון בודדת בשורת האייקונים העליונה
-// (סגנון Windows 11: שורת כפתורי אייקון בראש תפריט ההקשר)
-// ═══════════════════════════════════════════════════════════════════════════
-
-class AppContextMenuIconAction {
-  /// כיתוב קצר (מילה אחת) שמוצג מתחת לאייקון. בהיעדרו מוצג [tooltip].
-  final String? label;
-
-  /// טקסט הרחבה שמוצג בריחוף על האייקון. null/ריק → אין tooltip.
-  final String? tooltip;
-  final IconData icon;
-  final VoidCallback? onTap;
-  final bool enabled;
-
-  /// כשמוגדר, האייקון פותח תת-תפריט (עם חץ למטה) במקום פעולה ישירה.
-  final List<AppContextMenuSubAction> Function()? submenuBuilder;
-
-  const AppContextMenuIconAction({
-    required this.icon,
-    this.label,
-    this.tooltip,
-    this.onTap,
-    this.enabled = true,
-    this.submenuBuilder,
-  });
-}
-
-class AppContextMenuColorAction {
-  final String id;
-  final Color color;
-  final String label;
-  final IconData? icon;
-  final VoidCallback? onTap;
-  final bool selected;
-
-  const AppContextMenuColorAction({
-    required this.id,
-    required this.color,
-    required this.label,
-    this.icon,
-    this.onTap,
-    this.selected = false,
-  });
-}
-
-/// פריט פעולה פשוט בתת-תפריט של כפתור אייקון בשורה העליונה.
-/// מכיל בדיוק את מה שתת-התפריט מרנדר — בלי divider/trailing/קינון של
-/// [AppContextMenuEntry] שלא נתמכים שם.
-class AppContextMenuSubAction {
-  final String label;
-  final IconData? icon;
-  final bool enabled;
-  final VoidCallback? onTap;
-
-  const AppContextMenuSubAction({
-    required this.label,
-    this.icon,
-    this.enabled = true,
-    this.onTap,
-  });
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// AppContextMenuEntry — פריט בתפריט הקשר (right-click)
-// ═══════════════════════════════════════════════════════════════════════════
-
-class AppContextMenuEntry {
-  final Key? key;
-  final String? label;
-  final Widget? labelWidget;
-  final IconData? icon;
-  final bool enabled;
-  final bool isDivider;
-  final bool isDestructive;
-  final bool isSelected;
-  final bool isHighlighted;
-  final VoidCallback? onTap;
-
-  /// בתוך תת-תפריט: הלחיצה לא סוגרת את התפריט, והתת-תפריט נבנה מחדש
-  /// מ-[childrenBuilder] של ההורה כדי ש-[isSelected] יתעדכן מיד.
-  final bool keepOpen;
-  final Widget? trailing;
-  // תת-פריטים לתפריט משנה
-  final List<AppContextMenuEntry>? children;
-  // בנייה עצלה של תת-פריטים לתפריט משנה.
-  final List<AppContextMenuEntry> Function()? childrenBuilder;
-  // תת-תפריט תגובתי שמתעדכן בזמן אמת (למשל רשימת כרטיסיות פתוחות)
-  final Stream<Object?>? childrenRefreshStream;
-  // חלונית תצוגה מקדימה צפה שנפתחת ברפרוף על השורה בתפריט.
-  final WidgetBuilder? hoverPreviewBuilder;
-
-  /// כשמוגדר, הערך מרונדר כשורה אופקית של כפתורי אייקון בראש התפריט
-  /// (סגנון Windows 11) במקום שורת טקסט רגילה.
-  final List<AppContextMenuIconAction>? iconRowActions;
-  final List<AppContextMenuColorAction>? colorRowActions;
-
-  const AppContextMenuEntry({
-    required this.label,
-    this.key,
-    this.labelWidget,
-    this.icon,
-    this.enabled = true,
-    this.isDestructive = false,
-    this.isSelected = false,
-    this.isHighlighted = false,
-    this.onTap,
-    this.keepOpen = false,
-    this.trailing,
-    this.children,
-    this.childrenBuilder,
-    this.childrenRefreshStream,
-    this.hoverPreviewBuilder,
-  }) : iconRowActions = null,
-       colorRowActions = null,
-       isDivider = false;
-
-  /// שורת כפתורי אייקון בראש התפריט (סגנון Windows 11).
-  const AppContextMenuEntry.iconRow(List<AppContextMenuIconAction> actions)
-    : assert(actions.length > 0, 'iconRow דורש לפחות פעולה אחת'),
-      iconRowActions = actions,
-      colorRowActions = null,
-      key = null,
-      label = null,
-      labelWidget = null,
-      icon = null,
-      enabled = true,
-      isDivider = false,
-      isDestructive = false,
-      isSelected = false,
-      isHighlighted = false,
-      onTap = null,
-      keepOpen = false,
-      trailing = null,
-      children = null,
-      childrenBuilder = null,
-      childrenRefreshStream = null,
-      hoverPreviewBuilder = null;
-
-  const AppContextMenuEntry.colorRow(List<AppContextMenuColorAction> actions)
-    : assert(actions.length > 0, 'colorRow דורש לפחות צבע אחד'),
-      colorRowActions = actions,
-      iconRowActions = null,
-      key = null,
-      label = null,
-      labelWidget = null,
-      icon = null,
-      enabled = true,
-      isDivider = false,
-      isDestructive = false,
-      isSelected = false,
-      isHighlighted = false,
-      onTap = null,
-      keepOpen = false,
-      trailing = null,
-      children = null,
-      childrenBuilder = null,
-      childrenRefreshStream = null,
-      hoverPreviewBuilder = null;
-
-  const AppContextMenuEntry.divider()
-    : key = null,
-      label = null,
-      labelWidget = null,
-      icon = null,
-      enabled = false,
-      isDivider = true,
-      isDestructive = false,
-      isSelected = false,
-      isHighlighted = false,
-      onTap = null,
-      keepOpen = false,
-      trailing = null,
-      children = null,
-      childrenBuilder = null,
-      childrenRefreshStream = null,
-      hoverPreviewBuilder = null,
-      iconRowActions = null,
-      colorRowActions = null;
-}
-
-bool hasEnabledAppContextMenuEntries(List<AppContextMenuEntry> entries) {
-  return entries.any((entry) => !entry.isDivider && entry.enabled);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// AppPopupMenuButton — כפתור שפותח תפריט
-// ═══════════════════════════════════════════════════════════════════════════
+export 'package:otzaria_context_menu/otzaria_context_menu.dart'
+    show
+        AppMenuEntry,
+        AppContextMenuEntry,
+        AppContextMenuIconAction,
+        AppContextMenuColorAction,
+        AppContextMenuSubAction,
+        hasEnabledAppContextMenuEntries,
+        calculateAppMenuLabelMaxWidth,
+        calculateAppMenuPreferredWidth;
 
 class AppPopupMenuButton<T> extends StatefulWidget {
   final List<AppMenuEntry<T>>? entries;
@@ -263,9 +48,7 @@ class AppPopupMenuButton<T> extends StatefulWidget {
   /// ובריחוף יוצג צבע מוגבר — שימושי לכפתורי מצב פעיל (כמו מיון).
   final bool highlighted;
 
-  /// נקרא כשהתפריט נסגר — גם בבחירת פעולה וגם בביטול. המסלול היחיד להחזרת
-  /// הפוקוס למי שמנוהל במקלדת: אחרי סגירת התפריט הפוקוס נשאר על ה-scope של
-  /// המסלול, ולא חוזר לרכיב שפתח אותו.
+  /// נקרא גם בבחירה וגם בביטול, ומאפשר למארח להחזיר את הפוקוס לרכיב הפותח.
   final VoidCallback? onMenuClosed;
 
   const AppPopupMenuButton({
@@ -432,10 +215,6 @@ class _AppPopupMenuButtonState<T> extends State<AppPopupMenuButton<T>> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// showAnchoredAppMenu — פתיחת תפריט עוגן לרכיב קיים
-// ═══════════════════════════════════════════════════════════════════════════
-
 Future<T?> showAnchoredAppMenu<T>({
   required BuildContext context,
   required BuildContext anchorContext,
@@ -507,7 +286,6 @@ Future<T?> showAnchoredAppMenu<T>({
   );
 }
 
-/// עוטף פריט תפריט ב-Directionality של הפותח, בשקיפות מלאה כלפי showMenu.
 class _DirectionalMenuEntry<T> extends PopupMenuEntry<T> {
   final PopupMenuEntry<T> inner;
   final TextDirection textDirection;
@@ -535,13 +313,6 @@ class _DirectionalMenuEntryState<T> extends State<_DirectionalMenuEntry<T>> {
     child: widget.inner,
   );
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// showAnchoredAppSearchMenu — תפריט עם שדה חיפוש מוצמד בראש
-//
-// שדה החיפוש לא נגלל יחד עם הרשימה — תמיד גלוי בראש התפריט.
-// כתיבה בו מסננת את הפריטים בזמן אמת.
-// ═══════════════════════════════════════════════════════════════════════════
 
 Future<T?> showAnchoredAppSearchMenu<T>({
   required BuildContext context,
@@ -597,10 +368,8 @@ Future<T?> showAnchoredAppSearchMenu<T>({
       ? targetRect.bottom + offset.dy
       : targetRect.top - menuHeight - offset.dy;
 
-  // הרוחב הוא הגדול מבין: הרוחב שהמפעיל ביקש (menuMinWidth), הרוחב הדרוש
-  // לפריט הארוך ביותר, רוחב שורת צ'יפי הסינון (כדי שכולם ייראו בלי גלילה),
-  // ורוחב השדה המפעיל. מוגבל לרוחב ה-overlay כדי שה-clamp לא יקבל גבול שלילי.
-  final preferredWidth = calculateAppMenuPreferredWidth(metrics, entries);
+  // רוחב התוכן והטריגר מוגבל ל-overlay כדי שלא יגלוש מעבר לחלון.
+  final preferredWidth = menu.calculateAppMenuPreferredWidth(metrics, entries);
   final filterRowWidth = hasFilters
       ? _calculateFilterRowWidth(metrics, filterLabels)
       : 0.0;
@@ -828,7 +597,6 @@ class _AnchoredSearchMenuContentState<T>
               clipBehavior: Clip.antiAlias,
               child: Column(
                 children: [
-                  // שדה חיפוש מוצמד בראש
                   Padding(
                     padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
                     child: RtlTextField(
@@ -863,7 +631,6 @@ class _AnchoredSearchMenuContentState<T>
                       ),
                     ),
                   ),
-                  // שורת סינון (chip-ים) — מוצגת רק אם הועברו filterLabels
                   if (widget.filterLabels != null &&
                       widget.filterLabels!.isNotEmpty) ...[
                     Padding(
@@ -912,7 +679,6 @@ class _AnchoredSearchMenuContentState<T>
                       ),
                     ),
                   ],
-                  // רשימה נגללת
                   Expanded(
                     child: filtered.isEmpty
                         ? Center(
@@ -942,10 +708,7 @@ class _AnchoredSearchMenuContentState<T>
                                   width: double.infinity,
                                   height: widget.metrics.itemHeight,
                                   child: LayoutBuilder(
-                                    // constraints.maxWidth הוא הרוחב החיצוני (לפני
-                                    // ריפוד ה-Container שבתוך buildAppMenuRowContent) —
-                                    // בדיוק מה ש-calculateAppMenuLabelMaxWidth מצפה
-                                    // לקבל, כי הוא כבר מחסיר את itemPadding בעצמו.
+                                    // חישוב רוחב התווית כבר מחסיר את ריפוד השורה.
                                     builder: (ctx, constraints) =>
                                         buildAppMenuRowContent(
                                           context,
@@ -979,24 +742,6 @@ class _AnchoredSearchMenuContentState<T>
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// buildAppMenuRowContent — בניית שורת תוכן בתפריט
-//
-// שינויים:
-// • הרקע הנבחר ממלא שורה שלמה (ללא borderRadius, ללא גבול)
-// • סימן ✓ תמיד מופיע לפריט נבחר
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// המרחק בין סוף התוכן לסימן ה-✓ — משותף לרינדור בפועל
-/// ([buildAppMenuRowContent]) ולחישוב הרוחב ([calculateAppMenuPreferredWidth])
-/// כדי ששניהם יישארו מסונכרנים.
-const double _kCheckmarkGap = 4;
-
-/// משקל הגופן של פריט נבחר — משותף לרינדור בפועל ולחישוב הרוחב, כדי שהמדידה
-/// תשקף את הרוחב הרחב יותר של הטקסט המודגש (אחרת הפריט הארוך ביותר עלול
-/// לגלוש על סימן ה-✓ כשהוא נבחר, כי הגופן המודגש רחב יותר מהרגיל).
-const FontWeight _kSelectedItemFontWeight = FontWeight.w600;
-
 Widget buildAppMenuRowContent(
   BuildContext context,
   AppMenuMetrics metrics, {
@@ -1010,195 +755,22 @@ Widget buildAppMenuRowContent(
   bool enabled = true,
   bool reserveTrailingGap = false,
   double trailingReservedWidth = 0,
-}) {
-  final colorScheme = Theme.of(context).colorScheme;
-  final foregroundColor = !enabled
-      ? colorScheme.onSurface.withValues(alpha: 0.38)
-      : isDestructive
-      ? colorScheme.error
-      : isSelected
-      ? colorScheme.primary
-      : colorScheme.onSurface;
+}) => menu.buildAppMenuRowContent(
+  context,
+  metrics,
+  presentation: createAppMenuPresentation(context, metrics: metrics),
+  label: label,
+  maxWidth: maxWidth,
+  labelWidget: labelWidget,
+  icon: icon,
+  trailing: trailing,
+  isSelected: isSelected,
+  isDestructive: isDestructive,
+  enabled: enabled,
+  reserveTrailingGap: reserveTrailingGap,
+  trailingReservedWidth: trailingReservedWidth,
+);
 
-  final hasTrailingWidget = isSelected || trailing != null;
-  // selected+trailing מציג גם trailing וגם checkmark → slot נוסף.
-  // non-selected+trailing+reserve מציג trailing + SizedBox ריק → slot נוסף.
-  final hasExtraSlot =
-      (isSelected && trailing != null) ||
-      (!isSelected && reserveTrailingGap && trailing != null);
-  final labelMaxWidth = calculateAppMenuLabelMaxWidth(
-    metrics,
-    maxWidth: maxWidth,
-    hasLeadingIcon: icon != null,
-    hasTrailingWidget: hasTrailingWidget,
-    trailingWidth: trailingReservedWidth,
-    hasExtraSlot: hasExtraSlot,
-  );
-  final labelTextStyle = TextStyle(
-    fontFamily: 'Roboto',
-    fontSize: metrics.fontSize,
-    fontWeight: isSelected ? _kSelectedItemFontWeight : metrics.itemFontWeight,
-    color: foregroundColor,
-  );
-  final labelChild =
-      labelWidget ??
-      Text(
-        label,
-        overflow: TextOverflow.ellipsis,
-        softWrap: false,
-      );
-
-  final row = Row(
-    mainAxisSize: (isSelected || trailing != null)
-        ? MainAxisSize.max
-        : MainAxisSize.min,
-    children: [
-      if (icon != null) ...[
-        AppMenuIcon(icon, size: metrics.iconSize, color: foregroundColor),
-        const SizedBox(width: 8),
-      ],
-      DefaultTextStyle.merge(
-        style: labelTextStyle,
-        child: labelMaxWidth == null
-            ? labelChild
-            : ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: labelMaxWidth),
-                child: labelChild,
-              ),
-      ),
-      if (isSelected && trailing != null) ...[
-        const Spacer(),
-        IconTheme.merge(
-          data: IconThemeData(
-            size: metrics.iconSize,
-            color: foregroundColor,
-          ),
-          child: DefaultTextStyle.merge(
-            style: TextStyle(color: foregroundColor),
-            child: trailing,
-          ),
-        ),
-        const SizedBox(width: _kCheckmarkGap),
-        Icon(
-          FluentIcons.checkmark_circle_24_filled,
-          size: metrics.iconSize,
-          color: foregroundColor,
-        ),
-      ] else if (isSelected) ...[
-        const Spacer(),
-        const SizedBox(width: _kCheckmarkGap),
-        Icon(
-          FluentIcons.checkmark_circle_24_filled,
-          size: metrics.iconSize,
-          color: foregroundColor,
-        ),
-      ] else if (trailing != null) ...[
-        const Spacer(),
-        IconTheme.merge(
-          data: IconThemeData(
-            size: metrics.iconSize,
-            color: foregroundColor,
-          ),
-          child: DefaultTextStyle.merge(
-            style: TextStyle(color: foregroundColor),
-            child: trailing,
-          ),
-        ),
-        if (reserveTrailingGap) SizedBox(width: metrics.iconSize + 8),
-      ],
-    ],
-  );
-
-  return Container(
-    constraints: BoxConstraints(
-      minWidth: metrics.menuMinWidth,
-      minHeight: metrics.itemHeight,
-    ),
-    padding: metrics.itemPadding,
-    alignment: AlignmentDirectional.centerStart,
-    child: row,
-  );
-}
-
-double? calculateAppMenuLabelMaxWidth(
-  AppMenuMetrics metrics, {
-  required double? maxWidth,
-  required bool hasLeadingIcon,
-  required bool hasTrailingWidget,
-  double trailingWidth = 0,
-  bool hasExtraSlot = false,
-}) {
-  if (maxWidth == null) return null;
-
-  final trailingSlot = hasTrailingWidget
-      ? (trailingWidth > 0 ? trailingWidth : metrics.iconSize + 8)
-      : 0.0;
-  final occupiedWidth =
-      metrics.itemPadding.horizontal +
-      (hasLeadingIcon ? metrics.iconSize + 8 : 0) +
-      trailingSlot +
-      (hasExtraSlot ? metrics.iconSize + 8 : 0);
-  final availableWidth = maxWidth - occupiedWidth;
-  if (availableWidth <= 0) return null;
-
-  return availableWidth;
-}
-
-/// מחשב את הרוחב הדרוש להצגת הפריט הארוך ביותר ב-[entries] בלי קיצוץ —
-/// משמש גם לקביעת רוחב התפריט וגם לרוחב הכפתור הפותח אותו (AppDropdownField).
-double calculateAppMenuPreferredWidth<T>(
-  AppMenuMetrics metrics,
-  List<AppMenuEntry<T>> entries,
-) {
-  if (entries.isEmpty) return metrics.menuMinWidth;
-
-  // נמדד במשקל של פריט נבחר (מודגש) — כל פריט עשוי להיות זה שנבחר,
-  // והגופן המודגש רחב יותר מהרגיל.
-  final textStyle = TextStyle(
-    fontFamily: 'Roboto',
-    fontSize: metrics.fontSize,
-    fontWeight: _kSelectedItemFontWeight,
-  );
-
-  var maxLabelWidth = 0.0;
-  for (final entry in entries) {
-    final painter = TextPainter(
-      text: TextSpan(text: entry.label, style: textStyle),
-      textDirection: TextDirection.rtl,
-      maxLines: 1,
-    )..layout();
-    if (painter.width > maxLabelWidth) maxLabelWidth = painter.width;
-  }
-
-  final hasIcon = entries.any((entry) => entry.icon != null);
-
-  var maxTrailingWidth = 0.0;
-  var hasExtraSlot = false;
-  for (final entry in entries) {
-    if (entry.trailing != null) {
-      final tWidth = entry.trailingReservedWidth > 0
-          ? entry.trailingReservedWidth
-          : metrics.iconSize + 8;
-      if (tWidth > maxTrailingWidth) maxTrailingWidth = tWidth;
-      if (entry.reserveTrailingGap) hasExtraSlot = true;
-    }
-  }
-
-  // תמיד משוריין מקום לסימן ה-✓ שמוצג ליד הפריט הנבחר, יהיה אשר יהיה.
-  final occupiedWidth =
-      metrics.itemPadding.horizontal +
-      (hasIcon ? metrics.iconSize + 8 : 0) +
-      metrics.iconSize +
-      _kCheckmarkGap +
-      maxTrailingWidth +
-      (hasExtraSlot ? metrics.iconSize + 8 : 0);
-
-  return max(metrics.menuMinWidth, maxLabelWidth + occupiedWidth);
-}
-
-/// מחשב את רוחב שורת צ'יפי הסינון (סכום כל הצ'יפים + רווחים + ריפוד השורה),
-/// כדי שרוחב התפריט יבטיח שכל הצ'יפים ייראו בלי גלילה אופקית.
-/// הקבועים תואמים את רינדור הצ'יפים ב-[_AnchoredSearchMenuContent].
 double _calculateFilterRowWidth(AppMenuMetrics metrics, List<String> labels) {
   // ריפוד ה-Padding העוטף (EdgeInsets.fromLTRB(8, 0, 8, 4)) + רווח בין צ'יפים.
   const double rowHorizontalPadding = 16.0;
@@ -1223,10 +795,6 @@ double _calculateFilterRowWidth(AppMenuMetrics metrics, List<String> labels) {
   }
   return total;
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// buildAppPopupMenuItem
-// ═══════════════════════════════════════════════════════════════════════════
 
 PopupMenuEntry<T> buildAppPopupMenuItem<T>(
   BuildContext context,
@@ -1259,10 +827,6 @@ PopupMenuEntry<T> buildAppPopupMenuItem<T>(
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// buildAppCustomPopupMenuItem
-// ═══════════════════════════════════════════════════════════════════════════
-
 PopupMenuEntry<T> buildAppCustomPopupMenuItem<T>({
   required BuildContext context,
   required AppMenuMetrics metrics,
@@ -1279,8 +843,6 @@ PopupMenuEntry<T> buildAppCustomPopupMenuItem<T>({
   );
 }
 
-/// שורה בתפריט שאינה פריט בחירה — למשל שורת כפתורי אייקון.
-/// הרקע בולע לחיצות והילדים שומרים על סמנטיקה עצמאית.
 class AppMenuRowEntry<T> extends PopupMenuEntry<T> {
   final Widget child;
 
@@ -1310,62 +872,14 @@ class _AppMenuRowEntryState<T> extends State<AppMenuRowEntry<T>> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// buildAppSubmenuItemStyle
-// ═══════════════════════════════════════════════════════════════════════════
-
 ButtonStyle buildAppSubmenuItemStyle(
   BuildContext context,
   AppMenuMetrics metrics,
-) {
-  final colorScheme = Theme.of(context).colorScheme;
-  return ButtonStyle(
-    padding: WidgetStatePropertyAll(metrics.itemPadding),
-    minimumSize: WidgetStatePropertyAll(
-      Size(metrics.menuMinWidth, metrics.itemHeight),
-    ),
-    visualDensity: metrics.visualDensity,
-    shape: WidgetStatePropertyAll(
-      RoundedRectangleBorder(
-        borderRadius: AppTokens.borderRadiusAll,
-      ),
-    ),
-    alignment: Alignment.centerRight,
-    textStyle: WidgetStatePropertyAll(
-      TextStyle(
-        fontFamily: 'Roboto',
-        fontSize: metrics.fontSize,
-        fontWeight: metrics.itemFontWeight,
-      ),
-    ),
-    foregroundColor: WidgetStateProperty.resolveWith((states) {
-      if (states.contains(WidgetState.disabled)) {
-        return colorScheme.onSurface.withValues(alpha: 0.38);
-      }
-      return colorScheme.onSurface;
-    }),
-    iconColor: WidgetStateProperty.resolveWith((states) {
-      if (states.contains(WidgetState.disabled)) {
-        return colorScheme.onSurface.withValues(alpha: 0.38);
-      }
-      return colorScheme.onSurface;
-    }),
-    overlayColor: WidgetStateProperty.resolveWith((states) {
-      if (states.contains(WidgetState.hovered) ||
-          states.contains(WidgetState.focused)) {
-        return colorScheme.onSurface.withValues(alpha: 0.08);
-      }
-      if (states.contains(WidgetState.pressed)) {
-        return colorScheme.onSurface.withValues(alpha: 0.12);
-      }
-      return null;
-    }),
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// buildAppSubmenuPopupMenuItem
-// ═══════════════════════════════════════════════════════════════════════════
+) => menu.buildAppSubmenuItemStyle(
+  context,
+  metrics,
+  presentation: createAppMenuPresentation(context, metrics: metrics),
+);
 
 PopupMenuEntry<T> buildAppSubmenuPopupMenuItem<T>({
   required BuildContext context,
@@ -1389,7 +903,6 @@ PopupMenuEntry<T> buildAppSubmenuPopupMenuItem<T>({
   );
 }
 
-/// ווידג'ט פנימי לפריט תת-תפריט שתומך בפתיחה גם בלחיצה וגם ב-hover.
 class _SubmenuItemWidget<T> extends StatefulWidget {
   final AppMenuMetrics metrics;
   final String label;
@@ -1410,238 +923,58 @@ class _SubmenuItemWidget<T> extends StatefulWidget {
 }
 
 class _SubmenuItemWidgetState<T> extends State<_SubmenuItemWidget<T>> {
-  bool _submenuOpen = false;
-  Timer? _hoverTimer;
-  Timer? _closeTimer;
-  OverlayEntry? _overlayEntry;
-  Completer<T?>? _completer;
-
-  void _scheduleSubmenuOnHover(BuildContext innerContext) {
-    // חילוץ כל המידע מה-context לפני ה-async gap
-    final renderBox = innerContext.findRenderObject() as RenderBox?;
-    final overlayState = Overlay.maybeOf(innerContext);
-    if (renderBox == null || overlayState == null) return;
-    final overlay = overlayState.context.findRenderObject() as RenderBox;
-
-    _closeTimer?.cancel();
-    _closeTimer = null;
-    _hoverTimer?.cancel();
-    _hoverTimer = Timer(const Duration(milliseconds: 500), () {
-      if (mounted) {
-        _openSubmenuFromData(renderBox, overlay);
-      }
-    });
-  }
-
-  void _cancelHoverDelay() {
-    _hoverTimer?.cancel();
-    _hoverTimer = null;
-    // סגירת הסאבמנו כשיוצאים מהפריט (אם לא נכנסים לסאבמנו עצמו)
-    // נשתמש בעיכוב ארוך יותר כדי לאפשר כניסה לסאבמנו
-    _closeTimer?.cancel();
-    _closeTimer = Timer(const Duration(milliseconds: 400), () {
-      if (mounted && _submenuOpen) {
-        _closeSubmenu();
-      }
-    });
-  }
-
-  void _closeSubmenu() {
-    _overlayEntry?.remove();
-    _overlayEntry = null;
-    _completer?.complete(null);
-    _completer = null;
-    _submenuOpen = false;
-  }
-
-  @override
-  void dispose() {
-    _hoverTimer?.cancel();
-    _closeTimer?.cancel();
-    _overlayEntry?.remove();
-    _overlayEntry = null;
-    // שחרור מי שממתין ל-future של הסאבמנו (_openSubmenuFromData) — בלי זה
-    // ה-await נשאר תלוי לנצח כשה-widget נזרק בזמן שהסאבמנו פתוח.
-    if (!(_completer?.isCompleted ?? true)) {
-      _completer!.complete(null);
-    }
-    _completer = null;
-    super.dispose();
-  }
-
-  Future<void> _openSubmenuFromData(
-    RenderBox renderBox,
-    RenderBox overlay,
-  ) async {
-    if (_submenuOpen) return;
-    final overlaySize = overlay.size;
-    if (!renderBox.attached) return;
-    final itemRect = MatrixUtils.transformRect(
-      renderBox.getTransformTo(overlay),
-      Offset.zero & renderBox.size,
-    );
-
-    // showMenu תמיד פותח למטה/מעלה — לא הצידה.
-    // כדי לפתוח הצידה, נשתמש ב-OverlayEntry ישירות.
-    const double estimatedSubmenuWidth = 250.0;
-    final spaceToRight = overlaySize.width - itemRect.right;
-    final spaceToLeft = itemRect.left;
-    final openToRight =
-        spaceToRight >= estimatedSubmenuWidth || spaceToRight >= spaceToLeft;
-
-    // צבע רקע מה-theme (כמו showMenu)
-    final menuColor =
-        Theme.of(context).popupMenuTheme.color ??
-        Theme.of(context).colorScheme.surface;
-    final menuBorderRadius = AppTokens.borderRadiusAll;
-    final menuPadding = widget.metrics.menuPadding;
-
-    _submenuOpen = true;
-    _completer = Completer<T?>();
-
-    _overlayEntry = OverlayEntry(
-      builder: (overlayContext) {
-        // לא משתמשים ב-Positioned.fill עם GestureDetector כשכבת סגירה: היא
-        // הייתה גוזלת את הקליק הראשון מכל פריט בתפריט-האב, ויוצרת חוויית
-        // "קליק אחד לסגירה, קליק שני לבחירה". בלעדיה, קליק על פריט אב יעבור
-        // ישירות לתפריט האב, שיסגור בעצמו את עצמו (וב-dispose ינוקה גם
-        // ה-overlay הזה). סגירה ביציאה מהעכבר עדיין מתבצעת ע"י _closeTimer.
-        return Stack(
-          children: [
-            Positioned.fill(
-              child: CustomSingleChildLayout(
-                delegate: _SubmenuLayoutDelegate(
-                  itemRect: itemRect,
-                  openToRight: openToRight,
-                ),
-                child: MouseRegion(
-                  // כניסה לסאבמנו מבטלת את סגירת ה-hover
-                  onEnter: (_) {
-                    _hoverTimer?.cancel();
-                    _hoverTimer = null;
-                    _closeTimer?.cancel();
-                    _closeTimer = null;
-                  },
-                  onExit: (_) {
-                    // יציאה מהסאבמנו — סגור אחרי עיכוב קצר
-                    _closeTimer?.cancel();
-                    _closeTimer = Timer(const Duration(milliseconds: 400), () {
-                      if (mounted && _submenuOpen) {
-                        _closeSubmenu();
-                      }
-                    });
-                  },
-                  child: Material(
-                    elevation: 8,
-                    borderRadius: menuBorderRadius,
-                    color: menuColor,
-                    child: Padding(
-                      padding: menuPadding,
-                      child: IntrinsicWidth(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: widget.menuChildren.map((menuEntry) {
-                            if (menuEntry is PopupMenuItem<T>) {
-                              return InkWell(
-                                borderRadius: AppTokens.borderRadiusAll,
-                                onTap: menuEntry.enabled
-                                    ? () {
-                                        final value = menuEntry.value;
-                                        _closeSubmenu();
-                                        if (value != null) {
-                                          if (mounted) {
-                                            Navigator.of(context).pop();
-                                          }
-                                          widget.onSelected?.call(value);
-                                        }
-                                      }
-                                    : null,
-                                child:
-                                    menuEntry.child ?? const SizedBox.shrink(),
-                              );
-                            }
-                            return const SizedBox.shrink();
-                          }).toList(),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-
-    Overlay.of(context).insert(_overlayEntry!);
-    await _completer!.future;
-    _submenuOpen = false;
-  }
-
-  Future<void> _openSubmenu(BuildContext innerContext) async {
-    if (_submenuOpen) return;
-    final renderBox = innerContext.findRenderObject() as RenderBox?;
-    if (renderBox == null) return;
-    final overlayState = Overlay.maybeOf(innerContext);
-    if (overlayState == null) return;
-    final overlay = overlayState.context.findRenderObject() as RenderBox;
-    await _openSubmenuFromData(renderBox, overlay);
-  }
+  final _controller = MenuController();
 
   @override
   Widget build(BuildContext context) {
-    return Builder(
-      builder: (innerContext) => MouseRegion(
-        onEnter: (_) => _scheduleSubmenuOnHover(innerContext),
-        onExit: (_) => _cancelHoverDelay(),
-        child: InkWell(
-          onTap: () => _openSubmenu(innerContext),
-          borderRadius: AppTokens.borderRadiusAll,
-          child: buildAppMenuRowContent(
-            context,
-            widget.metrics,
-            label: widget.label,
-            icon: widget.icon,
-            trailing: Icon(
-              // החץ מצביע לכיוון פתיחת התת-תפריט (ימינה)
-              FluentIcons.chevron_right_24_regular,
-              size: widget.metrics.iconSize * 0.75,
-            ),
-          ),
+    final presentation = createAppMenuPresentation(
+      context,
+      metrics: widget.metrics,
+    );
+    final itemStyle = buildAppSubmenuItemStyle(context, widget.metrics)
+        .copyWith(
+          padding: const WidgetStatePropertyAll(EdgeInsets.zero),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        );
+    return menu.AppSubmenuButton(
+      controller: _controller,
+      presentation: presentation,
+      preserveFocus: false,
+      maxWidth: min(320, MediaQuery.sizeOf(context).width - 16),
+      menuStyle: Theme.of(context).menuTheme.style,
+      style: itemStyle,
+      menuChildren: [
+        for (final entry in widget.menuChildren)
+          if (entry is PopupMenuItem<T>)
+            MenuItemButton(
+              style: itemStyle,
+              onPressed: !entry.enabled
+                  ? null
+                  : () {
+                      _controller.close();
+                      Navigator.of(context).pop();
+                      entry.onTap?.call();
+                      final value = entry.value;
+                      if (value != null) widget.onSelected?.call(value);
+                    },
+              child: entry.child ?? const SizedBox.shrink(),
+            )
+          else
+            entry,
+      ],
+      childBuilder: (context, openToRight) => buildAppMenuRowContent(
+        context,
+        widget.metrics,
+        label: widget.label,
+        icon: widget.icon,
+        trailing: presentation.submenuArrowBuilder(
+          context,
+          openToRight,
+          widget.metrics.iconSize,
+          null,
         ),
       ),
+      child: const SizedBox.shrink(),
     );
   }
-}
-
-/// ממקם את התת-תפריט צמוד לפריט האב לפי כיוון הפתיחה, מוצמד לגבולות ה-overlay
-/// לפי גודלו האמיתי — בחלון צר עיגון לקצה הפריט לבדו גולש מחוץ למסך.
-class _SubmenuLayoutDelegate extends SingleChildLayoutDelegate {
-  final Rect itemRect;
-  final bool openToRight;
-
-  _SubmenuLayoutDelegate({required this.itemRect, required this.openToRight});
-
-  @override
-  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
-      BoxConstraints.loose(constraints.biggest);
-
-  @override
-  Offset getPositionForChild(Size size, Size childSize) {
-    final desiredX = openToRight
-        ? itemRect.right
-        : itemRect.left - childSize.width;
-    final maxX = (size.width - childSize.width).clamp(0.0, size.width);
-    final maxY = (size.height - childSize.height).clamp(0.0, size.height);
-    return Offset(
-      desiredX.clamp(0.0, maxX),
-      itemRect.top.clamp(0.0, maxY),
-    );
-  }
-
-  @override
-  bool shouldRelayout(covariant _SubmenuLayoutDelegate oldDelegate) =>
-      oldDelegate.itemRect != itemRect ||
-      oldDelegate.openToRight != openToRight;
 }

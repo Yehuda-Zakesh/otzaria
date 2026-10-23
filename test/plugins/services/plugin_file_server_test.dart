@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/plugins/services/plugin_content_security_policy.dart';
@@ -375,6 +376,99 @@ void main() {
       isFalse,
     );
     expect(server.isServerUri(Uri.parse('https://example.com')), isFalse);
+  });
+
+  group('גופנים לתוספים (/fonts/)', () {
+    final bytes = Uint8List.fromList([0, 1, 0, 0, 7, 7]);
+
+    test('URL רשום מגיש את הבייטים עם cache ל-token של ההרצה', () async {
+      final url = await server.fontUrl('b-x.ttf', () async => bytes);
+      final response = await get(url);
+      expect(response.statusCode, 200);
+      expect(response.headers.contentType?.mimeType, 'font/ttf');
+      expect(
+        response.headers.value('cache-control'),
+        'max-age=31536000, immutable',
+      );
+      expect(await response.expand((c) => c).toList(), bytes);
+    });
+
+    test('fontBytesFor מחזיר את אותם בייטים בלי בקשת רשת', () async {
+      final url = await server.fontUrl('b-x.ttf', () async => bytes);
+      expect(await server.fontBytesFor(Uri.parse(url)), bytes);
+      expect(
+        await server.fontBytesFor(Uri.parse(url).replace(port: 1)),
+        isNull,
+      );
+    });
+
+    test('token שגוי או id שלא נרשם מחזירים 404', () async {
+      final url = Uri.parse(
+        await server.fontUrl('b-x.ttf', () async => bytes),
+      );
+      final segments = url.pathSegments;
+      final wrongToken = url.replace(
+        pathSegments: [segments[0], 'deadbeef', segments[2]],
+      );
+      final unknownId = url.replace(
+        pathSegments: [segments[0], segments[1], 'b-y.ttf'],
+      );
+      for (final uri in [wrongToken, unknownId]) {
+        final response = await get(uri.toString());
+        expect(response.statusCode, 404, reason: '$uri');
+        await response.drain<void>();
+        expect(await server.fontBytesFor(uri), isNull);
+      }
+    });
+
+    test('loader שנכשל מחזיר 404', () async {
+      final url = await server.fontUrl(
+        's0.ttf',
+        () async => throw const FileSystemException('gone'),
+      );
+      final response = await get(url);
+      expect(response.statusCode, 404);
+      await response.drain<void>();
+    });
+
+    test('CORS משתקף ל-file:// ולא לאתר חיצוני', () async {
+      final url = await server.fontUrl('b-x.ttf', () async => bytes);
+      for (final (origin, expected) in [
+        ('null', 'null'),
+        ('https://evil.example.com', null),
+      ]) {
+        final request = await client.getUrl(Uri.parse(url));
+        request.headers.set('origin', origin);
+        final response = await request.close();
+        expect(
+          response.headers.value('access-control-allow-origin'),
+          expected,
+        );
+        await response.drain<void>();
+      }
+    });
+
+    test('HEAD מחזיר כותרות בלי גוף', () async {
+      final url = await server.fontUrl('b-x.ttf', () async => bytes);
+      final request = await client.headUrl(Uri.parse(url));
+      final response = await request.close();
+      expect(response.statusCode, 200);
+      expect(response.headers.contentLength, bytes.length);
+      expect(await response.expand((c) => c).toList(), isEmpty);
+    });
+
+    test('אחרי close ה-URL הישן אינו תקף', () async {
+      final old = await server.fontUrl('b-x.ttf', () async => bytes);
+      await server.close();
+      final fresh = await server.fontUrl('b-x.ttf', () async => bytes);
+      expect(fresh, isNot(old));
+      final oldPath = Uri.parse(old).path;
+      final response = await get(
+        Uri.parse(fresh).replace(path: oldPath).toString(),
+      );
+      expect(response.statusCode, 404);
+      await response.drain<void>();
+    });
   });
 
   // ==========================================================================

@@ -13,6 +13,30 @@ void main() {
       expect(ratio, 1.0);
     });
 
+    test('חלון 4K אינו עוקף את תקרת הפיקסלים', () {
+      const viewSize = Size(3840, 2160);
+      final ratio = pdfSpreadSnapshotPixelRatio(
+        viewSize: viewSize,
+        devicePixelRatio: 1,
+      );
+      expect(
+        viewSize.width * viewSize.height * ratio * ratio,
+        closeTo(1600000, 0.001),
+      );
+    });
+
+    test('תקרת הפיקסלים נשמרת גם בחלון רחב במיוחד', () {
+      const viewSize = Size(7680, 2160);
+      final ratio = pdfSpreadSnapshotPixelRatio(
+        viewSize: viewSize,
+        devicePixelRatio: 2,
+      );
+      expect(
+        viewSize.width * viewSize.height * ratio * ratio,
+        closeTo(1600000, 0.001),
+      );
+    });
+
     test('חלון קטן במסך צפוף — עד 1.35', () {
       expect(
         pdfSpreadSnapshotPixelRatio(

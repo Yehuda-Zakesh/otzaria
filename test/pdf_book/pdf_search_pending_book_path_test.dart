@@ -86,7 +86,7 @@ Future<_CountingSearchRepository> _pumpEngineSearch(
   );
   final searchController = TextEditingController(text: 'אב');
   final focusNode = FocusNode();
-  final textSearcher = PdfTextSearcher(_FakeReadyController());
+  final textSearcher = PdfTextSearchSession(_FakeReadyController());
   final repository = _CountingSearchRepository();
 
   addTearDown(settingsBloc.close);

@@ -85,7 +85,10 @@ void main() {
       theme.colorScheme.surfaceContainerHigh,
     );
     expect(textField.decoration?.labelText, 'חיפוש');
-    expect(textField.decoration?.hintText, 'הקלד מילות חיפוש');
+    expect(
+      textField.decoration?.hintText,
+      'הקלד מילות חיפוש · לצמצום: מצה@רשי/פסחים',
+    );
   });
 
   testWidgets('שליחת חיפוש מעדכנת את כותרת הטאב', (tester) async {

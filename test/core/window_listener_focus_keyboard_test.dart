@@ -1,6 +1,9 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/window_listener.dart';
+import 'package:otzaria/core/windowing/app_window_id.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
+import 'package:otzaria/core/windowing/last_active_window.dart';
 
 /// issue #1071 — onWindowFocus קרא ל-clearState() שמוחק את *כל* ה-handlers
 /// של HardwareKeyboard, ואיתם מאזין ה-Ctrl+C של המפרשים בצורת הדף: אחרי
@@ -65,5 +68,18 @@ void main() {
           'handler שנרשם לפני onWindowFocus חייב להמשיך לקבל '
           'אירועים — issue #1071',
     );
+  });
+
+  test('onWindowFocus מפעיל את החלון של ה-listener', () {
+    addTearDown(AppWindowKeys.resetForTest);
+    addTearDown(LastActiveWindow.resetForTest);
+    const id = AppWindowId('window-2');
+    final keys = AppWindowKeys(id: id);
+    AppWindowKeys.register(keys);
+
+    AppWindowListener(windowId: id).onWindowFocus();
+
+    expect(LastActiveWindow.id, id);
+    expect(AppWindowKeys.current, same(keys));
   });
 }

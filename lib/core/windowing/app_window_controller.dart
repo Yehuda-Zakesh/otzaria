@@ -1,7 +1,10 @@
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show Listenable;
+
 import 'package:otzaria/core/windowing/app_window_id.dart';
-import 'package:window_manager/window_manager.dart' show TitleBarStyle;
+import 'package:window_manager/window_manager.dart'
+    show ResizeEdge, TitleBarStyle;
 
 /// פעולות ושאילתות על חלון **אחד**.
 ///
@@ -46,6 +49,10 @@ abstract interface class AppWindowController {
   Future<bool> isMaximized();
   Future<bool> isMinimized();
   Future<bool> isFullScreen();
+
+  /// מודיע כשמצב ה-maximize של החלון משתנה; המאזינים שואלים מחדש
+  /// ([isMaximized]) ולא מקבלים ערך.
+  Listenable get stateChanges;
 }
 
 /// גודל, מיקום ומצב תצוגה של חלון.
@@ -74,4 +81,13 @@ abstract interface class AppWindowGeometry {
 
   /// חיווי התקדמות על אייקון המשימות/Dock. שלילי מסתיר, מעל 1 = בלתי-מוגדר.
   Future<void> setProgressBar(double progress);
+}
+
+/// שינוי גודל מהקצוות שהאפליקציה מציירת (`AppVirtualWindowFrame`), לחלון
+/// שאין לו `VirtualWindowFrame` של window_manager.
+abstract interface class AppWindowResizing {
+  Future<void> startResizing(ResizeEdge edge);
+
+  /// הגדלה לגובה המסך, כמו לחיצה כפולה על הקצה העליון.
+  Future<void> maximizeVertically();
 }

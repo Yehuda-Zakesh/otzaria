@@ -50,11 +50,13 @@ class OverlayScrollAnchor {
   }
 
   /// המיקום הגלובלי הנוכחי של נקודת העוגן, או null כשה-widget שעליו ישב
-  /// העוגן כבר אינו חי (למשל שורה שמוחזרה מחוץ ל-cache של רשימה נגללת).
+  /// העוגן כבר אינו מוצג: שורה שמוחזרה מחוץ ל-cache של רשימה נגללת, או טאב
+  /// ברקע (keep-alive מקבל טרנספורם אפס, והמיקום יוצא NaN).
   Offset? currentGlobalPosition() {
     if (!_box.attached) return null;
     try {
-      return _box.localToGlobal(_local);
+      final position = _box.localToGlobal(_local);
+      return position.isFinite ? position : null;
     } catch (_) {
       return null;
     }

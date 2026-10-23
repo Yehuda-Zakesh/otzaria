@@ -57,6 +57,7 @@ void main() {
       (303, 'תמונה בלבד', [imageOnlyRow]),
       (304, 'ספר מצויר', illustratedRows),
       (305, 'ספר הערות', _notedRows),
+      (306, 'הערה פגומה', _notedRows),
     ]) {
       db.execute(
         'INSERT INTO book (id, categoryId, sourceId, title, orderIndex, '
@@ -72,13 +73,20 @@ void main() {
     }
     db.execute(
       'CREATE TABLE line_note (lineId INTEGER NOT NULL, '
-      'noteIndex INTEGER NOT NULL, charPos INTEGER NOT NULL, marker TEXT, '
+      'noteIndex INTEGER NOT NULL, charPos INTEGER NOT NULL, '
+      'hasMarker INTEGER NOT NULL, '
       'body TEXT NOT NULL, PRIMARY KEY (lineId, noteIndex)) WITHOUT ROWID',
     );
     db.execute(
-      'INSERT INTO line_note (lineId, noteIndex, charPos, marker, body) '
-      "SELECT id, 0, 4, 'א', 'מילה_בהערה מילתנסיוןנדירה' FROM line "
+      'INSERT INTO line_note (lineId, noteIndex, charPos, hasMarker, body) '
+      "SELECT id, 0, 4, 1, 'מילה_בהערה מילתנסיוןנדירה' FROM line "
       'WHERE bookId = 305 AND lineIndex = 0',
+    );
+    // מסגרת zstd במסד בלי zstd_dict: גוף שאי אפשר לפענח.
+    db.execute(
+      'INSERT INTO line_note (lineId, noteIndex, charPos, hasMarker, body) '
+      "SELECT id, 0, 4, 0, X'28B52FFD00' FROM line "
+      'WHERE bookId = 306 AND lineIndex = 0',
     );
     database.close();
 
@@ -165,6 +173,26 @@ void main() {
       // שורות המסד אינן הטקסט המאונדקס, ולכן המנוע אינו קורא אותן משם.
       expect(source.libraryDbBookId, isNull);
       expect(storageFor(book, source.libraryDbBookId), TextStorage.inIndex);
+    },
+  );
+
+  test(
+    'גוף הערה שאי אפשר לפענח — הטעינה נכשלת, ואין סמן שחותם את הספר',
+    () async {
+      final book = TextBook(id: 306, title: 'הערה פגומה', categoryId: 7);
+      Object? error;
+      try {
+        await repository.loadTextBookSource(book);
+      } catch (e) {
+        error = e;
+      }
+
+      expect(error, isA<FormatException>());
+      // כשל שאינו קבוע: אין סמן ריק עם contentHash, והספר ינוסה שוב.
+      expect(
+        IndexingRepository.classifyFailureForTesting(book, error!).isRetryable,
+        isTrue,
+      );
     },
   );
 

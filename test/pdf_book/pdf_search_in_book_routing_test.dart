@@ -79,7 +79,7 @@ Future<void> main() async {
     final searchController =
         tab?.searchController ?? TextEditingController(text: query);
     final focusNode = FocusNode();
-    final textSearcher = PdfTextSearcher(_FakeReadyController());
+    final textSearcher = PdfTextSearchSession(_FakeReadyController());
     final repository = _RecordingSearchRepository()
       ..bloc = pdfBookBloc
       ..textSearcher = textSearcher;
@@ -588,7 +588,7 @@ class _SearchRequest {
 class _RecordingSearchRepository extends SearchRepository {
   final List<_SearchRequest> requests = [];
   late PdfBookBloc bloc;
-  late PdfTextSearcher textSearcher;
+  late PdfTextSearchSession textSearcher;
 
   @override
   Future<List<SearchResult>> searchTexts(SearchEngineRequest request) async {
@@ -618,7 +618,7 @@ class _FakeDocument extends Fake implements PdfDocument {
   Stream<PdfDocumentEvent> get events => const Stream.empty();
 }
 
-/// קונטרולר "מוכן" בלי PdfViewer אמיתי — [PdfTextSearcher] דורש מסמך חי
+/// קונטרולר "מוכן" בלי PdfViewer אמיתי — [PdfTextSearchSession] דורש מסמך חי
 /// בבנייה, ו-useDocument מוחזר null כדי שהחיפוש הפשוט לא יגע ב-pdfium.
 class _FakeReadyController extends PdfViewerController {
   @override

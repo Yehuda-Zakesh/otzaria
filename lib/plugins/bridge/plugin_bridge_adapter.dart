@@ -6,6 +6,9 @@ import 'dart:io' hide Link;
 import 'dart:math' as math;
 import 'package:collection/collection.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:otzaria/book_common/utils/link_anchor_markers.dart';
+import 'package:otzaria/text_book/models/book_notes.dart';
+import 'package:otzaria/text_book/repository/book_notes_repository.dart';
 import 'package:otzaria/book_protection/models/book_protection.dart';
 import 'package:otzaria/book_protection/repository/book_protection_repository.dart';
 import 'package:otzaria/book_protection/utils/copy_guard.dart';
@@ -13,8 +16,8 @@ import 'package:otzaria/models/book_source.dart';
 import 'package:otzaria/utils/file/file_picker_dialog_options.dart';
 import 'package:otzaria/widgets/dialogs/input_dialog.dart';
 import 'package:flutter/material.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:flutter/foundation.dart' show compute;
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/plugins/plugin_constants.dart';
@@ -27,6 +30,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/services/installed_fonts.dart';
+import 'package:otzaria/plugins/services/plugin_fonts.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/data/data_providers/database_library_provider.dart';
@@ -113,6 +117,7 @@ import 'package:otzaria/plugins/models/plugin_toolbar_item.dart';
 import 'package:otzaria/plugins/models/plugin_when_condition.dart';
 import 'package:otzaria/plugins/services/context_menu_registry.dart';
 import 'package:otzaria/plugins/services/plugin_toolbar_registry.dart';
+import 'package:otzaria/plugins/services/plugin_restore_state_store.dart';
 import 'package:otzaria/plugins/services/plugin_unsaved_changes_registry.dart';
 import 'package:otzaria/plugins/services/plugin_page_launcher.dart';
 import 'package:otzaria/plugins/services/plugin_new_tab_page_service.dart';
@@ -248,162 +253,6 @@ Map<String, dynamic> buildThemePayloadFromScheme(
   };
 }
 
-// ===================================================================
-// Helper: build CSS @font-face block with bundled fonts as data: URLs
-// so the plugin WebView can resolve names like 'FrankRuhlCLM'.
-// בלי זה — שמות הגופנים שאוצריא שולחת לתוסף מצביעים על font assets
-// של Flutter שאינם זמינים ל-WebView, וב-macOS ה-fallback של המערכת
-// לעברית נראה כגופן דקורטיבי (ראה תקלת תצוגת תוספים ב-macOS).
-// ===================================================================
-final Map<String, String> _fontFaceCache = {};
-
-/// \u05db\u05dc\u05dc `@font-face` \u05d9\u05d7\u05d9\u05d3. [weight] \u05d4\u05d5\u05d0 \u05d3\u05e1\u05e7\u05e8\u05d9\u05e4\u05d8\u05d5\u05e8 \u05d4-CSS: \u05de\u05e9\u05e7\u05dc \u05d1\u05d5\u05d3\u05d3
-/// ("700") \u05d0\u05d5 \u05d8\u05d5\u05d5\u05d7 \u05dc\u05d2\u05d5\u05e4\u05df \u05de\u05e9\u05ea\u05e0\u05d4 ("100 900").
-String _fontFaceRule(String family, Uint8List bytes, String weight) {
-  final b64 = base64Encode(bytes);
-  return "@font-face{font-family:'$family';font-style:normal;"
-      "font-weight:$weight;"
-      "src:url(data:font/ttf;base64,$b64) format('truetype');"
-      'font-display:block;}';
-}
-
-/// \u05d4-faces \u05e9\u05dc \u05d2\u05d5\u05e4\u05df \u05de\u05d5\u05d1\u05e0\u05d4: \u05d4-regular, \u05d5\u05d1\u05de\u05e9\u05e4\u05d7\u05d4 \u05e2\u05dd \u05e7\u05d5\u05d1\u05e5 \u05d1\u05d5\u05dc\u05d3 \u05e0\u05e4\u05e8\u05d3 \u05d2\u05dd \u05d4\u05d5\u05d0.
-/// \u05d2\u05d5\u05e4\u05df \u05de\u05e9\u05ea\u05e0\u05d4 \u05de\u05e7\u05d1\u05dc \u05d8\u05d5\u05d5\u05d7 \u05de\u05e9\u05e7\u05dc\u05d9\u05dd \u2014 \u05d1\u05dc\u05e2\u05d3\u05d9\u05d5 \u05d4-WebView \u05e0\u05e2\u05d5\u05dc \u05e2\u05dc \u05de\u05d5\u05e4\u05e2
-/// \u05d1\u05e8\u05d9\u05e8\u05ea \u05d4\u05de\u05d7\u05d3\u05dc \u05d5\u05de\u05e1\u05e0\u05ea\u05d6 \u05d1\u05d5\u05dc\u05d3 \u05de\u05dc\u05d0\u05db\u05d5\u05ea\u05d9 \u05d5\u05de\u05e8\u05d5\u05d7 \u05d1\u05de\u05e7\u05d5\u05dd \u05dc\u05d4\u05e9\u05ea\u05de\u05e9 \u05d1\u05e6\u05d9\u05e8 \u05d4-wght.
-/// [asFamily] מגיש את הבייטים תחת שם אחר. כך `fonts.resolveFamilies` עונה על
-/// בקשה לגופן שאינו במכונה: הבייטים של תחליף, בשם שהמסמך מבקש.
-Future<String> _bundledFontFaceCss(String family, {String? asFamily}) async {
-  final assetPath = AppFonts.fontPaths[family];
-  if (assetPath == null) return '';
-  final name = asFamily ?? family;
-  final isVariable = AppFonts.variableWeightFonts.contains(family);
-  final regular = await rootBundle.load(assetPath);
-  final parts = <String>[
-    _fontFaceRule(
-      name,
-      regular.buffer.asUint8List(),
-      isVariable ? '100 900' : '400',
-    ),
-  ];
-  final boldPath = AppFonts.boldFontPaths[family];
-  if (boldPath != null) {
-    final bold = await rootBundle.load(boldPath);
-    parts.add(_fontFaceRule(name, bold.buffer.asUint8List(), '700'));
-  }
-  return parts.join('\n');
-}
-
-/// \u05d4-faces \u05e9\u05dc \u05d2\u05d5\u05e4\u05df \u05de\u05e2\u05e8\u05db\u05ea \u05e9\u05e0\u05d1\u05d7\u05e8 \u05d1\u05d4\u05d2\u05d3\u05e8\u05d5\u05ea. \u05d0\u05d9\u05e0\u05d5 \u05de\u05d5\u05d1\u05e0\u05d4, \u05d5\u05dc\u05db\u05df \u05d4-WebView
-/// \u05d0\u05d9\u05e0\u05d5 \u05d9\u05db\u05d5\u05dc \u05dc\u05e4\u05ea\u05d5\u05e8 \u05d0\u05ea \u05e9\u05de\u05d5 \u05d0\u05dc\u05d0 \u05d0\u05dd \u05d4\u05d1\u05d9\u05d9\u05d8\u05d9\u05dd \u05e9\u05dc\u05d5 \u05e0\u05e9\u05dc\u05d7\u05d9\u05dd \u05d0\u05d9\u05ea\u05d5.
-Future<String> _systemFontFaceCss(String family, {String? asFamily}) async {
-  await AppFonts.warmUpSystemFontsCache();
-  final faces = AppFonts.pluginSystemFamilyFaces(family);
-  if (faces == null) return '';
-  final regular = AppFonts.readFontBytes(faces.regularPath);
-  if (regular == null) return '';
-  final name = asFamily ?? family;
-  final parts = <String>[
-    _fontFaceRule(name, regular, faces.hasWeightAxis ? '100 900' : '400'),
-  ];
-  final boldPath = faces.boldPath;
-  if (boldPath != null) {
-    final bold = AppFonts.readFontBytes(boldPath);
-    if (bold != null) parts.add(_fontFaceRule(name, bold, '700'));
-  }
-  return parts.join('\n');
-}
-
-Future<String> _loadFontFaceCss(String fontFamily, {String? asFamily}) async {
-  if (fontFamily.isEmpty) return '';
-  if (asFamily == null) {
-    final cached = _fontFaceCache[fontFamily];
-    if (cached != null) return cached;
-  }
-  try {
-    final css = AppFonts.fontPaths.containsKey(fontFamily)
-        ? await _bundledFontFaceCss(fontFamily, asFamily: asFamily)
-        : await _systemFontFaceCss(fontFamily, asFamily: asFamily);
-    if (css.isNotEmpty && asFamily == null) {
-      _fontFaceCache[fontFamily] = css;
-    }
-    return css;
-  } catch (_) {
-    return '';
-  }
-}
-
-/// כמה משפחות ותחליפים בקשה אחת יכולה לבקש. גבול, לא מדיניות: כל גופן שמוגש
-/// הוא מאות קילובייטים ב-base64, ובקשה בלי תקרה היא דרך לנפח את ה-WebView.
-const int _maxResolveFamilies = 24;
-const int _maxResolveSubstitutes = 12;
-
-/// עונה על `fonts.resolveFamilies`: לכל משפחה מבוקשת, ה-`@font-face` הראשון
-/// שאפשר להרכיב מרשימת התחליפים שלה — **בשם שהמסמך מבקש**.
-///
-/// למה בכלל: `src: local()` ב-WebView רואה רק גופנים מותקנים במערכת, ולא את
-/// אלה שאוצריא מזריקה כ-`@font-face`. תוסף שפותח מסמך המבקש גופן שאינו מותקן
-/// אינו יכול להגיע לגופנים הארוזים כאן בלי הבייטים עצמם — וזה מה שמוחזר.
-///
-/// המדיניות — אילו תחליפים ובאיזה סדר — נשארת אצל הקורא: הוא זה שקרא את
-/// `word/fontTable.xml` ויודע מה המסמך באמת מבקש.
-Future<Map<String, dynamic>> _resolveFontFamilies(
-  List<dynamic> requested,
-) async {
-  final css = <String>[];
-  final resolved = <String>[];
-
-  for (final entry in requested.take(_maxResolveFamilies)) {
-    if (entry is! Map) continue;
-    final name = entry['name'];
-    if (name is! String || name.isEmpty) continue;
-
-    final substitutes = entry['substitutes'];
-    final candidates = substitutes is List
-        ? substitutes.whereType<String>().take(_maxResolveSubstitutes)
-        : const <String>[];
-
-    for (final candidate in candidates) {
-      final rule = await _loadFontFaceCss(candidate, asFamily: name);
-      if (rule.isEmpty) continue;
-      css.add(rule);
-      resolved.add(name);
-      break;
-    }
-  }
-
-  return {'css': css.join('\n'), 'resolved': resolved};
-}
-
-@visibleForTesting
-Future<Map<String, dynamic>> debugResolveFontFamilies(
-  List<dynamic> requested,
-) => _resolveFontFamilies(requested);
-
-@visibleForTesting
-void debugClearFontFaceCssCache() => _fontFaceCache.clear();
-
-@visibleForTesting
-int get debugFontFaceCssCacheSize => _fontFaceCache.length;
-
-/// \u05d1\u05d5\u05e0\u05d4 \u05d1\u05dc\u05d5\u05e7 CSS \u05e2\u05dd `@font-face` \u05dc\u05db\u05dc \u05d4\u05d2\u05d5\u05e4\u05e0\u05d9\u05dd \u05e9\u05ea\u05d5\u05e1\u05e3 \u05d9\u05db\u05d5\u05dc \u05dc\u05e0\u05e7\u05d5\u05d1 \u05d1\u05e9\u05de\u05dd:
-/// \u05d4\u05de\u05d5\u05d1\u05e0\u05d9\u05dd \u05e9\u05dc \u05d0\u05d5\u05e6\u05e8\u05d9\u05d0, \u05d5\u05d1\u05e0\u05d5\u05e1\u05e3 \u05d2\u05d5\u05e4\u05df \u05de\u05e2\u05e8\u05db\u05ea \u05e9\u05e0\u05d1\u05d7\u05e8 \u05d1\u05d4\u05d2\u05d3\u05e8\u05d5\u05ea. \u05de\u05e9\u05e4\u05d7\u05d4
-/// \u05e9\u05d0\u05d9\u05e0\u05d4 \u05e0\u05e9\u05dc\u05d7\u05ea \u05e0\u05d5\u05e4\u05dc\u05ea \u05d1-WebView \u05dc-fallback \u05e9\u05dc \u05d4\u05de\u05e2\u05e8\u05db\u05ea \u05d5\u05de\u05d5\u05e6\u05d2\u05ea \u05d1\u05d2\u05d5\u05e4\u05df \u05d0\u05d7\u05e8.
-Future<String> buildPluginFontFaceCss() async {
-  final families = <String>{
-    ...AppFonts.fontPaths.keys,
-    Settings.getValue<String>(SettingsRepository.keyFontFamily) ??
-        AppFonts.defaultFont,
-    Settings.getValue<String>(SettingsRepository.keyCommentatorsFontFamily) ??
-        AppFonts.defaultCommentatorsFont,
-  };
-  final parts = <String>[];
-  for (final family in families) {
-    final css = await _loadFontFaceCss(family);
-    if (css.isNotEmpty) parts.add(css);
-  }
-  return parts.join('\n');
-}
-
 /// שורת ערך AltToc עם ה-lineIndex שלה (או null לכותרת-אב ללא שורה), לבניית
 /// העץ וחישוב ה-index ב-`getBookAltToc`.
 typedef AltTocEntryRow = ({
@@ -414,7 +263,22 @@ typedef AltTocEntryRow = ({
   String text,
 });
 
+/// מצב החלון שנלכד בתחילת RPC; אינו משתנה כשבקשה אסינכרונית ממתינה.
+typedef PluginBridgeWindowDependencies = ({
+  BuildContext? context,
+  int? viewId,
+  AppWindowKeys? windowKeys,
+  HistoryBloc historyBloc,
+  TabsBloc tabsBloc,
+  NavigationBloc navigationBloc,
+  WorkspaceBloc workspaceBloc,
+  BookOpenCoordinator bookOpenCoordinator,
+  CustomFoldersBloc? customFoldersBloc,
+  Future<void> Function(int requestId)? waitForLibraryRefresh,
+});
+
 class PluginBridgeDependencies {
+  final BuildContext? windowContext;
   final HistoryBloc historyBloc;
   final TabsBloc tabsBloc;
   final NavigationBloc navigationBloc;
@@ -591,7 +455,21 @@ class PluginBridgeDependencies {
   /// כבר נראים לקריאה הבאה של התוסף.
   final Future<void> Function(int requestId)? waitForLibraryRefresh;
 
+  PluginBridgeWindowDependencies get window => (
+    context: windowContext,
+    viewId: windowContext == null ? null : View.of(windowContext!).viewId,
+    windowKeys: windowContext == null ? null : AppWindowKeys.of(windowContext!),
+    historyBloc: historyBloc,
+    tabsBloc: tabsBloc,
+    navigationBloc: navigationBloc,
+    workspaceBloc: workspaceBloc,
+    bookOpenCoordinator: bookOpenCoordinator,
+    customFoldersBloc: customFoldersBloc,
+    waitForLibraryRefresh: waitForLibraryRefresh,
+  );
+
   const PluginBridgeDependencies({
+    this.windowContext,
     required this.historyBloc,
     required this.tabsBloc,
     required this.navigationBloc,
@@ -682,6 +560,42 @@ class PluginBridgeAdapter {
   final String instanceId;
   final PluginRegistryRepository _pluginRepo;
   final PluginBridgeDependencies _dependencies;
+  final PluginBridgeWindowDependencies Function()? windowDependenciesResolver;
+  late final _defaultWindowDependencies = _dependencies.window;
+  final _windowScopeKey = Object();
+  PluginBridgeWindowDependencies get _windowDependencies =>
+      Zone.current[_windowScopeKey] as PluginBridgeWindowDependencies? ??
+      _defaultWindowDependencies;
+
+  BuildContext? get rpcWindowContext => _windowDependencies.context;
+
+  /// ברקע החלון הפעיל הוא יעד ה-RPC; בקשות חופפות שומרות כל אחת על היעד שלה.
+  Future<T> withWindowDependencies<T>(
+    Future<T> Function() action, {
+    String? domain,
+    String? rpcAction,
+  }) {
+    if (const {
+          'app',
+          'fonts',
+          'storage',
+          'settings',
+          'calendar',
+          'bookmarks',
+          'database',
+          'network',
+          'shortcut',
+        }.contains(domain) ||
+        (domain == 'notifications' && rpcAction != 'showInApp')) {
+      return action();
+    }
+    final resolve = windowDependenciesResolver;
+    if (resolve == null || Zone.current[_windowScopeKey] != null) {
+      return action();
+    }
+    return runZoned(action, zoneValues: {_windowScopeKey: resolve()});
+  }
+
   final CalendarAlertsClient _alerts;
   final PluginDatabaseService _databaseService;
   final PluginHighlightRegistry _highlightRegistry;
@@ -690,6 +604,7 @@ class PluginBridgeAdapter {
   PluginBridgeAdapter(
     this.plugin, {
     required this._dependencies,
+    this.windowDependenciesResolver,
     this.instanceId = PluginInstanceIds.defaultForeground,
     this.readerTab,
     PluginRegistryRepository? pluginRepository,
@@ -836,20 +751,33 @@ class PluginBridgeAdapter {
   static const _searchIdleTimeout = Duration(seconds: 30);
   static final _streamIdPattern = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
 
-  static bool isSearchCancellationPayload(Map<String, dynamic> args) {
+  static bool isStreamCancellationPayload(Map<String, dynamic> args) {
     if (args.length != 1) return false;
     final streamId = args[_cancelStreamIdKey];
     return streamId is String && _streamIdPattern.hasMatch(streamId);
   }
 
-  static bool isNetworkFetchCancellationPayload(Map<String, dynamic> args) {
-    if (args.length != 1) return false;
-    final streamId = args[_cancelStreamIdKey];
-    return streamId is String && _streamIdPattern.hasMatch(streamId);
+  /// ביטול שמגיע לפני תחילת הזרם נשמר ב-[pending], והזרם נעצר כשיתחיל.
+  Map<String, dynamic> _cancelStream(
+    String streamId,
+    Map<String, Future<void> Function()> active,
+    Set<String> pending,
+  ) {
+    if (!_streamIdPattern.hasMatch(streamId)) {
+      throw Exception('error.invalid_params: invalid internal stream id');
+    }
+    final cancel = active[streamId];
+    if (cancel == null) {
+      if (pending.length < 16) pending.add(streamId);
+      return {'cancelled': false};
+    }
+    unawaited(cancel());
+    return {'cancelled': true};
   }
 
-  void dispose() {
-    _stopFolderRevocationListener();
+  /// משחרר את מה שקשור לדף הנוכחי — תרומות ו-streams — כשה-WebView שוחרר.
+  /// המתאם ממשיך לשמש את הדף הבא של אותו מופע.
+  void releaseRuntime() {
     // מסיר רק את תרומות המופע הזה — מופע אחר של אותו תוסף ממשיך לתפקד,
     // וה-dedup בציור חושף את העותקים שלו.
     final key = (pluginId: plugin.pluginId, instanceId: instanceId);
@@ -867,6 +795,11 @@ class PluginBridgeAdapter {
     }
     _activeNetworkFetchStreams.clear();
     _pendingNetworkFetchCancellations.clear();
+  }
+
+  void dispose() {
+    _stopFolderRevocationListener();
+    releaseRuntime();
     _networkFetchService?.dispose();
     _fileDownloadService?.dispose();
     _bookContentCache.clear();
@@ -956,6 +889,17 @@ class PluginBridgeAdapter {
     String action,
     Map<String, dynamic> args, {
     PluginRpcEventSink? eventSink,
+  }) => withWindowDependencies(
+    () => _execute(domain, action, args, eventSink: eventSink),
+    domain: domain,
+    rpcAction: action,
+  );
+
+  Future<dynamic> _execute(
+    String domain,
+    String action,
+    Map<String, dynamic> args, {
+    PluginRpcEventSink? eventSink,
   }) async {
     switch (domain) {
       case 'app':
@@ -1012,7 +956,7 @@ class PluginBridgeAdapter {
   }
 
   // ----------------------------------------------------------------
-  // app.*
+  // fonts.*, app.*
   // ----------------------------------------------------------------
   Future<dynamic> _handleFonts(
     String action,
@@ -1024,7 +968,7 @@ class PluginBridgeAdapter {
         if (families is! List) {
           throw Exception('error.invalid_params: families must be an array');
         }
-        return await _resolveFontFamilies(families);
+        return await resolvePluginFontFamilies(families);
       case 'listInstalled':
         return InstalledFonts.list();
       default:
@@ -1144,7 +1088,7 @@ class PluginBridgeAdapter {
   /// אילו תיקיות ייסרקו נקבע מהגדרות המשתמש בלבד — התוסף אינו מעביר נתיב,
   /// ולכן אינו יכול לגרום לסריקה של תיקייה שהמשתמש לא הגדיר.
   Future<Map<String, dynamic>> _refreshUserBooks() async {
-    final bloc = _dependencies.customFoldersBloc;
+    final bloc = _windowDependencies.customFoldersBloc;
     if (bloc == null) {
       throw Exception(
         'error.unavailable: personal books refresh is not available',
@@ -1157,7 +1101,7 @@ class PluginBridgeAdapter {
     final completed = bloc.stream
         .firstWhere((state) => state.completedScan?.requestId == requestId)
         .timeout(_userBooksRefreshTimeout);
-    final waitForRefresh = _dependencies.waitForLibraryRefresh;
+    final waitForRefresh = _windowDependencies.waitForLibraryRefresh;
     final libraryRefreshCompleted = waitForRefresh == null
         ? null
         : waitForRefresh(requestId).timeout(_userBooksRefreshTimeout);
@@ -1286,14 +1230,7 @@ class PluginBridgeAdapter {
         // spec: accepts id, bookId (= title in otzaria), type — all optional,
         // all supplied fields must match the same book.
         {
-          final bookId = (args['bookId'] ?? args['title']) as String?;
-          if (PluginBookIdentity.parseId(args['id']) == null &&
-              bookId == null &&
-              (args['bookUid'] as String?)?.trim().isNotEmpty != true) {
-            throw Exception(
-              'error.invalid_params: id, bookUid or bookId required',
-            );
-          }
+          _requireBookIdentity(args);
           final book = _findPluginBook(library, args);
           if (book == null) return null;
           return {
@@ -1307,14 +1244,7 @@ class PluginBridgeAdapter {
         // spec: אותם שדות זהות כמו getBookMetadata, ומחזיר את נתוני
         // חלון "אודות הספר" — אותו מקור נתונים, כדי שהתצוגות לא ייפרדו.
         {
-          final bookId = (args['bookId'] ?? args['title']) as String?;
-          if (PluginBookIdentity.parseId(args['id']) == null &&
-              bookId == null &&
-              (args['bookUid'] as String?)?.trim().isNotEmpty != true) {
-            throw Exception(
-              'error.invalid_params: id, bookUid or bookId required',
-            );
-          }
+          _requireBookIdentity(args);
           final book = _findPluginBook(library, args);
           if (book == null) return null;
           final info = await BookDetailsService().getBookInformation(book);
@@ -1403,7 +1333,7 @@ class PluginBridgeAdapter {
             identities.add(Map<String, dynamic>.from(item));
           }
           final access = DeclarativeLibraryBookAccess.otzaria(
-            _dependencies.bookOpenCoordinator,
+            _windowDependencies.bookOpenCoordinator,
           );
           final books = await access.findUniqueBooks(identities);
           return [
@@ -1443,7 +1373,7 @@ class PluginBridgeAdapter {
           ];
         }
       case 'listRecentBooks':
-        final historyState = _dependencies.historyBloc.state;
+        final historyState = _windowDependencies.historyBloc.state;
         if (historyState is! HistoryLoaded) return [];
         return historyState.history
             .where((b) => !b.isSearch)
@@ -1819,6 +1749,17 @@ class PluginBridgeAdapter {
       targetBookTitles: targetTitlePrefixes == null ? targetTitles : null,
     );
 
+    // העוגנים נמדדים על השורה המלאה; התוסף מקבל את הטקסט השמור, בלי גופי ההערות.
+    final notes = includeAnchors
+        ? await BookNotesRepository.instance.notesFor(
+            book.title,
+            categoryId: book.categoryId,
+            source: book.source,
+            fileType: book.fileType,
+            versionTitle: book.versionTitle,
+          )
+        : BookNotes.empty;
+
     final filtered = _filterLinkRecords(
       links,
       targetTitles: targetTitles,
@@ -1838,7 +1779,8 @@ class PluginBridgeAdapter {
         'targetIsUserBook': link.targetIsUserBook,
         'targetSource': link.targetSource.wireKey,
         'targetCategoryId': link.targetCategoryId,
-        if (includeAnchors) ...?_linkAnchorJson(link),
+        if (includeAnchors)
+          ...?_linkAnchorJson(link, notes.notesAt(link.index1 - 1)),
       },
     );
     return {'links': filtered.records, 'truncated': filtered.truncated};
@@ -1952,16 +1894,16 @@ class PluginBridgeAdapter {
     return (records: records, truncated: truncated);
   }
 
-  Map<String, dynamic>? _linkAnchorJson(Link link) {
-    final span = link.anchorSpans.firstOrNull;
-    final start = span?.start ?? link.anchorStart;
-    if (start == null) return null;
+  /// העוגן הראשון של [link] בטקסט השמור של השורה ([notes] — הערותיה); עוגן
+  /// שכולו בגוף הערה אינו מוחזר.
+  Map<String, dynamic>? _linkAnchorJson(Link link, List<BookNote> notes) {
+    final spans = linkAnchorSpans(link);
+    final span =
+        (link.anchorOffsetsAreRaw ? spans : projectAnchorSpans(spans, notes))
+            .firstOrNull;
+    if (span == null) return null;
     return {
-      'anchor': {
-        'start': start,
-        'end': span?.end ?? link.anchorEnd,
-        'label': span?.label ?? link.anchorLabel,
-      },
+      'anchor': {'start': span.start, 'end': span.end, 'label': span.label},
     };
   }
 
@@ -2198,12 +2140,7 @@ class PluginBridgeAdapter {
     Library library,
     Map<String, dynamic> args,
   ) async {
-    final bookId = (args['bookId'] ?? args['title']) as String?;
-    if (PluginBookIdentity.parseId(args['id']) == null &&
-        bookId == null &&
-        (args['bookUid'] as String?)?.trim().isNotEmpty != true) {
-      throw Exception('error.invalid_params: id, bookUid or bookId required');
-    }
+    _requireBookIdentity(args);
     final writable = _parseUserFileAccess(args);
     final book = _findPluginBook(library, args);
     if (book == null) throw Exception('error.not_found: book not found');
@@ -2238,7 +2175,6 @@ class PluginBridgeAdapter {
   // Book identity helpers (Plugin SDK)
   // ----------------------------------------------------------------
 
-  /// מחזיר את סוג הספר כמחרוזת עבור ה-Plugin SDK.
   Book? _findPluginBook(Library library, Map<String, dynamic> args) {
     final bound = readerTab?.book;
     final uid = args['bookUid'] as String?;
@@ -2287,6 +2223,14 @@ class PluginBridgeAdapter {
       return null;
     }
     return found.first;
+  }
+
+  static void _requireBookIdentity(Map<String, dynamic> args) {
+    if (PluginBookIdentity.parseId(args['id']) == null &&
+        (args['bookId'] ?? args['title']) == null &&
+        (args['bookUid'] as String?)?.trim().isNotEmpty != true) {
+      throw Exception('error.invalid_params: id, bookUid or bookId required');
+    }
   }
 
   void _ensureBookIndex(Library library) {
@@ -2373,7 +2317,11 @@ class PluginBridgeAdapter {
         return _handleSearchFieldSession(action, args);
       case 'query':
         if (args[_cancelStreamIdKey] case final String streamId) {
-          return _cancelPluginSearch(streamId);
+          return _cancelStream(
+            streamId,
+            _activeSearchStreams,
+            _pendingSearchCancellations,
+          );
         }
         return await _runPluginSearch(args, eventSink: eventSink);
       default:
@@ -2572,21 +2520,6 @@ class PluginBridgeAdapter {
     }
   }
 
-  Map<String, dynamic> _cancelPluginSearch(String streamId) {
-    if (!_streamIdPattern.hasMatch(streamId)) {
-      throw Exception('error.invalid_params: invalid internal stream id');
-    }
-    final cancel = _activeSearchStreams[streamId];
-    if (cancel == null) {
-      if (_pendingSearchCancellations.length < 16) {
-        _pendingSearchCancellations.add(streamId);
-      }
-      return {'cancelled': false};
-    }
-    unawaited(cancel());
-    return {'cancelled': true};
-  }
-
   // ----------------------------------------------------------------
   // reader.*
   // ----------------------------------------------------------------
@@ -2626,18 +2559,8 @@ class PluginBridgeAdapter {
         await PluginTextReaderRegistry.instance.select(plugin, enabled);
         return {'enabled': enabled};
       case 'setTextReaderFontSize':
-        final tab = readerTab;
-        final registry = PluginTextReaderRegistry.instance;
+        final tab = _requireEmbeddedTextReader();
         final size = args['fontSize'];
-        if (tab == null ||
-            instanceId == PluginInstanceIds.background ||
-            !registry.usesPlugin(tab) ||
-            registry.activePlugin?.pluginId != plugin.pluginId ||
-            tab.bloc.isClosed) {
-          throw Exception(
-            'error.unavailable: Not an active embedded text reader',
-          );
-        }
         if (size is! num || !size.isFinite || size < 14 || size > 60) {
           throw Exception(
             'error.invalid_params: fontSize must be between 14 and 60',
@@ -2646,17 +2569,7 @@ class PluginBridgeAdapter {
         tab.bloc.add(UpdateFontSize(size.toDouble()));
         return true;
       case 'reportTextReaderLocation':
-        final tab = readerTab;
-        final registry = PluginTextReaderRegistry.instance;
-        if (tab == null ||
-            instanceId == PluginInstanceIds.background ||
-            !registry.usesPlugin(tab) ||
-            registry.activePlugin?.pluginId != plugin.pluginId ||
-            tab.bloc.isClosed) {
-          throw Exception(
-            'error.unavailable: Not an active embedded text reader',
-          );
-        }
+        final tab = _requireEmbeddedTextReader();
         final index = args['index'];
         if (index is! int || index < 0) {
           throw Exception('error.invalid_params: index must be nonnegative');
@@ -2664,31 +2577,23 @@ class PluginBridgeAdapter {
         tab.lines.reportExternalLine(index);
         final ref = args['ref'];
         if (ref is String && ref.length <= 500) tab.currentTitle.value = ref;
-        _dependencies.tabsBloc.add(const SaveTabs());
+        _windowDependencies.tabsBloc.add(const SaveTabs());
         return true;
       case 'openBook':
         // spec: openBook({ id?, bookId?, type?, index?, searchQuery?,
         //   navigateToPositionIfReused?, matchPages?, matchedTerms? })
         // also accepts legacy 'title' for back-compat; all supplied identity fields must match.
         {
-          final bookId = (args['bookId'] ?? args['title']) as String?;
           final index = (args['index'] as num?)?.toInt() ?? 0;
           final searchQuery = args['searchQuery'] as String? ?? '';
           final navigateToPositionIfReused =
               args['navigateToPositionIfReused'] as bool? ?? false;
           final openInSidePane = args['openInSidePane'] as bool? ?? false;
           final externalMatches = _parseExternalMatches(args, searchQuery);
-          if (PluginBookIdentity.parseId(args['id']) == null &&
-              bookId == null &&
-              args['external'] == null &&
-              (args['bookUid'] as String?)?.trim().isNotEmpty != true) {
-            throw Exception(
-              'error.invalid_params: id, bookUid or bookId required',
-            );
-          }
+          if (args['external'] == null) _requireBookIdentity(args);
           if (args['external'] != null && args['reader'] != 'native') {
             final access = DeclarativeLibraryBookAccess.otzaria(
-              _dependencies.bookOpenCoordinator,
+              _windowDependencies.bookOpenCoordinator,
             );
             return access.openUnique(
               _identityFields(args),
@@ -2701,7 +2606,7 @@ class PluginBridgeAdapter {
           }
           final book = args['external'] != null
               ? (await DeclarativeLibraryBookAccess.otzaria(
-                  _dependencies.bookOpenCoordinator,
+                  _windowDependencies.bookOpenCoordinator,
                 ).findUniqueBooks([_identityFields(args)])).single
               : _findPluginBook(
                   await DataRepository.instance.library,
@@ -2710,7 +2615,7 @@ class PluginBridgeAdapter {
           if (book == null) return false;
           if (args['reader'] == 'native' && book is TextBook) {
             final registry = PluginTextReaderRegistry.instance;
-            final coordinator = _dependencies.bookOpenCoordinator;
+            final coordinator = _windowDependencies.bookOpenCoordinator;
             final tab = coordinator.buildTab(
               book,
               index,
@@ -2719,7 +2624,7 @@ class PluginBridgeAdapter {
             );
             if (tab is TextBookTab) registry.useNative(tab);
             for (final existing
-                in _dependencies.tabsBloc.state.tabs
+                in _windowDependencies.tabsBloc.state.tabs
                     .expand(leafPanes)
                     .whereType<TextBookTab>()) {
               if (PluginBookIdentity.uidOf(existing.book) ==
@@ -2734,7 +2639,7 @@ class PluginBridgeAdapter {
             );
             return true;
           }
-          _dependencies.bookOpenCoordinator.openBook(
+          _windowDependencies.bookOpenCoordinator.openBook(
             book,
             index,
             searchQuery,
@@ -2820,7 +2725,7 @@ class PluginBridgeAdapter {
             query: query,
           );
           return openPluginSearchTab(
-            coordinator: _dependencies.bookOpenCoordinator,
+            coordinator: _windowDependencies.bookOpenCoordinator,
             query: query,
             autoSearch: autoSearch,
             settings: settings,
@@ -2882,17 +2787,10 @@ class PluginBridgeAdapter {
       case 'openBookAtRef':
         // spec: openBookAtRef({ id?, bookId?, type?, ref, index?, highlight? })
         {
-          final bookId = (args['bookId'] ?? args['title']) as String?;
           final ref = args['ref'] as String?;
           int index = (args['index'] as num?)?.toInt() ?? 0;
           final highlight = args['highlight'] as bool? ?? false;
-          if (PluginBookIdentity.parseId(args['id']) == null &&
-              bookId == null &&
-              (args['bookUid'] as String?)?.trim().isNotEmpty != true) {
-            throw Exception(
-              'error.invalid_params: id, bookUid or bookId required',
-            );
-          }
+          _requireBookIdentity(args);
           final book = _findPluginBook(
             await DataRepository.instance.library,
             args,
@@ -2908,7 +2806,7 @@ class PluginBridgeAdapter {
               try {
                 final lineIndex = await resolveLine(book, ref);
                 if (lineIndex != null) {
-                  _dependencies.bookOpenCoordinator.openBook(
+                  _windowDependencies.bookOpenCoordinator.openBook(
                     book,
                     lineIndex,
                     '',
@@ -2958,7 +2856,7 @@ class PluginBridgeAdapter {
           }
           // חיפוש רק כ-fallback: אם מצאנו את הכותרת וקפצנו אליה,
           // אין טעם להשאיר אותה גם בתיבת החיפוש.
-          _dependencies.bookOpenCoordinator.openBook(
+          _windowDependencies.bookOpenCoordinator.openBook(
             book,
             index,
             refFound ? '' : (ref ?? ''),
@@ -2986,13 +2884,7 @@ class PluginBridgeAdapter {
               'startIndex',
             );
           }
-          if (PluginBookIdentity.parseId(args['id']) == null &&
-              (args['bookId'] ?? args['title']) == null &&
-              (args['bookUid'] as String?)?.trim().isNotEmpty != true) {
-            throw Exception(
-              'error.invalid_params: id, bookUid or bookId required',
-            );
-          }
+          _requireBookIdentity(args);
           final rawCommentators = args['commentators'];
           if (args.containsKey('commentators') &&
               (rawCommentators is! List ||
@@ -3028,7 +2920,7 @@ class PluginBridgeAdapter {
                 await (_dependencies.textBookRepository ??
                         TextBookRepository(fileSystem: FileSystemData.instance))
                     .getAvailableCommentators(book);
-            final pane = _dependencies.tabsBloc.state.readingPane;
+            final pane = _windowDependencies.tabsBloc.state.readingPane;
             final state =
                 pane is TextBookTab &&
                     PluginBookIdentity.uidOf(pane.book) ==
@@ -3058,7 +2950,7 @@ class PluginBridgeAdapter {
           });
         }
       case 'getCurrentState':
-        final tabsState = _dependencies.tabsBloc.state;
+        final tabsState = _windowDependencies.tabsBloc.state;
         final tabs = tabsState.tabs;
         final panes = tabs.map(_paneForPlugins).toList();
         // Use the same resolver as getCurrentRef for consistent currentRef values
@@ -3164,13 +3056,13 @@ class PluginBridgeAdapter {
             );
             if (!confirmed) return false;
           }
-          _dependencies.tabsBloc.add(RemoveTab(target));
+          _windowDependencies.tabsBloc.add(RemoveTab(target));
           return true;
         }
       case 'activateTab':
         // spec: activateTab({ index })
         {
-          final tabsBloc = _dependencies.tabsBloc;
+          final tabsBloc = _windowDependencies.tabsBloc;
           tabsBloc.add(
             SetCurrentTab(tabsBloc.state.tabs.indexOf(_tabAt(args))),
           );
@@ -3178,7 +3070,7 @@ class PluginBridgeAdapter {
         }
       case 'getCurrentRef':
         final snapshot = await resolveReaderLocation(
-          _dependencies.tabsBloc.state.readingPane,
+          _windowDependencies.tabsBloc.state.readingPane,
         );
         if (snapshot == null) {
           return {
@@ -3217,11 +3109,11 @@ class PluginBridgeAdapter {
             );
           }
           return PluginReaderScrollService(
-            _dependencies.tabsBloc,
+            _windowDependencies.tabsBloc,
           ).scrollToSection(sectionIndex, highlight: args['highlight'] == true);
         }
       case 'getSelection':
-        final currentPane = _dependencies.tabsBloc.state.readingPane;
+        final currentPane = _windowDependencies.tabsBloc.state.readingPane;
         final paneState = currentPane is TextBookTab
             ? currentPane.bloc.state
             : null;
@@ -3418,7 +3310,7 @@ class PluginBridgeAdapter {
           return item.title == highlight.bookId;
         }, orElse: () => null);
         if (book == null) return false;
-        _dependencies.bookOpenCoordinator.openBook(
+        _windowDependencies.bookOpenCoordinator.openBook(
           book,
           highlight.sectionIndex,
           '',
@@ -3489,6 +3381,20 @@ class PluginBridgeAdapter {
           'error.unknown_method: Unknown action in reader: $action',
         );
     }
+  }
+
+  /// טאב הספר שבו התוסף הזה מוצג כרגע כקורא הטקסט.
+  TextBookTab _requireEmbeddedTextReader() {
+    final tab = readerTab;
+    final registry = PluginTextReaderRegistry.instance;
+    if (tab == null ||
+        instanceId == PluginInstanceIds.background ||
+        !registry.usesPlugin(tab) ||
+        registry.activePlugin?.pluginId != plugin.pluginId ||
+        tab.bloc.isClosed) {
+      throw Exception('error.unavailable: Not an active embedded text reader');
+    }
+    return tab;
   }
 
   Map<String, dynamic> _identityFields(Map<String, dynamic> args) => {
@@ -3610,17 +3516,17 @@ class PluginBridgeAdapter {
       );
     }
     final uid = bookUid?.trim();
-    // `bookUid` מזהה מדויק; בהיעדרו נשמר זיהוי לפי כותרת כמקודם.
+    // `bookUid` מזהה מדויק; בהיעדרו הזיהוי לפי כותרת.
     bool matchesBook(Book b) => uid != null && uid.isNotEmpty
         ? PluginBookIdentity.uidOf(b) == uid
         : b.title == bookId;
     // סריקת חלוניות ולא טאבים: ספר שיושב רק בחלונית של טאב מפוצל לא נמצא,
     // והקריאה נפלה למסלול ה-DB שמאבד את מצב הניקוד החי. החלונית הפעילה
     // ראשונה, כי אותו ספר בשתי חלוניות יכול להיות בהגדרות ניקוד שונות.
-    final activePane = _dependencies.tabsBloc.state.readingPane;
+    final activePane = _windowDependencies.tabsBloc.state.readingPane;
     final panes = <OpenedTab>[
       ?activePane,
-      ..._dependencies.tabsBloc.state.tabs.expand(leafPanes),
+      ..._windowDependencies.tabsBloc.state.tabs.expand(leafPanes),
     ];
     for (final tab in panes) {
       if (tab is! TextBookTab || !matchesBook(tab.book)) continue;
@@ -3635,7 +3541,7 @@ class PluginBridgeAdapter {
         );
       }
       final snapshot =
-          identical(tab, _dependencies.tabsBloc.state.readingPane) &&
+          identical(tab, _windowDependencies.tabsBloc.state.readingPane) &&
               tab.index == sectionIndex
           ? await resolveReaderLocation(tab)
           : null;
@@ -3690,7 +3596,9 @@ class PluginBridgeAdapter {
   }
 
   TextBookTab _correctionTab(String id) {
-    for (final tab in _dependencies.tabsBloc.state.tabs.expand(leafPanes)) {
+    for (final tab in _windowDependencies.tabsBloc.state.tabs.expand(
+      leafPanes,
+    )) {
       if (tab is TextBookTab &&
           PluginCorrectionSessionService.tabIdFor(tab) == id) {
         return tab;
@@ -3877,7 +3785,7 @@ class PluginBridgeAdapter {
     final service = PluginCorrectionSessionService.instance;
     final id = args['sessionId'] as String;
     final owner = plugin.pluginId;
-    final tab = _dependencies.tabsBloc.state.tabs
+    final tab = _windowDependencies.tabsBloc.state.tabs
         .expand(leafPanes)
         .whereType<TextBookTab>()
         .where(
@@ -4101,7 +4009,7 @@ class PluginBridgeAdapter {
     String action,
     Map<String, dynamic> args,
   ) async {
-    final bloc = _dependencies.workspaceBloc;
+    final bloc = _windowDependencies.workspaceBloc;
     switch (action) {
       case 'list':
         final activeId = bloc.state.activeWorkspaceId;
@@ -4112,7 +4020,7 @@ class PluginBridgeAdapter {
                 'name': workspace.name,
                 'isActive': workspace.id == activeId,
                 'tabCount': bloc.state
-                    .tabsOf(workspace, _dependencies.tabsBloc.state.tabs)
+                    .tabsOf(workspace, _windowDependencies.tabsBloc.state.tabs)
                     .length,
               },
             )
@@ -4171,7 +4079,7 @@ class PluginBridgeAdapter {
   /// יוצר שולחן עבודה חדש ומחזיר אותו. ה-`AddWorkspace` אינו מחזיר את המזהה
   /// שנוצר, ולכן מאתרים אותו במצב הראשון שבו נוסף שולחן שלא היה קודם.
   Future<Workspace?> _createWorkspace(String name) async {
-    final bloc = _dependencies.workspaceBloc;
+    final bloc = _windowDependencies.workspaceBloc;
     final knownIds = bloc.state.workspaces
         .map((workspace) => workspace.id)
         .toSet();
@@ -4194,9 +4102,9 @@ class PluginBridgeAdapter {
   /// נמסרים לאירוע כי ה-UI הוא מקור האמת עליהם — בלעדיהם המעבר מוחק אותם.
   /// נמסרת רשימת הטאבים **המלאה**, כולל `ToolTab`, ולא הרשימה שהתוסף רואה.
   Future<bool> _switchWorkspace(String id) async {
-    final bloc = _dependencies.workspaceBloc;
+    final bloc = _windowDependencies.workspaceBloc;
     if (bloc.state.activeWorkspaceId == id) return true;
-    final tabsState = _dependencies.tabsBloc.state;
+    final tabsState = _windowDependencies.tabsBloc.state;
     final state = await _awaitWorkspaceState(
       (workspaceState) => workspaceState.activeWorkspaceId == id,
       () => bloc.add(
@@ -4217,7 +4125,7 @@ class PluginBridgeAdapter {
     bool Function(WorkspaceState state) test,
     void Function() trigger,
   ) async {
-    final bloc = _dependencies.workspaceBloc;
+    final bloc = _windowDependencies.workspaceBloc;
     final settled = bloc.stream.firstWhere(
       (state) => test(state) || state.error != null,
       orElse: () => bloc.state,
@@ -4253,7 +4161,9 @@ class PluginBridgeAdapter {
             screen = Screen.reading;
             break;
           case 'more':
-            ToolsLauncherController.instance.open();
+            ToolsLauncherController.instance.open(
+              windowKeys: _windowDependencies.windowKeys,
+            );
             return true;
           case 'settings':
             screen = Screen.settings;
@@ -4263,7 +4173,7 @@ class PluginBridgeAdapter {
               "error.invalid_params: Invalid navigation target: $target. Valid: library, reading, more, settings",
             );
         }
-        _dependencies.navigationBloc.add(NavigateToScreen(screen));
+        _windowDependencies.navigationBloc.add(NavigateToScreen(screen));
         return true;
       default:
         throw Exception(
@@ -4370,18 +4280,21 @@ class PluginBridgeAdapter {
       case 'showMessage':
         UiSnack.show(
           args['message'] as String? ?? '',
+          window: _windowDependencies.windowKeys,
           onTap: _messageTapHandler(args),
         );
         return true;
       case 'showSuccess':
         UiSnack.showSuccess(
           args['message'] as String? ?? '',
+          window: _windowDependencies.windowKeys,
           onTap: _messageTapHandler(args),
         );
         return true;
       case 'showError':
         UiSnack.showError(
           args['message'] as String? ?? '',
+          window: _windowDependencies.windowKeys,
           onTap: _messageTapHandler(args),
         );
         return true;
@@ -4502,11 +4415,15 @@ class PluginBridgeAdapter {
     }
     final payload = <String, dynamic>{'payload': args['tapPayload']};
     if (openPlugin) {
+      final viewId = _windowDependencies.viewId;
+      final windowKeys = _windowDependencies.windowKeys;
       // ניווט לדף התוסף עם מסירת האירוע — כמו openPlugin בתפריט ההקשר.
       return () => PluginPageLauncher.instance.open(
         plugin.pluginId,
         topic: topic,
         payload: payload,
+        viewId: viewId,
+        windowKeys: windowKeys,
       );
     }
     final dispatch =
@@ -4693,7 +4610,7 @@ class PluginBridgeAdapter {
     return result != 'inactive';
   }
 
-  /// מסך ההדפסה של הקורא, כדיאלוג מעל החלון הראשי (`reader.printRange`).
+  /// מסך ההדפסה של הקורא מעל חלון הבקשה (`reader.printRange`).
   Future<bool> _defaultPrintBookRange(
     TextBook book, {
     required int startLine,
@@ -4702,7 +4619,10 @@ class PluginBridgeAdapter {
     required List<String> availableCommentators,
   }) async {
     final toc = await book.tableOfContents;
-    final context = navigatorKey.currentContext;
+    final context =
+        rpcWindowContext ??
+        (_windowDependencies.windowKeys?.navigator ?? navigatorKey)
+            .currentContext;
     if (context == null || !context.mounted) {
       throw Exception('error.unavailable: No window to show the print screen');
     }
@@ -4723,25 +4643,15 @@ class PluginBridgeAdapter {
     return printed ?? false;
   }
 
-  /// מסך ההדפסה של הקורא על קובץ PDF, כדיאלוג מעל החלון הראשי
-  /// (`ui.printFile`) — אותה הגדרה כמו `_handlePrintPress` בקורא ה-PDF:
-  /// [PrintingScreen] עם `createPdfOverride`, בלי טווח שורות או מפרשים.
-  ///
-  /// הקובץ נקרא פעם אחת לפני הפתיחה, כך ש-`fs.revokeFile`, פינוי המטמון או
-  /// הסרת התוסף בזמן שהדיאלוג פתוח אינם מוחקים אותו מתחת למסך.
-  ///
-  /// קורא ה-PDF מנתק את ה-`PdfViewer` שלו כל עוד המסך פתוח (pdfrx מנהל worker
-  /// יחיד), ופה אין ניתוק דומה. הניתוק נכתב כשהתצוגה המקדימה הייתה `PdfViewer`
-  /// ופתחה מסמכים במקביל, והתקיעה תוקנה אחר כך בשורש (פתיחה בזיכרון, `await`
-  /// ל-`dispose`, הסדרת כל פעולות ה-pdfrx בתוך המסך). שאר הכניסות למסך רצות
-  /// כשיש `PdfViewer` חי ואינן מנתקות אותו: הדפסה מקורא טקסט (טאב PDF ברקע
-  /// נשמר ב-keep-alive) והדפסת מפרשים מתוך טאב PDF פעיל. ובקריאה מתוסף הטאב
-  /// הפעיל הוא טאב התוסף, כך שאין `PdfViewer` גלוי שמרנדר.
+  /// קורא את קובץ ה-PDF לפני פתיחת מסך ההדפסה בחלון הבקשה.
   Future<bool> _defaultPrintPluginFile(
     File file, {
     required String jobName,
   }) async {
-    final context = navigatorKey.currentContext;
+    final context =
+        rpcWindowContext ??
+        (_windowDependencies.windowKeys?.navigator ?? navigatorKey)
+            .currentContext;
     if (context == null || !context.mounted) {
       throw Exception('error.unavailable: No window to show the print screen');
     }
@@ -4919,22 +4829,25 @@ class PluginBridgeAdapter {
   }) async {
     final canonicalTarget = canonicalizeNearestExisting(targetPath);
     if (canonicalTarget == null) return false;
-    bool inside(String root) =>
-        (allowRoot && p.equals(canonicalTarget, root)) ||
-        p.isWithin(root, canonicalTarget);
-    for (final root in _grantedFolders) {
+    bool inside(String root) {
       final canonicalRoot = canonicalizeNearestExisting(root);
-      if (canonicalRoot == null || !p.equals(canonicalRoot, root)) continue;
-      if (inside(canonicalRoot)) return true;
+      if (canonicalRoot == null || !p.equals(canonicalRoot, root)) return false;
+      return (allowRoot && p.equals(canonicalTarget, canonicalRoot)) ||
+          p.isWithin(canonicalRoot, canonicalTarget);
     }
-    for (final grant in await _folderGrants.list(plugin.pluginId)) {
-      final canonicalRoot = canonicalizeNearestExisting(grant.path);
-      if (canonicalRoot == null || !p.equals(canonicalRoot, grant.path)) {
-        continue;
-      }
-      if (inside(canonicalRoot)) return true;
+
+    if (_grantedFolders.any(inside)) return true;
+    final grants = await _folderGrants.list(plugin.pluginId);
+    return grants.any((grant) => inside(grant.path));
+  }
+
+  Future<void> _requireInGrantedFolder(
+    String path, {
+    bool allowRoot = true,
+  }) async {
+    if (!await _isPathInGrantedFolder(path, allowRoot: allowRoot)) {
+      throw Exception('error.forbidden: path outside a user-selected folder');
     }
-    return false;
   }
 
   // ----------------------------------------------------------------
@@ -4950,12 +4863,8 @@ class PluginBridgeAdapter {
             'error.invalid_params: zipPath and destFolder required',
           );
         }
-        if (!await _isPathInGrantedFolder(zipPath) ||
-            !await _isPathInGrantedFolder(destFolder)) {
-          throw Exception(
-            'error.forbidden: path outside a user-selected folder',
-          );
-        }
+        await _requireInGrantedFolder(zipPath);
+        await _requireInGrantedFolder(destFolder);
         await _fsService.extractZip(zipPath, destFolder);
         return true;
       case 'deleteFile':
@@ -4963,11 +4872,7 @@ class PluginBridgeAdapter {
         if (path == null) {
           throw Exception('error.invalid_params: path required');
         }
-        if (!await _isPathInGrantedFolder(path)) {
-          throw Exception(
-            'error.forbidden: path outside a user-selected folder',
-          );
-        }
+        await _requireInGrantedFolder(path);
         await _fsService.deleteFile(path);
         return true;
       case 'deleteFolder':
@@ -4975,11 +4880,7 @@ class PluginBridgeAdapter {
         if (folderPath == null) {
           throw Exception('error.invalid_params: path required');
         }
-        if (!await _isPathInGrantedFolder(folderPath, allowRoot: false)) {
-          throw Exception(
-            'error.forbidden: path outside a user-selected folder',
-          );
-        }
+        await _requireInGrantedFolder(folderPath, allowRoot: false);
         await _fsService.deleteFolder(folderPath);
         return true;
       case 'moveEntry':
@@ -4988,12 +4889,8 @@ class PluginBridgeAdapter {
         if (from == null || to == null) {
           throw Exception('error.invalid_params: from and to required');
         }
-        if (!await _isPathInGrantedFolder(from, allowRoot: false) ||
-            !await _isPathInGrantedFolder(to, allowRoot: false)) {
-          throw Exception(
-            'error.forbidden: path outside a user-selected folder',
-          );
-        }
+        await _requireInGrantedFolder(from, allowRoot: false);
+        await _requireInGrantedFolder(to, allowRoot: false);
         await _fsService.moveEntry(from, to);
         return true;
       case 'writeFile':
@@ -6082,10 +5979,8 @@ class PluginBridgeAdapter {
   ) async {
     final calendarState = _dependencies.calendarCubit.state;
 
-    // getDailyTimes/getHalachicTimes מקבלים אופציונלית date (ISO) ומיקום —
-    // עיר מרשימת הלוח (city) או קואורדינטות (lat+lng, עם elevation/timezone/
-    // inIsrael אופציונליים). בלי אף פרמטר מוחזרים זמני התאריך והעיר הנבחרים
-    // בלוח (התנהגות הגרסאות הקודמות).
+    // date (ISO) ומיקום אופציונליים: city מרשימת הלוח או lat+lng (ועוד
+    // elevation/timezone/inIsrael). בלי פרמטרים: זמני התאריך והעיר שנבחרו בלוח.
     Map<String, String> resolveDailyTimes() {
       final rawDate = args['date'];
       if (rawDate != null && rawDate is! String) {
@@ -6484,7 +6379,7 @@ class PluginBridgeAdapter {
     switch (action) {
       case 'list':
         final limit = args['limit'] as int? ?? 50;
-        final historyState = _dependencies.historyBloc.state;
+        final historyState = _windowDependencies.historyBloc.state;
         if (historyState is! HistoryLoaded) return [];
 
         return historyState.history
@@ -6503,7 +6398,7 @@ class PluginBridgeAdapter {
 
       case 'listSearches':
         final limit = args['limit'] as int? ?? 50;
-        final historyState = _dependencies.historyBloc.state;
+        final historyState = _windowDependencies.historyBloc.state;
         if (historyState is! HistoryLoaded) return [];
 
         return historyState.history
@@ -6519,7 +6414,7 @@ class PluginBridgeAdapter {
             .toList();
 
       case 'clear':
-        _dependencies.historyBloc.add(ClearHistory());
+        _windowDependencies.historyBloc.add(ClearHistory());
         return true;
 
       case 'remove':
@@ -6536,7 +6431,7 @@ class PluginBridgeAdapter {
               'error.invalid_params: id, bookUid or bookId required',
             );
           }
-          final historyState = _dependencies.historyBloc.state;
+          final historyState = _windowDependencies.historyBloc.state;
           if (historyState is! HistoryLoaded) return false;
 
           final historyList = historyState.history;
@@ -6560,7 +6455,7 @@ class PluginBridgeAdapter {
           }
 
           if (indexToRemove != null) {
-            _dependencies.historyBloc.add(RemoveHistory(indexToRemove));
+            _windowDependencies.historyBloc.add(RemoveHistory(indexToRemove));
             return true;
           }
           return false;
@@ -6608,15 +6503,7 @@ class PluginBridgeAdapter {
           if (index < 0) {
             throw Exception('error.invalid_params: index must not be negative');
           }
-          final hasUid =
-              (args['bookUid'] as String?)?.trim().isNotEmpty == true;
-          if (!hasUid &&
-              PluginBookIdentity.parseId(args['id']) == null &&
-              (args['bookId'] ?? args['title']) == null) {
-            throw Exception(
-              'error.invalid_params: id, bookUid or bookId required',
-            );
-          }
+          _requireBookIdentity(args);
           final book = _findPluginBook(
             await DataRepository.instance.library,
             args,
@@ -6801,14 +6688,26 @@ class PluginBridgeAdapter {
         final onTap = _messageTapHandler(args);
         switch (type) {
           case 'success':
-            UiSnack.showSuccess(message, onTap: onTap);
+            UiSnack.showSuccess(
+              message,
+              onTap: onTap,
+              window: _windowDependencies.windowKeys,
+            );
             break;
           case 'error':
-            UiSnack.showError(message, onTap: onTap);
+            UiSnack.showError(
+              message,
+              onTap: onTap,
+              window: _windowDependencies.windowKeys,
+            );
             break;
           case 'info':
           default:
-            UiSnack.show(message, onTap: onTap);
+            UiSnack.show(
+              message,
+              onTap: onTap,
+              window: _windowDependencies.windowKeys,
+            );
             break;
         }
         return true;
@@ -6924,10 +6823,6 @@ class PluginBridgeAdapter {
   // flutter_local_notifications דוחה מזהה שאינו נכנס ב-32 ביט.
   static int _newNotificationId() => math.Random().nextInt(0x7FFFFFFF);
 
-  // ----------------------------------------------------------------
-  // Helpers
-  // ----------------------------------------------------------------
-
   Map<String, dynamic> _buildJewishDatePayload(DateTime date, bool inIsrael) {
     final jewishCalendar = JewishCalendar.fromDateTime(date)
       ..inIsrael = inIsrael;
@@ -6963,7 +6858,7 @@ class PluginBridgeAdapter {
     bool inIsrael,
     HebrewDateFormatter formatter,
   ) {
-    final dayOfWeek = date.weekday; // 1=Mon … 6=Sat, 7=Sun in Dart
+    final dayOfWeek = date.weekday;
     // Dart weekday: Mon=1 … Sat=6, Sun=7. Shabbat = Saturday = 6.
     final daysUntilShabbat = dayOfWeek == 6 ? 0 : (6 - dayOfWeek) % 7;
     final shabbatDate = addCalendarDays(date, daysUntilShabbat);
@@ -7048,15 +6943,10 @@ class PluginBridgeAdapter {
     return _pluginRepo.getGrantedPermissionNames(plugin.pluginId);
   }
 
-  /// הספר שמייצג טאב כלפי התוספים.
-  ///
-  /// בטאב מפוצל הכותרת המשולבת אינה ספר, ולכן מדווחת החלונית הפעילה (ובטאב
-  /// שאינו הנוכחי — הראשונה). דיווח כל החלוניות מחייב הרחבת הסכמה של
-  /// `openTabs`, שהיא שינוי API בפני עצמו.
   /// מצב המפרשים של טאב הקריאה כפי שהוא כבר טעון בטאב — בלי שאילתה נוספת.
   /// `null` כשאין טאב קריאה, כשמצב הטאב עדיין לא נטען או כשאין בו מפרשים.
   Map<String, dynamic>? _getActiveCommentators() {
-    final pane = _dependencies.tabsBloc.state.readingPane;
+    final pane = _windowDependencies.tabsBloc.state.readingPane;
     if (pane is TextBookTab) {
       final state = pane.bloc.state;
       if (state is! TextBookLoaded) return null;
@@ -7098,7 +6988,7 @@ class PluginBridgeAdapter {
     if (add.isEmpty && remove.isEmpty) {
       throw Exception('error.invalid_params: add or remove is required');
     }
-    final pane = _dependencies.tabsBloc.state.readingPane;
+    final pane = _windowDependencies.tabsBloc.state.readingPane;
     if (pane is! TextBookTab) return null;
     final state = pane.bloc.state;
     if (state is! TextBookLoaded) return null;
@@ -7127,7 +7017,7 @@ class PluginBridgeAdapter {
   }
 
   Map<String, dynamic>? _getPageShapeLayout() {
-    final pane = _dependencies.tabsBloc.state.readingPane;
+    final pane = _windowDependencies.tabsBloc.state.readingPane;
     if (pane is! TextBookTab) return null;
     final state = pane.bloc.state;
     if (state is! TextBookLoaded || !state.showPageShapeView) return null;
@@ -7146,7 +7036,7 @@ class PluginBridgeAdapter {
       throw Exception('error.invalid_params: visible must be a boolean');
     }
 
-    final pane = _dependencies.tabsBloc.state.readingPane;
+    final pane = _windowDependencies.tabsBloc.state.readingPane;
     if (pane is! TextBookTab) return null;
     final state = pane.bloc.state;
     if (state is! TextBookLoaded || !state.showPageShapeView) return null;
@@ -7180,7 +7070,7 @@ class PluginBridgeAdapter {
   /// מה נתמך **בפועל** בהקשר הקריאה הנוכחי. הדגשות מצוירות רק בטור הטקסט
   /// הראשי (תצוגה משולבת וצורת הדף), ואין ב-PDF הדגשות ובחירה דרך ה-API.
   Map<String, dynamic> _getHighlightCapabilities() {
-    final pane = _dependencies.tabsBloc.state.readingPane;
+    final pane = _windowDependencies.tabsBloc.state.readingPane;
     if (pane is TextBookTab) {
       final state = pane.bloc.state;
       final pageShape = state is TextBookLoaded && state.showPageShapeView;
@@ -7217,7 +7107,7 @@ class PluginBridgeAdapter {
       throw Exception('error.invalid_params: index must be an integer');
     }
     final index = rawIndex.toInt();
-    final tabs = _dependencies.tabsBloc.state.tabs;
+    final tabs = _windowDependencies.tabsBloc.state.tabs;
     if (index < 0 || index >= tabs.length) {
       throw Exception(
         'error.invalid_params: index $index out of range '
@@ -7227,9 +7117,11 @@ class PluginBridgeAdapter {
     return tabs[index];
   }
 
+  /// בטאב מפוצל הכותרת המשולבת אינה ספר, ולכן מדווחת החלונית הפעילה (ובטאב
+  /// שאינו הנוכחי — הראשונה); דיווח כל החלוניות הוא שינוי API של `openTabs`.
   OpenedTab _paneForPlugins(OpenedTab tab) {
     if (tab is! CombinedTab) return tab;
-    final state = _dependencies.tabsBloc.state;
+    final state = _windowDependencies.tabsBloc.state;
     if (identical(tab, state.currentTab)) return state.activePane ?? tab;
     return leafPanes(tab).first;
   }
@@ -7296,19 +7188,19 @@ class PluginBridgeAdapter {
   }
 
   String? _currentBookId() {
-    return _dependencies.tabsBloc.state.readingPane?.title;
+    return _windowDependencies.tabsBloc.state.readingPane?.title;
   }
 
   /// מזהה יציב של הספר בחלונית הקריאה, ל-scope של `book:<bookUid>`.
   String? _currentBookUid() {
-    final pane = _dependencies.tabsBloc.state.readingPane;
+    final pane = _windowDependencies.tabsBloc.state.readingPane;
     if (pane is TextBookTab) return PluginBookIdentity.uidOf(pane.book);
     if (pane is PdfBookTab) return PluginBookIdentity.uidOf(pane.book);
     return null;
   }
 
   String? _currentWorkspaceId() {
-    return _dependencies.workspaceBloc.state.activeWorkspaceId;
+    return _windowDependencies.workspaceBloc.state.activeWorkspaceId;
   }
 
   // ----------------------------------------------------------------
@@ -7447,6 +7339,8 @@ class PluginBridgeAdapter {
           plugin.pluginId,
           topic: 'plugin.page_opened',
           payload: {'param': args['param']},
+          viewId: _windowDependencies.viewId,
+          windowKeys: _windowDependencies.windowKeys,
         );
         return true;
       case 'openOther':
@@ -7465,10 +7359,28 @@ class PluginBridgeAdapter {
           targetId,
           topic: 'plugin.page_opened',
           payload: {'param': args['param'], 'openedBy': plugin.pluginId},
+          viewId: _windowDependencies.viewId,
+          windowKeys: _windowDependencies.windowKeys,
         );
         return true;
       case 'backgroundDone':
         return _dependencies.onBackgroundInstanceDone?.call() ?? false;
+      case 'setRestoreState':
+        // spec: setRestoreState({ state }) — נמסר ב-plugin.boot.restore כשהדף
+        // של המופע נטען מחדש (פינוי, נפילה, סשן). למופע רקע אין שחזור.
+        if (!args.containsKey('state')) {
+          throw Exception('error.invalid_params: state is required');
+        }
+        if (instanceId == PluginInstanceIds.background) return false;
+        try {
+          PluginRestoreStateStore.instance.set((
+            pluginId: plugin.pluginId,
+            instanceId: instanceId,
+          ), args['state']);
+        } on ArgumentError catch (e) {
+          throw Exception('error.invalid_params: ${e.message}');
+        }
+        return true;
       default:
         throw Exception(
           'error.unknown_method: Unknown action in plugin: $action',
@@ -7570,7 +7482,11 @@ class PluginBridgeAdapter {
     switch (action) {
       case 'fetchStream':
         if (args[_cancelStreamIdKey] case final String streamId) {
-          return _cancelPluginNetworkFetch(streamId);
+          return _cancelStream(
+            streamId,
+            _activeNetworkFetchStreams,
+            _pendingNetworkFetchCancellations,
+          );
         }
         return _runPluginNetworkFetchStream(args, eventSink: eventSink);
 
@@ -7833,21 +7749,6 @@ class PluginBridgeAdapter {
       _activeNetworkFetchStreams.remove(streamId);
       await iterator?.cancel();
     }
-  }
-
-  Map<String, dynamic> _cancelPluginNetworkFetch(String streamId) {
-    if (!_streamIdPattern.hasMatch(streamId)) {
-      throw Exception('error.invalid_params: invalid internal stream id');
-    }
-    final cancel = _activeNetworkFetchStreams[streamId];
-    if (cancel == null) {
-      if (_pendingNetworkFetchCancellations.length < 16) {
-        _pendingNetworkFetchCancellations.add(streamId);
-      }
-      return {'cancelled': false};
-    }
-    unawaited(cancel());
-    return {'cancelled': true};
   }
 
   Iterable<String> _splitNetworkFetchChunk(String value) sync* {

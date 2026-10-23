@@ -1,6 +1,8 @@
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'dart:io';
 
 import 'package:otzaria/text_book/repository/book_notes_repository.dart';
+import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 import 'package:otzaria/book_protection/utils/copy_guard.dart';
 import 'package:otzaria/bookmarks/view/book_bookmarks_action.dart';
 import 'package:otzaria/book_common/view/parallel_editions_action.dart';
@@ -93,7 +95,6 @@ import 'package:otzaria/utils/ui/image_decode_size.dart';
 
 import 'package:otzaria/widgets/navigation/responsive_action_bar.dart';
 import 'package:otzaria/widgets/navigation/book_view_actions.dart';
-import 'package:otzaria/plugins/services/plugin_toolbar_registry.dart';
 import 'package:otzaria/plugins/services/plugin_text_reader_registry.dart';
 import 'package:otzaria/plugins/utils/plugin_toolbar_actions.dart';
 import 'package:otzaria/plugins/services/context_menu_registry.dart';
@@ -120,6 +121,7 @@ import 'package:otzaria/widgets/widgets_exports.dart';
 import 'package:otzaria/widgets/navigation/nav_panel_search.dart';
 import 'package:otzaria/widgets/navigation/nav_side_panel.dart';
 import 'package:otzaria/widgets/navigation/app_top_bar.dart';
+import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 
 // קבועים למצבי תצוגה (למניעת magic strings)
 const String _viewModeSplit = 'split';
@@ -244,6 +246,8 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
   // בדיקת הכותרות החלופיות מסתיימת אחרי הבנייה ומשנה את מספר הלשוניות; בלי
   // מפתח גלובלי לשונית החיפוש נבנית מאפס ומה שהוקלד בה עד אז אובד (issue #1263).
   final GlobalKey _searchTabKey = GlobalKey();
+  Object? _searchViewInputs;
+  TextBookSearchView? _searchView;
 
   // בקשה לפתיחת דיאלוג הגדרות צורת הדף מתוך PageShapeScreen (עדכון חי)
   final ValueNotifier<int> _pageShapeOpenSettingsNotifier = ValueNotifier<int>(
@@ -910,6 +914,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
         showSplitView: currentState.showSplitView,
         removeNikud: settings.defaultRemoveNikud,
         forceCloseLeftPane: widget.isInCombinedView,
+        screenWidth: readingLayoutWidthOf(context),
         preserveState: true,
         preserveRemoveNikud: !nikudSettingsChanged,
         preserveRemovePunctuation: !punctuationSettingsChanged,
@@ -1107,6 +1112,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
         preserveState: true,
         // בתצוגה משולבת, חלונית הצד תמיד סגורה
         forceCloseLeftPane: widget.isInCombinedView,
+        screenWidth: readingLayoutWidthOf(context),
       ),
     );
 
@@ -1336,6 +1342,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
                   removeNikud: settingsState.defaultRemoveNikud,
                   // בתצוגה משולבת, חלונית הצד תמיד סגורה
                   forceCloseLeftPane: widget.isInCombinedView,
+                  screenWidth: readingLayoutWidthOf(context),
                 ),
               );
             }
@@ -1653,7 +1660,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
   Widget _buildActions(BuildContext context, TextBookLoaded state) {
     final tourKeys = TourTargetKeys.of(context);
     return ListenableBuilder(
-      listenable: PluginToolbarRegistry.instance,
+      listenable: readerPluginToolbarListenable(context),
       builder: (context, _) => Consumer<ShamorZachorDataProvider>(
         builder: (context, _, _) => ResponsiveActionBar(
           key: const ValueKey('responsive_actions'),
@@ -2946,7 +2953,7 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
                           LogicalKeyboardKey.keyF,
                         ): openSearch,
                       },
-                      child: _buildSearchView(context, state),
+                      child: _buildSearchView(state),
                     ),
                   );
                 },
@@ -2958,12 +2965,28 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
     );
   }
 
-  Widget _buildSearchView(BuildContext context, TextBookLoaded state) {
+  Widget _buildSearchView(TextBookLoaded state) {
     final repository = context.read<TextBookBloc>().repository;
-    return TextBookSearchView(
+    final book = state.book;
+    final inputs = (
+      book,
+      repository,
+      widget.tab.lines,
+      state.searchText,
+      state.searchOptions,
+      state.alternativeWords,
+      state.spacingValues,
+      state.searchMode,
+      state.searchDistance,
+      state.matchPolicy,
+    );
+    // אירועי בחירה והדגשה ממשיכים לבנות את הקורא, אך אינם משנים את החיפוש.
+    if (_searchViewInputs == inputs) return _searchView!;
+    _searchViewInputs = inputs;
+    return _searchView = TextBookSearchView(
       focusNode: textSearchFocusNode,
       contentLoader: () async =>
-          splitContentLines(await repository.getBookContent(state.book)),
+          splitContentLines(await repository.getBookContent(book)),
       lines: widget.tab.lines,
       // הוא מעביר את טקסט החיפוש מה-state הנוכחי אל תוך רכיב החיפוש
       initialQuery: state.searchText,
@@ -3372,8 +3395,9 @@ bool _handleGlobalKeyEvent(
       // F11 - מסך מלא
       case LogicalKeyboardKey.f11:
         if (!Platform.isAndroid && !Platform.isIOS) {
-          final settingsBloc = context.read<SettingsBloc>();
-          final newFullscreenState = !settingsBloc.state.isFullscreen;
+          final newFullscreenState = !context
+              .read<WindowFullscreenCubit>()
+              .state;
           FullscreenHelper.toggleFullscreen(context, newFullscreenState);
           return true;
         }
@@ -3390,8 +3414,7 @@ bool _handleGlobalKeyEvent(
           return true;
         }
         if (!Platform.isAndroid && !Platform.isIOS) {
-          final settingsBloc = context.read<SettingsBloc>();
-          if (settingsBloc.state.isFullscreen) {
+          if (context.read<WindowFullscreenCubit>().state) {
             FullscreenHelper.toggleFullscreen(context, false);
             return true;
           }
@@ -3431,6 +3454,8 @@ Future<void> _dispatchPluginShortcut({
     'app.command',
     {'command': target.command, 'shortcutId': target.shortcutId},
     preferBackground: true,
+    viewId: View.of(context).viewId,
+    windowKeys: AppWindowKeys.of(context),
   );
 }
 
@@ -3444,6 +3469,8 @@ Future<void> _dispatchContextMenuShortcut({
   required int? selectedLineIndex,
   required int? selectedColumn,
 }) async {
+  final window = AppWindowKeys.of(context);
+  final viewId = View.of(context).viewId;
   final item = ContextMenuRegistry.instance.findItem(
     target.pluginId,
     target.contextMenuItemId ?? '',
@@ -3551,6 +3578,8 @@ Future<void> _dispatchContextMenuShortcut({
 
   await dispatchPluginContextMenuItemClick(
     dispatcher: PluginRuntimeDispatcher.instance,
+    viewId: viewId,
+    windowKeys: window,
     pluginId: target.pluginId,
     item: item,
     selection: selection,

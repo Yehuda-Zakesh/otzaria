@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:otzaria/core/windowing/app_window_controller.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
+import 'package:otzaria/core/windowing/window_role.dart';
 
 /// מספק לכל widget את החלון שהוא יושב בו.
 ///
@@ -14,6 +15,7 @@ class AppWindowScope extends InheritedWidget {
     required this.controller,
     required this.geometry,
     this.keys,
+    this.role,
     required super.child,
   });
 
@@ -24,11 +26,20 @@ class AppWindowScope extends InheritedWidget {
   /// [AppWindowKeys.of].
   final AppWindowKeys? keys;
 
+  /// תפקיד החלון; `null` — [AppWindowRole.current]. נשלף דרך [roleOf].
+  final AppWindowRole? role;
+
   static AppWindowController controllerOf(BuildContext context) =>
       _of(context).controller;
 
   static AppWindowGeometry geometryOf(BuildContext context) =>
       _of(context).geometry;
+
+  /// בלי scope מעל (בדיקות) — [AppWindowRole.current]. אינו רושם תלות:
+  /// התפקיד קבוע לכל חיי החלון, ונקרא גם מתוך `create` של ספקים.
+  static AppWindowRole roleOf(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<AppWindowScope>()?.role ??
+      AppWindowRole.current;
 
   static AppWindowScope _of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<AppWindowScope>();
@@ -40,5 +51,6 @@ class AppWindowScope extends InheritedWidget {
   bool updateShouldNotify(AppWindowScope oldWidget) =>
       controller != oldWidget.controller ||
       geometry != oldWidget.geometry ||
-      keys != oldWidget.keys;
+      keys != oldWidget.keys ||
+      role != oldWidget.role;
 }

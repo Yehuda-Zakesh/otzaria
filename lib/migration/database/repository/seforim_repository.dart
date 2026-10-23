@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:logging/logging.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
 
+import '../../../book_protection/utils/banner_title.dart';
 import '../../../utils/text/ref_key.dart';
 import '../../../utils/text/text_manipulation.dart';
 import '../../models/author.dart';
@@ -908,9 +909,17 @@ class SeforimRepository {
     };
     final banners = <int, String>{
       if (capabilities.hasBookBanners)
-        for (final row in db.select('SELECT bookId, text FROM book_banner'))
-          if (row['bookId'] is int && row['text'] is String)
-            row['bookId'] as int: row['text'] as String,
+        for (final row in db.select(
+          'SELECT bb.bookId, b.title, n.text FROM book_banner bb '
+          'JOIN banner n ON n.id = bb.bannerId JOIN book b ON b.id = bb.bookId',
+        ))
+          if (row['bookId'] is int &&
+              row['title'] is String &&
+              row['text'] is String)
+            row['bookId'] as int: expandBannerTitle(
+              row['text'] as String,
+              row['title'] as String,
+            ),
     };
     // רק הספרים שבטבלאות — כדי שאיתור לפי כותרת ייעשה בזיכרון.
     final booksByTitle = <String, List<({int id, int? categoryId})>>{};

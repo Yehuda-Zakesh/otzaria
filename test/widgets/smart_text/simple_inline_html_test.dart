@@ -91,9 +91,31 @@ void main() {
       );
     });
 
-    test('br הופך לשורה חדשה ובולע רווחים צמודים', () {
+    // כמו ב-fwfh: רווח לפני <br> נשאר, ורווח אחריו נבלע.
+    test('br הופך לשורה חדשה ובולע את הרווח שאחריו', () {
       final span = SimpleInlineHtml.tryParse('שורה א <br> שורה ב', baseStyle);
-      expect(span!.toPlainText(), 'שורה א\nשורה ב');
+      expect(span!.toPlainText(), 'שורה א \nשורה ב');
+    });
+
+    test('span עם class לא מוכר, ישויות והדגשה בשם צבע — כמו ב-fwfh', () {
+      expect(
+        SimpleInlineHtml.tryParse(
+          '<span class="unknown-class">א</span>',
+          baseStyle,
+        )?.toPlainText(),
+        'א',
+      );
+      expect(
+        SimpleInlineHtml.tryParse('א&amp;ב&#1488;', baseStyle)?.toPlainText(),
+        'א&בא',
+      );
+      final highlighted = SimpleInlineHtml.tryParse(
+        'לפני <span style="background-color:yellow">מילה</span>',
+        baseStyle,
+      )!;
+      final word = highlighted.children!.cast<TextSpan>().last;
+      expect(word.text, 'מילה');
+      expect(word.style?.background?.color, const Color(0xFFFFFF00));
     });
 
     test('תג סוגר עודף לא מפיל את הפרסור', () {
@@ -126,12 +148,11 @@ void main() {
       final cases = <String, String>{
         // סימונים מורמים (footnote-marker-number / raised-sup) הם היוצא
         // מן הכלל היחיד — נתמכים במסלול המהיר; ראו raised_markers_test.
-        'תג עם attributes': '<span class="unknown-class">א</span>',
+        // קישור דורש recognizer ומטפל בלחיצה, ולכן אינו ספאן בלי הקשר.
         'קישור': '<a href="x">קישור</a>',
         'כותרת': '<h2>כותרת</h2>',
-        'הדגשת חיפוש': 'לפני <span style="background-color:yellow">מילה</span>',
-        'HTML entity': 'א&amp;ב',
-        'entity מספרי': 'א&#1488;ב',
+        'רשימה': 'א<ul><li>ב</li></ul>',
+        'style שמשנה פריסה': '<span style="line-height: 2">א</span>',
         'תג לא מוכר': '<sup>1</sup>',
       };
 

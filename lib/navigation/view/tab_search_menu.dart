@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/history/view/history_screen.dart';
 import 'package:otzaria/navigation/view/tab_context_menu.dart';
 import 'package:otzaria/navigation/view/tab_visuals.dart';
@@ -41,11 +42,12 @@ class TabSearchButton extends StatelessWidget {
   }
 }
 
-/// החלונית הפתוחה כרגע, אם יש. הקיצור עשוי להילחץ שוב לפני שהיא נסגרה.
-_TabSearchRoute? _openRoute;
+/// החלונית הפתוחה כרגע בכל חלון, אם יש. הקיצור עשוי להילחץ שוב לפני שנסגרה.
+final _openRoutes = Expando<_TabSearchRoute>();
 
-/// האם חלונית חיפוש הכרטיסיות היא ה-route העליון.
-bool get isTabSearchMenuOnTop => _openRoute?.isCurrent ?? false;
+/// האם חלונית חיפוש הכרטיסיות היא ה-route העליון בחלון של [context].
+bool isTabSearchMenuOnTop(BuildContext context) =>
+    _openRoutes[AppWindowKeys.of(context)]?.isCurrent ?? false;
 
 /// פותח את חלונית חיפוש הכרטיסיות, וסוגר אותה אם היא כבר פתוחה. בלי
 /// [anchorContext] היא נפתחת ממורכזת בראש החלון — כך גם קיצור המקלדת מגיע
@@ -55,8 +57,9 @@ Future<void> showTabSearchMenu(
   BuildContext? anchorContext,
 }) {
   // חלונית שכבר אינה פעילה (הניווט שלה פורק) אינה חוסמת פתיחה חדשה.
-  final open = _openRoute;
-  _openRoute = null;
+  final keys = AppWindowKeys.of(context);
+  final open = _openRoutes[keys];
+  _openRoutes[keys] = null;
   if (open != null && open.isActive) {
     open.navigator?.removeRoute(open);
     return Future<void>.value();
@@ -90,9 +93,9 @@ Future<void> showTabSearchMenu(
     rect: Rect.fromLTWH(left, top, width, height),
     tabsBloc: context.read<TabsBloc>(),
   );
-  _openRoute = route;
+  _openRoutes[keys] = route;
   return Navigator.of(context).push<void>(route).whenComplete(() {
-    if (identical(_openRoute, route)) _openRoute = null;
+    if (identical(_openRoutes[keys], route)) _openRoutes[keys] = null;
   });
 }
 

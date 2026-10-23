@@ -81,6 +81,8 @@ class PluginShortcutRegistry extends ChangeNotifier {
     if (removed != null) notifyListeners();
   }
 
+  bool hasPlugin(String pluginId) => _byPlugin[pluginId]?.isNotEmpty ?? false;
+
   void removeAll(String pluginId) {
     if (_byPlugin.remove(pluginId) != null) notifyListeners();
   }

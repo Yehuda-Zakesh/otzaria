@@ -7,9 +7,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
-import 'package:window_manager/window_manager.dart';
+import 'package:otzaria/core/windowing/app_window_caption.dart';
+import 'package:otzaria/core/windowing/app_window_controller.dart';
+import 'package:otzaria/core/windowing/app_window_id.dart';
+import 'package:otzaria/core/windowing/multiview/host_window_app_window_controller.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
+import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 import 'package:otzaria/core/windowing/window_manager_app_window_controller.dart';
+import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/commentators_tab.dart';
@@ -40,7 +45,10 @@ import 'package:otzaria/text_book/bloc/text_book_event.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
 import 'package:otzaria/workspaces/bloc/workspace_state.dart';
+import 'package:window_manager/window_manager.dart' show WindowCaptionButton;
 import '../helpers/memory_settings_cache.dart';
+import '../test_helpers/fake_view_window.dart';
+import '../test_helpers/second_test_view.dart';
 
 class _NewTabRegistryRepo extends Fake implements PluginRegistryRepository {
   @override
@@ -550,6 +558,7 @@ void main() {
 
   group('שינוי הגדרות', () {
     late _TestSettingsBloc settingsBloc;
+    late WindowFullscreenCubit fullscreenCubit;
 
     Future<void> pumpBar(WidgetTester tester) async {
       final tabs = [for (var i = 0; i < 5; i++) _makeTextTab('ספר $i')];
@@ -558,6 +567,10 @@ void main() {
         const NavigationState(currentScreen: Screen.reading),
       );
       settingsBloc = _TestSettingsBloc(SettingsState.initial());
+      fullscreenCubit = WindowFullscreenCubit(
+        initial: false,
+        persist: (_) async {},
+      );
       addTearDown(() async {
         for (final tab in tabs) {
           tab.dispose();
@@ -565,6 +578,7 @@ void main() {
         await tabsBloc.close();
         await navigationBloc.close();
         await settingsBloc.close();
+        await fullscreenCubit.close();
       });
       await _setSurfaceSize(tester, const Size(1200, 800));
       await _pumpTitleBar(
@@ -572,6 +586,7 @@ void main() {
         tabsBloc: tabsBloc,
         navigationBloc: navigationBloc,
         settingsBloc: settingsBloc,
+        fullscreenCubit: fullscreenCubit,
       );
       await tester.pumpAndSettle();
     }
@@ -618,10 +633,8 @@ void main() {
       expect(find.byType(ReadingTabStrip), findsOneWidget);
       expect(find.byTooltip('מסך מלא'), findsOneWidget);
 
-      await emitSettings(
-        tester,
-        settingsBloc.state.copyWith(isFullscreen: true),
-      );
+      await fullscreenCubit.set(true);
+      await tester.pump();
       expect(find.byTooltip('צא ממסך מלא'), findsOneWidget);
 
       await Settings.setValue<String>('key-shortcut-open-history', 'ctrl+j');
@@ -2416,11 +2429,11 @@ void main() {
   });
 
   group('לחיצה כפולה: על טאב נבלעת, על האזור הריק עושה maximize', () {
-    // DragToMoveArea (window_manager) עושה maximize/restore ב-onDoubleTap דרך
+    // AppDragToMoveArea עושה maximize/restore ב-onDoubleTap, וכברירת מחדל דרך
     // ה-MethodChannel 'window_manager' (isMaximized → maximize/unmaximize).
     // תופסים את הקריאות כדי לוודא שלחיצה כפולה על טאב אינה מגיעה לשם.
     // אוספים רק את פעולות שינוי-הגודל (maximize/unmaximize). את isMaximized
-    // מתעלמים: WindowCaption (כפתורי החלון) קורא לו בכל build לבחירת האייקון,
+    // מתעלמים: AppWindowCaption (כפתורי החלון) קורא לו בכל build לבחירת האייקון,
     // והוא אינו מעיד על לחיצה כפולה.
     late List<String> resizeCalls;
 
@@ -2488,7 +2501,7 @@ void main() {
     testWidgets('לחיצה כפולה על האזור הריק שבשורת הטאבים עושה maximize', (
       tester,
     ) async {
-      // טאב יחיד קצר ברוחב גדול → אזור ריק נרחב בשורת הטאבים, שבו ה-DragToMoveArea
+      // טאב יחיד קצר ברוחב גדול → אזור ריק נרחב בשורת הטאבים, שבו ה-AppDragToMoveArea
       // צריך לפעול כרגיל (maximize/restore).
       final tab = _makeTextTab('ספר א');
       final tabsBloc = _TestTabsBloc(
@@ -2712,12 +2725,75 @@ void main() {
       settingsBloc: settingsBloc,
     );
 
-    expect(find.byType(WindowCaption), findsOneWidget);
+    expect(find.byType(AppWindowCaption), findsOneWidget);
+  });
+
+  testWidgets('בחלון Dart כפתורי החלון פועלים על החלון שלו', (tester) async {
+    final tab = _makeTextTab('ספר א');
+    final tabsBloc = _TestTabsBloc(
+      TabsState(tabs: [tab], currentTabIndex: 0),
+    );
+    final navigationBloc = _TestNavigationBloc(
+      const NavigationState(currentScreen: Screen.reading),
+    );
+    final settingsBloc = _TestSettingsBloc(SettingsState.initial());
+    final stub = StubWindowController(SecondTestView(tester.view));
+    final handle = StubWindowHandle(stub, (_) {}, fakeHwnd: 9);
+    var closes = 0;
+    final window = HostWindowAppWindowController(
+      id: const AppWindowId('window-view-2'),
+      handle: handle,
+      onClose: () async => closes++,
+      native: FakeViewWindowNative(),
+    );
+
+    addTearDown(() async {
+      tab.dispose();
+      await tabsBloc.close();
+      await navigationBloc.close();
+      await settingsBloc.close();
+    });
+
+    await _setSurfaceSize(tester, const Size(1200, 800));
+    await _pumpTitleBar(
+      tester,
+      tabsBloc: tabsBloc,
+      navigationBloc: navigationBloc,
+      settingsBloc: settingsBloc,
+      role: const AppWindowRole.view(),
+      controller: window,
+    );
+
+    expect(find.byType(AppWindowCaption), findsOneWidget);
+    expect(find.text('ספר א'), findsOneWidget);
+    final buttons = find.descendant(
+      of: find.byType(AppWindowCaption),
+      matching: find.byType(WindowCaptionButton),
+    );
+    expect(buttons, findsNWidgets(3));
+
+    await tester.tap(buttons.at(1));
+    stub.notify();
+    await tester.pumpAndSettle();
+    expect(stub.maximized, isTrue);
+    // אחרי WM_SIZE הכפתור האמצעי מחזיר לגודל רגיל.
+    await tester.tap(buttons.at(1));
+    stub.notify();
+    await tester.pumpAndSettle();
+    expect(stub.maximized, isFalse);
+
+    await tester.tap(buttons.first);
+    await tester.pump();
+    expect(stub.minimized, isTrue);
+
+    await tester.tap(buttons.last);
+    await tester.pump();
+    expect(closes, 1);
   });
 }
 
 /// לחיצה כפולה במיקום נתון: שתי הקשות עם השהיה תקפה ל-double-tap, ואז המתנה
-/// להשלמת ה-onDoubleTap (שהוא async ב-DragToMoveArea).
+/// להשלמת ה-onDoubleTap (שהוא async ב-AppDragToMoveArea).
 Future<void> _doubleTapAt(WidgetTester tester, Offset pos) async {
   await tester.tapAt(pos);
   await tester.pump(const Duration(milliseconds: 100));
@@ -2732,19 +2808,32 @@ Future<void> _pumpTitleBar(
   required SettingsBloc settingsBloc,
   HistoryBloc? historyBloc,
   WorkspaceBloc? workspaceBloc,
+  WindowFullscreenCubit? fullscreenCubit,
+  AppWindowRole? role,
+  AppWindowController? controller,
 }) async {
   await tester.pumpWidget(
     // CustomTitleBar שולף את החלון מ-[AppWindowScope] (maximize בלחיצה
     // כפולה, מזעור, סגירה, גרירת החלון). הבקר האמיתי מנתב לאותו
     // MethodChannel שממוקם בבדיקה, ולכן ההנחות הקיימות נשארות בתוקף.
     AppWindowScope(
-      controller: const WindowManagerAppWindowController(),
+      controller: controller ?? const WindowManagerAppWindowController(),
       geometry: const WindowManagerAppWindowController(),
+      role: role,
       child: MultiBlocProvider(
         providers: [
           BlocProvider<TabsBloc>.value(value: tabsBloc),
           BlocProvider<NavigationBloc>.value(value: navigationBloc),
           BlocProvider<SettingsBloc>.value(value: settingsBloc),
+          if (fullscreenCubit != null)
+            BlocProvider<WindowFullscreenCubit>.value(value: fullscreenCubit)
+          else
+            BlocProvider<WindowFullscreenCubit>(
+              create: (_) => WindowFullscreenCubit(
+                initial: false,
+                persist: (_) async {},
+              ),
+            ),
           if (historyBloc != null)
             BlocProvider<HistoryBloc>.value(value: historyBloc),
           if (workspaceBloc != null)

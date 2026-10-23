@@ -19,6 +19,7 @@ $runStamp = (Get-Date).ToString("yyyyMMdd_HHmmss", [System.Globalization.Culture
 $runDir = Join-Path $probeRoot ("run_" + $runStamp)
 $phasesFile = Join-Path $probeRoot "phases.jsonl"
 $heapFile = Join-Path $probeRoot "heap.jsonl"
+$summaryFile = Join-Path $probeRoot "reader_scroll_summary.txt"
 $samplesCsv = Join-Path $runDir "samples.csv"
 $stopFile = Join-Path $runDir "sampler.stop"
 $driveLog = Join-Path $runDir "flutter_drive.log"
@@ -26,6 +27,7 @@ $driveLog = Join-Path $runDir "flutter_drive.log"
 New-Item -ItemType Directory -Force -Path $probeRoot, $runDir | Out-Null
 Remove-Item -LiteralPath $phasesFile -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath $heapFile -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $summaryFile -ErrorAction SilentlyContinue
 
 if (Get-Process -Name "otzaria" -ErrorAction SilentlyContinue) {
   throw "otzaria כבר רץ — יש לסגור אותו לפני הרצת האבחון (בדיקת single-instance תפיל את התרחיש)."
@@ -86,6 +88,9 @@ try {
   }
   if (Test-Path $heapFile) {
     Copy-Item -LiteralPath $heapFile -Destination (Join-Path $runDir "heap.jsonl") -Force
+  }
+  if (Test-Path $summaryFile) {
+    Copy-Item -LiteralPath $summaryFile -Destination (Join-Path $runDir "reader_scroll_summary.txt") -Force
   }
 }
 

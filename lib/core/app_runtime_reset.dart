@@ -1,8 +1,8 @@
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/attached_libraries/repository/external_link_repository.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/library/hidden/hidden_library_store.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/data/cache/acronyms_cache.dart';
@@ -96,7 +96,7 @@ void _invalidateLibraryRuntimeCaches() {
 /// וחלון משני מקבל ממנו מחדש את המצב שנמחק אצלו.
 Future<void> resetRuntimeStateAfterSettingsReset() async {
   await resetRuntimeStateForAppRestart();
-  if (WindowRole.isSecondary) {
+  if (!ProcessDuties.current.isProcessOwner) {
     RemoteCalendarAlertsClient.instance.forgetAppliedRevision();
     return;
   }

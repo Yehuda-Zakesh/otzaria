@@ -45,6 +45,7 @@ const Set<String> kKnownSeforimTables = {
   'db_meta',
   'external_link',
   // מסכמה 7; מסד בסכמה 6, מצורף או אישי עשוי שלא להכיל אותן.
+  'banner',
   'book_banner',
   'book_protection',
   'line_divine_name',
@@ -154,8 +155,7 @@ class DbCapabilities {
       hasLines &&
       hasColumn('line_divine_name', 'lineId') &&
       hasColumn('line_divine_name', 'charStart') &&
-      hasColumn('line_divine_name', 'charEnd') &&
-      hasColumn('line_divine_name', 'kind');
+      hasColumn('line_divine_name', 'span');
 
   /// הערות שוליים שהוצאו מתוכן השורה (סכמה 7); בלעדיה הן נשארות בשורה.
   bool get hasBookNotes =>
@@ -163,7 +163,7 @@ class DbCapabilities {
       hasColumn('line_note', 'lineId') &&
       hasColumn('line_note', 'noteIndex') &&
       hasColumn('line_note', 'charPos') &&
-      hasColumn('line_note', 'marker') &&
+      hasColumn('line_note', 'hasMarker') &&
       hasColumn('line_note', 'body');
 
   /// מופעי שמות הקודש בגוף הערות השוליים; בלי הטבלה הגוף מוצג ככתבו.
@@ -172,8 +172,7 @@ class DbCapabilities {
       hasColumn('line_note_divine_name', 'lineId') &&
       hasColumn('line_note_divine_name', 'noteIndex') &&
       hasColumn('line_note_divine_name', 'charStart') &&
-      hasColumn('line_note_divine_name', 'charEnd') &&
-      hasColumn('line_note_divine_name', 'kind');
+      hasColumn('line_note_divine_name', 'span');
   bool get hasLineBookIndex => hasIndex('idx_line_book_index');
   bool get hasAuthors => hasBooks && has('author') && has('book_author');
   bool get hasTopics => hasBooks && has('topic') && has('book_topic');
@@ -187,9 +186,13 @@ class DbCapabilities {
   bool get hasDefaultTargums => hasBooks && has('default_targum');
   bool get hasCategoryClosure => hasCategories && has('category_closure');
 
-  /// באנר קרדיט לספר; טבלה דלילה.
+  /// באנר קרדיט לספר: `book_banner` דלילה מפנה לטקסט ב-`banner`.
   bool get hasBookBanners =>
-      hasColumn('book_banner', 'bookId') && hasColumn('book_banner', 'text');
+      hasColumn('book', 'title') &&
+      hasColumn('banner', 'id') &&
+      hasColumn('banner', 'text') &&
+      hasColumn('book_banner', 'bookId') &&
+      hasColumn('book_banner', 'bannerId');
 
   /// רמת הגבלת מו"ל לספר; טבלה דלילה.
   bool get hasBookProtection =>

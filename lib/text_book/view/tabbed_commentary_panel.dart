@@ -68,6 +68,7 @@ class TabbedCommentaryPanel extends StatefulWidget {
   /// בקשות גלילה לקטע מפרש מלחיצה על עוגן-אות בטקסט הראשי. מועבר כמות שהוא
   /// לרשימת המפרשים; רלוונטי רק במצב המפוצל, שבו היא בכלל מוצגת כאן.
   final ValueListenable<CommentaryScrollRequest?>? commentaryScrollTarget;
+  final bool isPaneOpen;
 
   const TabbedCommentaryPanel({
     super.key,
@@ -91,6 +92,7 @@ class TabbedCommentaryPanel extends StatefulWidget {
     this.notesFocusLineNumber,
     this.notesFooter,
     this.commentaryScrollTarget,
+    this.isPaneOpen = true,
   });
 
   @override
@@ -258,6 +260,7 @@ class _TabbedCommentaryPanelState extends State<TabbedCommentaryPanel>
                         onOpenPersonalNote: widget.onOpenPersonalNote,
                         personalNotesLoader: loadStoredPersonalNotes,
                         scrollTargetListenable: widget.commentaryScrollTarget,
+                        isPaneOpen: widget.isPaneOpen,
                       ),
                     )
                   else
@@ -269,6 +272,7 @@ class _TabbedCommentaryPanelState extends State<TabbedCommentaryPanel>
                     openBookCallback: widget.openBookCallback,
                     fontSize: widget.fontSize,
                     selectionSyncController: widget.selectionSyncController,
+                    isPaneOpen: widget.isPaneOpen,
                   ),
                   // כרטיסיית ההערות האישיות
                   PersonalNotesSidebar(

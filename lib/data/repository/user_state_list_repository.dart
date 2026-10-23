@@ -26,9 +26,15 @@ class UserStateListRepository<T> {
   final Map<String, dynamic> Function(T) toJson;
   final UserStateListStore _store;
 
-  /// אות שהרשימה הזו שונתה בחלון אחר. כתיבה של החלון הזה אינה מחזירה אות.
+  /// מזהה הכותב: כל חלון מחזיק מופע משלו, וכך מסנן רק את הכתיבות שלו.
+  final Object _origin = Object();
+
+  /// אות שהרשימה הזו שונתה בחלון אחר. כתיבה של המופע הזה אינה מחזירה אות.
   Stream<void> get remoteChanges => _store.changes.where(
-    (changed) => changed.box == boxName && changed.key == key,
+    (changed) =>
+        changed.box == boxName &&
+        changed.key == key &&
+        !identical(changed.origin, _origin),
   );
 
   /// טוען את הרשימה. כשל קריאה מהמסד מתפשט — "לא ידוע" אינו "ריק", וגיבוי
@@ -43,7 +49,7 @@ class UserStateListRepository<T> {
   /// מהרשימה שקיבל, בלי await ובלי תופעות לוואי.
   Future<List<T>> mutate(List<T> Function(List<T> current) apply) async {
     late List<T> next;
-    await _store.mutate(boxName, key, (raw) {
+    await _store.mutate(boxName, key, origin: _origin, (raw) {
       final decoded = _decode(raw);
       next = apply(decoded.items);
       // ⚠️ רשומות שלא נפענחו נשמרות. הן אינן מוצגות, אבל כתיבה שמשמיטה
@@ -58,10 +64,10 @@ class UserStateListRepository<T> {
   /// ⚠️ **דריסה מוחלטת.** מוצדק בשחזור מגיבוי בלבד — שם הכוונה היא בדיוק
   /// להחליף את מה שיש. לכל שינוי אחר השתמש ב-[mutate].
   Future<void> overwrite(List<T> items) =>
-      _store.write(boxName, key, items.map(toJson).toList());
+      _store.write(boxName, key, items.map(toJson).toList(), origin: _origin);
 
   /// "מחק הכול" פירושו הכול, כולל מה שחלון אחר הוסיף בשנייה האחרונה.
-  Future<void> clear() => _store.clear(boxName, key);
+  Future<void> clear() => _store.clear(boxName, key, origin: _origin);
 
   _Decoded<T> _decode(List<dynamic> raw) {
     final items = <T>[];

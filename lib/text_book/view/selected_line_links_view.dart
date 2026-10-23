@@ -30,11 +30,15 @@ class SelectedLineLinksView extends StatelessWidget {
 
   final SelectionSyncController? selectionSyncController;
 
+  /// false כשהחלונית סגורה אך נשארת בעץ: גלילה בספר לא בונה בה את הרשימה.
+  final bool isPaneOpen;
+
   const SelectedLineLinksView({
     super.key,
     required this.openBookCallback,
     required this.fontSize,
     this.selectionSyncController,
+    this.isPaneOpen = true,
   });
 
   @override
@@ -43,6 +47,7 @@ class SelectedLineLinksView extends StatelessWidget {
       // רשימת הקישורים תלויה ב-visibleLinks בלבד (ובהצגת הטקסט), לא בתוכן
       // הספר. דילוג על emit-ים של warming/הרחבת-טווח שלא נוגעים לקישורים.
       buildWhen: (previous, current) {
+        if (!isPaneOpen) return false;
         if (previous is! TextBookLoaded || current is! TextBookLoaded) {
           return true;
         }
@@ -54,7 +59,10 @@ class SelectedLineLinksView extends StatelessWidget {
                 current.commentaryDisplayProfile ||
             _copyProfile(previous) != _copyProfile(current);
       },
-      builder: (context, state) {
+      builder: (context, built) {
+        // בפתיחה ה-builder רץ עם המצב האחרון שעבר את buildWhen, שאולי התיישן.
+        final latest = context.read<TextBookBloc>().state;
+        final state = latest is TextBookLoaded ? latest : built;
         return LinksListView(
           links: referenceLinksOf(state),
           chipSourceLinks: state.links,

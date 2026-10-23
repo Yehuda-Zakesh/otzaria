@@ -37,10 +37,8 @@ class PluginBridgeHandler {
   final RateLimiter _rateLimiter;
   final PluginRegistryRepository _registry;
 
-  /// מופעלים בתחילת ובסוף כל RPC — מאפשרים למופע רקע לאותת "אני עסוק"
-  /// למנגנון הכיבוי אחרי חוסר פעילות, בלי לקטוע RPC ארוך באמצעו.
-  final void Function()? onWorkStarted;
-  final void Function()? onWorkEnded;
+  /// תחילת RPC מחזירה פעולת סיום של אותו מופע ודף.
+  final VoidCallback Function()? onWorkStarted;
 
   PluginBridgeHandler(
     this.plugin, {
@@ -48,7 +46,6 @@ class PluginBridgeHandler {
     PluginRegistryRepository? registry,
     RateLimiter? rateLimiter,
     this.onWorkStarted,
-    this.onWorkEnded,
   }) : _registry = registry ?? PluginRegistryRepository(),
        _rateLimiter = rateLimiter ?? RateLimiter();
 
@@ -179,11 +176,19 @@ class PluginBridgeHandler {
       return _errorResp("error.forbidden", "Bridge call is not authorized");
     }
 
-    onWorkStarted?.call();
+    final method = first['method'];
+    final parts = method is String ? method.split('.') : const <String>[];
+    final endWork = onWorkStarted?.call();
     try {
-      return await _dispatchRpc(args, eventSink: eventSink);
+      return await adapter.withWindowDependencies(
+        () => _dispatchRpc(args, eventSink: eventSink),
+        domain: parts.firstOrNull,
+        rpcAction: parts.skip(1).join('.'),
+      );
+    } catch (error) {
+      return _errorResp("error.internal", error.toString());
     } finally {
-      onWorkEnded?.call();
+      endWork?.call();
     }
   }
 
@@ -233,12 +238,10 @@ class PluginBridgeHandler {
     // permission_denied. כדי לא להוסיף קריאת DB לכל RPC, ההקדמה הזו מתבצעת רק
     // לקריאות תוכן; שאר הקריאות נבדקות כרגיל בהמשך.
     final isContentRead = isRateLimitExempt(request.method);
-    final isSearchCancellation =
-        request.method == 'search.query' &&
-        PluginBridgeAdapter.isSearchCancellationPayload(request.payload);
-    final isNetworkFetchCancellation =
-        request.method == 'network.fetchStream' &&
-        PluginBridgeAdapter.isNetworkFetchCancellationPayload(request.payload);
+    final isStreamCancellation =
+        (request.method == 'search.query' ||
+            request.method == 'network.fetchStream') &&
+        PluginBridgeAdapter.isStreamCancellationPayload(request.payload);
     bool? grantedEarly;
     if (isContentRead && declaresPermission && requiredPermission != null) {
       grantedEarly =
@@ -247,9 +250,7 @@ class PluginBridgeHandler {
     }
 
     final exempt =
-        (isContentRead && (grantedEarly ?? false)) ||
-        isSearchCancellation ||
-        isNetworkFetchCancellation;
+        (isContentRead && (grantedEarly ?? false)) || isStreamCancellation;
     if (!exempt && !_rateLimiter.consume()) {
       return _errorResp("error.rate_limited", "Rate limit exceeded");
     }

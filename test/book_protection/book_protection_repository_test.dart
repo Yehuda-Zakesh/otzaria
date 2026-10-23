@@ -34,8 +34,12 @@ void main() {
   Future<void> createTables() async {
     final db = await database.database;
     db.execute(
-      'CREATE TABLE book_banner (bookId INTEGER PRIMARY KEY NOT NULL, '
+      'CREATE TABLE banner (id INTEGER PRIMARY KEY NOT NULL, '
       'text TEXT NOT NULL)',
+    );
+    db.execute(
+      'CREATE TABLE book_banner (bookId INTEGER PRIMARY KEY NOT NULL, '
+      'bannerId INTEGER NOT NULL REFERENCES banner(id))',
     );
     db.execute(
       'CREATE TABLE book_protection (bookId INTEGER PRIMARY KEY NOT NULL, '
@@ -78,12 +82,36 @@ void main() {
     await createTables();
     final db = await database.database;
     db.execute('INSERT INTO book_protection VALUES (?, 2)', [protectedId]);
-    db.execute('INSERT INTO book_banner VALUES (?, ?)', [bannerId, 'שורה\nב']);
+    db.execute("INSERT INTO banner VALUES (5, 'שורה\nב')");
+    db.execute('INSERT INTO book_banner VALUES (?, 5)', [bannerId]);
 
     final tables = await repository.getBookProtectionTables();
     expect(tables.levels, {protectedId: 2});
     expect(tables.banners, {bannerId: 'שורה\nב'});
     expect(tables.booksByTitle.keys.toSet(), {'ספר מוגן', 'ספר עם באנר'});
+  });
+
+  test('טקסט אחד משותף, ו-{title} מורחב בשם כל ספר', () async {
+    final first = await insertBook('ספר א');
+    final second = await insertBook('ספר (ב)');
+    await createTables();
+    final db = await database.database;
+    db.execute(
+      'INSERT INTO banner VALUES (3, ?)',
+      ['על {title}\n[בוויקי](https://w.org/wiki/{title})'],
+    );
+    db.execute('INSERT INTO book_banner VALUES (?, 3), (?, 3)', [
+      first,
+      second,
+    ]);
+
+    expect((await repository.getBookProtectionTables()).banners, {
+      first:
+          'על ספר א\n[בוויקי](https://w.org/wiki/%D7%A1%D7%A4%D7%A8%20%D7%90)',
+      second:
+          'על ספר (ב)\n[בוויקי](https://w.org/wiki/'
+          '%D7%A1%D7%A4%D7%A8%20%28%D7%91%29)',
+    });
   });
 
   test('טבלה שנוספה אחרי הטעינה הראשונה נקלטת', () async {
@@ -122,7 +150,8 @@ void main() {
     await createTables();
     final db = await database.database;
     db.execute('INSERT INTO book_protection VALUES (?, 1)', [id]);
-    db.execute('INSERT INTO book_banner VALUES (?, ?)', [id, 'כל הזכויות']);
+    db.execute("INSERT INTO banner VALUES (1, 'כל הזכויות')");
+    db.execute('INSERT INTO book_banner VALUES (?, 1)', [id]);
     final service = BookProtectionRepository.instance;
 
     final byBook = await service.forBook(

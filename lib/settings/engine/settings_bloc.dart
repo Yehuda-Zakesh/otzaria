@@ -66,7 +66,6 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
     on<UpdateCommentaryPaneWidth>(_onUpdateCommentaryPaneWidth);
     on<UpdateCopyWithHeaders>(_onUpdateCopyWithHeaders);
     on<UpdateCopyHeaderFormat>(_onUpdateCopyHeaderFormat);
-    on<UpdateIsFullscreen>(_onUpdateIsFullscreen);
     on<UpdateLibraryViewMode>(_onUpdateLibraryViewMode);
     on<UpdateLibraryShowPreview>(_onUpdateLibraryShowPreview);
     on<UpdateSearchShowPreview>(_onUpdateSearchShowPreview);
@@ -157,7 +156,6 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
       commentaryPaneWidth: settings['commentaryPaneWidth'],
       copyWithHeaders: settings['copyWithHeaders'],
       copyHeaderFormat: settings['copyHeaderFormat'],
-      isFullscreen: settings['isFullscreen'],
       libraryViewMode: settings['libraryViewMode'],
       libraryShowPreview: settings['libraryShowPreview'],
       searchShowPreview: settings['searchShowPreview'] ?? true,
@@ -601,14 +599,6 @@ class SettingsBloc extends Bloc<SettingsEvent, SettingsState> {
   ) async {
     await _repository.updateCopyHeaderFormat(event.copyHeaderFormat);
     emit(state.copyWith(copyHeaderFormat: event.copyHeaderFormat));
-  }
-
-  Future<void> _onUpdateIsFullscreen(
-    UpdateIsFullscreen event,
-    Emitter<SettingsState> emit,
-  ) async {
-    await _repository.updateIsFullscreen(event.isFullscreen);
-    emit(state.copyWith(isFullscreen: event.isFullscreen));
   }
 
   Future<void> _onUpdateLibraryViewMode(

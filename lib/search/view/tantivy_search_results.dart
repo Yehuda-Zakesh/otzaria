@@ -637,9 +637,7 @@ class _TantivySearchResultsState extends State<TantivySearchResults> {
               _isAutoLoadInFlight = false;
             }
 
-            // חיפוש חדש (שינוי חתימה) — מאפס את הגלילה לראש הרשימה.
-            // טעינת המשך (LoadMore) שומרת על אותה חתימה ולכן לא נוגעת בגלילה,
-            // וכך גם chunks עוקבים של אותו חיפוש (החתימה זהה).
+            // רק שינוי חתימה מאפס גלילה; מקטעים ועמודי המשך שומרים מיקום.
             final signature = _searchSignature(state);
             if (signature != _lastSearchSignature) {
               _lastSearchSignature = signature;
@@ -672,26 +670,7 @@ class _TantivySearchResultsState extends State<TantivySearchResults> {
     );
   }
 
-  /// שאילתת החיפוש האחרון שהושלם — מבחין בין "חיפוש חדש" (ספינר חוסם במקום
-  /// התוצאות הישנות) לבין "טען עוד" באותה שאילתה (אסור להעלים את הקיימות).
-  String _lastCompletedQuery = '';
-
-  void _updateLastCompletedQuery(SearchState state) {
-    if (!state.isLoading) {
-      _lastCompletedQuery = state.searchQuery;
-    }
-  }
-
-  bool _shouldShowBlockingLoader(SearchState state) {
-    final currentQuery = state.searchQuery.trim();
-    final lastQuery = _lastCompletedQuery.trim();
-    return state.isLoading &&
-        currentQuery.isNotEmpty &&
-        currentQuery != lastQuery;
-  }
-
   Widget _buildResultsContent(SearchState state, BoxConstraints constrains) {
-    _updateLastCompletedQuery(state);
     // רשימת גלילה אחת לשני המקורות: הבלוק החיצוני הוא sliver באותו
     // CustomScrollView, ולכן כל מצבי המנוע (כולל ריק/טעינה/שגיאה) מרונדרים
     // אף הם כ-slivers — אחרת הבלוק החיצוני היה יורד מהעץ יחד עם הרשימה.
@@ -752,10 +731,7 @@ class _TantivySearchResultsState extends State<TantivySearchResults> {
     SearchState state, {
     required bool hasExternal,
   }) {
-    // חשוב: בטעינת-המשך אנחנו לא רוצים לפרק את הרשימה, אחרת הגלילה מתאפסת
-    // לראש. לכן ספינר חוסם מוצג רק בחיפוש חדש או כשאין עדיין תוצאות.
-    if (_shouldShowBlockingLoader(state) ||
-        (state.isLoading && state.results.isEmpty)) {
+    if (state.isLoading && state.results.isEmpty) {
       return const [
         SliverFillRemaining(
           hasScrollBody: false,

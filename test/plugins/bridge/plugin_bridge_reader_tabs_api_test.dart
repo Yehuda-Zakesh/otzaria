@@ -1,3 +1,11 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:otzaria/core/ui_snack.dart';
+import 'package:otzaria/core/windowing/app_window_id.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
+import 'package:otzaria/plugins/services/plugin_page_launcher.dart';
+import 'package:otzaria/tools/tools_launcher_controller.dart';
+import 'package:otzaria/plugins/bridge/plugin_bridge_handler.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -44,6 +52,17 @@ class _MockPersonalNotesRepository extends Mock
     implements PersonalNotesRepository {}
 
 class _MockBookOpenCoordinator extends Mock implements BookOpenCoordinator {}
+
+class _PermissionGate extends Fake implements PluginRegistryRepository {
+  final entered = Completer<void>();
+  final gate = Completer<void>();
+  @override
+  Future<bool?> getPermission(String pluginId, String permission) async {
+    if (!entered.isCompleted) entered.complete();
+    await gate.future;
+    return true;
+  }
+}
 
 class _ReaderGrants extends PluginRegistryRepository {
   _ReaderGrants(this.names);
@@ -143,10 +162,12 @@ void main() {
     TextBookTab? readerTab,
     bool userGesture = true,
     List<String> permissions = const ['reader.open'],
+    PluginBridgeWindowDependencies Function()? windowDependenciesResolver,
   }) => PluginBridgeAdapter(
     _plugin(permissions),
     instanceId: instanceId ?? 'fg',
     readerTab: readerTab,
+    windowDependenciesResolver: windowDependenciesResolver,
     dependencies: PluginBridgeDependencies(
       historyBloc: _MockHistoryBloc(),
       tabsBloc: tabsBloc,
@@ -200,6 +221,232 @@ void main() {
     await PluginTextReaderRegistry.instance.select(_plugin(const []), false);
     await tabsBloc.close();
   });
+
+  PluginBridgeWindowDependencies windowFor(
+    TabsBloc bloc, {
+    AppWindowKeys? keys,
+  }) => (
+    context: null,
+    viewId: null,
+    windowKeys: keys,
+    tabsBloc: bloc,
+    historyBloc: _MockHistoryBloc(),
+    navigationBloc: _MockNavigationBloc(),
+    workspaceBloc: _MockWorkspaceBloc(),
+    bookOpenCoordinator: _MockBookOpenCoordinator(),
+    customFoldersBloc: null,
+    waitForLibraryRefresh: null,
+  );
+
+  test(
+    'tools navigation retains its window across a permission await',
+    () async {
+      final a = AppWindowKeys(id: const AppWindowId('a'));
+      final b = AppWindowKeys(id: const AppWindowId('b'));
+      final opened = <String>[];
+      void openA() => opened.add('a');
+      void openB() => opened.add('b');
+      ToolsLauncherController.instance.register(a, openA);
+      ToolsLauncherController.instance.register(b, openB);
+      addTearDown(() {
+        ToolsLauncherController.instance.unregister(a, openA);
+        ToolsLauncherController.instance.unregister(b, openB);
+        AppWindowKeys.resetForTest();
+      });
+      AppWindowKeys.activate(b);
+      final adapter = buildAdapter(
+        permissions: ['navigation.write'],
+        windowDependenciesResolver: () =>
+            windowFor(tabsBloc, keys: AppWindowKeys.current),
+      );
+      addTearDown(adapter.dispose);
+      final permission = _PermissionGate();
+      final handler = PluginBridgeHandler(
+        _plugin(['navigation.write']),
+        adapter: adapter,
+        registry: permission,
+      );
+      final request = handler.handleRpcForTesting([
+        {
+          'method': 'navigation.goTo',
+          'payload': {'target': 'more'},
+        },
+      ]);
+      await permission.entered.future;
+      AppWindowKeys.activate(a);
+      permission.gate.complete();
+      expect((await request as Map)['success'], isTrue);
+      expect(opened, ['b']);
+    },
+  );
+
+  for (final domain in ['ui', 'notifications']) {
+    testWidgets(
+      '$domain messages and their tap handler retain the RPC window',
+      (tester) async {
+        final a = AppWindowKeys(id: const AppWindowId('a'));
+        final b = AppWindowKeys(id: const AppWindowId('b'));
+        final opened = <String>[];
+        void openA(String _) => opened.add('a');
+        void openB(String _) => opened.add('b');
+        PluginPageLauncher.instance.register(a, openA);
+        PluginPageLauncher.instance.register(b, openB);
+        addTearDown(() {
+          PluginPageLauncher.instance.unregister(a, openA);
+          PluginPageLauncher.instance.unregister(b, openB);
+          AppWindowKeys.resetForTest();
+        });
+        await tester.pumpWidget(
+          MaterialApp(
+            navigatorKey: b.navigator,
+            home: const Scaffold(body: SizedBox()),
+          ),
+        );
+        AppWindowKeys.activate(b);
+        final grants = [
+          domain == 'ui' ? 'ui.feedback' : 'notifications.in_app',
+        ];
+        final adapter = buildAdapter(
+          permissions: grants,
+          windowDependenciesResolver: () =>
+              windowFor(tabsBloc, keys: AppWindowKeys.current),
+        );
+        addTearDown(adapter.dispose);
+        final permission = _PermissionGate();
+        final handler = PluginBridgeHandler(
+          _plugin(grants),
+          adapter: adapter,
+          registry: permission,
+        );
+        final request = handler.handleRpcForTesting([
+          {
+            'method': '$domain.${domain == 'ui' ? 'showMessage' : 'showInApp'}',
+            'payload': {'message': 'בקשה בב', 'tapOpenPlugin': true},
+          },
+        ]);
+        await permission.entered.future;
+        AppWindowKeys.activate(a);
+        permission.gate.complete();
+        expect((await request as Map)['success'], isTrue);
+        await tester.pump();
+        expect(find.text('בקשה בב'), findsOneWidget);
+        await tester.tap(find.text('בקשה בב'));
+        await tester.pump();
+        expect(opened, ['b']);
+        UiSnack.hide(window: b);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  test(
+    'RPC פר-תהליך אינו דורש חלון וחריגה בלכידת חלון מוחזרת כשגיאה',
+    () async {
+      final adapter = buildAdapter(
+        windowDependenciesResolver: () => throw StateError('closed window'),
+      );
+      addTearDown(adapter.dispose);
+      expect(await adapter.execute('app', 'getTheme', {}), isEmpty);
+      final permission = _PermissionGate();
+      final handler = PluginBridgeHandler(
+        _plugin(['reader.open']),
+        adapter: adapter,
+        registry: permission,
+      );
+      final result =
+          await handler.handleRpcForTesting([
+                {
+                  'method': 'reader.getCurrentState',
+                  'payload': <String, dynamic>{},
+                },
+              ])
+              as Map;
+      expect(result['success'], isFalse);
+      expect((result['error'] as Map)['code'], 'error.internal');
+      expect(permission.entered.isCompleted, isFalse);
+    },
+  );
+
+  test(
+    'בקשות רקע חופפות נלכדות בחלון הפעיל ואינן מחליפות יעד במהלך await',
+    () async {
+      final second = TabsBloc(repository: _FakeTabsRepository());
+      addTearDown(second.close);
+      await openTabs([toolTab()]);
+      final loadedB = second.stream.firstWhere(
+        (state) => state.tabs.isNotEmpty,
+      );
+      second.add(
+        ReplaceAllTabs([ToolTab(toolId: 'calendar', title: 'לוח שנה')], 0),
+      );
+      await loadedB;
+      var active = second;
+      final adapter = buildAdapter(
+        instanceId: 'background',
+        windowDependenciesResolver: () => windowFor(active),
+      );
+      addTearDown(adapter.dispose);
+      final closingB = adapter.execute('reader', 'closeTab', {'index': 0});
+      active = tabsBloc;
+      final closingA = adapter.execute('reader', 'closeTab', {'index': 0});
+      await Future.wait([closingA, closingB]);
+      await Future<void>.delayed(Duration.zero);
+      expect(tabsBloc.state.tabs, isEmpty);
+      expect(second.state.tabs, isEmpty);
+    },
+  );
+
+  test(
+    'יעד RPC נלכד לפני המתנה להרשאה, ובקשה חדשה קוראת את החלון הפעיל החדש',
+    () async {
+      final second = TabsBloc(repository: _FakeTabsRepository());
+      addTearDown(second.close);
+      await openTabs([toolTab()]);
+      final loadedB = second.stream.firstWhere(
+        (state) => state.tabs.isNotEmpty,
+      );
+      second.add(
+        ReplaceAllTabs([ToolTab(toolId: 'calendar', title: 'לוח שנה')], 0),
+      );
+      await loadedB;
+      var active = second;
+      final adapter = buildAdapter(
+        instanceId: 'background',
+        permissions: ['reader.open'],
+        windowDependenciesResolver: () => windowFor(active),
+      );
+      addTearDown(adapter.dispose);
+      final permissions = _PermissionGate();
+      final handler = PluginBridgeHandler(
+        _plugin(['reader.open']),
+        adapter: adapter,
+        registry: permissions,
+      );
+      final readingB = handler.handleRpcForTesting([
+        {'method': 'reader.getCurrentState', 'payload': <String, dynamic>{}},
+      ]);
+      await permissions.entered.future;
+      active = tabsBloc;
+      permissions.gate.complete();
+      final resultB = await readingB as Map;
+      expect(
+        ((resultB['data'] as Map)['openTabs'] as List).single['toolId'],
+        'calendar',
+      );
+      final resultA =
+          await handler.handleRpcForTesting([
+                {
+                  'method': 'reader.getCurrentState',
+                  'payload': <String, dynamic>{},
+                },
+              ])
+              as Map;
+      expect(
+        ((resultA['data'] as Map)['openTabs'] as List).single['toolId'],
+        'gematria',
+      );
+    },
+  );
 
   group('default text reader', () {
     final permissions = PluginTextReaderRegistry.requiredPermissions.toList();

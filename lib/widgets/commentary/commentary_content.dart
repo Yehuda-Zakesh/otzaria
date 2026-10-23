@@ -104,6 +104,12 @@ class _CommentaryContentState extends State<CommentaryContent>
   bool get anchorLinksEnabled => widget.displayProfile.showAnchorMarkers;
 
   @override
+  bool get highlightsLinkedAnchor => true;
+
+  @override
+  void openPanelAnchor(Link link) => _openAnchorTarget(link);
+
+  @override
   void initState() {
     super.initState();
     _loadContent();
@@ -241,15 +247,12 @@ class _CommentaryContentState extends State<CommentaryContent>
                     underlineColor: Theme.of(context).colorScheme.primary,
                   );
 
-                  final linkedStart = widget.link.linkedAnchorStart;
-                  final linkedEnd = widget.link.linkedAnchorEnd;
-                  if (linkedStart != null &&
-                      linkedEnd != null &&
-                      linkedEnd > linkedStart) {
+                  final linked = linkedAnchorSpan();
+                  if (linked != null) {
                     displayData = wrapVisibleRange(
                       html: displayData,
-                      start: linkedStart,
-                      end: linkedEnd,
+                      start: linked.start,
+                      end: linked.end!,
                       openTag: '<span class="link-anchor-range">',
                       closeTag: '</span>',
                     );

@@ -31,6 +31,7 @@ class BookNotesRepository {
 
   /// ההערות של [title]. ספר אישי וספר מקובץ שומרים את ההערות בשורה; הטבלה
   /// מכסה רק שורות בסיס, ולכן גם מהדורה ([versionTitle]) נשארת בשורה.
+  /// כשל בטעינה נזרק ואינו נשמר במטמון — הקריאה הבאה מנסה שוב.
   Future<BookNotes> notesFor(
     String title, {
     int? categoryId,
@@ -50,6 +51,12 @@ class BookNotesRepository {
     final future = _load(title, categoryId, source, fileType);
     _cache[key] = future;
     if (_cache.length > _maxBooks) _cache.remove(_cache.keys.first);
+    future.then<void>(
+      (_) {},
+      onError: (Object _) {
+        if (identical(_cache[key], future)) _cache.remove(key);
+      },
+    );
     return future;
   }
 
@@ -85,18 +92,13 @@ class BookNotesRepository {
       return check(title, categoryId: categoryId, fileType: fileType);
     }
     if (debugLoader != null) return true;
-    try {
-      final provider = await LibraryProviderManager.instance
-          .resolveProviderForBook(
-            title,
-            categoryId: categoryId,
-            fileType: fileType,
-          );
-      return provider is DatabaseLibraryProvider;
-    } catch (e) {
-      debugPrint('⚠️ BookNotesRepository: provider lookup failed "$title": $e');
-      return false;
-    }
+    final provider = await LibraryProviderManager.instance
+        .resolveProviderForBook(
+          title,
+          categoryId: categoryId,
+          fileType: fileType,
+        );
+    return provider is DatabaseLibraryProvider;
   }
 
   /// מרוקן את המטמון — חובה כשמסד הספרייה מוחלף.

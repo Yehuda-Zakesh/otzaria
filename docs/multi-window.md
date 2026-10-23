@@ -468,6 +468,28 @@ Win32 ריק שכבר קיים.
 המוקדם גנב פוקוס מחלון אחר לפני שהיה מה לראות. `WM_ACTIVATE` ממקד ממילא
 בכל הפעלה.
 
+### החלון הפעיל בצד Dart
+
+לכל חלון `AppWindowKeys` עם `AppWindowId` משלו, ורישום סטטי `id → keys`.
+`AppWindowListener.onWindowFocus` קורא ל-`AppWindowKeys.activateWindow(id)`:
+החלון מסומן ב-`LastActiveWindow`, ואם הוא רשום — הופך ל-`AppWindowKeys.current`.
+אחריו עוקבים כל ה-"current" שנגזרים ממנו: `navigatorKey`, יעדי הסיור
+(`AppWindowKeys.current.tour`) ו-`FocusRepository.current`. היום יש חלון אחד
+לכל isolate, ולכן אין בזה שינוי התנהגות.
+
+`FocusRepository` הוא מופע לכל `AppWindowKeys` (`forWindow`); `FocusRepository()`
+מחזיר את `current`, כך שה-provider והבדיקות לא השתנו.
+
+**הכלל:** `current` הוא נפילה-לאחור לקוד בלי `BuildContext`. widget או bloc
+משתמשים ב-`of(context)` (`AppWindowKeys.of`, `FocusRepository.of`), כדי שבנייה
+בחלון ברקע לא תפנה לחלון שבפוקוס. מי שמשתמש בו ב-`dispose` שומר אותו ב-`initState`.
+
+**בשלב 1** (כמה views ב-isolate אחד) `window_manager` מכיר חלון אחד בלבד, ולכן
+מקור האירוע יהיה `WidgetsBindingObserver.didChangeViewFocus` עם מיפוי
+`viewId → AppWindowId` שה-scope של החלון ממלא (יחד עם `register`/`unregister`), ו-
+`ExternalActivationService` ינתב לפי `LastActiveWindow.id` ולא לפי
+`lastActiveSlot` הנייטיבי.
+
 ---
 
 ## מלכודות נייטיביות ידועות

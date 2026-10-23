@@ -4,6 +4,7 @@ import 'package:equatable/equatable.dart';
 import 'package:otzaria/models/pdf_headings.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:pdfrx/pdfrx.dart';
+import 'package:otzaria/pdf_book/models/pdf_reading_location.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
 
@@ -28,14 +29,23 @@ class DocumentReady extends PdfBookEvent {
   final List<PdfOutlineNode>? outline;
   final int totalPages;
 
+  /// רוחב החלון של הקורא, למדיניות החלונית השמאלית; null — ברירת המחדל.
+  final double? screenWidth;
+
   const DocumentReady({
     required this.documentRef,
     this.outline,
     required this.totalPages,
+    this.screenWidth,
   });
 
   @override
-  List<Object?> get props => [documentRef, outline?.length, totalPages];
+  List<Object?> get props => [
+    documentRef,
+    outline?.length,
+    totalPages,
+    screenWidth,
+  ];
 }
 
 /// Called when document loading fails
@@ -94,6 +104,20 @@ class LoadHeadingsAndLinks extends PdfBookEvent {
 }
 
 // ============ Navigation Events ============
+
+/// שומר את העוגן שנלכד לפני תחילת קפיצה מפורשת.
+class RememberPdfLocation extends PdfBookEvent {
+  const RememberPdfLocation(this.location);
+  final PdfReadingLocation location;
+
+  @override
+  List<Object> get props => [location];
+}
+
+/// חוזר לעוגן הקודם בלי להוסיף את החזרה להיסטוריה.
+class ReturnToPreviousPdfLocation extends PdfBookEvent {
+  const ReturnToPreviousPdfLocation();
+}
 
 /// Update the current page number
 class UpdatePageNumber extends PdfBookEvent {
@@ -307,7 +331,7 @@ class UpdateSearchOptions extends PdfBookEvent {
 
 /// Update search results
 class UpdateSearchResults extends PdfBookEvent {
-  final List<PdfPageTextRange>? matches;
+  final List<PdfTextSearchResult>? matches;
   final int? currentMatchIndex;
 
   const UpdateSearchResults({

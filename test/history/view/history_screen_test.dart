@@ -11,11 +11,34 @@ import 'package:otzaria/history/bloc/history_state.dart';
 import 'package:otzaria/history/view/history_screen.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/search/models/search_configuration.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
+import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
+import 'package:otzaria/navigation/bloc/navigation_event.dart';
+import 'package:otzaria/navigation/bloc/navigation_state.dart';
+import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
+import 'package:otzaria/tabs/bloc/tabs_event.dart';
+import 'package:otzaria/tabs/bloc/tabs_state.dart';
 
 import '../../support/search_engine_test_init.dart';
+import '../../helpers/memory_settings_cache.dart';
 
 class MockHistoryBloc extends MockBloc<HistoryEvent, HistoryState>
     implements HistoryBloc {}
+
+class _RecordingTabsBloc extends MockBloc<TabsEvent, TabsState>
+    implements TabsBloc {
+  final sent = <TabsEvent>[];
+
+  @override
+  void add(TabsEvent event) => sent.add(event);
+}
+
+class _RecordingNavigationBloc
+    extends MockBloc<NavigationEvent, NavigationState>
+    implements NavigationBloc {
+  @override
+  void add(NavigationEvent event) {}
+}
 
 Bookmark _searchBookmark(
   String ref, {
@@ -44,6 +67,53 @@ Future<void> main() async {
   TestWidgetsFlutterBinding.ensureInitialized();
   // בניית כותרת עשירה עם אפשרויות מפצלת מילים דרך המנוע; מדולג כשאין build.
   final engineReady = await tryInitSearchEngine();
+  setUpAll(() => Settings.init(cacheProvider: MemorySettingsCache()));
+
+  for (final slot in <String?>[null, 'selected-place']) {
+    testWidgets('לחיצה על מקום בהיסטוריה מבקשת התאמת slot ($slot)', (
+      tester,
+    ) async {
+      final history = MockHistoryBloc();
+      final tabs = _RecordingTabsBloc();
+      final navigation = _RecordingNavigationBloc();
+      whenListen(
+        history,
+        const Stream<HistoryState>.empty(),
+        initialState: HistoryLoaded([
+          Bookmark(
+            ref: 'ספר פרק א',
+            book: TextBook(id: 7, title: 'ספר'),
+            index: 50,
+            historySlot: slot,
+          ),
+        ]),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MultiBlocProvider(
+              providers: [
+                BlocProvider<HistoryBloc>.value(value: history),
+                BlocProvider<TabsBloc>.value(value: tabs),
+                BlocProvider<NavigationBloc>.value(value: navigation),
+              ],
+              child: const HistoryView(),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('ספר'));
+      await tester.pump();
+      final event = tabs.sent.single as OpenOrFocusTab;
+      addTearDown(event.tab.dispose);
+      expect(event.matchHistorySlot, isTrue);
+      expect(event.tab.historySlot, slot);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await history.close();
+      await tabs.close();
+      await navigation.close();
+    });
+  }
 
   group('HistoryView - workspace filter chips', () {
     late MockHistoryBloc historyBloc;

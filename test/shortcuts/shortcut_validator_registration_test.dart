@@ -2,6 +2,36 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/shortcuts/shortcut_validator.dart';
 
 void main() {
+  test('קיצור חזרה למיקום הקודם ב־PDF רשום וניתן להתאמה', () {
+    expect(
+      ShortcutValidator.shortcutKeys,
+      contains(ShortcutValidator.previousPdfLocationKey),
+    );
+    expect(
+      ShortcutValidator.defaultShortcuts[ShortcutValidator
+          .previousPdfLocationKey],
+      'alt+arrowleft',
+    );
+    expect(
+      ShortcutValidator.shortcutNames[ShortcutValidator.previousPdfLocationKey],
+      'חזרה למיקום הקודם (PDF)',
+    );
+  });
+
+  test('קיצור התאמת PDF רשום עם שם וברירת מחדל נפרדים מאיפוס הזום', () {
+    expect(
+      ShortcutValidator.shortcutKeys,
+      contains(ShortcutValidator.fitPdfViewKey),
+    );
+    expect(
+      ShortcutValidator.defaultShortcuts[ShortcutValidator.fitPdfViewKey],
+      'ctrl+shift+0',
+    );
+    expect(
+      ShortcutValidator.shortcutNames[ShortcutValidator.fitPdfViewKey],
+      'התאם לרוחב / לעמוד שלם (PDF)',
+    );
+  });
   group('ShortcutValidator - רישום קיצורי החלוניות', () {
     test('המפתחות החדשים נמצאים ב-shortcutKeys', () {
       expect(

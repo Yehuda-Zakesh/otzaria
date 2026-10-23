@@ -507,6 +507,43 @@ void main() {
       expectNoLeftovers(library.path);
     });
 
+    test(
+      'Android: shared storage and /data are one volume (issue #2821)',
+      () async {
+        const size = 1000;
+        const free = AttachedLibraryUpdateService.spaceMargin + size * 3 ~/ 2;
+        // df מדווח שמות שונים לאותה מחיצה; כל צורך לבד נכנס, הסכום לא.
+        final svc = AttachedLibraryUpdateService(
+          isAndroid: true,
+          diskSpace: (path) async => DiskSpaceInfo(
+            volumeId: path.startsWith('/data/')
+                ? '/dev/block/dm-47'
+                : '/dev/fuse',
+            freeBytes: free,
+          ),
+        );
+        await expectLater(
+          svc.ensureSpace(
+            const AttachedUpdateArtifact(
+              compression: AttachedUpdateCompression.zstd,
+              size: size,
+              sha256: '',
+              parts: [AttachedUpdatePart(url: '', size: size, sha256: '')],
+            ),
+            staged: '/storage/emulated/0/ספרים/lib.db.update',
+            combined: '/data/user/0/org.otzaria/app_flutter/.updates/lib.zst',
+          ),
+          throwsA(
+            predicate<Object>(
+              (e) =>
+                  AttachedLibraryUpdateService.errorOf(e) ==
+                  AttachedUpdateError.noSpace,
+            ),
+          ),
+        );
+      },
+    );
+
     test('missing file (drive gone) ⇒ clear error', () async {
       final (svc, library) = await offered(database(version: '2'));
       File(library.path).deleteSync();

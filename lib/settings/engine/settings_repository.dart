@@ -497,10 +497,6 @@ class SettingsRepository {
         keyCopyHeaderFormat,
         defaultValue: 'same_line_after_brackets',
       ),
-      'isFullscreen': _settings.getValue<bool>(
-        keyIsFullscreen,
-        defaultValue: false,
-      ),
       'libraryViewMode': _settings.getValue<String>(
         keyLibraryViewMode,
         defaultValue: 'grid',

@@ -118,7 +118,11 @@ class TextBookSearchViewState extends State<TextBookSearchView>
   /// חיפוש רק בקטע שתחת הכותרת הקרובה למקום הקריאה (issue #1093).
   bool _limitToSection = false;
   ({int start, int? end, String title})? _activeSection;
-  int? _selectedSearchResultIndex;
+  // מעבר בין תוצאות משנה רק את הבחירה; בלי setState שורות התוצאות הגלויות
+  // אינן נבנות מחדש בכל לחיצה.
+  final ValueNotifier<int?> _selectedResult = ValueNotifier(null);
+  int? get _selectedSearchResultIndex => _selectedResult.value;
+  set _selectedSearchResultIndex(int? value) => _selectedResult.value = value;
   // מספר השורה בספר של התוצאה הנבחרת — משמש לשמירת הבחירה לפי זהות בין
   // חיפושים. אינדקס סידורי לבדו אינו אמין כי תוכן הרשימה משתנה כשהשאילתה
   // משתנה. ההיסט מבחין בין כמה הופעות באותה שורה.
@@ -721,11 +725,9 @@ class TextBookSearchViewState extends State<TextBookSearchView>
     }
 
     final result = searchResults[resultListIndex];
-    setState(() {
-      _selectedSearchResultIndex = resultListIndex;
-      _selectedResultLine = result.index;
-      _selectedResultOffset = result.matchOffset;
-    });
+    _selectedSearchResultIndex = resultListIndex;
+    _selectedResultLine = result.index;
+    _selectedResultOffset = result.matchOffset;
 
     final bloc = context.read<TextBookBloc>();
     bloc.add(UpdateSelectedIndex(result.index));
@@ -885,6 +887,7 @@ class TextBookSearchViewState extends State<TextBookSearchView>
   @override
   void dispose() {
     searchTextController.dispose();
+    _selectedResult.dispose();
     super.dispose();
   }
 
@@ -1028,11 +1031,15 @@ class TextBookSearchViewState extends State<TextBookSearchView>
                   return NavTreeGroupCard(
                     isGroupStart: isGroupStart,
                     isGroupEnd: isGroupEnd,
-                    child: NavTreeContentRow(
-                      isSelected: _selectedSearchResultIndex == resultListIndex,
-                      onTap: () => _navigateToSearchResult(
-                        resultListIndex,
-                        closePaneOnAndroid: true,
+                    child: ValueListenableBuilder<int?>(
+                      valueListenable: _selectedResult,
+                      builder: (context, selected, child) => NavTreeContentRow(
+                        isSelected: selected == resultListIndex,
+                        onTap: () => _navigateToSearchResult(
+                          resultListIndex,
+                          closePaneOnAndroid: true,
+                        ),
+                        child: child!,
                       ),
                       child: RichText(
                         textAlign: TextAlign.justify,
@@ -1167,13 +1174,17 @@ class TextBookSearchViewState extends State<TextBookSearchView>
     );
   }
 
-  Widget _buildSearchResultNavigationBar() {
-    final isAtFirstResult =
-        (_selectedSearchResultIndex ?? 0) <= 0 || searchResults.isEmpty;
-    final isAtLastResult =
-        searchResults.isEmpty ||
-        (_selectedSearchResultIndex ?? 0) >= searchResults.length - 1;
+  Widget _buildSearchResultNavigationBar() => ValueListenableBuilder<int?>(
+    valueListenable: _selectedResult,
+    builder: (context, selected, _) {
+      final isAtFirstResult = (selected ?? 0) <= 0 || searchResults.isEmpty;
+      final isAtLastResult =
+          searchResults.isEmpty || (selected ?? 0) >= searchResults.length - 1;
+      return _buildNavigationButtons(isAtFirstResult, isAtLastResult);
+    },
+  );
 
+  Widget _buildNavigationButtons(bool isAtFirstResult, bool isAtLastResult) {
     return Padding(
       padding: const EdgeInsetsDirectional.only(start: 12, end: 12, bottom: 2),
       child: Align(

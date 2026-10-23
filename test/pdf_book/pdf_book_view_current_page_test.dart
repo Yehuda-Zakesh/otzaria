@@ -7,6 +7,7 @@ import 'package:otzaria/settings/services/per_book_settings_service.dart'
     show PdfLayoutMode;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdfrx/pdfrx.dart';
+import '../test_helpers/pdf_document_dispose.dart';
 
 /// בתצוגת ספר העמוד הנוכחי שמדווח הקורא הוא של הכפולה המוצגת — ממנו מחושב
 /// יעד החיצים.
@@ -47,7 +48,7 @@ void main() {
         useProgressiveLoading: false,
       );
     }))!;
-    addTearDown(document.dispose);
+    addTearDown(() => disposePdfDocument(tester, document));
     final controller = PdfViewerController();
 
     await tester.pumpWidget(

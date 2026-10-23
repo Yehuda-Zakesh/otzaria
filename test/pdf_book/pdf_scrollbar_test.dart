@@ -80,6 +80,7 @@ const _horizontalHostKey = Key('horizontal-scroll-host');
 Widget _buildVerticalScrollbarHarness(
   _InteractiveController controller, {
   bool freezeThumb = false,
+  VoidCallback? onNavigationStarted,
 }) {
   return MaterialApp(
     home: Scaffold(
@@ -96,6 +97,7 @@ Widget _buildVerticalScrollbarHarness(
             thumbColor: Colors.green,
             scrollBoundsBuilder: (_) => const Rect.fromLTWH(0, 0, 100, 1000),
             freezeThumb: freezeThumb,
+            onNavigationStarted: onNavigationStarted,
           ),
         ),
       ),
@@ -103,7 +105,10 @@ Widget _buildVerticalScrollbarHarness(
   );
 }
 
-Widget _buildHorizontalScrollbarHarness(_InteractiveController controller) {
+Widget _buildHorizontalScrollbarHarness(
+  _InteractiveController controller, {
+  VoidCallback? onNavigationStarted,
+}) {
   return MaterialApp(
     home: Scaffold(
       body: Center(
@@ -115,6 +120,7 @@ Widget _buildHorizontalScrollbarHarness(_InteractiveController controller) {
             controller: controller,
             trackThickness: 12,
             thumbColor: Colors.orange,
+            onNavigationStarted: onNavigationStarted,
           ),
         ),
       ),
@@ -334,6 +340,70 @@ void main() {
   );
 
   group('PdfScrollbar - אינטראקציות drag', () {
+    testWidgets('גרירה אנכית זוכרת מיקום פעם אחת, ולחיצה על המסילה בנפרד', (
+      tester,
+    ) async {
+      var starts = 0;
+      final controller = _InteractiveController();
+      await tester.pumpWidget(
+        _buildVerticalScrollbarHarness(
+          controller,
+          onNavigationStarted: () => starts++,
+        ),
+      );
+      final center = tester.getCenter(_thumbFinder(Colors.green));
+      final gesture = tester.widget<GestureDetector>(
+        _verticalDragGestureFinder(),
+      );
+      gesture.onVerticalDragStart!(
+        DragStartDetails(localPosition: const Offset(8, 20)),
+      );
+      for (final delta in [20.0, 40.0, 60.0]) {
+        gesture.onVerticalDragUpdate!(
+          DragUpdateDetails(globalPosition: center + Offset(0, delta)),
+        );
+        await tester.pump();
+      }
+      expect(starts, 1);
+      gesture.onVerticalDragEnd!(DragEndDetails());
+      await tester.pump();
+      final origin = tester.getTopLeft(find.byKey(_verticalHostKey));
+      await tester.tapAt(origin + const Offset(12, 170));
+      expect(starts, 2);
+    });
+
+    testWidgets('גרירה אופקית זוכרת מיקום פעם אחת, ולחיצה על המסילה בנפרד', (
+      tester,
+    ) async {
+      var starts = 0;
+      final controller = _InteractiveController();
+      await tester.pumpWidget(
+        _buildHorizontalScrollbarHarness(
+          controller,
+          onNavigationStarted: () => starts++,
+        ),
+      );
+      final center = tester.getCenter(_thumbFinder(Colors.orange));
+      final gesture = tester.widget<GestureDetector>(
+        _horizontalDragGestureFinder(),
+      );
+      gesture.onHorizontalDragStart!(
+        DragStartDetails(localPosition: const Offset(30, 6)),
+      );
+      for (final delta in [20.0, 40.0, 60.0]) {
+        gesture.onHorizontalDragUpdate!(
+          DragUpdateDetails(globalPosition: center + Offset(delta, 0)),
+        );
+        await tester.pump();
+      }
+      expect(starts, 1);
+      gesture.onHorizontalDragEnd!(DragEndDetails());
+      await tester.pump();
+      final origin = tester.getTopLeft(find.byKey(_horizontalHostKey));
+      await tester.tapAt(origin + const Offset(180, 6));
+      expect(starts, 2);
+    });
+
     testWidgets('drag אנכי משתמש ב-Duration.zero בזמן גרירה', (tester) async {
       final controller = _InteractiveController();
       await tester.pumpWidget(_buildVerticalScrollbarHarness(controller));
@@ -388,8 +458,13 @@ void main() {
 
     testWidgets('freezeThumb מונע drag ויזואלי וגם goTo', (tester) async {
       final controller = _InteractiveController();
+      var starts = 0;
       await tester.pumpWidget(
-        _buildVerticalScrollbarHarness(controller, freezeThumb: true),
+        _buildVerticalScrollbarHarness(
+          controller,
+          freezeThumb: true,
+          onNavigationStarted: () => starts++,
+        ),
       );
 
       final thumb = _thumbFinder(Colors.green);
@@ -412,6 +487,9 @@ void main() {
       expect(tester.getTopLeft(thumb).dy, initialTop);
 
       dragGesture.onVerticalDragEnd!(DragEndDetails());
+      final origin = tester.getTopLeft(find.byKey(_verticalHostKey));
+      await tester.tapAt(origin + const Offset(12, 170));
+      expect(starts, 0);
     });
 
     testWidgets('tap על track אנכי שומר אנימציית 200ms', (tester) async {

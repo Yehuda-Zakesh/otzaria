@@ -228,23 +228,35 @@ void main() {
       );
     });
 
-    testWidgets('מסלול ה-HtmlWidget', (tester) async {
-      await tester.pumpWidget(
-        _wrap(
-          const SmartTextWidget(
-            text: '$_longText <span class="link-anchor">א</span>',
-            settings: _settings,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
+    for (final viaHtml in [false, true]) {
+      testWidgets(
+        viaHtml ? 'מסלול ה-HtmlWidget' : 'שורה עם עוגן במסלול הספאנים',
+        (tester) async {
+          SmartTextWidget.debugForceHtmlWidget = viaHtml;
+          addTearDown(() => SmartTextWidget.debugForceHtmlWidget = false);
+          await tester.pumpWidget(
+            _wrap(
+              const SmartTextWidget(
+                text: '$_longText <span class="link-anchor">א</span>',
+                settings: _settings,
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
 
-      expect(find.byType(HtmlWidget), findsOneWidget);
-      final paragraph = tester
-          .renderObjectList<RenderParagraph>(find.byType(SelectionFillRichText))
-          .firstWhere((p) => p.text.toPlainText().contains('חונן'));
-      _expectNoVerticalGaps(paragraph);
-    });
+          expect(
+            find.byType(HtmlWidget),
+            viaHtml ? findsOneWidget : findsNothing,
+          );
+          final paragraph = tester
+              .renderObjectList<RenderParagraph>(
+                find.byType(SelectionFillRichText),
+              )
+              .firstWhere((p) => p.text.toPlainText().contains('חונן'));
+          _expectNoVerticalGaps(paragraph);
+        },
+      );
+    }
 
     testWidgets('פסקה במצב קריאה רציפה', (tester) async {
       await tester.pumpWidget(

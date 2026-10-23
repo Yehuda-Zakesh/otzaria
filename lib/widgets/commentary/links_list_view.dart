@@ -276,6 +276,9 @@ class _LinksListViewState extends State<LinksListView> {
   bool _searchInContent = false;
   Future<List<Link>>? _filteredLinksFuture;
   String _lastSearchKey = '';
+  Object? _lastSearchInputs;
+  List<Link>? _dedupedSource;
+  List<Link> _dedupedLinks = const [];
   final Set<String> _linksWithSearchResults = {}; // קישורים עם תוצאות חיפוש
   String? _savedSelectedText; // טקסט נבחר לתפריט הקשר
   bool _anchorHandledTap = false;
@@ -359,7 +362,7 @@ class _LinksListViewState extends State<LinksListView> {
 
   @override
   Widget build(BuildContext context) {
-    final links = dedupeLinksByTarget(widget.links);
+    final links = _dedupedFor(widget.links);
     final openBookTitle = widget.openBookTitle;
     final chipKeys = _chipKeysFor(widget.chipSourceLinks, openBookTitle);
     final effectiveTypes = effectiveSelectedLinkTypes(
@@ -478,6 +481,16 @@ class _LinksListViewState extends State<LinksListView> {
     );
   }
 
+  /// הרשימה מתחלפת עם הקטע בלבד; הרחבת פריט או הקלדה אינן גוזרות מחדש את
+  /// מפתחות היעד של כל הקישורים.
+  List<Link> _dedupedFor(List<Link> links) {
+    if (!identical(_dedupedSource, links)) {
+      _dedupedSource = links;
+      _dedupedLinks = dedupeLinksByTarget(links);
+    }
+    return _dedupedLinks;
+  }
+
   /// צ׳יפי הסינון של כל קישורי החלון, ממומשים לפי זהות הרשימה. `copyWith`
   /// מעביר את `links` באותה הפניה בגלילה, ולכן זהות היא מפתח נכון וזול.
   List<String> _chipKeysFor(List<Link> stateLinks, String openBookTitle) {
@@ -554,18 +567,26 @@ class _LinksListViewState extends State<LinksListView> {
       return _buildEmptyMessage('לא נמצאו קישורים מהסוגים שנבחרו');
     }
 
-    // יצירת מפתח ייחודי לחיפוש
-    final searchKey = buildSelectedLinksSearchKey(
-      searchQuery: _searchQuery,
-      searchInContent: _searchInContent,
-      links: typeFilteredLinks,
-      selectedLinkTypes: selectedTypes,
+    // אותם קלטים בדיוק נותנים אותו מפתח; בלי הבדיקה כל בנייה מחשבת מפתח לכל קישור.
+    final searchInputs = (
+      _searchQuery,
+      _searchInContent,
+      typeFilteredLinks,
+      selectedTypes,
     );
-
-    // יצירת Future חדש רק אם החיפוש השתנה
-    if (_lastSearchKey != searchKey) {
-      _lastSearchKey = searchKey;
-      _filteredLinksFuture = _filterLinksAsync(typeFilteredLinks);
+    if (searchInputs != _lastSearchInputs) {
+      _lastSearchInputs = searchInputs;
+      final searchKey = buildSelectedLinksSearchKey(
+        searchQuery: _searchQuery,
+        searchInContent: _searchInContent,
+        links: typeFilteredLinks,
+        selectedLinkTypes: selectedTypes,
+      );
+      // Future חדש רק כשהחיפוש השתנה, גם כשהרשימה עצמה הוחלפה.
+      if (_lastSearchKey != searchKey) {
+        _lastSearchKey = searchKey;
+        _filteredLinksFuture = _filterLinksAsync(typeFilteredLinks);
+      }
     }
 
     return AppFutureBuilder<List<Link>>(

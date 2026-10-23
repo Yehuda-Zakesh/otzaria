@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:otzaria/plugins/plugin_constants.dart';
+import 'package:otzaria/plugins/services/plugin_restore_state_store.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tools/built_in_tools_catalog.dart';
@@ -62,19 +63,31 @@ class ToolTab extends OpenedTab {
     return 'כלי';
   }
 
+  PluginInstanceKey get _pluginKey =>
+      (pluginId: toolId, instanceId: instanceId);
+
   @override
   void dispose() {
+    PluginRestoreStateStore.instance.remove(_pluginKey);
     queryInbox.dispose();
     super.dispose();
   }
 
   @override
-  OpenedTab clone() => ToolTab(
-    toolId: toolId,
-    title: title,
-    isPinned: isPinned,
-    allowMultipleInstances: allowMultipleInstances,
-  );
+  OpenedTab clone() {
+    final copy = ToolTab(
+      toolId: toolId,
+      title: title,
+      isPinned: isPinned,
+      allowMultipleInstances: allowMultipleInstances,
+    );
+    // שולחנות עבודה עוברים דרך clone — בלי ההעתקה המצב אובד במזהה החדש.
+    final restoreState = PluginRestoreStateStore.instance.jsonOf(_pluginKey);
+    if (restoreState != null) {
+      PluginRestoreStateStore.instance.seed(copy._pluginKey, restoreState);
+    }
+    return copy;
+  }
 
   @override
   Map<String, dynamic> toJson() => {
@@ -84,6 +97,9 @@ class ToolTab extends OpenedTab {
     'isPinned': isPinned,
     'instanceId': instanceId,
     'allowMultipleInstances': allowMultipleInstances,
+    // מצב השחזור של התוסף (plugin.setRestoreState) עובר עם הטאב לסשן
+    // ולסביבות העבודה.
+    'pluginRestoreState': ?PluginRestoreStateStore.instance.jsonOf(_pluginKey),
   };
 
   /// מפתחות מופעי התוספים המוצגים בטאב [tab], כולל חלוניות מפוצלות.
@@ -99,7 +115,7 @@ class ToolTab extends OpenedTab {
   factory ToolTab.fromJson(Map<String, dynamic> json) {
     final toolId = json['toolId'] as String? ?? '';
     final title = json['title'] as String?;
-    return ToolTab(
+    final tab = ToolTab(
       toolId: toolId,
       title: title == null || title.isEmpty ? fallbackTitleFor(toolId) : title,
       isPinned: json['isPinned'] == true,
@@ -107,5 +123,10 @@ class ToolTab extends OpenedTab {
       instanceId: json['instanceId'] as String?,
       allowMultipleInstances: json['allowMultipleInstances'] == true,
     );
+    final restoreState = json['pluginRestoreState'];
+    if (restoreState is String) {
+      PluginRestoreStateStore.instance.seed(tab._pluginKey, restoreState);
+    }
+    return tab;
   }
 }

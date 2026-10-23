@@ -38,6 +38,12 @@ class HiddenBooksChanged extends LibraryEvent {
   List<Object?> get props => [];
 }
 
+/// bloc של חלון Dart אחר בנה את העץ מחדש (רענון, החלפת מסד, הסתרות): העץ נבנה
+/// כאן מהקטלוג הטרי, כמו [HiddenBooksChanged], בלי להודיע הלאה.
+class LibraryChangedInOtherWindow extends LibraryEvent {
+  const LibraryChangedInOtherWindow();
+}
+
 /// קובץ ספר חיצוני נוסף לתיקייה: הקטלוג נסרק מחדש והאיתור המוצג רץ שוב.
 class ExternalBooksChanged extends LibraryEvent {
   const ExternalBooksChanged();

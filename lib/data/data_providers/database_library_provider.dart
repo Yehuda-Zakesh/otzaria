@@ -42,6 +42,8 @@ import 'package:otzaria/models/books.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/models/link_types.dart';
 import 'package:otzaria/library/models/library.dart';
+import 'package:otzaria/text_book/utils/inline_notes_utils.dart'
+    show bookNoteMarkers;
 import 'package:otzaria/text_book/utils/inline_section_markers.dart';
 import 'package:otzaria/migration/models/category.dart' as db_models;
 import 'package:otzaria/migration/models/book.dart' as db_models;
@@ -157,6 +159,51 @@ String? _existingAttachedFile(
     row['filePath'] as String?,
   );
   return resolved != null && File(resolved).existsSync() ? resolved : null;
+}
+
+/// שורות הקטלוג של seforim.db על חיבור משלו; null כשאין נתיב למסד.
+/// ביטול חייב להתפשט כדי לא לפתוח חיבור ראשי ששוחרר לכתיבה חיצונית.
+Future<CatalogRows?> _officialCatalogInIsolate(String dbPath) async {
+  if (dbPath.isEmpty) return null;
+  return DbReadWorker.runOnFreshIsolate(
+    () => readOfficialCatalogSync(dbPath),
+  );
+}
+
+typedef CatalogRows = ({
+  List<Map<String, dynamic>> books,
+  List<Map<String, dynamic>> categories,
+  Map<int, String> authors,
+});
+
+@visibleForTesting
+CatalogRows readOfficialCatalogSync(String dbPath) {
+  final db = openReadOnlyTarget((
+    path: dbPath,
+    untrusted: false,
+    immutable: false,
+  ));
+  try {
+    return _readCatalogRows(db, DbCapabilities.probe(db));
+  } finally {
+    db.close();
+  }
+}
+
+/// בטרנזקציה אחת, כדי שסנכרון רקע לא ינעל את המסד בין השאילתות.
+CatalogRows _readCatalogRows(
+  sqlite3.Database db,
+  DbCapabilities capabilities,
+) {
+  late final CatalogRows rows;
+  withTransaction(db, () {
+    rows = (
+      books: BookDao.selectBooksMinimal(db, capabilities),
+      categories: CategoryDao.selectCategoryRows(db, capabilities),
+      authors: BookDao.selectBookAuthorsMap(db, capabilities),
+    );
+  });
+  return rows;
 }
 
 Future<AttachedCatalogRows> _readAttachedCatalogInIsolate(
@@ -1215,6 +1262,15 @@ Map<int, String> _loadDibburHamatchilInIsolate({
   }
 }
 
+/// תא שלם בשורת שם קודש; ערך אחר — FormatException, כמו span פגום.
+int _divineNameInt(sqlite3.Row row, String column) {
+  final value = row[column];
+  if (value is! int) {
+    throw FormatException('divine-name $column is not an integer: $value');
+  }
+  return value;
+}
+
 /// מופעי שמות הקודש של ספר (`line_divine_name`) לפי `lineIndex`, בשאילתה
 /// אחת. מסד ישן, בלי הטבלה, נותן [DivineNameSpans.empty].
 DivineNameSpans _loadDivineNamesInIsolate({
@@ -1239,19 +1295,16 @@ DivineNameSpans _loadDivineNamesInIsolate({
     final builder = DivineNameSpansBuilder();
     final rows = db.select(
       'SELECT l.lineIndex AS lineIndex, d.charStart AS charStart, '
-      'd.charEnd AS charEnd, d.kind AS kind '
+      'd.span AS span '
       'FROM line l JOIN line_divine_name d ON d.lineId = l.id '
       'WHERE l.bookId = ? ORDER BY l.lineIndex, d.charStart',
       [bookId],
     );
     for (final row in rows) {
-      final lineIndex = row['lineIndex'];
-      final start = row['charStart'];
-      final end = row['charEnd'];
-      final kind = row['kind'];
-      if (lineIndex is int && start is int && end is int && kind is int) {
-        builder.add(lineIndex, start, end, kind);
-      }
+      final lineIndex = _divineNameInt(row, 'lineIndex');
+      final start = _divineNameInt(row, 'charStart');
+      final name = decodeDivineNameSpan(start, _divineNameInt(row, 'span'));
+      builder.add(lineIndex, start, name.end, name.kind);
     }
     return builder.build();
   } finally {
@@ -1260,7 +1313,8 @@ DivineNameSpans _loadDivineNamesInIsolate({
 }
 
 /// הערות השוליים של ספר (`line_note`) לפי `lineIndex`, בשאילתה אחת. מסד בלי
-/// הטבלה (סכמה 6, מצורף, אישי) נותן [BookNotes.empty].
+/// הטבלה (סכמה 6, מצורף, אישי) נותן [BookNotes.empty]. גוף ההערה מפוענח כמו
+/// טקסט שורה ([LineContentCodec]).
 BookNotes _loadBookNotesInIsolate({
   required ReadOnlyDbTarget target,
   required String bookTitle,
@@ -1281,50 +1335,98 @@ BookNotes _loadBookNotesInIsolate({
     if (bookId == null) return BookNotes.empty;
 
     final builder = BookNotesBuilder();
+    final codec = LineContentCodec.of(db);
+    // הסימן לא נשמר: ה-<sup> ה-k-י שבשורה הוא הסימן של ההערה ה-k-ית שיש לה hasMarker.
+    final split = capabilities.hasSplitLineContent;
+    final markersByLine = <int, List<String>>{
+      for (final row in db.select(
+        'SELECT l.id AS lineId, ${split ? 'lc.content' : 'l.content'} AS content '
+        'FROM line l ${split ? 'LEFT JOIN line_content lc ON lc.id = l.id ' : ''}'
+        'WHERE l.bookId = ? AND EXISTS (SELECT 1 FROM line_note n '
+        'WHERE n.lineId = l.id AND n.hasMarker = 1)',
+        [bookId],
+      ))
+        row['lineId'] as int: bookNoteMarkers(codec.text(row['content']) ?? ''),
+    };
+    final markersTaken = <int, int>{};
     final rows = db.select(
-      'SELECT l.lineIndex AS lineIndex, n.noteIndex AS noteIndex, '
-      'n.charPos AS charPos, n.marker AS marker, n.body AS body '
+      'SELECT l.id AS lineId, l.lineIndex AS lineIndex, n.noteIndex AS noteIndex, '
+      'n.charPos AS charPos, n.hasMarker AS hasMarker, n.body AS body '
       'FROM line l JOIN line_note n ON n.lineId = l.id '
       'WHERE l.bookId = ? ORDER BY l.lineIndex, n.noteIndex',
       [bookId],
     );
     for (final row in rows) {
+      final lineId = row['lineId'] as int;
       final lineIndex = row['lineIndex'];
       final noteIndex = row['noteIndex'];
       final charPos = row['charPos'];
-      final marker = row['marker'];
-      final body = row['body'];
+      final String? marker;
+      switch (row['hasMarker']) {
+        case 0:
+          marker = null;
+        case 1:
+          final markers = markersByLine[lineId]!;
+          final taken = markersTaken[lineId] ?? 0;
+          if (taken == markers.length) {
+            throw FormatException('בשורה $lineId יש פחות סימני הערה מהערות');
+          }
+          marker = markers[taken];
+          markersTaken[lineId] = taken + 1;
+        case final other:
+          throw FormatException(
+            'line_note.hasMarker של שורה $lineId הוא $other',
+          );
+      }
+      final body = codec.text(row['body']);
       if (lineIndex is int && noteIndex is int && body is String) {
         builder.add(
           lineIndex,
           noteIndex,
-          marker is String ? marker : null,
+          marker,
           body,
           charPos: charPos is int ? charPos : -1,
         );
       }
     }
+    for (final MapEntry(key: lineId, value: markers) in markersByLine.entries) {
+      if (markersTaken[lineId] != markers.length) {
+        throw FormatException('בשורה $lineId יש יותר סימני הערה מהערות');
+      }
+    }
     if (capabilities.hasBookNoteDivineNames) {
-      final names = db.select(
-        'SELECT l.lineIndex AS lineIndex, d.noteIndex AS noteIndex, '
-        'd.charStart AS charStart, d.charEnd AS charEnd, d.kind AS kind '
-        'FROM line l JOIN line_note_divine_name d ON d.lineId = l.id '
-        'WHERE l.bookId = ? ORDER BY l.lineIndex, d.noteIndex, d.charStart',
-        [bookId],
-      );
-      for (final row in names) {
-        final lineIndex = row['lineIndex'];
-        final noteIndex = row['noteIndex'];
-        final start = row['charStart'];
-        final end = row['charEnd'];
-        final kind = row['kind'];
-        if (lineIndex is int &&
-            noteIndex is int &&
-            start is int &&
-            end is int &&
-            kind is int) {
-          builder.addDivineName(lineIndex, noteIndex, start, end, kind);
+      // שכבת השמות נכשלת לבדה: גוף ההערות נשאר, בלי אף שם (לא חלקית).
+      try {
+        final names =
+            <({int lineIndex, int noteIndex, int start, int end, int kind})>[];
+        for (final row in db.select(
+          'SELECT l.lineIndex AS lineIndex, d.noteIndex AS noteIndex, '
+          'd.charStart AS charStart, d.span AS span '
+          'FROM line l JOIN line_note_divine_name d ON d.lineId = l.id '
+          'WHERE l.bookId = ? ORDER BY l.lineIndex, d.noteIndex, d.charStart',
+          [bookId],
+        )) {
+          final start = _divineNameInt(row, 'charStart');
+          final name = decodeDivineNameSpan(start, _divineNameInt(row, 'span'));
+          names.add((
+            lineIndex: _divineNameInt(row, 'lineIndex'),
+            noteIndex: _divineNameInt(row, 'noteIndex'),
+            start: start,
+            end: name.end,
+            kind: name.kind,
+          ));
         }
+        for (final n in names) {
+          builder.addDivineName(
+            n.lineIndex,
+            n.noteIndex,
+            n.start,
+            n.end,
+            n.kind,
+          );
+        }
+      } on Exception catch (e) {
+        debugPrint('⚠️ Error in getBookNotes divine names "$bookTitle": $e');
       }
     }
     return builder.build();
@@ -1906,6 +2008,16 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
 
   bool _isUserBooksCategoryId(int categoryId) =>
       _userBooksCategoryIds.contains(categoryId);
+
+  /// מקור הקריאה בפועל לפי אותו ניתוב שמשמש את הטקסט ותוכן העניינים.
+  BookSource? resolvedSourceForBook(TextBook book) => book.categoryId == null
+      ? null
+      : _resolveSource(
+          title: book.title,
+          categoryId: book.categoryId!,
+          fileType: book.fileType ?? 'txt',
+          preferSource: book.source,
+        );
 
   /// המסד שממנו לקרוא ספר שידוע רק לפי כותרת+קטגוריה+סוג: [preferSource]
   /// כשאינו רשמי, אחרת אישי רק כשהמטמון או הקטגוריה מעידים על כך.
@@ -3159,16 +3271,15 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
     // from locking the DB between them (which caused 17s delays).
     final tQuery = DateTime.now();
 
-    late final List<Map<String, dynamic>> allDbBooks;
-    late List<Map<String, dynamic>> allCatRows;
-    late final Map<int, String> authorsByBookId;
-
-    final db = await repository.database.database;
-    withTransaction(db, () {
-      allDbBooks = repository.database.bookDao.getAllBooksMinimal(db);
-      allCatRows = repository.database.categoryDao.getAllCategoryRows(db);
-      authorsByBookId = repository.database.bookDao.getBookAuthorsMap(db);
-    });
+    final catalogRows =
+        await _officialCatalogInIsolate(_sqliteProvider.dbPath) ??
+        _readCatalogRows(
+          await repository.database.database,
+          await repository.database.capabilities,
+        );
+    final allDbBooks = catalogRows.books;
+    var allCatRows = catalogRows.categories;
+    final authorsByBookId = catalogRows.authors;
     // מסד בלי קטגוריות: כל ספריו (categoryId = 0) תחת שורש יחיד.
     if (allCatRows.isEmpty && allDbBooks.isNotEmpty) {
       allCatRows = const [
@@ -4804,22 +4915,20 @@ class DatabaseLibraryProvider implements LibraryProvider, LinkLinesProvider {
   }
 
   /// הערות השוליים של ספר (`line_note`), לפי `lineIndex`. במסד בלי הטבלה,
-  /// או לספר בלי הערות, מוחזר [BookNotes.empty].
+  /// או לספר בלי הערות, מוחזר [BookNotes.empty]. כשל נזרק: הגופים הם חלק
+  /// מטקסט הספר, ועוגני הקישורים נמדדים עליהם.
   Future<BookNotes> getBookNotes(
     String bookTitle, {
     int? categoryId,
     BookSource source = BookSource.official,
   }) async {
-    return _readTarget(
-      source,
-      BookNotes.empty,
-      'getBookNotes "$bookTitle"',
-      (target) => _runBookLoadInIsolate(
-        _loadBookNotesInIsolate,
-        target: target,
-        bookTitle: bookTitle,
-        categoryId: categoryId,
-      ),
+    final target = _isolateTargetFor(source);
+    if (target == null) return BookNotes.empty;
+    return _runBookLoadInIsolate(
+      _loadBookNotesInIsolate,
+      target: target,
+      bookTitle: bookTitle,
+      categoryId: categoryId,
     );
   }
 

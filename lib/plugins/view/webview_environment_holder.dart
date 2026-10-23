@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:flutter_inappwebview_windows/flutter_inappwebview_windows.dart'
+    show WindowsWebViewHwndFallbacks;
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/core/app_paths.dart';
@@ -16,6 +19,7 @@ class WebViewEnvironmentHolder {
   // Coalesces concurrent init calls (background host vs. plugin tab): two
   // callers racing past the null guard would spawn two Edge process trees.
   static Future<void>? _initializeFuture;
+  static StreamSubscription<void>? _hwndFallbackSubscription;
   static const MethodChannel _nativeShutdownChannel = MethodChannel(
     'com.pichillilorenzo/flutter_inappwebview_manager',
   );
@@ -149,6 +153,10 @@ class WebViewEnvironmentHolder {
       );
       environment.onBrowserProcessExited = _logAbnormalBrowserExit;
       _environment = environment;
+      // כל WebView שעולה מכאן, טאב או מופע רקע, נרשם אם נסוג למצב HWND.
+      _hwndFallbackSubscription ??= WindowsWebViewHwndFallbacks.stream.listen(
+        logPluginWebViewHwndFallback,
+      );
     } catch (error, stackTrace) {
       // כשל כאן = כל התוספים יעלו ריקים; בלי הרישום אין לזה שום עקבות.
       logPluginWebViewFailure(

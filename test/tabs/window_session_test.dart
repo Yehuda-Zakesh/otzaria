@@ -3,10 +3,13 @@ import 'dart:isolate';
 import 'dart:ui' as ui show IsolateNameServer;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/window_session_store.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
+import 'package:otzaria/core/windowing/multiview/view_window_registry.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/tabs/tabs_repository.dart';
@@ -37,10 +40,12 @@ void main() {
   });
 
   tearDown(() async {
+    MultiViewMode.debugOverride = null;
     TabsRepository.debugSessions = null;
     MultiWindowService.debugSupportedOverride = null;
     database.close();
     WindowRole.isSecondary = false;
+    ProcessDuties.debugOverride = null;
     WindowBus.instance.unregister();
     for (var i = 1; i <= WindowBus.slotCount; i++) {
       ui.IsolateNameServer.removePortNameMapping('$_namespace.$i');
@@ -211,6 +216,17 @@ void main() {
     });
   });
 
+  test('ריבוי תצוגות משחזר את כל שמונת הסשנים בלי למחוק חלונות', () async {
+    MultiViewMode.debugOverride = true;
+    WindowBus.instance.register();
+    for (var slot = 1; slot <= ViewWindowRegistry.maxWindows; slot++) {
+      await sessions.save(slot, tabsJson: '["$slot"]', currentIndex: 0);
+    }
+    expect(await TabsRepository.compactWindowSessions(), [2, 3, 4, 5, 6, 7, 8]);
+    expect(await sessions.loadAll(), hasLength(ViewWindowRegistry.maxWindows));
+    expect((await sessions.load(8))!.tabsJson, '["8"]');
+  });
+
   group('אימוץ סשנים יתומים', () {
     test('מצרף למשבצת המארח ומוחק את האחרות', () async {
       WindowBus.instance.register();
@@ -262,6 +278,21 @@ void main() {
 
       WindowRole.isSecondary = true;
       expect(await TabsRepository.adoptOrphanWindowSessions(), 0);
+      expect(await sessions.load(host + 1), isNotNull);
+    });
+
+    test('אינו רץ כשאינו בעל התהליך, גם בחלון ראשי', () async {
+      WindowBus.instance.register();
+      final host = WindowBus.instance.slot!;
+      await sessions.save(
+        host + 1,
+        tabsJson: '[${_encoded('יתום')}]',
+        currentIndex: 0,
+      );
+
+      ProcessDuties.debugOverride = ProcessDuties(isProcessOwner: () => false);
+      expect(await TabsRepository.adoptOrphanWindowSessions(), 0);
+      expect(await TabsRepository.compactWindowSessions(), isEmpty);
       expect(await sessions.load(host + 1), isNotNull);
     });
   });

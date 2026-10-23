@@ -8,6 +8,7 @@ import 'package:otzaria/models/link_types.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/personal_notes/utils/note_anchor_utils.dart';
 import 'package:otzaria/book_common/utils/link_anchor_variants.dart';
+import 'package:otzaria/text_book/models/book_notes.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' show isHeadingLine;
 
 /// סמני עוגן-מילה (טבלת link_anchor שבמסד): הזרקת אות סימון קטנה, למשל (א),
@@ -17,6 +18,9 @@ import 'package:otzaria/utils/text/text_manipulation.dart' show isHeadingLine;
 /// entity (`&...;`) נספר כתו אחד — אותה מוסכמה של `line.charCount`. ההזרקה
 /// חייבת לכן להיעשות על שורת המקור *כפי שנשמרה*, לפני כל עיבוד שמוסיף תוכן
 /// גלוי (סימוני הערות אישיות וכד').
+///
+/// במסד שיש בו `line_note` האופסט נמדד על השורה המלאה: השורה השמורה ובה גוף כל
+/// הערה במקום ה-charPos שלה. [projectAnchorSpans] מפצל אותו לשורה ולגופים.
 
 /// אות הסימון של קישור מעוגן: התווית ששמורה במסד, ואם אין — הרכיב האחרון של
 /// ה-heRef של ההערה (מספר ההערה בגימטריה, כפי שמודפס). מחזיר null כשאין אות
@@ -86,6 +90,8 @@ int _stableStyleIndex(String title) {
 /// מנווטת ישירות ליעד (ולא רק מקפיצה תצוגה). בלעדיו הכול `<span>` לא-אינטראקטיבי.
 /// [rangesOnly] — רק ציטוטי הלינקר (עוגן-טווח); סמני-האות מדולגים. משמש
 /// בחלוניות המפרשים והקישורים, שאינן מציגות סמני מפרש-על.
+/// [notes] — הערות השורה מ-`line_note`: [rawLine] היא השורה השמורה, או גוף
+/// ההערה [note] (מיקום ב-[notes]), ומוזרק רק חלק העוגן שבה.
 String injectLinkAnchorMarkers({
   required String rawLine,
   required List<Link> anchorLinks,
@@ -93,11 +99,19 @@ String injectLinkAnchorMarkers({
   int? lineIndex,
   int? activeIndex,
   bool rangesOnly = false,
+  List<BookNote> notes = const [],
+  int? note,
 }) {
   final points = <({int at, int order, String html})>[];
   final ranges = <HtmlWrapRange>[];
   // כותרת היא כלי ניווט: ציטוט לינקר בתוכה הופך אותה לקישור לספר אחר.
   final skipLinker = isHeadingLine(rawLine);
+  final spansByLink = [
+    for (final link in anchorLinks)
+      link.anchorOffsetsAreRaw
+          ? (note == null ? linkAnchorSpans(link) : const <LinkAnchorSpan>[])
+          : projectAnchorSpans(linkAnchorSpans(link), notes, note: note),
+  ];
   // כל המרה היא סריקה של השורה מתחילתה; שורה עם כמה מפרשים מעוגנים שואלת
   // לא פעם על אותו אופסט, ולכן שומרים את התוצאה לאורך הקריאה.
   final visibleAtRaw = <int, int>{};
@@ -109,16 +123,7 @@ String injectLinkAnchorMarkers({
     final link = anchorLinks[linkIndex];
     // continue ולא סינון מראש: האינדקס מזהה את הקישור ב-href של הסמן.
     if (skipLinker && _isLinkerLink(link)) continue;
-    final spans = link.anchorSpans.isNotEmpty
-        ? link.anchorSpans
-        : [
-            if (link.anchorStart != null)
-              LinkAnchorSpan(
-                start: link.anchorStart!,
-                end: link.anchorEnd,
-                label: link.anchorLabel,
-              ),
-          ];
+    final spans = spansByLink[linkIndex];
     final styleIndex = styleIndexByCommentator[link.path2] ?? 0;
     for (final span in spans) {
       if (span.start < 0) continue;
@@ -131,7 +136,11 @@ String injectLinkAnchorMarkers({
           : (link.anchorOffsetsAreRaw ? toVisible(end) : end);
       if (end != null && end > span.start) {
         // רק כשיש טווח בפועל: סמני נקודה אינם צריכים מפת תווים.
-        final bounds = rangeBounds ??= _rangeBounds(anchorLinks, skipLinker);
+        final bounds = rangeBounds ??= _rangeBounds(
+          anchorLinks,
+          spansByLink,
+          skipLinker,
+        );
         int rawStart;
         int rawEnd;
         if (bounds.count == 1) {
@@ -201,26 +210,111 @@ String injectLinkAnchorMarkers({
 bool _isLinkerLink(Link link) =>
     LinkTypes.normalize(link.connectionType) == LinkTypes.linker;
 
-({int count, int maxEnd}) _rangeBounds(List<Link> links, bool skipLinker) {
+({int count, int maxEnd}) _rangeBounds(
+  List<Link> links,
+  List<List<LinkAnchorSpan>> spansByLink,
+  bool skipLinker,
+) {
   var count = 0;
   var maxEnd = 0;
-  void include(int? start, int? end) {
-    if (start == null || start < 0 || end == null || end <= start) return;
-    count++;
-    if (end > maxEnd) maxEnd = end;
-  }
-
-  for (final link in links) {
-    if (skipLinker && _isLinkerLink(link)) continue;
-    if (link.anchorSpans.isEmpty) {
-      include(link.anchorStart, link.anchorEnd);
-    } else {
-      for (final span in link.anchorSpans) {
-        include(span.start, span.end);
-      }
+  for (var i = 0; i < links.length; i++) {
+    if (skipLinker && _isLinkerLink(links[i])) continue;
+    for (final span in spansByLink[i]) {
+      final end = span.end;
+      if (span.start < 0 || end == null || end <= span.start) continue;
+      count++;
+      if (end > maxEnd) maxEnd = end;
     }
   }
   return (count: count, maxEnd: maxEnd);
+}
+
+/// עוגני [link] בשורה המוצגת: [Link.anchorSpans], ובלעדיהם העוגן היחיד.
+List<LinkAnchorSpan> linkAnchorSpans(Link link) => link.anchorSpans.isNotEmpty
+    ? link.anchorSpans
+    : [
+        if (link.anchorStart != null)
+          LinkAnchorSpan(
+            start: link.anchorStart!,
+            end: link.anchorEnd,
+            label: link.anchorLabel,
+          ),
+      ];
+
+/// מספר התווים הגלויים של [html] — מוסכמת `line.charCount`.
+int visibleCharCount(String html) => _visibleOffsetAtRaw(html, html.length);
+
+/// מקרין עוגנים מהשורה המלאה — השורה השמורה ובה גוף כל הערה מ-[notes], בתווים
+/// הגלויים שלו, במקום ה-charPos שלה — לשורה השמורה ([note] null) או לגוף ההערה
+/// ה-[note] (מיקום ב-[notes]). עוגן-נקודה בתוך גוף שייך לגוף ובקצהו לשורה;
+/// טווח נשאר טווח אחד בשורה, וכל הערה שהוא נוגע בה מקבלת את חלקה. הערה בלי
+/// מיקום (charPos -1) משאירה את השורה בלי מקום לעוגנים — אין חלק בשום מקום.
+List<LinkAnchorSpan> projectAnchorSpans(
+  List<LinkAnchorSpan> spans,
+  List<BookNote> notes, {
+  int? note,
+}) {
+  if (notes.isEmpty) return note == null ? spans : const [];
+  if (note != null && (note < 0 || note >= notes.length)) return const [];
+  if (notes.any((n) => n.charPos < 0)) return const [];
+  // גוף k תופס בשורה המלאה את [starts[k], ends[k]).
+  final starts = List<int>.filled(notes.length, 0);
+  final ends = List<int>.filled(notes.length, 0);
+  var before = 0;
+  for (var k = 0; k < notes.length; k++) {
+    starts[k] = notes[k].charPos + before;
+    before += visibleCharCount(notes[k].body);
+    ends[k] = notes[k].charPos + before;
+  }
+  bool inside(int at, int k) => starts[k] < at && at < ends[k];
+  int stored(int at) {
+    var shift = 0;
+    for (var k = 0; k < notes.length && starts[k] < at; k++) {
+      if (at < ends[k]) return starts[k] - shift;
+      shift += ends[k] - starts[k];
+    }
+    return at - shift;
+  }
+
+  final result = <LinkAnchorSpan>[];
+  for (final span in spans) {
+    final end = span.end;
+    if (note != null) {
+      final from = starts[note];
+      if (end == null) {
+        if (inside(span.start, note)) {
+          result.add(
+            LinkAnchorSpan(start: span.start - from, label: span.label),
+          );
+        }
+      } else {
+        final a = span.start > from ? span.start : from;
+        final b = end < ends[note] ? end : ends[note];
+        if (b > a) {
+          result.add(
+            LinkAnchorSpan(start: a - from, end: b - from, label: span.label),
+          );
+        }
+      }
+    } else if (end == null) {
+      var inBody = false;
+      for (var k = 0; k < notes.length && !inBody; k++) {
+        inBody = inside(span.start, k);
+      }
+      if (!inBody) {
+        result.add(
+          LinkAnchorSpan(start: stored(span.start), label: span.label),
+        );
+      }
+    } else {
+      final a = stored(span.start);
+      final b = stored(end);
+      if (b > a) {
+        result.add(LinkAnchorSpan(start: a, end: b, label: span.label));
+      }
+    }
+  }
+  return result;
 }
 
 /// עוטף טווח תווים-גלויים [start, end) של שורת HTML בתגי פתיחה/סגירה, תוך

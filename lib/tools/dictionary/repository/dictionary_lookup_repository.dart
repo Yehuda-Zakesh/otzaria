@@ -326,6 +326,12 @@ class AramaicDictionaryEntryPresentation {
   }
 }
 
+typedef AramaicIndex = ({
+  List<AramaicDictionaryEntry> entries,
+  Set<String> terms,
+  List<({String normalized, List<String> words})> index,
+});
+
 /// Repository משותף לטעינה וחיפוש במילוני הכלים.
 class DictionaryLookupRepository {
   DictionaryLookupRepository({
@@ -333,7 +339,9 @@ class DictionaryLookupRepository {
     Future<List<AramaicDictionaryEntry>> Function()? loadAramaicEntries,
     Future<List<LaazDictionaryEntry>> Function()? loadLaazEntries,
     Future<List<Link>> Function()? loadLaazLinks,
-  }) : _loadAramaicEntries = loadAramaicEntries ?? _defaultLoadAramaicEntries,
+  }) : _loadAramaic = loadAramaicEntries == null
+           ? _defaultLoadAramaicIndex
+           : (() async => _buildAramaicIndex(await loadAramaicEntries())),
        _loadLaazEntries = loadLaazEntries ?? _defaultLoadLaazEntries,
        _loadLaazLinks = loadLaazLinks ?? _defaultLoadLaazLinks;
 
@@ -344,7 +352,7 @@ class DictionaryLookupRepository {
   static const String laazBookTitle = 'אוצר לעזי רש"י';
 
   final Future<Map<String, List<String>>> Function()? _loadAcronyms;
-  final Future<List<AramaicDictionaryEntry>> Function() _loadAramaicEntries;
+  final Future<AramaicIndex> Function() _loadAramaic;
   final Future<List<LaazDictionaryEntry>> Function() _loadLaazEntries;
   final Future<List<Link>> Function() _loadLaazLinks;
 
@@ -650,7 +658,15 @@ class DictionaryLookupRepository {
   }
 
   Future<void> _loadAramaicInternal() async {
-    final aramaicEntries = await _loadAramaicEntries();
+    final loaded = await _loadAramaic();
+    _aramaicEntries = loaded.entries;
+    _aramaicTerms = loaded.terms;
+    _aramaicIndex = loaded.index;
+  }
+
+  static AramaicIndex _buildAramaicIndex(
+    List<AramaicDictionaryEntry> aramaicEntries,
+  ) {
     final aramaicTerms = <String>{};
     final aramaicIndex = <({String normalized, List<String> words})>[];
 
@@ -669,9 +685,11 @@ class DictionaryLookupRepository {
       aramaicTerms.addAll(words);
     }
 
-    _aramaicEntries = List<AramaicDictionaryEntry>.unmodifiable(aramaicEntries);
-    _aramaicTerms = Set<String>.unmodifiable(aramaicTerms);
-    _aramaicIndex = List.unmodifiable(aramaicIndex);
+    return (
+      entries: List<AramaicDictionaryEntry>.unmodifiable(aramaicEntries),
+      terms: Set<String>.unmodifiable(aramaicTerms),
+      index: List.unmodifiable(aramaicIndex),
+    );
   }
 
   Future<void> _loadLaazInternal() async {
@@ -733,15 +751,20 @@ class DictionaryLookupRepository {
     );
   }
 
-  static Future<List<AramaicDictionaryEntry>>
-  _defaultLoadAramaicEntries() async {
+  static Future<AramaicIndex> _defaultLoadAramaicIndex() async {
     final String jsonString = await rootBundle.loadString(
       'assets/dictionary.json',
     );
-    final jsonData = await compute(_decodeJsonObject, jsonString);
+    // נרמול הערכים תוקע את ה-UI isolate בבחירה הראשונה, ולכן רץ יחד עם הפענוח.
+    return compute(decodeAramaicIndex, jsonString);
+  }
+
+  @visibleForTesting
+  static AramaicIndex decodeAramaicIndex(String jsonString) {
+    final jsonData = _decodeJsonObject(jsonString);
     final List<dynamic> entries = jsonData['מילון פשיטא'] ?? <dynamic>[];
 
-    return entries
+    final parsed = entries
         .whereType<Map<String, dynamic>>()
         .map((entry) {
           if (entry.isEmpty) {
@@ -757,6 +780,7 @@ class DictionaryLookupRepository {
         })
         .whereType<AramaicDictionaryEntry>()
         .toList();
+    return _buildAramaicIndex(parsed);
   }
 
   static Future<List<LaazDictionaryEntry>> _defaultLoadLaazEntries() async {

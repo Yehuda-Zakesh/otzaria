@@ -6,7 +6,7 @@ import 'package:otzaria/widgets/smart_text/render_settings.dart';
 import 'package:otzaria/widgets/smart_text/smart_text_widget.dart';
 
 // שורת כותרת שלמה עוברת למסלול המהיר; היא חייבת להיראות בדיוק כמו ב-HtmlWidget.
-// `<hN >` זהה ל-`<hN>` בפרסור HTML אך אינו מזוהה במסלול המהיר — כך נבנה הייחוס.
+// הייחוס הוא אותו HTML כשהוא מוצג בכפייה ב-HtmlWidget.
 const _needle = 'כותרת';
 
 class _Rendered {
@@ -23,8 +23,12 @@ Future<_Rendered> _render(
   String html,
   RenderSettings settings, {
   required bool expectHtmlWidget,
+  bool forceHtmlWidget = false,
 }) async {
   final key = GlobalKey();
+  // הייחוס: אותו HTML מוצג ב-HtmlWidget.
+  SmartTextWidget.debugForceHtmlWidget = forceHtmlWidget;
+  addTearDown(() => SmartTextWidget.debugForceHtmlWidget = false);
   await tester.pumpWidget(
     MaterialApp(
       home: Directionality(
@@ -48,6 +52,7 @@ Future<_Rendered> _render(
     ),
   );
   await tester.pumpAndSettle();
+  SmartTextWidget.debugForceHtmlWidget = false;
   expect(
     find.byType(HtmlWidget),
     expectHtmlWidget ? findsOneWidget : findsNothing,
@@ -121,9 +126,10 @@ void main() {
             );
             final reference = await _render(
               tester,
-              '<h$level >$body</h$level >',
+              '<h$level>$body</h$level>',
               settings,
               expectHtmlWidget: true,
+              forceHtmlWidget: true,
             );
             final reason = 'h$level/$font/$body';
             expect(fast.root, reference.root, reason: reason);

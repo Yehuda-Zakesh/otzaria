@@ -4,8 +4,11 @@
 library;
 
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/widgets/misc/app_cursors.dart';
+
+import '../../test_helpers/second_test_view.dart';
 
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
@@ -90,5 +93,66 @@ void main() {
       return activation;
     });
     expect(named('setCustomCursor/windows'), isEmpty);
+  });
+
+  testWidgets('each view gets a hand built for its own DPR', (tester) async {
+    await tester.runAsync(AppCursors.ensureInitialized);
+    tester.view.devicePixelRatio = 1.25;
+    final second = SecondTestView(tester.view)..devicePixelRatio = 2.5;
+    late BuildContext first;
+    late BuildContext other;
+    await tester.pumpWidget(
+      wrapWithView: false,
+      ViewCollection(
+        views: [
+          View(
+            view: tester.view,
+            child: Builder(
+              builder: (c) {
+                first = c;
+                return const SizedBox();
+              },
+            ),
+          ),
+          View(
+            view: second,
+            child: Builder(
+              builder: (c) {
+                other = c;
+                return const SizedBox();
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+    expect(AppCursors.grabOf(first), AppCursors.grabbingOf(first));
+    expect(AppCursors.grabOf(first), isNot(AppCursors.grabOf(other)));
+
+    calls.clear();
+    await tester.runAsync(
+      () => AppCursors.grabOf(other).createSession(0).activate(),
+    );
+    final args = named('createCustomCursor/windows').single.arguments as Map;
+    expect(args['width'], 45);
+
+    calls.clear();
+    await tester.runAsync(
+      () => AppCursors.grabOf(first).createSession(0).activate(),
+    );
+    expect(
+      (named('createCustomCursor/windows').single.arguments as Map)['width'],
+      23,
+    );
+
+    // ה-DPR נקרא בהפעלה, כמו קודם: מעבר מסך בלי build חדש.
+    final cursor = AppCursors.grabOf(other);
+    second.devicePixelRatio = 2.75;
+    calls.clear();
+    await tester.runAsync(() => cursor.createSession(0).activate());
+    expect(
+      (named('createCustomCursor/windows').single.arguments as Map)['width'],
+      50,
+    );
   });
 }

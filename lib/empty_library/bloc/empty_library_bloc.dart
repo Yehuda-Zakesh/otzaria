@@ -941,15 +941,13 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
     final tempPath = Directory.systemTemp.path;
     final temp = await getDiskSpaceInfo(tempPath);
     final library = await getDiskSpaceInfo(target);
-    final tempVolume = comparableVolumeId(
+    final sameVolume = isSameVolume(
       tempPath,
-      temp.volumeId,
+      temp,
+      target,
+      library,
       isAndroid: true,
     );
-    final sameVolume =
-        tempVolume != null &&
-        tempVolume ==
-            comparableVolumeId(target, library.volumeId, isAndroid: true);
     // על אותו כונן הארכיונים נמחקים אחד-אחד בזמן החילוץ, ולכן רק השיא נספר.
     return insufficientSpaceMessage([
       if (sameVolume)

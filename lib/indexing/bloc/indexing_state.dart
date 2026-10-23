@@ -36,7 +36,7 @@ class IndexingInProgress extends IndexingState {
   /// האינדוקס מושהה — הלולאה ממתינה לפני הספר הבא.
   final bool isPaused;
 
-  /// מצב חסכוני פעיל — המנוע רץ עם תקציב writer מוקטן.
+  /// מצב חסכוני פעיל — הכנת הספרים והכתיבה מוגבלות במשאבים.
   final bool isEconomy;
 
   /// כל הספרים אונדקסו והמנוע מאחד את קבצי האינדקס (commit ו-optimize).

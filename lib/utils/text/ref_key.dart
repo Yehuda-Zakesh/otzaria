@@ -99,29 +99,58 @@ bool isHebrewNumeral(String token) {
   return true;
 }
 
+/// טווח וסימן דף דורשים מקף, נקודה או נקודתיים. רוב ה-heRef אינם מכילים
+/// אותם, וסריקת שני הביטויים בכל אחד מהם היא רוב עלות הנרמול.
+@visibleForTesting
+bool mayHaveRangeOrDafMark(String ref) =>
+    ref.contains('-') ||
+    ref.contains('–') ||
+    ref.contains('־') ||
+    ref.contains('.') ||
+    ref.contains(':');
+
 /// טוקני המפתח הקנוני של [ref], לפי הסדר: חיתוך טווח, הרחבת סימוני דף,
 /// הסרת ניקוד/טעמים, מיפוי ע"א/ע"ב, הסרת גרשיים/פיסוק והסרת מילות מיקום.
 List<String> refKeyTokens(String ref) {
   // חיתוך הטווח לפני הנרמול — המקף נהפך לרווח בהסרת הניקוד. תחילית ההתאמה
   // ורכיב המספר אינם מכילים מפריד, ולכן הראשון שאחרי תחילתה הוא מפריד הטווח.
-  final range = _trailingRange.firstMatch(ref);
+  final marked = mayHaveRangeOrDafMark(ref);
+  final range = marked ? _trailingRange.firstMatch(ref) : null;
   final dash = range == null ? -1 : ref.indexOf(RegExp('[-–־]'), range.start);
   final head = dash > 0 ? ref.substring(0, dash) : ref;
 
-  var cleaned = removeTeamim(removeVolwels(_expandDafMarks(head)));
+  var cleaned = removeTeamim(
+    removeVolwels(marked ? _expandDafMarks(head) : head),
+  );
   cleaned = cleaned.replaceAll(_amudA, 'א').replaceAll(_amudB, 'ב');
   cleaned = cleaned
       .replaceAll('"', '')
       .replaceAll("'", '')
       .replaceAll('״', '')
       .replaceAll('׳', '');
-  cleaned = cleaned.replaceAll(RegExp(r'[^a-zA-Z0-9֐-׿\s]'), ' ').toLowerCase();
-
-  return cleaned
-      .split(RegExp(r'\s+'))
-      .where((t) => t.isNotEmpty && !_locatorWords.contains(t))
-      .toList();
+  // כל תו שאינו אות לטינית, ספרה או עברית מפריד בין טוקנים — כמו החלפתו
+  // ברווח ופיצול לפי רווחים, בלי שני מעברי RegExp על כל הפניה.
+  final tokens = <String>[];
+  var start = -1;
+  for (var i = 0; i <= cleaned.length; i++) {
+    if (i < cleaned.length && isRefKeyChar(cleaned.codeUnitAt(i))) {
+      if (start < 0) start = i;
+    } else if (start >= 0) {
+      final token = cleaned.substring(start, i).toLowerCase();
+      if (!_locatorWords.contains(token)) tokens.add(token);
+      start = -1;
+    }
+  }
+  return tokens;
 }
+
+/// אות לטינית, ספרה או תו מגוש העברית — מה שנשאר בתוך טוקן.
+@visibleForTesting
+bool isRefKeyChar(int c) =>
+    (c >= 0x61 && c <= 0x7A) ||
+    (c >= 0x41 && c <= 0x5A) ||
+    (c >= 0x30 && c <= 0x39) ||
+    (c >= 0x0590 && c <= 0x05FF);
 
 /// המפתח הקנוני של [ref], או `null` כשלא נותר ממנו דבר.
 String? buildRefKey(String ref) {

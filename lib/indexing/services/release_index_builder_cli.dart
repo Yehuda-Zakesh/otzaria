@@ -174,38 +174,55 @@ class ReleaseIndexBuilderCli {
     log('נמצאו ${books.length} ספרים; מתחיל אינדוקס...');
     var lastReported = 0;
     final repository = IndexingRepository(TantivyDataProvider.instance);
-    final result = await repository.indexAllBooks(
-      library,
-      onProgress: (processed, total) {
-        if (processed == total || processed - lastReported >= 100) {
-          lastReported = processed;
-          log('התקדמות אינדוקס: $processed/$total');
-        }
-      },
-    );
-    if (!result.completed) {
-      throw StateError('האינדוקס בוטל או לא הושלם');
-    }
-    if (!result.isClean) {
-      throw StateError(
-        'האינדקס נוצר עם ${result.failures.length} כשלים',
-      );
-    }
-    if (books.any(
-      (book) =>
-          IndexingRepository.isIndexableBook(book) &&
-          !repository.isBookIndexed(book),
-    )) {
-      throw StateError('האינדקס נוצר, אך חסרים בו ספרים הניתנים לאינדוקס');
-    }
-    // האינדוקס כבר דחף את המיפוי; כאן כשל נכשל את הבנייה במקום להיבלע.
     final engine = await TantivyDataProvider.instance.engine;
-    await engine.setBookOrder(
-      entries: await IndexingRepository.buildBookOrder(library),
-    );
-    verifyBookOrderFiles(
-      TantivyDataProvider.instance.activeIndexPath ?? config.indexPath,
-    );
+    await withBulkIndexing(engine, () async {
+      final result = await repository.indexAllBooks(
+        library,
+        onProgress: (processed, total) {
+          if (processed == total || processed - lastReported >= 100) {
+            lastReported = processed;
+            log('התקדמות אינדוקס: $processed/$total');
+          }
+        },
+      );
+      if (!result.completed) {
+        throw StateError('האינדוקס בוטל או לא הושלם');
+      }
+      if (!result.isClean) {
+        throw StateError(
+          'האינדקס נוצר עם ${result.failures.length} כשלים',
+        );
+      }
+      if (books.any(
+        (book) =>
+            IndexingRepository.isIndexableBook(book) &&
+            !repository.isBookIndexed(book),
+      )) {
+        throw StateError('האינדקס נוצר, אך חסרים בו ספרים הניתנים לאינדוקס');
+      }
+      await engine.setBookOrder(
+        entries: await IndexingRepository.buildBookOrder(library),
+      );
+      verifyBookOrderFiles(
+        TantivyDataProvider.instance.activeIndexPath ?? config.indexPath,
+      );
+    });
+  }
+
+  /// בונה ומאחד להפצה עם bulk, ומשחזר מצב רגיל גם בכשל.
+  @visibleForTesting
+  static Future<T> withBulkIndexing<T>(
+    SearchEngine engine,
+    Future<T> Function() build,
+  ) async {
+    await engine.setBulkIndexing(enabled: true);
+    try {
+      final result = await build();
+      await engine.optimize();
+      return result;
+    } finally {
+      await engine.setBulkIndexing(enabled: false);
+    }
   }
 
   /// קבצי מספרי הספרים ומיפוי הסדר נארזים עם האינדקס; בלעדיהם מיון לפי

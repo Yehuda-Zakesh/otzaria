@@ -101,7 +101,15 @@ void main() {
 
   setUp(() {
     sessions = PluginSearchFieldSessionService.forTesting(
-      (_, _, _, {preferBackground = false, instanceId}) async {},
+      (
+        _,
+        _,
+        _, {
+        preferBackground = false,
+        instanceId,
+        viewId,
+        windowKeys,
+      }) async {},
     );
   });
 

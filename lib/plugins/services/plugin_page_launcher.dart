@@ -1,93 +1,134 @@
-import 'package:flutter/foundation.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/plugins/plugin_constants.dart';
 import 'package:otzaria/plugins/services/plugin_runtime_dispatcher.dart';
 
-/// מנווט את המשתמש לדף תוסף ומוסר לו payload כאירוע JS.
-///
-/// פותר את המרוץ בין הניווט לטעינת ה-WebView: אם דף התוסף עדיין לא סיים
-/// boot, ה-payload נשמר כממתין ונמסר רק כשה-[PluginTabPage] מדווח שהדף מוכן.
+/// מנווט לדף תוסף ומוסר לו אירועים בחלון שפתח אותו, גם כשה-boot עדיין ממתין.
 class PluginPageLauncher {
   static final PluginPageLauncher instance = PluginPageLauncher._();
   PluginPageLauncher._();
 
-  /// מנווט לדף התוסף — נרשם ע"י MainWindowScreen (בעל הגישה למסך הכלים).
-  void Function(String pluginId)? navigator;
+  final _navigators = Expando<void Function(String pluginId)>();
 
-  final Map<String, List<({String topic, Map<String, dynamic> payload})>>
+  void Function(String pluginId)? get navigator =>
+      _navigators[AppWindowKeys.current];
+  set navigator(void Function(String pluginId)? value) =>
+      _navigators[AppWindowKeys.current] = value;
+
+  void register(AppWindowKeys keys, void Function(String pluginId) navigator) =>
+      _navigators[keys] = navigator;
+
+  void unregister(
+    AppWindowKeys keys,
+    void Function(String pluginId) navigator,
+  ) {
+    if (_navigators[keys] == navigator) _navigators[keys] = null;
+  }
+
+  final Map<
+    ({String pluginId, int? viewId}),
+    List<({String topic, Map<String, dynamic> payload})>
+  >
   _pending = {};
+  final Map<PluginInstanceKey, int?> _readyPages = {};
+  final Map<({String pluginId, int? viewId}), Future<void>> _deliveryChain = {};
 
-  /// דפים מוכנים לפי מופע — לתוסף יכולים להיות כמה טאבים פתוחים.
-  final Set<PluginInstanceKey> _readyPages = {};
+  bool hasPendingFor(String pluginId) => _pending.entries.any(
+    (entry) => entry.key.pluginId == pluginId && entry.value.isNotEmpty,
+  );
 
-  // שרשרת מסירה פר-תוסף: כל אירוע ממתין לקודמו, כך שהסדר נשמר גם כשאירוע
-  // חדש מגיע בזמן ריקון הממתינים.
-  final Map<String, Future<void>> _deliveryChain = {};
+  PluginInstanceKey? _readyPage(String pluginId, int? viewId) => _readyPages
+      .entries
+      .where(
+        (entry) =>
+            entry.key.pluginId == pluginId &&
+            (viewId == null || entry.value == viewId),
+      )
+      .firstOrNull
+      ?.key;
 
-  bool _hasReadyPage(String pluginId) =>
-      _readyPages.any((key) => key.pluginId == pluginId);
-
-  /// פותח את דף התוסף. אם סופק [topic], ה-[payload] יימסר לתוסף כאירוע —
-  /// מיד אם דף כלשהו כבר מוכן, אחרת לאחר סיום ה-boot של הדף הראשון.
   void open(
     String pluginId, {
     String? topic,
     Map<String, dynamic> payload = const {},
+    int? viewId,
+    AppWindowKeys? windowKeys,
   }) {
+    if (windowKeys != null && _navigators[windowKeys] == null) return;
     if (topic != null) {
-      if (_hasReadyPage(pluginId)) {
-        _enqueueDelivery(pluginId, topic, payload);
+      final ready = _readyPage(pluginId, viewId);
+      if (ready != null) {
+        _enqueueDelivery(
+          pluginId,
+          topic,
+          payload,
+          viewId: viewId,
+          instanceId: ready.instanceId,
+        );
       } else {
-        _pending.putIfAbsent(pluginId, () => []).add((
-          topic: topic,
-          payload: payload,
-        ));
+        _pending
+            .putIfAbsent((pluginId: pluginId, viewId: viewId), () => [])
+            .add((topic: topic, payload: payload));
       }
     }
-    navigator?.call(pluginId);
+    _navigators[windowKeys ?? AppWindowKeys.current]?.call(pluginId);
   }
 
-  /// נקרא ע"י PluginTabPage כשה-boot הסתיים — האירועים הממתינים נמסרים
-  /// בסדרם **לדף שדיווח שהוא מוכן**, לא למופע אחר של אותו תוסף.
   void markPageReady(
     String pluginId, {
     String instanceId = PluginInstanceIds.defaultForeground,
+    int? viewId,
   }) {
-    _readyPages.add((pluginId: pluginId, instanceId: instanceId));
-    final pending = _pending.remove(pluginId);
-    if (pending == null) return;
-    debugPrint(
-      'PluginPageLauncher: $pluginId ready, delivering ${pending.length} '
-      'pending event(s)',
-    );
+    _readyPages[(pluginId: pluginId, instanceId: instanceId)] = viewId;
+    final pending = [
+      ...?_pending.remove((pluginId: pluginId, viewId: viewId)),
+      if (viewId != null)
+        ...?_pending.remove((pluginId: pluginId, viewId: null)),
+    ];
     for (final event in pending) {
       _enqueueDelivery(
         pluginId,
         event.topic,
         event.payload,
+        viewId: viewId,
         instanceId: instanceId,
       );
     }
   }
 
-  /// נקרא ע"י PluginTabPage בעת dispose של דף התוסף. מצב התוסף (ממתינים,
-  /// שרשרת מסירה) מתנקה רק כשלא נשאר אף דף מוכן שלו.
   void markPageClosed(
     String pluginId, {
     String instanceId = PluginInstanceIds.defaultForeground,
+    int? viewId,
   }) {
-    _readyPages.remove((pluginId: pluginId, instanceId: instanceId));
-    if (_hasReadyPage(pluginId)) return;
-    _pending.remove(pluginId);
-    _deliveryChain.remove(pluginId);
+    final key = (pluginId: pluginId, instanceId: instanceId);
+    final ownerView = _readyPages.containsKey(key)
+        ? _readyPages.remove(key)
+        : viewId;
+    if (_readyPages.entries.any(
+      (entry) => entry.key.pluginId == pluginId && entry.value == ownerView,
+    )) {
+      return;
+    }
+    _pending.remove((pluginId: pluginId, viewId: ownerView));
+    _deliveryChain.remove((pluginId: pluginId, viewId: ownerView));
+  }
+
+  /// סגירה לפני יצירת דף אינה משאירה אירועים שממתינים לחלון שכבר איננו.
+  void forgetWindow(int viewId) {
+    _pending.removeWhere((key, _) => key.viewId == viewId);
+    _deliveryChain.removeWhere((key, _) => key.viewId == viewId);
+    _readyPages.removeWhere((_, owner) => owner == viewId);
   }
 
   void _enqueueDelivery(
     String pluginId,
     String topic,
     Map<String, dynamic> payload, {
-    String? instanceId,
+    int? viewId,
+    required String instanceId,
   }) {
-    final previous = _deliveryChain[pluginId] ?? Future<void>.value();
+    final key = (pluginId: pluginId, viewId: viewId);
+    final previous = _deliveryChain[key] ?? Future<void>.value();
     final next = previous.then(
       (_) => PluginRuntimeDispatcher.instance.dispatchEventToPlugin(
         pluginId,
@@ -97,7 +138,6 @@ class PluginPageLauncher {
         instanceId: instanceId,
       ),
     );
-    // catchError כדי ששגיאה במסירה אחת לא תחסום את הבאות בשרשרת.
-    _deliveryChain[pluginId] = next.catchError((_) {});
+    _deliveryChain[key] = next.catchError((_) {});
   }
 }

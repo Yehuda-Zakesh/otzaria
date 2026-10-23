@@ -19,6 +19,7 @@ import 'package:otzaria/models/links.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
 import 'package:otzaria/navigation/bloc/navigation_event.dart';
 import 'package:otzaria/navigation/bloc/navigation_state.dart';
+import 'package:otzaria/navigation/view/main_window_screen.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/data/repository/text_book_repository.dart';
 import 'package:otzaria/personal_notes/bloc/personal_notes_bloc.dart';
@@ -404,6 +405,72 @@ void main() {
     });
   }
 
+  testWidgets('קישור בתיבת ההערות המרחפת מנווט בתוך הספר (issue #2956)', (
+    tester,
+  ) async {
+    addTearDown(LinkPreviewOverlay.dismiss);
+    final lines = LineScrollController();
+    addTearDown(lines.dispose);
+    final content = [for (var i = 1; i <= 40; i++) 'שורה $i'];
+    final note = _note().copyWith(
+      content:
+          r'[{"insert":"עיין שורה 30","attributes":{"link":"otzaria://book?bookId=ספר בדיקה&line=30"}},{"insert":"\n"}]',
+      contentFormat: PersonalNoteContentFormat.quillDelta,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MultiBlocProvider(
+          providers: [
+            BlocProvider<TextBookBloc>.value(
+              value: _TestTextBookBloc(
+                _loadedState().copyWith(content: content),
+              ),
+            ),
+            BlocProvider<PersonalNotesBloc>.value(
+              value: _TestPersonalNotesBloc(
+                PersonalNotesState(
+                  isLoading: false,
+                  bookId: 'ספר בדיקה',
+                  locatedNotes: [note],
+                  missingNotes: const [],
+                  errorMessage: null,
+                  filteredLocatedNotes: [note],
+                  filteredMissingNotes: const [],
+                ),
+              ),
+            ),
+            BlocProvider<SettingsBloc>.value(
+              value: _TestSettingsBloc(SettingsState.initial()),
+            ),
+          ],
+          child: Scaffold(
+            body: SimpleTextViewer(
+              content: content,
+              fontSize: 18,
+              openBookCallback: (_) {},
+              isMainText: true,
+              lines: lines,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final position = lines.itemController.scrollController!.position;
+    expect(position.pixels, 0);
+
+    tester
+        .widgetList<SmartTextWidget>(find.byType(SmartTextWidget))
+        .firstWhere((w) => w.onAnchorHover != null)
+        .onAnchorHover!('otzaria://note?line=0', const Offset(400, 100));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(ActionChip, 'עיין שורה 30'));
+    await tester.pumpAndSettle();
+
+    expect(position.pixels, greaterThan(0));
+  });
+
   testWidgets('סימון הערה inline מוזרק לטקסט ולחיצתו פותחת את טאב ההערות', (
     tester,
   ) async {
@@ -456,6 +523,76 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(openedTab, kNotesTabIndex);
+  });
+
+  testWidgets('תיבת הערה מרחפת נסגרת כשקישור בה פותח טאב אחר (issue #2957)', (
+    tester,
+  ) async {
+    addTearDown(LinkPreviewOverlay.dismiss);
+    final tabs = PageController();
+    addTearDown(tabs.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MultiBlocProvider(
+          providers: [
+            BlocProvider<TextBookBloc>.value(
+              value: _TestTextBookBloc(_loadedState()),
+            ),
+            BlocProvider<PersonalNotesBloc>.value(
+              value: _TestPersonalNotesBloc(
+                PersonalNotesState(
+                  isLoading: false,
+                  bookId: 'ספר בדיקה',
+                  locatedNotes: [_note()],
+                  missingNotes: const [],
+                  errorMessage: null,
+                  filteredLocatedNotes: [_note()],
+                  filteredMissingNotes: const [],
+                ),
+              ),
+            ),
+            BlocProvider<SettingsBloc>.value(
+              value: _TestSettingsBloc(SettingsState.initial()),
+            ),
+          ],
+          // כמו מסך העיון: כל טאב הוא עמוד PageView שנשמר חי ברקע.
+          child: Scaffold(
+            body: PageView(
+              controller: tabs,
+              children: [
+                KeepAlivePage(
+                  child: SimpleTextViewer(
+                    content: const ['שורה א'],
+                    fontSize: 18,
+                    openBookCallback: (_) {},
+                    isMainText: true,
+                  ),
+                ),
+                const KeepAlivePage(child: Text('הספר שנפתח מהקישור')),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    tester
+        .widgetList<SmartTextWidget>(find.byType(SmartTextWidget))
+        .firstWhere((w) => w.onAnchorHover != null)
+        .onAnchorHover!('otzaria://note?line=0', const Offset(400, 100));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+    expect(find.text('תוכן'), findsOneWidget);
+
+    // הלחיצה על הקישור שבתיבה מקבעת אותה, והקישור פותח את הספר בטאב אחר.
+    await tester.tap(find.text('תוכן'));
+    await tester.pump();
+    tabs.jumpToPage(1);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('תוכן'), findsNothing);
   });
 
   testWidgets('כניסה חוזרת לעוגן בצורת הדף אינה בונה פופאפ מחדש', (

@@ -34,7 +34,7 @@ class _FakeDocument extends Fake implements PdfDocument {
   Stream<PdfDocumentEvent> get events => const Stream.empty();
 }
 
-/// קונטרולר "מוכן" בלי PdfViewer אמיתי — [PdfTextSearcher] דורש מסמך חי
+/// קונטרולר "מוכן" בלי PdfViewer אמיתי — [PdfTextSearchSession] דורש מסמך חי
 /// בבנייה, ו-useDocument מוחזר null כדי שהחיפוש הפשוט לא יגע ב-pdfium.
 class _FakeReadyController extends PdfViewerController {
   @override
@@ -101,7 +101,7 @@ Future<void> main() async {
 
     final searchController = TextEditingController(text: 'אב');
     final focusNode = FocusNode();
-    final textSearcher = PdfTextSearcher(_FakeReadyController());
+    final textSearcher = PdfTextSearchSession(_FakeReadyController());
 
     addTearDown(settingsBloc.close);
     addTearDown(pdfBookBloc.close);
@@ -187,8 +187,8 @@ Future<void> main() async {
     );
     final searchController = TextEditingController(text: 'אב');
     final focusNode = FocusNode();
-    final firstSearcher = PdfTextSearcher(_FakeReadyController());
-    final secondSearcher = PdfTextSearcher(_FakeReadyController());
+    final firstSearcher = PdfTextSearchSession(_FakeReadyController());
+    final secondSearcher = PdfTextSearchSession(_FakeReadyController());
     final searchRepository = _ThrowingSearchRepository();
 
     addTearDown(settingsBloc.close);
@@ -198,7 +198,7 @@ Future<void> main() async {
     addTearDown(firstSearcher.dispose);
     addTearDown(secondSearcher.dispose);
 
-    Widget searchView(PdfTextSearcher searcher) => MaterialApp(
+    Widget searchView(PdfTextSearchSession searcher) => MaterialApp(
       home: MultiBlocProvider(
         providers: [
           BlocProvider<SettingsBloc>.value(value: settingsBloc),

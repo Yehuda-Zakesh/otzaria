@@ -151,6 +151,7 @@ class BookDetailsService {
       'נתיב הקובץ': bookNotFoundText,
       'תיקיית המקור': bookNotFoundText,
     };
+    if (book is ExternalLibraryBook) return details;
 
     final fileType = _resolveFileType(book, databaseBook);
     final inferredName = _inferFileName(
@@ -180,6 +181,7 @@ class BookDetailsService {
   }
 
   Future<ResolvedDbBookRecord?> _tryResolveDbBook(Book book) async {
+    if (book is ExternalLibraryBook) return null;
     try {
       return await BookDatabaseResolver.resolveBook(
         title: book.title,

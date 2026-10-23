@@ -1,12 +1,12 @@
 import 'dart:async';
+import 'dart:collection';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
+import 'package:otzaria/core/diagnostics/smart_text_render_stats.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:otzaria/tabs/models/tab.dart';
-import 'package:otzaria/text_book/utils/inline_section_markers.dart';
-import 'package:otzaria/book_common/utils/link_anchor_variants.dart';
 import 'package:otzaria/text_book/utils/link_preview_utils.dart';
 import 'package:otzaria/theme/app_fonts.dart';
 import 'package:otzaria/theme/app_surfaces.dart';
@@ -14,12 +14,15 @@ import 'package:otzaria/utils/file/markdown_to_otzaria.dart';
 import 'package:otzaria/utils/text/html_link_handler.dart';
 import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
 import 'package:otzaria/widgets/smart_text/exact_line_height.dart';
+import 'package:otzaria/widgets/smart_text/inline_html_document.dart';
+import 'package:otzaria/widgets/smart_text/inline_html_text.dart';
 import 'package:otzaria/widgets/misc/inline_link_targets.dart';
 import 'package:otzaria/widgets/smart_text/otzaria_widget_factory.dart';
 import 'package:otzaria/widgets/smart_text/raised_markers.dart';
 import 'package:otzaria/widgets/smart_text/render_settings.dart';
 import 'package:otzaria/widgets/smart_text/selection_fill_text.dart';
 import 'package:otzaria/widgets/smart_text/simple_inline_html.dart';
+import 'package:otzaria/widgets/smart_text/smart_text_css.dart';
 import 'package:otzaria/widgets/smart_text/text_renderer_service.dart';
 import 'package:otzaria/plugins/models/plugin_highlight.dart';
 import 'package:otzaria/plugins/services/plugin_highlight_registry.dart';
@@ -85,6 +88,10 @@ class SmartTextWidget extends StatelessWidget {
   final String? highlightBookType;
   final String? highlightBookSource;
 
+  /// בדיקות: מציג כל שורה ב-HtmlWidget, כייחוס למסלול הספאנים.
+  @visibleForTesting
+  static bool debugForceHtmlWidget = false;
+
   const SmartTextWidget({
     super.key,
     required this.text,
@@ -117,10 +124,13 @@ class SmartTextWidget extends StatelessWidget {
       listenables.add(utils.highlightPatternRevision);
     }
     if (bookId != null && sectionIndex != null) {
-      listenables.addAll([
-        PluginHighlightRegistry.instance,
-        PluginHighlightRevealService.instance,
-      ]);
+      listenables.add(
+        PluginHighlightRegistry.instance.sectionListenable(
+          bookId: bookId,
+          sectionIndex: sectionIndex,
+          bookUid: highlightBookUid,
+        ),
+      );
     }
     Widget buildResolved() => _buildResolved(
       context,
@@ -134,7 +144,9 @@ class SmartTextWidget extends StatelessWidget {
     );
     if (listenables.isEmpty) return buildResolved();
     return ListenableBuilder(
-      listenable: Listenable.merge(listenables),
+      listenable: listenables.length == 1
+          ? listenables.single
+          : Listenable.merge(listenables),
       builder: (context, _) => buildResolved(),
     );
   }
@@ -192,26 +204,29 @@ class SmartTextWidget extends StatelessWidget {
       ),
       height: settings.lineHeight,
     );
+    // נחוצים רק לשורה עם קישורים או ל-HtmlWidget, לא לשורה סטטית.
+    late final colorScheme = Theme.of(context).colorScheme;
+    late final linkColor = AppSurfaces.readerLink(colorScheme);
+    late final onTapUrl = _tapHandler(context);
+    late final onMiddleClickUrl = onOpenBook == null
+        ? null
+        : (String url) => HtmlLinkHandler.openLinkInBackground(context, url);
 
-    // הציור המורם נמדד בסגנון השורה — בכותרת זה סגנון הכותרת, כמו הגליף שבה.
-    final lineStyle =
-        SimpleInlineHtml.headingStyle(processedHtml, textStyle) ?? textStyle;
-
-    // מסלול מהיר: רוב השורות הן טקסט פשוט (או עם תגי עיצוב בסיסיים) —
-    // רינדור ישיר ב-Text.rich חוסך את מלוא עלות הפרסור של HtmlWidget.
-    // גם סימונים מורמים נתמכים כאן באופן בסיסי: SimpleInlineHtml מזהה את
-    // שני תגי הסימון, והשכבה נעטפת בדיוק כמו במסלול ה-HtmlWidget.
-    if (renderMode == RenderMode.column) {
-      final heading = SimpleInlineHtml.tryParseHeading(
-        processedHtml,
-        textStyle,
-      );
-      final simpleSpan =
-          heading?.span ?? SimpleInlineHtml.tryParse(processedHtml, textStyle);
-      if (simpleSpan != null) {
-        if (simpleSpan.toPlainText().isEmpty) {
+    // מסלול מהיר: שורה שכל ה-markup בה inline מוצגת ב-Text.rich, בספאנים זהים
+    // לאלה ש-HtmlWidget היה בונה — בלי עלות עץ הווידג'טים של fwfh.
+    if (renderMode == RenderMode.column && !debugForceHtmlWidget) {
+      final line = InlineHtmlDocument.parseLine(processedHtml, textStyle);
+      if (line != null) {
+        SmartTextRenderStats.fastLine(heading: line.isHeading);
+        final document = line.document;
+        if (document.plainText.isEmpty) {
           return const SizedBox.shrink();
         }
+        final lineStyle = line.style;
+        final staticSpan = document.staticSpan;
+        final textAlign = settings.justifyText
+            ? TextAlign.justify
+            : TextAlign.right;
         // רוחב מלא כמו <div> בלוק ב-HtmlWidget - אחרת מסכים שעוטפים שורה
         // ב-Center (הגבלת רוחב קריאה) ימרכזו שורות קצרות בטעות.
         return _withPluginFrames(
@@ -223,27 +238,46 @@ class SmartTextWidget extends StatelessWidget {
             SizedBox(
               key: widgetKey,
               width: double.infinity,
-              child: SelectionFillText.rich(
-                simpleSpan,
-                style: lineStyle,
-                strutStyle: exactLineHeightStrut(lineStyle, simpleSpan),
-                textAlign: settings.justifyText
-                    ? TextAlign.justify
-                    : TextAlign.right,
-              ),
+              child: staticSpan != null
+                  ? inlineSpanText(
+                      staticSpan,
+                      plainTextLength: document.plainText.length,
+                      style: lineStyle,
+                      strutStyle: line.strutStyle,
+                      textAlign: textAlign,
+                      splitLongLines: !line.isHeading,
+                    )
+                  : InlineHtmlText(
+                      document: document,
+                      style: lineStyle,
+                      strutStyle: line.strutStyle,
+                      textAlign: textAlign,
+                      // ב-HtmlWidget צבע הקישור עובר ב-CSS כ-hex בלי שקיפות.
+                      linkColor: Color(0xFF000000 | linkColor.toARGB32()),
+                      primaryColor: colorScheme.primary,
+                      splitLongLines: !line.isHeading,
+                      onTapUrl: onTapUrl,
+                      onAnchorHover: onAnchorHover,
+                      onAnchorHoverExit: onAnchorHoverExit,
+                      onMiddleClickUrl: onMiddleClickUrl,
+                    ),
             ),
           ),
         );
       }
     }
 
+    SmartTextRenderStats.fullLine(columnMode: renderMode == RenderMode.column);
+    // הציור המורם נמדד בסגנון השורה — בכותרת זה סגנון הכותרת, כמו הגליף שבה.
+    final lineStyle =
+        SimpleInlineHtml.headingStyle(processedHtml, textStyle) ?? textStyle;
+
     // סמן-מספר וטווח-ציטוט נשארים בשורה בצבע הקישור; fwfh לא מכיר
     // inherit ולכן הערך מפורש. צבעי אותיות המפרשים המורמות נפתרים ב-wrap.
-    final colorScheme = Theme.of(context).colorScheme;
     String toCssHex(Color color) =>
         '#${(color.toARGB32() & 0x00FFFFFF).toRadixString(16).padLeft(6, '0')}';
-    final linkColor = AppSurfaces.readerLink(colorScheme);
     final anchorLinkColorCss = toCssHex(linkColor);
+    final headingColorCss = toCssHex(colorScheme.onSurfaceVariant);
     final markdownSurfaceCss = toCssHex(colorScheme.surfaceContainerHighest);
     final markdownBorderCss = toCssHex(colorScheme.outlineVariant);
     final hasMarkdownBlock = processedHtml.contains(kMarkdownBlockClass);
@@ -257,14 +291,9 @@ class SmartTextWidget extends StatelessWidget {
         _SmartTextCallbacks(
           onAnchorHover: onAnchorHover,
           onAnchorHoverExit: onAnchorHoverExit,
-          onMiddleClickUrl: onOpenBook == null
-              ? null
-              : (url) => HtmlLinkHandler.openLinkInBackground(context, url),
+          onMiddleClickUrl: onMiddleClickUrl,
           child: HtmlWidget(
-            TextRendererService.wrapWithRtlDiv(
-              processedHtml,
-              justifyText: settings.justifyText,
-            ),
+            _wrapWithRtlDivCached(processedHtml, settings.justifyText),
             key: widgetKey,
             // מעל 10K תווים fwfh בונה ב-isolate ומציג קודם גובה 0 — שורת רשימה
             // קופצת אחרי פריים ו-jumpTo מחטיא.
@@ -283,97 +312,19 @@ class SmartTextWidget extends StatelessWidget {
             ],
             factoryBuilder: _SmartTextWidgetFactory.new,
             customStylesBuilder: (dom.Element element) {
-              final headingWeight = AppFonts.headingFontWeightOverride(
+              final elementCss = smartTextElementCss(
+                element.localName,
+                element.classes,
+                hasHref: element.attributes.containsKey('href'),
+                fontFamily: fontFamily,
+                linkColorCss: anchorLinkColorCss,
+                headingColorCss: headingColorCss,
+              );
+              if (elementCss != null) return elementCss;
+              final headingCss = smartTextHeadingCss(
                 element.localName,
                 fontFamily,
               );
-              // כותרת שאיבדה את ההדגשה מקבלת גודל שמבדיל אותה מהטקסט.
-              final headingSize = AppFonts.headingFontSizeOverride(
-                element.localName,
-                fontFamily,
-              );
-              final headingCss = <String, String>{
-                'font-weight': ?headingWeight,
-                'font-size': ?headingSize,
-              };
-              if (element.localName == 'span' &&
-                  element.classes.contains('subscript-text')) {
-                return {'font-size': 'smaller'};
-              }
-              // סימונים מורמים: הגליפים נשארים בשורה — תופסים את המקום ואת הסדר
-              // הנכון, וזמינים לבחירה ולהעתקה — אבל שקופים, ו-RaisedMarkerOverlay
-              // מצייר אותם מורמים מעל מקומם. `position`/`top` אינם נתמכים ב-fwfh
-              // כלל (היו no-op גם קודם), ולכן הרמה בפריסה אינה אפשרית כאן.
-              if (element.localName == 'span' &&
-                  element.classes.contains(kFootnoteMarkerClass)) {
-                return {
-                  'font-size': '${kFootnoteMarkerScale}em',
-                  'font-style': 'italic',
-                  'color': 'transparent',
-                };
-              }
-              if (element.localName == 'span' &&
-                  element.classes.contains(kRaisedSupClass)) {
-                return {
-                  'font-size': '${kHtmlSmallerFontScale}em',
-                  'color': 'transparent',
-                };
-              }
-              // סימון הערה מוטמעת לחיץ: כמו מרקר הערה — הגליף שקוף ומורם בשכבה;
-              // ה-recognizer והריחוף נשארים על הספאן, והשכבה מפנה אליו לחיצות.
-              if (element.localName == 'a' &&
-                  element.classes.contains('book-note-marker')) {
-                return {
-                  'font-size': '${kFootnoteMarkerScale}em',
-                  'font-style': 'italic',
-                  'color': 'transparent',
-                  'text-decoration': 'none',
-                };
-              }
-              // סמן-מספר מודפס בגוף הספר, למשל (9): נשאר בגודלו ובמקומו — רק
-              // נצבע בגוון הנושא כדי לרמז שאפשר לרחף עליו.
-              if (element.localName == 'a' &&
-                  element.classes.contains('numbered-note-marker')) {
-                return {'color': anchorLinkColorCss, 'text-decoration': 'none'};
-              }
-              // סמן-אות של מפרש (עוגן-נקודה): הגליף שקוף — הווריאנט הטיפוגרפי
-              // נשאר עליו כדי שרוחב המקום בשורה יתאים לציור המורם, שנושא את
-              // הצבע, הקו התחתון והרקע הפעיל (ראו RaisedMarkerOverlay).
-              if ((element.localName == 'span' || element.localName == 'a') &&
-                  element.classes.contains('link-anchor')) {
-                return {
-                  'font-size': '${kLinkAnchorMarkerScale}em',
-                  'white-space': 'nowrap',
-                  'color': 'transparent',
-                  'text-decoration': 'none',
-                  ...linkAnchorVariantCss(
-                    linkAnchorVariantFromClasses(element.classes),
-                  ),
-                  'text-decoration-color': 'transparent',
-                };
-              }
-              // טווח-ציטוט (לינקר): צבע הקישור בגופן הטקסט הסובב, בלי קו תחתון.
-              // בלי וריאנט טיפוגרפי — הוא שייך לסמני-האות של המפרשים בלבד.
-              if ((element.localName == 'span' || element.localName == 'a') &&
-                  element.classes.contains('link-anchor-range')) {
-                return <String, String>{
-                  'text-decoration': 'none',
-                  'color': anchorLinkColorCss,
-                };
-              }
-              if (element.localName == 'h3' &&
-                  element.classes.contains(kSectionHeadingClass)) {
-                return {
-                  ...headingCss,
-                  'color': toCssHex(colorScheme.onSurfaceVariant),
-                  // הכותרת צמודה לשורה שהיא פותחת, שמוצגת מיד מתחתיה.
-                  'margin-bottom': '0',
-                };
-              }
-              if (element.localName == 'a' &&
-                  element.attributes.containsKey('href')) {
-                return {'color': anchorLinkColorCss};
-              }
               if (!hasMarkdownBlock) {
                 return headingCss.isEmpty ? null : headingCss;
               }
@@ -388,47 +339,52 @@ class SmartTextWidget extends StatelessWidget {
               }
               return markdownCss;
             },
-            onTapUrl:
-                (onOpenBook != null || onNoteTap != null || onAnchorTap != null)
-                ? (url) async {
-                    final touchPosition = touchLinkTapPosition();
-                    if (touchPosition != null &&
-                        onTouchPreview != null &&
-                        isTouchPreviewUrl(url)) {
-                      onTouchPreview!(url, touchPosition);
-                      return true;
-                    }
-                    // עוגן-מילה — תצוגה מקדימה של המפרש, לפני שאר הקישורים.
-                    if (url.startsWith('otzaria://anchor') &&
-                        onAnchorTap != null) {
-                      onAnchorTap!(url);
-                      return true;
-                    }
-                    // סמן-מספר של הערה — הפעולה שלו היא ריחוף בלבד.
-                    if (url.startsWith('otzaria://note-marker')) return true;
-                    // סימון הערה אישית inline — נטפל לפני שאר הקישורים.
-                    if (url.startsWith('otzaria://note')) {
-                      final lineIndex = int.tryParse(
-                        Uri.parse(url).queryParameters['line'] ?? '',
-                      );
-                      if (lineIndex != null) {
-                        onNoteTap?.call(lineIndex);
-                      }
-                      return true;
-                    }
-                    if (url.startsWith('otzaria://book-note')) return true;
-                    if (onOpenBook == null) return false;
-                    return await HtmlLinkHandler.handleLink(
-                      context,
-                      url,
-                      (tab) => onOpenBook!(tab),
-                    );
-                  }
-                : null,
+            onTapUrl: onTapUrl,
           ),
         ),
       ),
     );
+  }
+
+  /// הטיפול בלחיצה על קישור, משותף ל-HtmlWidget ולמסלול הספאנים. null — אין
+  /// callback, והקישור נפתח בדפדפן.
+  Future<bool> Function(String url)? _tapHandler(BuildContext context) {
+    if (onOpenBook == null && onNoteTap == null && onAnchorTap == null) {
+      return null;
+    }
+    return (url) async {
+      final touchPosition = touchLinkTapPosition();
+      if (touchPosition != null &&
+          onTouchPreview != null &&
+          isTouchPreviewUrl(url)) {
+        onTouchPreview!(url, touchPosition);
+        return true;
+      }
+      // עוגן-מילה — תצוגה מקדימה של המפרש, לפני שאר הקישורים.
+      if (url.startsWith('otzaria://anchor') && onAnchorTap != null) {
+        onAnchorTap!(url);
+        return true;
+      }
+      // סמן-מספר של הערה — הפעולה שלו היא ריחוף בלבד.
+      if (url.startsWith('otzaria://note-marker')) return true;
+      // סימון הערה אישית inline — נטפל לפני שאר הקישורים.
+      if (url.startsWith('otzaria://note')) {
+        final lineIndex = int.tryParse(
+          Uri.parse(url).queryParameters['line'] ?? '',
+        );
+        if (lineIndex != null) {
+          onNoteTap?.call(lineIndex);
+        }
+        return true;
+      }
+      if (url.startsWith('otzaria://book-note')) return true;
+      if (onOpenBook == null) return false;
+      return await HtmlLinkHandler.handleLink(
+        context,
+        url,
+        (tab) => onOpenBook!(tab),
+      );
+    };
   }
 
   /// עוטף את ווידג'ט הטקסט בשכבת הציור של הסימונים המורמים, אם יש כאלה.
@@ -460,6 +416,33 @@ class SmartTextWidget extends StatelessWidget {
     }
     return PluginHighlightFrameOverlay(ranges: ranges, child: child);
   }
+}
+
+/// ה-HTML העטוף נשמר לפי ה-HTML המעובד (שמוחזר ממטמון processText), כדי
+/// ש-HtmlWidget יקבל בכל build את אותו מופע ולא ישווה מחרוזת חדשה תו אחר תו.
+final LinkedHashMap<(String, bool), String> _rtlDivCache = LinkedHashMap();
+int _rtlDivCacheChars = 0;
+const int _rtlDivCacheMaxChars = 2 * 1024 * 1024;
+
+String _wrapWithRtlDivCached(String html, bool justifyText) {
+  final key = (html, justifyText);
+  final cached = _rtlDivCache.remove(key);
+  if (cached != null) {
+    _rtlDivCache[key] = cached;
+    return cached;
+  }
+  final wrapped = TextRendererService.wrapWithRtlDiv(
+    html,
+    justifyText: justifyText,
+  );
+  if (html.length > _rtlDivCacheMaxChars ~/ 4) return wrapped;
+  _rtlDivCache[key] = wrapped;
+  _rtlDivCacheChars += wrapped.length;
+  while (_rtlDivCacheChars > _rtlDivCacheMaxChars) {
+    final oldest = _rtlDivCache.keys.first;
+    _rtlDivCacheChars -= _rtlDivCache.remove(oldest)!.length;
+  }
+  return wrapped;
 }
 
 Map<String, String>? _markdownElementCss(
@@ -697,6 +680,21 @@ class _SmartTextCallbacks extends InheritedWidget {
 
   @override
   bool updateShouldNotify(_SmartTextCallbacks oldWidget) => false;
+
+  @override
+  InheritedElement createElement() => _TimedCallbacksElement(this);
+}
+
+/// מודד את בניית תת-העץ של HtmlWidget: פרסור, עץ fwfh וספאנים, בלי פריסה.
+class _TimedCallbacksElement extends InheritedElement {
+  _TimedCallbacksElement(super.widget);
+
+  @override
+  void performRebuild() {
+    final start = SmartTextRenderStats.startMicros();
+    super.performRebuild();
+    SmartTextRenderStats.fwfhBuild(start);
+  }
 }
 
 /// עיגון מחדש של הדגשות התוספים ותיעוד תוכן הקטע (#828) לשורה מוצגת.

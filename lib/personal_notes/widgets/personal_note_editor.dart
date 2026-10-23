@@ -400,6 +400,14 @@ class _PersonalNoteEditorBodyState extends State<PersonalNoteEditorBody> {
                       menuBuilder: (_, _) => _buildEditMenu(),
                       child: Listener(
                         onPointerDown: (event) => _lastPointerKind = event.kind,
+                        // Quill לא מבקש פוקוס בגרירת בחירה בעכבר, ובלעדיו
+                        // מחיקה והעתקה של הבחירה לא מגיעות לעורך.
+                        onPointerUp: (event) {
+                          if (event.kind == PointerDeviceKind.mouse &&
+                              !widget.focusNode.hasFocus) {
+                            widget.focusNode.requestFocus();
+                          }
+                        },
                         child: quill.QuillEditor(
                           controller: widget.controller.quillController,
                           focusNode: widget.focusNode,

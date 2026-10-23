@@ -671,6 +671,7 @@ const Map<String, PluginApiMethod> pluginApiMethods = {
     documented: false,
   ),
   'plugin.backgroundDone': PluginApiMethod(null, '0.9.97'),
+  'plugin.setRestoreState': PluginApiMethod(null, '0.9.99'),
 };
 
 final Map<String, String> pluginApiMethodPermissions = Map.unmodifiable({

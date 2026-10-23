@@ -279,15 +279,6 @@ class UpdateCopyHeaderFormat extends SettingsEvent {
   List<Object?> get props => [copyHeaderFormat];
 }
 
-class UpdateIsFullscreen extends SettingsEvent {
-  final bool isFullscreen;
-
-  const UpdateIsFullscreen(this.isFullscreen);
-
-  @override
-  List<Object?> get props => [isFullscreen];
-}
-
 class UpdateLibraryViewMode extends SettingsEvent {
   final String libraryViewMode;
 

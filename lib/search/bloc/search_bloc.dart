@@ -15,7 +15,7 @@ import 'package:otzaria/library/models/library.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/search/search_defaults.dart';
 import 'package:otzaria/search/search_engine_gateway.dart'
-    show LexicalSearchRequestIds, isSearchCancelledError;
+    show LexicalSearchRequestIds, isSearchCancelledError, SearchCountProgress;
 import 'package:otzaria/search/search_repository.dart';
 import 'package:otzaria/search/search_query_builder.dart';
 import 'package:otzaria/search/utils/facet_helper.dart';
@@ -162,6 +162,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
           totalResults: 0,
           totalGroups: null,
           isLoading: false,
+          isCounting: false,
           facetCounts: const {},
         ),
       );
@@ -177,6 +178,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
           totalResults: 0,
           totalGroups: null,
           isLoading: false,
+          isCounting: false,
           facetCounts: const {},
         ),
       );
@@ -203,7 +205,11 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
       state.copyWith(
         searchQuery: query,
         negativeQuery: negativeQuery,
+        results: [],
+        totalResults: 0,
+        totalGroups: null,
         isLoading: true,
+        isCounting: true,
         facetCounts: shouldPreserveFacetCounts ? state.facetCounts : const {},
         // איפוס שגיאה קודמת בתחילת חיפוש חדש, אחרת הודעת שגיאה ישנה הייתה
         // נשארת ב-state ומבלבלת את המשתמש במהלך החיפוש החדש.
@@ -275,7 +281,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
           ),
           cancelRequestId: engineRequestId,
         ),
-        chunkSize: 50, // 50 תוצאות בכל chunk
+        chunkSize: 50,
       );
 
       final allResults = <SearchResult>[];
@@ -305,6 +311,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
           emit(
             state.copyWith(
               totalResults: update.totalCount,
+              isCounting: update is SearchCountProgress,
               // מספר הקבוצות כשהאיחוד פעיל; null בחיפוש שטוח — ואז הרשימה
               // נמדדת ב-totalResults כרגיל.
               totalGroups: update.groupCount,
@@ -356,12 +363,13 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
               : state.totalResults,
           totalGroups: state.totalGroups == null ? null : reconciledTotal,
           isLoading: false,
+          isCounting: false,
         ),
       );
     } catch (e, stackTrace) {
       if (requestId != _searchRequestId) return;
       if (isSearchCancelledError(e)) {
-        emit(state.copyWith(isLoading: false));
+        emit(state.copyWith(isLoading: false, isCounting: false));
         return;
       }
       // שגיאת החיפוש מוצגת בהודעה וב-state כדי שלא תיראה כ"0 תוצאות".
@@ -383,6 +391,7 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
           totalResults: 0,
           totalGroups: null,
           isLoading: false,
+          isCounting: false,
           errorMessage: 'אירעה שגיאה בעת החיפוש',
         ),
       );
@@ -1195,17 +1204,18 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
               ? combined.length
               : state.totalGroups,
           isLoading: false,
+          isCounting: false,
         ),
       );
     } catch (e, stackTrace) {
       if (requestId != _searchRequestId) return;
       if (isSearchCancelledError(e)) {
-        emit(state.copyWith(isLoading: false));
+        emit(state.copyWith(isLoading: false, isCounting: false));
         return;
       }
       debugPrint('❌ Load more results failed: $e\n$stackTrace');
       UiSnack.showError(LibraryMessages.loadMoreResultsError);
-      emit(state.copyWith(isLoading: false));
+      emit(state.copyWith(isLoading: false, isCounting: false));
     }
   }
 

@@ -61,7 +61,7 @@ void main() {
           isPinned: true,
           dedupeKey: 'זמני',
           blocOverride: _StateBloc(current),
-        );
+        )..historySlot = 'place-$phase';
         addTearDown(tab.dispose);
         final clone = OpenedTab.from(tab) as TextBookTab;
         addTearDown(clone.dispose);
@@ -70,6 +70,7 @@ void main() {
         addTearDown(restored.dispose);
 
         for (final copy in [clone, restored]) {
+          expect(copy.historySlot, 'place-$phase');
           expect(copy.searchText, loaded ? 'מעודכן' : 'מקור');
           expect(copy.searchMode, SearchMode.advanced);
           expect(copy.searchDistance, loaded ? 4 : 2);

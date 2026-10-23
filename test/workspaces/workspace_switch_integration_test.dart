@@ -20,6 +20,7 @@ import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
+import 'package:otzaria/plugins/services/plugin_restore_state_store.dart';
 import 'package:otzaria/plugins/services/plugin_unsaved_changes_registry.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
 import 'package:otzaria/workspaces/bloc/workspace_event.dart';
@@ -148,6 +149,60 @@ void main() {
         (await repository.loadWorkspaces()).$1.first.tabs.single.title,
         'אחרי ביטול',
       );
+    },
+  );
+
+  test(
+    'SQLite: מצב השחזור של תוסף עובר הלוך-חזור בין שולחנות, גם אחרי שחרור הטאב שעזב',
+    () async {
+      final store = PluginRestoreStateStore.instance;
+      final first = Workspace(name: 'א', tabs: []);
+      final second = Workspace(name: 'ב', tabs: []);
+      await repository.replaceWorkspaces([first, second], first.id);
+      List<OpenedTab>? opened;
+      final bloc = WorkspaceBloc(
+        repository: repository,
+        onWorkspaceTabsChanged: (tabs, _, _) async => opened = tabs,
+      )..add(LoadWorkspaces());
+      addTearDown(bloc.close);
+      await bloc.stream.firstWhere((s) => !s.isLoading);
+
+      final live = ToolTab(toolId: 'com.example.plugin', title: 'תוסף');
+      store.set(
+        (pluginId: live.toolId, instanceId: live.instanceId),
+        {
+          'screen': 'list',
+        },
+      );
+      addTearDown(() => store.removeInstanceId(live.instanceId));
+
+      var switched = bloc.stream.firstWhere(
+        (s) => s.activeWorkspaceId == second.id,
+      );
+      bloc.add(
+        SwitchToWorkspace(
+          targetWorkspaceId: second.id,
+          currentTabsToSave: [live],
+          currentTabIndexToSave: 0,
+        ),
+      );
+      await switched;
+      switched = bloc.stream.firstWhere((s) => s.activeWorkspaceId == first.id);
+      bloc.add(
+        SwitchToWorkspace(
+          targetWorkspaceId: first.id,
+          currentTabsToSave: const [],
+          currentTabIndexToSave: 0,
+        ),
+      );
+      await switched;
+      // ה-dispose המושהה (350ms) של הטאב שעזב מגיע אחרי שהעותק כבר נפתח.
+      live.dispose();
+
+      final back = opened!.single as ToolTab;
+      final backKey = (pluginId: back.toolId, instanceId: back.instanceId);
+      addTearDown(() => store.remove(backKey));
+      expect(store.stateOf(backKey), {'screen': 'list'});
     },
   );
 

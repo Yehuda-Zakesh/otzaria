@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/plugins/services/plugin_restore_state_store.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
 
@@ -157,6 +158,55 @@ void main() {
         'toolId': 'builtin.gematria',
       });
       expect(restored.title, 'גימטריה');
+    });
+  });
+
+  group('מצב שחזור של תוסף', () {
+    final store = PluginRestoreStateStore.instance;
+
+    test('נשמר ב-JSON ונזרע מחדש בטעינה', () {
+      final tab = ToolTab(
+        toolId: 'com.example.plugin',
+        title: 'תוסף',
+        instanceId: 'i-restore',
+      );
+      final key = (pluginId: 'com.example.plugin', instanceId: 'i-restore');
+      store.set(key, {'screen': 'list'});
+      final json = tab.toJson();
+      expect(json['pluginRestoreState'], '{"screen":"list"}');
+
+      store.remove(key);
+      final restored = ToolTab.fromJson(json);
+      expect(restored.instanceId, 'i-restore');
+      expect(store.stateOf(key), {'screen': 'list'});
+
+      restored.dispose();
+      expect(store.has(key), isFalse);
+    });
+
+    // שולחנות עבודה ושחזור טאב שנסגר עוברים דרך clone, שמייצר מזהה חדש.
+    test('clone מעביר את המצב למזהה החדש, ושחרור המקור אינו מוחק אותו', () {
+      final tab = ToolTab(toolId: 'com.example.plugin', title: 'תוסף');
+      store.set(
+        (pluginId: tab.toolId, instanceId: tab.instanceId),
+        {
+          'screen': 'list',
+        },
+      );
+
+      final copy = tab.clone() as ToolTab;
+      tab.dispose();
+
+      final copyKey = (pluginId: copy.toolId, instanceId: copy.instanceId);
+      expect(store.stateOf(copyKey), {'screen': 'list'});
+      expect(copy.toJson()['pluginRestoreState'], '{"screen":"list"}');
+      copy.dispose();
+      expect(store.has(copyKey), isFalse);
+    });
+
+    test('בלי מצב — אין שדה ב-JSON', () {
+      final tab = ToolTab(toolId: 'com.example.plugin', title: 'תוסף');
+      expect(tab.toJson().containsKey('pluginRestoreState'), isFalse);
     });
   });
 }

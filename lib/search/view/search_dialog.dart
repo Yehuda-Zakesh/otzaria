@@ -150,6 +150,9 @@ class SearchDialog extends StatefulWidget {
 }
 
 class _SearchDialogState extends State<SearchDialog> {
+  /// מאגר הפוקוס של החלון; נשמר כאן כי ב-dispose אסור לחפש ב-context.
+  late final FocusRepository _focus;
+
   late SearchingTab _searchTab;
   FocusRestorer? _focusRestorer;
   bool _indexInProgressWarningDismissed = false;
@@ -234,6 +237,7 @@ class _SearchDialogState extends State<SearchDialog> {
   @override
   void initState() {
     super.initState();
+    _focus = FocusRepository.of(context);
     _pluginSearchDialogRegistry =
         widget.pluginSearchDialogRegistry ??
         PluginSearchDialogRegistry.instance;
@@ -330,7 +334,7 @@ class _SearchDialogState extends State<SearchDialog> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _searchTab.searchFieldFocusNode.requestFocus();
-        _focusRestorer = FocusRepository().registerActiveRestorer(
+        _focusRestorer = _focus.registerActiveRestorer(
           restore: () {
             if (mounted) _searchTab.searchFieldFocusNode.requestFocus();
           },
@@ -357,6 +361,8 @@ class _SearchDialogState extends State<SearchDialog> {
     final isBuilding = indexingState is IndexingInProgress;
     final processed = indexingState.booksProcessed ?? 0;
     final total = indexingState.totalBooks ?? 0;
+    // אינדקס בסכמה ישנה אינו נפתח, ואינדוקס רגיל נדחה עליו עד שיאופס.
+    final rebuildRequired = TantivyDataProvider.instance.requiresManualReindex;
     return CenteredScrollableState(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
@@ -372,6 +378,8 @@ class _SearchDialogState extends State<SearchDialog> {
             Text(
               isBuilding
                   ? context.settingsText('אינדקס החיפוש בבנייה')
+                  : rebuildRequired
+                  ? context.settingsText('אינדקס החיפוש דורש בנייה מחדש')
                   : context.settingsText('אינדקס החיפוש לא קיים'),
               style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
@@ -381,6 +389,10 @@ class _SearchDialogState extends State<SearchDialog> {
               isBuilding
                   ? context.settingsText(
                       'החיפוש יתאפשר כשבניית האינדקס תסתיים. ניתן להמשיך לעיין בספרים בינתיים.',
+                    )
+                  : rebuildRequired
+                  ? context.settingsText(
+                      'האינדקס הקיים נבנה בגרסה קודמת של מנוע החיפוש, ויש לבנות אותו מחדש כדי לחפש. הבנייה רצה ברקע, וניתן להמשיך לעיין בספרים בינתיים.',
                     )
                   : context.settingsText(
                       'כדי לחפש בתוכן הספרים יש לבנות תחילה את אינדקס החיפוש. הבנייה רצה ברקע, וניתן להמשיך לעיין בספרים בינתיים.',
@@ -420,14 +432,20 @@ class _SearchDialogState extends State<SearchDialog> {
                     : SizedBox(
                         width: double.infinity,
                         child: ActionButton.recommended(
-                          text: context.settingsText('בנה אינדקס'),
+                          text: rebuildRequired
+                              ? context.settingsText('אפס ובנה מחדש')
+                              : context.settingsText('בנה אינדקס'),
                           icon: FluentIcons.play_24_regular,
                           onPressed: () async {
                             final indexingBloc = context.read<IndexingBloc>();
                             // העץ המלא: העץ של LibraryBloc מסונן מהסתרות.
                             final library =
                                 await DataRepository.instance.library;
-                            indexingBloc.add(StartIndexing(library));
+                            indexingBloc.add(
+                              rebuildRequired
+                                  ? ResetAndIndex(library)
+                                  : StartIndexing(library),
+                            );
                           },
                         ),
                       ),
@@ -826,7 +844,7 @@ class _SearchDialogState extends State<SearchDialog> {
   @override
   void dispose() {
     final restorer = _focusRestorer;
-    if (restorer != null) FocusRepository().unregisterActiveRestorer(restorer);
+    if (restorer != null) _focus.unregisterActiveRestorer(restorer);
     _searchTab.queryController.removeListener(_queryListener);
     _advancedControlsHasFocus.dispose();
     _semanticBloc?.close();
@@ -1340,6 +1358,8 @@ class _SearchDialogState extends State<SearchDialog> {
             pluginId,
             topic: 'search.requested',
             payload: payload,
+            viewId: View.of(context).viewId,
+            windowKeys: AppWindowKeys.of(context),
           );
         };
     for (final target in targets) {

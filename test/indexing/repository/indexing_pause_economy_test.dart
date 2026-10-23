@@ -96,6 +96,16 @@ void main() {
 
 class _PauseProbeProvider implements TantivyDataProvider {
   final engineInstance = _EconomyRecordingEngine();
+  bool _economy = false;
+
+  @override
+  bool get isEconomyIndexing => _economy;
+
+  @override
+  Future<void> setEconomyIndexing(bool enabled) async {
+    await engineInstance.setEconomyIndexing(enabled: enabled);
+    _economy = enabled;
+  }
 
   @override
   final ValueNotifier<bool> isIndexing = ValueNotifier<bool>(false);

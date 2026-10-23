@@ -5,6 +5,7 @@ import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:otzaria/app_scope/external_activation_service.dart';
 import 'package:otzaria/attached_libraries/models/attached_library.dart';
 import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/models/book_source.dart';
@@ -58,6 +59,7 @@ import 'package:otzaria/work_status/work_status_cubit.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
 import 'package:otzaria/workspaces/bloc/workspace_event.dart';
 import 'package:otzaria/workspaces/bloc/workspace_state.dart';
+import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:window_manager/window_manager.dart' show TitleBarStyle;
 
@@ -266,6 +268,12 @@ void main() {
                   BlocProvider<NavigationBloc>.value(value: navigation),
                   BlocProvider<WorkStatusCubit>.value(value: workStatus),
                   BlocProvider<SettingsBloc>.value(value: settings),
+                  BlocProvider<WindowFullscreenCubit>(
+                    create: (_) => WindowFullscreenCubit(
+                      initial: false,
+                      persist: (_) async {},
+                    ),
+                  ),
                   BlocProvider<IndexingBloc>.value(value: indexing),
                   BlocProvider<HistoryBloc>.value(value: history),
                   BlocProvider<LibraryBloc>.value(value: library),
@@ -283,6 +291,10 @@ void main() {
                       ),
                       ChangeNotifierProvider<ShamorZachorProgressProvider>(
                         create: (_) => _ShamorProgress(),
+                      ),
+                      Provider<ExternalActivationService>(
+                        create: (_) => ExternalActivationService(),
+                        dispose: (_, service) => service.dispose(),
                       ),
                     ],
                     child: const MaterialApp(home: MainWindowScreen()),
@@ -387,6 +399,8 @@ class _FakeWindow implements AppWindowController, AppWindowGeometry {
   Future<Rect> getBounds() async => Rect.zero;
   @override
   Future<bool> isFullScreen() async => false;
+  @override
+  Listenable get stateChanges => Listenable.merge(const []);
   @override
   Future<bool> isMaximized() async => false;
   @override

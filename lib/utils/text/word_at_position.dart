@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
@@ -7,10 +9,14 @@ import 'package:flutter/widgets.dart';
 /// הרלוונטי, ואז שולף את גבולות המילה דרך [RenderParagraph.getWordBoundary].
 ///
 /// מחזיר null אם לא נמצאה מילה (לחיצה על אזור ריק, תמונה, וכו').
-String? wordAtGlobalPosition(Offset globalPosition) {
+///
+/// [view] — התצוגה שהנקודה שייכת לה (מיקום גלובלי הוא יחסי לתצוגה); בלעדיה
+/// נבדקות כל התצוגות.
+String? wordAtGlobalPosition(Offset globalPosition, {ui.FlutterView? view}) {
   final hitTestResult = BoxHitTestResult();
-  for (final view in WidgetsBinding.instance.renderViews) {
-    view.hitTest(hitTestResult, position: globalPosition);
+  for (final renderView in WidgetsBinding.instance.renderViews) {
+    if (view != null && renderView.flutterView != view) continue;
+    renderView.hitTest(hitTestResult, position: globalPosition);
   }
 
   for (final entry in hitTestResult.path) {

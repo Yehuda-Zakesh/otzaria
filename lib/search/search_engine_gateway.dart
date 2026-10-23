@@ -286,6 +286,12 @@ abstract final class _UserRegexCancellations {
   }
 }
 
+/// מספר ההתאמות שנמצאו עד כה בסריקה, לפני שהספירה הסופית זמינה.
+class SearchCountProgress extends SearchStreamUpdate {
+  const SearchCountProgress({required int foundSoFar, required super.truncated})
+    : super(totalCount: foundSoFar, results: const []);
+}
+
 /// ממשק קטן וניתן לבדיקה מעל ה-API של `search_engine`.
 abstract class SearchEngineOperations {
   Future<List<SearchResult>> searchExact(SearchEngineRequest request);
@@ -1300,9 +1306,8 @@ class SearchEngineGateway {
           truncated: update.truncated,
         );
       } else if (!update.done && update.progressTotal > 0) {
-        yield SearchStreamUpdate(
-          totalCount: update.foundSoFar,
-          results: const [],
+        yield SearchCountProgress(
+          foundSoFar: update.foundSoFar,
           truncated: update.truncated,
         );
       }

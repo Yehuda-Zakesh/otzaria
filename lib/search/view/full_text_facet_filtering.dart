@@ -284,6 +284,7 @@ class _SearchFacetFilteringState extends State<SearchFacetFiltering>
           buildWhen: (p, c) =>
               p.facetCounts != c.facetCounts ||
               p.currentFacets != c.currentFacets ||
+              p.isCounting != c.isCounting ||
               (p.isLoading && p.results.isEmpty) !=
                   (c.isLoading && c.results.isEmpty) ||
               _filterQuery.text != _treeFilterQuery,
@@ -323,6 +324,9 @@ class _SearchFacetFilteringState extends State<SearchFacetFiltering>
                     FacetHelper.incrementFacet(counts, '/', summary.otherBooks);
                     extraRoots = _extraRootsFor(summary);
                   }
+                }
+                if (searchState.isCounting && counts.isEmpty) {
+                  return const Center(child: CircularProgressIndicator());
                 }
                 // הגדרת "תוצאות מ<מקור> קודמות/מאוחרות" קובעת גם את מיקום
                 // הדלי החיצוני בעץ — בראשו או בסופו (ברירת המחדל).

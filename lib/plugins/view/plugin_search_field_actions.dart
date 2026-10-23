@@ -1,5 +1,6 @@
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/plugins/models/plugin_search_field_action.dart';
 import 'package:otzaria/plugins/services/plugin_search_field_actions_registry.dart';
 import 'package:otzaria/plugins/services/plugin_search_field_session_service.dart';
@@ -146,6 +147,8 @@ class _PluginSearchFieldActionsState extends State<PluginSearchFieldActions>
         visualDensity: VisualDensity.compact,
         onPressed: () => _sessions.press(
           binding: this,
+          viewId: View.of(context).viewId,
+          windowKeys: AppWindowKeys.of(context),
           pluginId: pluginId,
           actionId: action.id,
         ),

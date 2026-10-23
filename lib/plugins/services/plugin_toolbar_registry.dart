@@ -17,6 +17,10 @@ class PluginToolbarRegistry extends PluginItemRegistry<PluginToolbarItem> {
   PluginToolbarRegistry._()
     : super(evaluator: PluginConditionEvaluator.instance);
 
+  /// רישום של חלון אחד, עם אותם תנאי תצוגה כמו הרישום המשותף.
+  PluginToolbarRegistry.forWindow()
+    : super(evaluator: PluginConditionEvaluator.instance);
+
   @visibleForTesting
   PluginToolbarRegistry.forTesting({super.evaluator});
 

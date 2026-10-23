@@ -2,12 +2,19 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/core/windowing/app_window_controller.dart';
+import 'package:otzaria/core/windowing/app_window_id.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
+import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/widgets/misc/middle_click_autoscroll.dart';
 import 'package:otzaria/widgets/misc/smooth_wheel_scroll.dart';
 
 const _itemHeight = 40.0;
 const _itemCount = 500;
 const _viewportHeight = 600.0;
+
+class _FakeWindow extends Fake
+    implements AppWindowController, AppWindowGeometry {}
 
 void main() {
   testWidgets('החלפות רבות של רשימות שומרות זיהוי של הרשימה המחוברת בלבד', (
@@ -180,6 +187,71 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('גרירת הגלגל אינה גוררת במקביל את התוכן ב-scale recognizer', (
+    tester,
+  ) async {
+    var panUpdates = 0;
+    var scrollDistance = 0.0;
+    await tester.pumpWidget(
+      buildApp(
+        child: Listener(
+          onPointerSignal: (event) {
+            if (event is PointerScrollEvent) {
+              scrollDistance += event.scrollDelta.dy;
+            }
+          },
+          child: GestureDetector(
+            onScaleUpdate: (_) => panUpdates++,
+            behavior: HitTestBehavior.opaque,
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+    final center = tester.getCenter(find.byType(GestureDetector).last);
+    final gesture = await middleClick(tester, center);
+    await gesture.moveTo(center + const Offset(0, 120));
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 16));
+    await gesture.up();
+
+    expect(scrollDistance, greaterThan(0));
+    expect(panUpdates, 0);
+  });
+
+  testWidgets('ילד שכבר תפס את המחווה שומר את לחיצת הגלגל לעצמו', (
+    tester,
+  ) async {
+    var scrollEvents = 0;
+    await tester.pumpWidget(
+      buildApp(
+        child: Listener(
+          onPointerSignal: (_) => scrollEvents++,
+          child: RawGestureDetector(
+            behavior: HitTestBehavior.opaque,
+            gestures: {
+              EagerGestureRecognizer:
+                  GestureRecognizerFactoryWithHandlers<EagerGestureRecognizer>(
+                    EagerGestureRecognizer.new,
+                    (_) {},
+                  ),
+            },
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+    final center = tester.getCenter(find.byType(RawGestureDetector).last);
+    final gesture = await middleClick(tester, center);
+    await gesture.moveTo(center + const Offset(0, 120));
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 16));
+    await gesture.up();
+
+    expect(scrollEvents, 0);
+    expect(anchor(), findsNothing);
+  });
+
   testWidgets('שחרור במקום נועל את הגלילה, ולחיצה נוספת מסיימת', (
     tester,
   ) async {
@@ -228,6 +300,39 @@ void main() {
     await tester.pump();
     expect(anchor(), findsOneWidget);
 
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(anchor(), findsNothing);
+  });
+
+  testWidgets('Esc מחלון אחר אינו מסיים את הגלילה בחלון שאינו פעיל', (
+    tester,
+  ) async {
+    final view = AppWindowKeys(id: const AppWindowId('view-2'));
+    AppWindowKeys.register(view);
+    addTearDown(AppWindowKeys.resetForTest);
+    await tester.pumpWidget(
+      AppWindowScope(
+        controller: _FakeWindow(),
+        geometry: _FakeWindow(),
+        keys: view,
+        child: buildApp(),
+      ),
+    );
+    final gesture = await middleClick(
+      tester,
+      tester.getCenter(find.byType(ListView)),
+    );
+    await gesture.up();
+    await tester.pump();
+    expect(anchor(), findsOneWidget);
+
+    // הראשי פעיל: ה-ESC שלו, ואינו נבלע כאן.
+    expect(await tester.sendKeyEvent(LogicalKeyboardKey.escape), isFalse);
+    await tester.pump();
+    expect(anchor(), findsOneWidget);
+
+    AppWindowKeys.activateWindow(view.id);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
     expect(anchor(), findsNothing);

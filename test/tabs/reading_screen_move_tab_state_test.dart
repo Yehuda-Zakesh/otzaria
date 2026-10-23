@@ -492,7 +492,7 @@ void main() {
       );
     });
 
-    testWidgets('an in-place tab update still rebuilds the tab content', (
+    testWidgets('renaming a tab in place still rebuilds its content', (
       tester,
     ) async {
       final tabs = [_tab('א'), _tab('ב')];
@@ -505,10 +505,34 @@ void main() {
       await visitAllTabs(tester, bloc, 0);
 
       final before = tabScreenWidget(tester, 'ב');
+      bloc.add(RenameTab(tabs[1], 'ב חדש'));
+      await tester.pumpAndSettle();
+
+      expect(identical(tabScreenWidget(tester, 'ב חדש'), before), isFalse);
+    });
+
+    testWidgets('pinning a tab reuses the content of every tab', (
+      tester,
+    ) async {
+      final tabs = [_tab('א'), _tab('ב'), _tab('ג')];
+      addTearDown(() {
+        for (final t in tabs) {
+          t.dispose();
+        }
+      });
+      final bloc = await pumpReadingScreen(tester, tabs);
+      await visitAllTabs(tester, bloc, 0);
+
+      final before = {
+        for (final t in ['א', 'ב', 'ג']) t: tabScreenWidget(tester, t),
+      };
       bloc.add(TogglePinTab(tabs[1]));
       await tester.pumpAndSettle();
 
-      expect(identical(tabScreenWidget(tester, 'ב'), before), isFalse);
+      // התוכן אינו קורא את ההצמדה; בנייתו מחדש עלתה מאות ms ב-15 ספרים.
+      for (final t in before.keys) {
+        expect(identical(tabScreenWidget(tester, t), before[t]), isTrue);
+      }
     });
 
     testWidgets('replacing a tab does not rebuild the other tabs', (

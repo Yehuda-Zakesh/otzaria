@@ -5,8 +5,11 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/messages/plugin_messages.dart';
+import 'package:otzaria/core/windowing/app_window_id.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/plugins/services/plugin_unsaved_changes_registry.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
@@ -155,19 +158,24 @@ int _nextProcessQuitRequest = 0;
 ///
 /// כמה מאזיני סגירת-חלון (הראשי, ושל העדכון) שואלים כל אחד בנפרד; הבטחה
 /// משותפת מבטיחה דיאלוג אחד ותשובה אחת לכולם, גם בלחיצה כפולה על ה-X.
-Future<bool> confirmAppCloseWithUnsavedChanges({bool allWindows = false}) {
+///
+/// [window] — החלון שנסגר; `null` — [AppWindowKeys.current]. עם חלונות Dart
+/// החלון הפעיל עשוי להיות אחר (סגירה משורת המשימות).
+Future<bool> confirmAppCloseWithUnsavedChanges({
+  bool allWindows = false,
+  AppWindowKeys? window,
+}) {
   final pending = _pendingAppClose;
   if (pending != null) return pending;
-  final context = navigatorKey.currentContext;
+  final keys = window ?? AppWindowKeys.current;
+  final context = keys.navigator.currentContext;
   if (context == null) return Future.value(true);
   final future = allWindows
-      ? _confirmAllWindowCorrections(context)
+      ? _confirmAllWindowCorrections(context, keys)
       : confirmCloseTabs(
           context,
           context.read<TabsBloc>().state.tabs,
-          subtitle: WindowBus.instance.hasOtherWindows
-              ? unsavedChangesWindowCloseSubtitle
-              : unsavedChangesAppCloseSubtitle,
+          subtitle: _closeSubtitle(keys),
           includeClosedTabCorrections: true,
         );
   final shared = future.whenComplete(() => _pendingAppClose = null);
@@ -175,7 +183,25 @@ Future<bool> confirmAppCloseWithUnsavedChanges({bool allWindows = false}) {
   return shared;
 }
 
-Future<bool> _confirmAllWindowCorrections(BuildContext context) async {
+/// "סגירת החלון" כשנשאר חלון פתוח אחר — באפיק, או חלון Dart שאינו [closing].
+/// הראשי אינו נספר: כשחלון Dart נסגר אחרון, הראשי מוסתר.
+String _closeSubtitle(AppWindowKeys closing) {
+  final others =
+      WindowBus.instance.hasOtherWindows ||
+      (MultiViewMode.enabled &&
+          AppWindowKeys.registered.any(
+            (keys) =>
+                keys.id != AppWindowId.primary && !identical(keys, closing),
+          ));
+  return others
+      ? unsavedChangesWindowCloseSubtitle
+      : unsavedChangesAppCloseSubtitle;
+}
+
+Future<bool> _confirmAllWindowCorrections(
+  BuildContext context,
+  AppWindowKeys keys,
+) async {
   final corrections = PluginCorrectionSessionService.instance;
   final requestId =
       '${WindowBus.instance.slot ?? 0}-${DateTime.now().microsecondsSinceEpoch}-${_nextProcessQuitRequest++}';
@@ -231,12 +257,18 @@ Future<bool> _confirmAllWindowCorrections(BuildContext context) async {
       for (final state in unsaved)
         'תיקוני התוסף ‹${state.ownerName}› בספר "${state.bookId}" עדיין לא נשמרו לטיוטת ההתאוששות.',
     ]);
+    final tabs = <OpenedTab>{
+      ...context.read<TabsBloc>().state.tabs,
+      if (MultiViewMode.enabled)
+        for (final window in AppWindowKeys.registered)
+          if (window.navigator.currentContext case final other?
+              when other.mounted)
+            ...other.read<TabsBloc>().state.tabs,
+    };
     final confirmed = await confirmCloseTabs(
       context,
-      context.read<TabsBloc>().state.tabs,
-      subtitle: WindowBus.instance.hasOtherWindows
-          ? unsavedChangesWindowCloseSubtitle
-          : unsavedChangesAppCloseSubtitle,
+      tabs,
+      subtitle: _closeSubtitle(keys),
       includeClosedTabCorrections: true,
       additionalMessages: remoteMessages,
     );

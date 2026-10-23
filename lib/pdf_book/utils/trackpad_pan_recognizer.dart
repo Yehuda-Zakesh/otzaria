@@ -1,24 +1,12 @@
 import 'package:flutter/gestures.dart';
 
-/// מזהה מחוות pan של לוח מגע מדויק (אירועי PointerPanZoom מסוג trackpad)
-/// ו"גונב" אותן מה-InteractiveViewer של pdfrx, כדי שנעילת הציר החכמה
-/// תחול גם עליהן (issue #969).
-///
-/// הרקע: ב-Windows, גלילה בשתי אצבעות על לוח מגע מדויק מגיעה כמחוות
-/// PointerPanZoom - לא כאירועי גלילה - ולכן היא עוקפת את TrackpadAxisLock
-/// ומטופלת ישירות ב-InteractiveViewer, שבו `PanAxis` מציע רק נעילה גסה
-/// (הכרעה מהתזוזה הזעירה הראשונה, קיצוץ מוחלט לציר אחד).
-///
-/// אסטרטגיית הזירה (gesture arena):
-/// - מחווה שמתחילה כ-pan (תזוזה מצטברת בלי שינוי scale) נתבעת אצלנו
-///   לפני שה-ScaleGestureRecognizer של pdfrx מגיע לסף הקבלה שלו
-///   (pan slop), כי סף הקבלה שלנו נמוך יותר ואנחנו ראשונים בסדר ה-hit test.
-/// - מחווה שמתחילה כ-pinch (ה-scale סוטה מ-1) נדחית אצלנו מיד, כדי
-///   ש-pdfrx ימשיך לטפל בזום בדיוק כמו היום.
+/// מנתב pan לנעילת הציר החכמה, ומשאיר pinch במסלול המקורי של pdfrx.
+/// [onPanZoomEvent] מאפשר להעביר גם מחווה שהופכת מ-pan ל-pinch בהמשכה.
 class TrackpadPanRecognizer extends OneSequenceGestureRecognizer {
   TrackpadPanRecognizer({
     required this.onPanDelta,
     required this.onPanEnd,
+    this.onPanZoomEvent,
     this.canPanHorizontally,
     super.debugOwner,
   }) : super(supportedDevices: {PointerDeviceKind.trackpad});
@@ -28,6 +16,9 @@ class TrackpadPanRecognizer extends OneSequenceGestureRecognizer {
 
   /// סוף מחווה שנתבעה - כאן מאפסים את נעילת הציר.
   final void Function() onPanEnd;
+
+  /// מחווה שנתבעה כ-pan והופכת ל-pinch מועברת למסלול הזום המקורי.
+  final void Function(PointerEvent event)? onPanZoomEvent;
 
   /// האם למסמך יש לאן לגלול לרוחב. כשלא - מחווה אופקית נמסרת
   /// הלאה, למעבר בין כרטיסיות.
@@ -41,14 +32,25 @@ class TrackpadPanRecognizer extends OneSequenceGestureRecognizer {
   static const double _pinchScaleDeviation = 0.015;
 
   _PanClaim _claim = _PanClaim.undecided;
+  int? _pointer;
   Offset _pendingPan = Offset.zero;
+  PointerPanZoomUpdateEvent? _lastUpdate;
+  Offset _scaleOriginPan = Offset.zero;
+  double _scaleOrigin = 1;
+  double _rotationOrigin = 0;
 
   @override
   void addAllowedPointerPanZoom(PointerPanZoomStartEvent event) {
+    final previous = _pointer;
+    if (previous != null) {
+      handleEvent(PointerPanZoomEndEvent(pointer: previous));
+    }
     super.addAllowedPointerPanZoom(event);
     startTrackingPointer(event.pointer, event.transform);
+    _pointer = event.pointer;
     _claim = _PanClaim.undecided;
     _pendingPan = Offset.zero;
+    _lastUpdate = null;
   }
 
   @override
@@ -56,6 +58,9 @@ class TrackpadPanRecognizer extends OneSequenceGestureRecognizer {
     if (event is PointerPanZoomUpdateEvent) {
       switch (_claim) {
         case _PanClaim.rejected:
+          return;
+        case _PanClaim.scaling:
+          _forwardScale(event);
           return;
         case _PanClaim.undecided:
           if ((event.scale - 1.0).abs() > _pinchScaleDeviation) {
@@ -76,17 +81,81 @@ class TrackpadPanRecognizer extends OneSequenceGestureRecognizer {
           }
           _claim = _PanClaim.accepted;
           resolve(GestureDisposition.accepted);
+          if (_beginScaleIfNeeded(event)) return;
           // מפצים על התזוזה שנצברה עד התביעה כדי לא "לבלוע" את תחילת המחווה.
           onPanDelta(_pendingPan, event.position);
         case _PanClaim.accepted:
+          if (_beginScaleIfNeeded(event)) return;
           onPanDelta(event.panDelta, event.position);
       }
-    } else if (event is PointerPanZoomEndEvent) {
-      if (_claim == _PanClaim.accepted) {
+      _lastUpdate = event;
+    } else if (event is PointerPanZoomEndEvent || event is PointerCancelEvent) {
+      final claim = _claim;
+      _claim = _PanClaim.rejected;
+      if (claim == _PanClaim.scaling) onPanZoomEvent?.call(event);
+      if (claim == _PanClaim.accepted || claim == _PanClaim.scaling) {
         onPanEnd();
       }
       stopTrackingPointer(event.pointer);
     }
+  }
+
+  bool _beginScaleIfNeeded(PointerPanZoomUpdateEvent event) {
+    if (onPanZoomEvent == null || event.scale == 1) return false;
+    final previous = _lastUpdate;
+    _scaleOriginPan = previous?.pan ?? Offset.zero;
+    _scaleOrigin = previous?.scale ?? 1;
+    _rotationOrigin = previous?.rotation ?? 0;
+    _claim = _PanClaim.scaling;
+    onPanZoomEvent!(
+      PointerPanZoomStartEvent(
+        viewId: event.viewId,
+        timeStamp: event.timeStamp,
+        pointer: event.pointer,
+        device: event.device,
+        position: (previous?.position ?? event.position) + _scaleOriginPan,
+      ),
+    );
+    if (_claim == _PanClaim.scaling) _forwardScale(event);
+    return true;
+  }
+
+  void _forwardScale(PointerPanZoomUpdateEvent event) {
+    _lastUpdate = event;
+    onPanZoomEvent!(
+      PointerPanZoomUpdateEvent(
+        viewId: event.viewId,
+        timeStamp: event.timeStamp,
+        pointer: event.pointer,
+        device: event.device,
+        position: event.position + _scaleOriginPan,
+        pan: event.pan - _scaleOriginPan,
+        panDelta: event.panDelta,
+        scale: event.scale / _scaleOrigin,
+        rotation: event.rotation - _rotationOrigin,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    final claim = _claim;
+    _claim = _PanClaim.rejected;
+    if (claim == _PanClaim.scaling) {
+      final last = _lastUpdate;
+      onPanZoomEvent?.call(
+        PointerPanZoomEndEvent(
+          pointer: last?.pointer ?? 0,
+          viewId: last?.viewId ?? 0,
+          device: last?.device ?? 0,
+          position: last?.position ?? Offset.zero,
+        ),
+      );
+    }
+    if (claim == _PanClaim.accepted || claim == _PanClaim.scaling) {
+      onPanEnd();
+    }
+    super.dispose();
   }
 
   @override
@@ -96,11 +165,13 @@ class TrackpadPanRecognizer extends OneSequenceGestureRecognizer {
 
   @override
   void didStopTrackingLastPointer(int pointer) {
-    if (_claim != _PanClaim.accepted) {
+    if (_claim != _PanClaim.accepted && _claim != _PanClaim.scaling) {
       resolve(GestureDisposition.rejected);
     }
     _claim = _PanClaim.undecided;
     _pendingPan = Offset.zero;
+    _lastUpdate = null;
+    _pointer = null;
   }
 
   @override
@@ -108,4 +179,4 @@ class TrackpadPanRecognizer extends OneSequenceGestureRecognizer {
 }
 
 /// הכרעת הזירה עבור המחווה הנוכחית - ערך יחיד, בלי צירופי מצב לא-חוקיים.
-enum _PanClaim { undecided, accepted, rejected }
+enum _PanClaim { undecided, accepted, scaling, rejected }

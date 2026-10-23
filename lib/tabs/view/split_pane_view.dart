@@ -115,19 +115,32 @@ class PaneCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final radius = BorderRadius.circular(isSplit ? kPaneCardRadius : 0);
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 160),
-      curve: Curves.easeOut,
-      decoration: BoxDecoration(
-        color: isSplit ? AppSurfaces.paneCard(context) : Colors.transparent,
-        borderRadius: radius,
-        border: isSplit
-            ? Border.all(
-                color: AppSurfaces.paneCardBorder(cs, isActive: isActive),
-              )
-            : null,
-      ),
-      child: ClipRRect(borderRadius: radius, child: child),
+    final border = isSplit
+        ? Border.all(color: AppSurfaces.paneCardBorder(cs, isActive: isActive))
+        : null;
+    // המסגרת מונפשת מאחורי התוכן ולא סביבו: ריפוד מונפש היה פורס מחדש את
+    // שני הספרים בכל פריים של הפיצול והפירוק.
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        Positioned.fill(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            decoration: BoxDecoration(
+              color: isSplit
+                  ? AppSurfaces.paneCard(context)
+                  : Colors.transparent,
+              borderRadius: radius,
+              border: border,
+            ),
+          ),
+        ),
+        Padding(
+          padding: border?.dimensions ?? EdgeInsets.zero,
+          child: ClipRRect(borderRadius: radius, child: child),
+        ),
+      ],
     );
   }
 }

@@ -39,6 +39,7 @@ import 'package:otzaria/utils/text/text_manipulation.dart' as utils;
 import 'package:otzaria/services/target_line_links_service.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/models/books.dart';
+import 'package:otzaria/text_book/models/book_notes.dart';
 import 'package:otzaria/widgets/feedback/scrollable_positioned_list_scrollbar.dart';
 import 'package:positioned_sliver_list/positioned_list.dart';
 import 'package:otzaria/tabs/models/tab.dart';
@@ -46,6 +47,7 @@ import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
 import 'package:otzaria/navigation/bloc/navigation_state.dart';
 import 'package:otzaria/core/focus_repository.dart';
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/widgets/text/rtl_selection_shortcuts.dart';
 import 'package:otzaria/widgets/text/selection_copy_shortcuts.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
@@ -55,6 +57,7 @@ import 'package:otzaria/utils/ui/context_menu_utils.dart' show ContextMenuUtils;
 import 'package:otzaria/core/messages/text_book_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/personal_notes/personal_notes_system.dart';
+import 'package:otzaria/personal_notes/widgets/personal_notes_sidebar.dart';
 import 'package:otzaria/personal_notes/utils/personal_note_source_selection.dart';
 import 'package:otzaria/personal_notes/storage/personal_notes_changes.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
@@ -374,6 +377,8 @@ Future<void> saveCommentaryNoteToRepository({
   );
 }
 
+const _readerListPadding = EdgeInsets.all(4);
+
 /// תצוגת טקסט פשוטה - משמשת גם לטקסט המרכזי וגם למפרשים
 class SimpleTextViewer extends StatefulWidget {
   final List<String> content;
@@ -436,6 +441,9 @@ class SimpleTextViewer extends StatefulWidget {
   /// בטקסט הראשי נשאר null: העוגנים שם נקראים מ-state.linksByLine.
   final Map<int, List<Link>>? anchorLinksByLine;
 
+  /// הערות השוליים (`line_note`) של ספר המפרש, שעליהן נמדדים [anchorLinksByLine].
+  final BookNotes anchorBookNotes;
+
   const SimpleTextViewer({
     super.key,
     required this.content,
@@ -466,6 +474,7 @@ class SimpleTextViewer extends StatefulWidget {
     this.onOpenCommentatorsPane,
     this.onOpenCommentatorsPaneWithFilter,
     this.anchorLinksByLine,
+    this.anchorBookNotes = BookNotes.empty,
   });
 
   /// האם חלונית מפרש זה עתה טיפלה בקיצור "הוסף הערה".
@@ -484,6 +493,18 @@ class SimpleTextViewer extends StatefulWidget {
   State<SimpleTextViewer> createState() => _SimpleTextViewerState();
 }
 
+/// המפרש הפעיל של חלון אחד — קיצור בחלון אחד לא ינותב למפרש של חלון אחר.
+class _ActiveCommentarySlot {
+  _SimpleTextViewerState? viewer;
+}
+
+final _activeCommentarySlots = Expando<_ActiveCommentarySlot>();
+
+extension on AppWindowKeys {
+  _ActiveCommentarySlot get _activeCommentary =>
+      _activeCommentarySlots[this] ??= _ActiveCommentarySlot();
+}
+
 class _SimpleTextViewerState extends State<SimpleTextViewer> {
   // דגל סטטי: מונע מהטקסט הראשי לדרוס העתקה שכבר בוצעה ע"י מפרש
   static bool _commentaryCopyHandled = false;
@@ -491,8 +512,15 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
   static bool _commentaryNoteHandled = false;
   // דגל סטטי: מונע מהטקסט הראשי לפתוח דיווח כפול אחרי שמפרש טיפל בקיצור
   static bool _commentaryReportHandled = false;
-  // מצביע סטטי: רק הפרשן האחרון שנבחר בו טקסט מטפל ב-Ctrl+C
-  static _SimpleTextViewerState? _lastActiveCommentary;
+  // רק הפרשן האחרון שנבחר בו טקסט מטפל ב-Ctrl+C — אחד בכל חלון.
+  late final _ActiveCommentarySlot _activeCommentarySlot;
+  _SimpleTextViewerState? get _lastActiveCommentary =>
+      _activeCommentarySlot.viewer;
+  set _lastActiveCommentary(_SimpleTextViewerState? viewer) =>
+      _activeCommentarySlot.viewer = viewer;
+
+  /// של החלון הזה, לא של החלון הפעיל; נלכד ב-initState כדי ש-dispose לא יחפש.
+  late final FocusRepository _focus;
 
   late ItemScrollController _scrollController;
   late ItemPositionsListener _positionsListener;
@@ -537,6 +565,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
       ParagraphCommentatorsCache();
   List<Link>? _anchorStyleSourceLinks;
   Map<String, int> _anchorStyleCache = const {};
+  late final AppWindowKeys _previewWindow;
   Timer? _previewHoverTimer;
   List<PersonalNote> _commentaryNotes = const [];
   int _commentaryNotesLoadGeneration = 0;
@@ -620,6 +649,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
       styleIndexByCommentator: _ownAnchorStyles(),
       lineIndex: lineIndex,
       activeIndex: lineIndex == _activeAnchorLine ? _activeAnchorIndex : null,
+      notes: widget.anchorBookNotes.notesAt(lineIndex),
     );
   }
 
@@ -642,11 +672,13 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     return _injectBodyAnchorMarkers(result, lineIndex, state);
   }
 
+  /// [note] — גוף ההערה ה-[note] של השורה במקום השורה עצמה.
   String _injectBodyAnchorMarkers(
     String rawLine,
     int lineIndex,
-    TextBookLoaded state,
-  ) {
+    TextBookLoaded state, {
+    int? note,
+  }) {
     if (!state.bodyDisplayProfile.showAnchorMarkers) return rawLine;
     // מהדורה חלופית: העוגנים ממופים לנוסח הראשי — במיקומים שגויים כאן.
     if (state.book.versionTitle != null) return rawLine;
@@ -660,6 +692,8 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
       styleIndexByCommentator: _anchorStyles(state),
       lineIndex: lineIndex,
       activeIndex: lineIndex == _activeAnchorLine ? _activeAnchorIndex : null,
+      notes: state.bookNotes.notesAt(lineIndex),
+      note: note,
     );
   }
 
@@ -682,7 +716,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
   }
 
   Future<void> _openAnchorTarget(Link link) {
-    LinkPreviewOverlay.dismiss();
+    LinkPreviewOverlay.dismiss(window: AppWindowKeys.of(context));
     return openLinkTarget(link, (tab) => widget.openBookCallback(tab));
   }
 
@@ -693,7 +727,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     Offset globalPosition, {
     bool hoverMode = true,
   }) {
-    LinkPreviewOverlay.cancelScheduledHide();
+    LinkPreviewOverlay.cancelScheduledHide(AppWindowKeys.of(context));
     _cancelPendingPreview();
     final line = noteMarkerLineFromUrl(url);
     final bloc = context.read<TextBookBloc>();
@@ -740,7 +774,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     if (url.startsWith('otzaria://note') && widget.isPersonalNotesTabActive) {
       return;
     }
-    LinkPreviewOverlay.cancelScheduledHide();
+    LinkPreviewOverlay.cancelScheduledHide(AppWindowKeys.of(context));
     _cancelPendingPreview();
     final bloc = context.read<TextBookBloc>();
     final currentState = bloc.state;
@@ -786,6 +820,8 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
         state.content,
         url,
         dbNotes: state.bookNotes,
+        decorateBody: (line, note, body) =>
+            _injectBodyAnchorMarkers(body, line, state, note: note),
       );
       if (note == null) return;
       LinkPreviewOverlay.showContent(
@@ -797,6 +833,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
           removeNikud: state.removeNikud,
           removePunctuation: state.removePunctuation,
           maxFontSize: widget.fontSize,
+          onAnchorTap: _handlePreviewTap,
         ),
       );
       return;
@@ -818,8 +855,16 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
         context,
         globalPosition: globalPosition,
         hoverMode: hoverMode,
-        contentBuilder: (_) =>
-            PersonalNotesListView(notes: notes, maxHeight: 220),
+        contentBuilder: (_) => PersonalNotesListView(
+          notes: notes,
+          maxHeight: 220,
+          onLinkTap: (url) => openNoteLink(
+            context,
+            url,
+            notes.first.bookId,
+            (line, {note}) => _lines?.scrollToLine(line - 1),
+          ),
+        ),
       );
       return;
     }
@@ -843,7 +888,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
 
   void _handlePreviewHoverExit(String url) {
     _cancelPendingPreview();
-    LinkPreviewOverlay.scheduleHide();
+    LinkPreviewOverlay.scheduleHide(AppWindowKeys.of(context));
   }
 
   bool _isTextInputFocused() {
@@ -1043,6 +1088,9 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
   @override
   void initState() {
     super.initState();
+    _previewWindow = AppWindowKeys.of(context);
+    _activeCommentarySlot = AppWindowKeys.of(context)._activeCommentary;
+    _focus = FocusRepository.of(context);
     _configureScrollControllers();
     _selectionFocusNode = FocusNode(debugLabel: 'SelectionAreaFocus');
     _resolvedKeyboardFocusNode;
@@ -1083,7 +1131,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
       // אזור הקריאה דרך reading_screen (גלילה בחצים עובדת מיד).
       final tab = widget.tab;
       if (tab != null) {
-        FocusRepository().registerTabContentFocusRequester(
+        _focus.registerTabContentFocusRequester(
           tab,
           () => _requestKeyboardFocus('tab-content-focus'),
         );
@@ -1142,6 +1190,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
   }
 
   bool _handleCommentaryKeyEvent(KeyEvent event) {
+    if (!AppWindowKeys.isActiveWindow(context)) return false;
     // קיצור דינמי על אותו צירוף גובר, ו-KeyboardShortcuts מפעיל אותו.
     if (DynamicShortcutRegistry.instance.match(event) != null) return false;
     final addNoteShortcut =
@@ -1221,7 +1270,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
     final binding = _viewportBinding;
     if (binding != null) _lines?.detach(binding);
     _ownedLines?.dispose();
-    if (widget.isMainText) LinkPreviewOverlay.dismiss();
+    if (widget.isMainText) LinkPreviewOverlay.dismiss(window: _previewWindow);
     widget.selectionSyncController?.removeListener(
       _handleExternalSelectionChange,
     );
@@ -1229,7 +1278,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
       FocusManager.instance.removeListener(_handleGlobalFocusChange);
       final tab = widget.tab;
       if (tab != null) {
-        FocusRepository().unregisterTabContentFocusRequester(tab);
+        _focus.unregisterTabContentFocusRequester(tab);
       }
     }
     if (!widget.isMainText) {
@@ -1273,10 +1322,10 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
       }
       if (widget.isMainText) {
         if (oldTab != null) {
-          FocusRepository().unregisterTabContentFocusRequester(oldTab);
+          _focus.unregisterTabContentFocusRequester(oldTab);
         }
         if (newTab != null) {
-          FocusRepository().registerTabContentFocusRequester(
+          _focus.registerTabContentFocusRequester(
             newTab,
             () => _requestKeyboardFocus('tab-content-focus'),
           );
@@ -2680,6 +2729,12 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
               }
 
               return BlocBuilder<PersonalNotesBloc, PersonalNotesState>(
+                // שאר שדות ה-bloc (חיפוש, טיוטה) משתנים בכל הקשה; הבנייה
+                // קוראת רק את אלה, וטור מפרש אף לא אותם.
+                buildWhen: (previous, current) =>
+                    widget.isMainText &&
+                    (previous.bookId != current.bookId ||
+                        previous.locatedNotes != current.locatedNotes),
                 builder: (context, notesState) {
                   final noteMap = <int, List<PersonalNote>>{};
                   final visibleNotes = widget.isMainText
@@ -2895,7 +2950,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
               : 0,
           estimateExtent: estimate,
           estimationKey: estimationKey,
-          padding: const EdgeInsets.all(4),
+          padding: _readerListPadding,
           itemBuilder: (context, index) {
             final item = _buildLineItem(
               context,
@@ -2933,6 +2988,7 @@ class _SimpleTextViewerState extends State<SimpleTextViewer> {
           ),
           lineHeight: settings.lineHeight,
           textWidth: (width) => width > 8 ? width - 8 : width,
+          crossAxisPadding: _readerListPadding.horizontal,
           builder: buildList,
         );
       },

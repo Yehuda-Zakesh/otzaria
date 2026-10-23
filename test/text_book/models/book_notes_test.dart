@@ -102,6 +102,34 @@ void main() {
       },
     );
 
+    test('כשל בטעינה נזרק, אינו נשמר במטמון, והקריאה הבאה טוענת שוב', () async {
+      repository.debugLoader = (title, {categoryId, required source}) async {
+        loads++;
+        if (loads == 1) throw StateError('גוף שאינו מתפענח');
+        return loaded;
+      };
+      await expectLater(
+        repository.notesFor('ספר', categoryId: 1),
+        throwsA(isA<StateError>()),
+      );
+      expect(await repository.notesFor('ספר', categoryId: 1), same(loaded));
+      expect(loads, 2);
+    });
+
+    test('כשל באיתור הספק נזרק ואינו נשמר כספר בלי הערות', () async {
+      var lookups = 0;
+      repository.debugIsDatabaseBook = (title, {categoryId, fileType}) async {
+        if (lookups++ == 0) throw StateError('provider');
+        return true;
+      };
+      addTearDown(() => repository.debugIsDatabaseBook = null);
+      await expectLater(
+        repository.notesFor('ספר', categoryId: 1),
+        throwsA(isA<StateError>()),
+      );
+      expect(await repository.notesFor('ספר', categoryId: 1), same(loaded));
+    });
+
     test('ספר שמוגש מקובץ — ריק, בלי טעינה מהמסד', () async {
       repository.debugIsDatabaseBook = (title, {categoryId, fileType}) async =>
           false;

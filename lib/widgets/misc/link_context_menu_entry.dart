@@ -1,3 +1,4 @@
+import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'dart:math' as math;
 
 import 'package:otzaria/theme/app_fonts.dart';
@@ -64,7 +65,7 @@ AppContextMenuEntry buildLinkContextMenuEntry({
     hoverPreviewBuilder: (context) => LinkHoverPreviewContent(
       link: link,
       onOpen: () {
-        LinkPreviewOverlay.dismiss();
+        LinkPreviewOverlay.dismiss(window: AppWindowKeys.of(context));
         onTap();
       },
       displayProfile: displayProfile,

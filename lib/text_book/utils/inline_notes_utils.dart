@@ -37,6 +37,16 @@ List<Match> _strippedMarkers(String html) => [
     if (_footnoteBodyStartRegExp.matchAsPrefix(html, match.end) == null) match,
 ];
 
+/// ה-inner HTML של [_strippedMarkers], לפי הסדר: הסימן של ההערה ה-k-ית שיש לה
+/// `line_note.hasMarker` (המחולל מוודא שהוא זהה לסימן המקורי).
+List<String> bookNoteMarkers(String html) => [
+  for (final match in _strippedMarkers(html))
+    match[0]!.substring(
+      match[0]!.indexOf('>') + 1,
+      match[0]!.length - _supCloseTag.length,
+    ),
+];
+
 final _supRegExp = RegExp(
   r'<sup\b[^>]*>.*?</sup>',
   caseSensitive: false,
@@ -132,11 +142,17 @@ String addInlineNotePreviewLinks(
   return result;
 }
 
+/// עיבוד גוף ההערה [note] (מיקום ב-`notesAt`) של שורה [lineIndex] מהטבלה, למשל
+/// הזרקת חלקי עוגני הקישורים שבו.
+typedef BookNoteBodyDecorator =
+    String Function(int lineIndex, int note, String body);
+
 /// מחזיר את תוכן ההערה שאליה מפנה [url] — מהשורה או מהטבלה ([dbNotes]).
 String? inlineNoteFromPreviewUrl(
   List<String> content,
   String url, {
   BookNotes? dbNotes,
+  BookNoteBodyDecorator? decorateBody,
 }) {
   final uri = Uri.tryParse(url);
   if (uri?.scheme != 'otzaria' || uri?.host != 'book-note') return null;
@@ -146,7 +162,12 @@ String? inlineNoteFromPreviewUrl(
   if (lineIndex >= content.length && _dbNotesAt(dbNotes, lineIndex).isEmpty) {
     return null;
   }
-  final lineNotes = notesForLines(content, [lineIndex], dbNotes: dbNotes);
+  final lineNotes = notesForLines(
+    content,
+    [lineIndex],
+    dbNotes: dbNotes,
+    decorateBody: decorateBody,
+  );
   if (noteIndex < 0 || noteIndex >= lineNotes.length) return null;
   return lineNotes[noteIndex];
 }
@@ -183,11 +204,12 @@ bool hasInlineNotes(List<String> content, {BookNotes? dbNotes}) {
 }
 
 /// ההערות של השורות [indexes]: ה-<sup> הצמוד (אם יש) ואחריו הגוף; הערות הטבלה
-/// ([dbNotes]) באות אחרי הערות השורה.
+/// ([dbNotes]) באות אחרי הערות השורה, וגופן עובר דרך [decorateBody].
 List<String> notesForLines(
   List<String> content,
   Iterable<int> indexes, {
   BookNotes? dbNotes,
+  BookNoteBodyDecorator? decorateBody,
 }) {
   final results = <String>[];
   for (final idx in indexes) {
@@ -198,11 +220,12 @@ List<String> notesForLines(
         results.add(_inlineNoteHtml(line, iMatch));
       }
     }
-    for (final note in _dbNotesAt(dbNotes, idx)) {
+    for (final (position, note) in _dbNotesAt(dbNotes, idx).indexed) {
+      final body = bookNoteBodyWithDivineNames(dbNotes!, idx, note);
       results.add(
         BookNotes.toInlineHtml(
           note,
-          body: bookNoteBodyWithDivineNames(dbNotes!, idx, note),
+          body: decorateBody?.call(idx, position, body) ?? body,
         ),
       );
     }

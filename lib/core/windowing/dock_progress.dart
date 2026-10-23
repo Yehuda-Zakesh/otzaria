@@ -1,9 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/windowing/app_window_controller.dart';
 import 'package:otzaria/core/windowing/window_manager_app_window_controller.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 
 /// חיווי התקדמות על אייקון ה-Dock של מק — המקום שבו משתמשי מק מצפים לראות
 /// עבודה שרצה ברקע בזמן שהחלון מוסתר.
@@ -28,7 +28,7 @@ class DockProgress {
   /// הדוק שייך לתהליך, וחלון משני שידווח עליו יתנגש עם הראשי.
   static bool get isSupported =>
       debugIsSupportedOverride ??
-      (!kIsWeb && Platform.isMacOS && !WindowRole.isSecondary);
+      (!kIsWeb && Platform.isMacOS && ProcessDuties.current.isProcessOwner);
 
   /// מציג התקדמות [value] בין 0 ל-1, או חיווי בלתי-מוגדר כש-[value] הוא `null`.
   static Future<void> show({double? value}) =>

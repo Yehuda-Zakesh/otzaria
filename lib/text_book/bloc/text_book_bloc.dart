@@ -273,15 +273,31 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     final window = _calculateLinksWindow(current.visibleIndices);
     final start = min(window.start, _loadedLinksStart ?? window.start) + 1;
     final end = max(window.end, _loadedLinksEnd ?? window.end) + 1;
+    final selected = current.selectedIndices;
+    final keptTypes = <String, bool>{};
+    bool touchesSelection(Link link) {
+      final last = link.index1End ?? link.index1;
+      if (last - link.index1 >= selected.length) {
+        return selected.any((i) => link.overlapsSourceLines(i + 1, i + 1));
+      }
+      for (var line = link.index1; line <= last; line++) {
+        if (selected.contains(line - 1)) return true;
+      }
+      return false;
+    }
+
+    bool keep(Link link) {
+      final type = link.connectionType;
+      return (keptTypes[type] ??=
+              LinkTypes.isDependentTextLink(type) ||
+              LinkTypes.isVirtualSource(type)) ||
+          link.overlapsSourceLines(start, end) ||
+          (selected.isNotEmpty && touchesSelection(link));
+    }
+
     final kept = [
       for (final link in current.links)
-        if (LinkTypes.isDependentTextLink(link.connectionType) ||
-            LinkTypes.isVirtualSource(link.connectionType) ||
-            link.overlapsSourceLines(start, end) ||
-            current.selectedIndices.any(
-              (i) => link.overlapsSourceLines(i + 1, i + 1),
-            ))
-          link,
+        if (keep(link)) link,
     ];
     if (kept.length == current.links.length) return;
     emit(current.copyWith(links: kept, linksByLine: buildLinksByLineMap(kept)));
@@ -755,8 +771,10 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
     // במקביל לטעינת התוכן, כדי שה-UI יקבל את ההגבלה כבר במצב ה-Loaded.
     // גם בטעינה-מחדש: הספרייה עשויה להתעדכן בינתיים.
     final protectionFuture = _protectionLoader(book);
-    // ההערות מהמסד קובעות אם 'הערות' זמין כבר ב-emit הראשון.
+    // ההערות מהמסד קובעות אם 'הערות' זמין כבר ב-emit הראשון. כשל בהן נכשל
+    // את הטעינה (TextBookError) כשהן נדרשות למטה, ולא כשגיאה לא-מטופלת.
     final bookNotesFuture = _bookNotesLoader(book);
+    bookNotesFuture.then<void>((_) {}, onError: (Object _) {});
 
     // ספר שנפתח עם חיפוש פעיל (מתוצאות חיפוש או טאב משוחזר): מזינים ברקע את
     // תבנית ההדגשה מבוססת-האינדקס, במקביל לטעינת התוכן — כך הרינדור מדגיש
@@ -954,6 +972,7 @@ class TextBookBloc extends Bloc<TextBookEvent, TextBookState> {
           : resolveInitialReadingLeftPaneVisibility(
               explicitOpen: showLeftPane,
               hasSearchText: searchText.isNotEmpty,
+              screenWidth: event.screenWidth,
             );
       _hiddenCommentatorTitlesCache = await currentHiddenBookTitles();
       commentators = _withoutHiddenCommentators(commentators);

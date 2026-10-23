@@ -2,8 +2,8 @@ import 'package:flutter/gestures.dart';
 
 /// החלקה בין כרטיסיות במסך מגע בדסקטופ.
 ///
-/// שתי אצבעות תמיד מעבירות כרטיסיה. אצבע אחת מעבירה רק כשהתוכן לא
-/// גולל לרוחב בעצמו ([singleFingerPansContent]) — אחרת הזירה נשארת לו.
+/// שתי אצבעות בתנועה מקבילה מעבירות כרטיסיה; צביטה נשארת בתוכן.
+/// אצבע אחת מעבירה רק כשהתוכן לא גולל לרוחב בעצמו.
 class TouchTabSwipeRecognizer extends HorizontalDragGestureRecognizer {
   TouchTabSwipeRecognizer({
     required this.singleFingerPansContent,
@@ -13,17 +13,20 @@ class TouchTabSwipeRecognizer extends HorizontalDragGestureRecognizer {
   /// האם אצבע אחת מזיזה כעת את התוכן לרוחב (למשל PDF מוגדל).
   final bool Function() singleFingerPansContent;
 
-  final Set<int> _downPointers = {};
+  final Map<int, Offset> _downPointers = {};
 
   @override
   void addAllowedPointer(PointerDownEvent event) {
-    _downPointers.add(event.pointer);
+    _downPointers[event.pointer] = Offset.zero;
     super.addAllowedPointer(event);
   }
 
   @override
   void handleEvent(PointerEvent event) {
-    if (event is PointerUpEvent || event is PointerCancelEvent) {
+    if (event is PointerMoveEvent) {
+      _downPointers[event.pointer] =
+          _downPointers[event.pointer]! + event.delta;
+    } else if (event is PointerUpEvent || event is PointerCancelEvent) {
       _downPointers.remove(event.pointer);
     }
     super.handleEvent(event);
@@ -38,7 +41,20 @@ class TouchTabSwipeRecognizer extends HorizontalDragGestureRecognizer {
         pointerDeviceKind,
         deviceTouchSlop,
       ) &&
-      (_downPointers.length >= 2 || !singleFingerPansContent());
+      (_downPointers.length >= 2
+          ? _isParallelDrag(pointerDeviceKind)
+          : !singleFingerPansContent());
+
+  bool _isParallelDrag(PointerDeviceKind kind) {
+    final slop = computeHitSlop(kind, gestureSettings);
+    final first = _downPointers.values.first;
+    return _downPointers.values.every(
+      (delta) =>
+          delta.dx.abs() > slop &&
+          delta.dx * first.dx > 0 &&
+          (delta - first).distance < slop,
+    );
+  }
 
   @override
   void didStopTrackingLastPointer(int pointer) {

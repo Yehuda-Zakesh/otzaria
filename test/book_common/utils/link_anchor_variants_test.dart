@@ -1,5 +1,6 @@
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:html/parser.dart' as html;
 import 'package:otzaria/book_common/utils/link_anchor_variants.dart';
 
 // מקור האמת של הווריאנטים משרת שני מסלולי רינדור: CSS (HtmlWidget) ו-TextStyle
@@ -32,6 +33,49 @@ void main() {
         isNull,
       );
     });
+
+    test(
+      'זהה לבדיקת contains לכל וריאנט, בכל סדר וכפילות של מחלקות (perf)',
+      () {
+        // אורקל: המימוש הקודם.
+        LinkAnchorVariant? oracle(Iterable<String> classes) {
+          for (var index = 0; index < kLinkAnchorVariants.length; index++) {
+            if (classes.contains('link-anchor-$index')) {
+              return kLinkAnchorVariants[index];
+            }
+          }
+          return null;
+        }
+
+        const pool = [
+          'link-anchor', 'link-anchor-active', 'link-anchor-range', 'x', //
+          'link-anchor-0', 'link-anchor-3', 'link-anchor-13', //
+          'link-anchor-14', 'link-anchor-05', 'link-anchor-+5', //
+          'LINK-ANCHOR-1', //
+        ];
+        for (final a in pool) {
+          for (final b in pool) {
+            for (final c in pool) {
+              final classes = [a, b, c];
+              final element = html
+                  .parseFragment('<a class="${classes.join(' ')}">א</a>')
+                  .children
+                  .single;
+              expect(
+                linkAnchorVariantFromClasses(classes),
+                same(oracle(classes)),
+                reason: '$classes',
+              );
+              expect(
+                linkAnchorVariantFromClasses(element.classes),
+                same(oracle(element.classes)),
+                reason: '$classes',
+              );
+            }
+          }
+        }
+      },
+    );
   });
 
   group('שקילות CSS ↔ TextStyle', () {

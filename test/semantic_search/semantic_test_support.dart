@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:otzaria/core/windowing/host_relay.dart';
 import 'package:otzaria/search/search_engine_gateway.dart';
 import 'package:otzaria/search_feedback/search_feedback_api.dart';
 import 'package:otzaria/semantic_search/engine/semantic_engine_backend.dart';
@@ -383,6 +384,8 @@ SemanticSearchRepository buildRepository({
   Future<DiskSpaceInfo> Function(String path)? diskSpace,
   Map<SemanticQuantization, SemanticModelRelease?>? modelReleases,
   bool secondaryWindow = false,
+  Future<HostCommandResponse> Function(String type, Map<String, Object?> args)?
+  hostRequest,
   Duration busyRetryDelay = const Duration(milliseconds: 20),
   Future<String> Function(SemanticVectorsFamily family)? identityLoader,
 }) {
@@ -403,6 +406,7 @@ SemanticSearchRepository buildRepository({
         (_) async => DiskSpaceInfo(volumeId: 'C', freeBytes: freeBytes),
     modelReleases: modelReleases ?? testModelReleases,
     isSecondaryWindow: () => secondaryWindow,
+    hostRequest: hostRequest,
     busyRetryDelay: busyRetryDelay,
   );
 }

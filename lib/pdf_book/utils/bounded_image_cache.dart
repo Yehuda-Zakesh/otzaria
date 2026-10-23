@@ -1,15 +1,19 @@
 import 'dart:collection';
 import 'dart:ui' as ui;
 
+import 'package:pdfrx/pdfrx.dart';
+
 /// מטמון תמונות המוגבל בסך הבתים; התמונה שנעשה בה שימוש לפני הכל נזרקת ראשונה.
 ///
 /// המטמון מחזיק עותק ([ui.Image.clone]) משלו, ולכן הקורא משחרר את התמונות
 /// שלו בלי תלות במטמון, ותמונה שנזרקה לא נעלמת ממסך שמציג אותה.
 class BoundedImageCache<K> {
-  BoundedImageCache({required this.maxBytes});
+  BoundedImageCache({required this.maxBytes, this.budget});
 
   final int maxBytes;
+  final PdfImageCacheBudget? budget;
   final LinkedHashMap<K, ui.Image> _images = LinkedHashMap<K, ui.Image>();
+  final _budgetEntries = <K, PdfImageCacheEntry>{};
   int _bytes = 0;
   int _generation = 0;
   bool _disposed = false;
@@ -25,6 +29,7 @@ class BoundedImageCache<K> {
     final image = _images.remove(key);
     if (image == null) return null;
     _images[key] = image;
+    _budgetEntries[key]?.touch();
     return image.clone();
   }
 
@@ -33,11 +38,29 @@ class BoundedImageCache<K> {
     if (_disposed) return;
     if (generation != null && generation != _generation) return;
     _remove(key);
-    _images[key] = image.clone();
-    _bytes += _sizeOf(image);
-    // תמונה יחידה שחורגת מהתקרה נשמרת בכל זאת.
-    while (_bytes > maxBytes && _images.length > 1) {
+    final size = _sizeOf(image);
+    if (size > maxBytes) return;
+    while (_bytes + size > maxBytes && _images.isNotEmpty) {
       _remove(_images.keys.first);
+    }
+    final reservation = budget?.tryReserve(size * 2);
+    if (budget != null && reservation == null) return;
+    try {
+      _images[key] = image.clone();
+      _bytes += size;
+      if (reservation != null) {
+        final entry = reservation.commit(
+          retainedBytes: size * 2,
+          onEvict: () => _remove(key),
+        );
+        if (entry == null) {
+          _remove(key);
+        } else {
+          _budgetEntries[key] = entry;
+        }
+      }
+    } finally {
+      reservation?.dispose();
     }
   }
 
@@ -52,10 +75,15 @@ class BoundedImageCache<K> {
       image.dispose();
     }
     _images.clear();
+    for (final entry in _budgetEntries.values) {
+      entry.dispose();
+    }
+    _budgetEntries.clear();
     _bytes = 0;
   }
 
   void _remove(K key) {
+    _budgetEntries.remove(key)?.dispose();
     final image = _images.remove(key);
     if (image == null) return;
     _bytes -= _sizeOf(image);
