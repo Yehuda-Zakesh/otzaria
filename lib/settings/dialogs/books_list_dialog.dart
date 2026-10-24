@@ -78,7 +78,9 @@ class _BooksListDialogState extends State<_BooksListDialog> {
 
     final csv = _buildCsv(_rows);
     final bytes = Uint8List.fromList(utf8.encode('\uFEFF$csv'));
+    if (!mounted) return;
     final path = await saveFileWithExtension(
+      context: context,
       dialogTitle: context.settingsText('בחר מיקום לשמירת רשימת הספרים'),
       fileName: 'otzaria_books.csv',
       initialDirectory: downloadsDirectory?.path,

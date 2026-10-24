@@ -501,10 +501,8 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
       },
       builder: (context, libraryState) {
         return BlocConsumer<SettingsBloc, SettingsState>(
-          // הרענון מופעל רק אחרי שה-BLoC סיים `await` של הכתיבה
-          // ל-`Settings` ופלט state חדש — אחרת `RefreshLibrary` היה
-          // עלול לרוץ לפני שהערך החדש זמין ל-`Settings.getValue`
-          // בתוך `_appendUserBooksToLibrary`.
+          // מרעננים רק אחרי שה-BLoC כתב ל-`Settings`: אחרת `RefreshLibrary` עלול
+          // לקרוא את הערך הישן ב-`_appendUserBooksToLibrary`.
           listenWhen: (prev, curr) =>
               prev.mergeUserBooksIntoLibrary != curr.mergeUserBooksIntoLibrary,
           listener: (context, state) {
@@ -539,7 +537,7 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
                     ),
                     kSettingsCardSpacing,
 
-                    // הפאנל המשותף (תצוגה + ספרים נוספים) - כעת כולל את תיקיית היברובוקס בתוכו!
+                    // הפאנל המשותף (תצוגה + ספרים נוספים, כולל תיקיית היברובוקס)
                     LibrarySettingsPanel(
                       hebrewBooksPathWidget: hebrewPathWidget,
                     ),
@@ -596,9 +594,7 @@ class _LibrarySettingsTabState extends State<LibrarySettingsTab> {
                                 ),
                           value: state.mergeUserBooksIntoLibrary,
                           onChanged: (value) {
-                            // ה-RefreshLibrary מופעל ב-listener למעלה,
-                            // אחרי שהערך החדש נשמר ב-`Settings`. אחרת
-                            // הספרייה היתה נבנית עם הערך הישן.
+                            // ה-RefreshLibrary מופעל ב-listener למעלה (ראו שם).
                             context.read<SettingsBloc>().add(
                               UpdateMergeUserBooksIntoLibrary(value),
                             );

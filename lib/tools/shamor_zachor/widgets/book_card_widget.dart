@@ -293,7 +293,6 @@ class _BookCardWidgetState extends State<BookCardWidget> {
       '/book_detail',
       arguments: {
         'topLevelCategoryKey': widget.topLevelCategoryKey,
-        'categoryName': widget.categoryName,
         'bookName': widget.bookName,
       },
     );

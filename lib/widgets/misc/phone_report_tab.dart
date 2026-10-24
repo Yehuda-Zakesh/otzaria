@@ -13,13 +13,6 @@ class PhoneReportTab extends StatefulWidget {
   final String libraryVersion;
   final int? bookId;
   final int lineNumber;
-  final void Function(
-    String selectedText,
-    int errorId,
-    String moreInfo,
-    int lineNumber,
-  )?
-  onSubmit;
   final VoidCallback? onCancel;
 
   const PhoneReportTab({
@@ -29,7 +22,6 @@ class PhoneReportTab extends StatefulWidget {
     required this.libraryVersion,
     required this.bookId,
     required this.lineNumber,
-    this.onSubmit,
     this.onCancel,
   });
 

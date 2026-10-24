@@ -2,9 +2,8 @@ import 'package:flutter/widgets.dart';
 
 /// מצב גרירת כרטיסיה שמגיעה **מחלון אחר**.
 ///
-/// ⚠️ חלון היעד אינו יודע דבר על גרירה שמתרחשת בחלון אחר: הם isolates
-/// נפרדים, ומחוות העכבר נתפסת אצל המקור. `Draggable`/`DragTarget` של
-/// Flutter פועלים רק בתוך חלון אחד, ולכן החיווי כאן מוזן מהודעות באפיק
+/// ⚠️ מחוות העכבר נתפסת אצל חלון המקור, ו-`Draggable`/`DragTarget` של
+/// Flutter פועלים רק בתוך חלון אחד. לכן החיווי כאן מוזן מ-`InProcessTabDrops`
 /// ולא ממערכת הגרירה של Flutter.
 @immutable
 class ExternalTabDrag {
@@ -19,8 +18,8 @@ class ExternalTabDrag {
   /// מיקום הסמן בקואורדינטות החלון, בפיקסלים לוגיים.
   ///
   /// ⚠️ ההמרה ממסך לחלון נעשית ב-runner (`ScreenToClient`) ולא כאן:
-  /// המיקום נמדד בחלון אחר, ו-Flutter אינו יודע היכן החלון שלו יושב על
-  /// המסך. חישוב ידני עם DPI היה ניחוש.
+  /// Flutter אינו יודע היכן החלון שלו יושב על המסך, וחישוב ידני עם DPI היה
+  /// ניחוש.
   final Offset local;
 
   @override
@@ -36,7 +35,7 @@ class ExternalTabDrag {
 /// לא ב-bloc: זהו מצב ויזואלי קצר-חיים של הגרירה, שנעלם בשחרור ואינו
 /// נשמר לדיסק. מעבר דרך bloc היה מוסיף אירוע ומצב לכל תזוזת עכבר.
 class ExternalTabDragState {
-  /// המצב של החלון שה-isolate הזה מציג; היום כל חלון הוא isolate משלו.
+  /// המצב של החלון הראשי; לחלון Dart יש מצב משלו דרך [ExternalTabDragScope].
   static final ExternalTabDragState current = ExternalTabDragState();
 
   /// המצב של החלון ש-[context] יושב בו; בלי [ExternalTabDragScope] — [current].
@@ -52,9 +51,8 @@ class ExternalTabDragState {
   /// מיקום ההכנסה שהרצועה חישבה עבור הגרירה החיצונית, או null כשהסמן אינו
   /// מעל רצועת הכרטיסיות.
   ///
-  /// ⚠️ הרצועה כותבת לכאן ו-[WindowBusHost] קורא — לא להפך. רק הרצועה
-  /// יודעת היכן הכרטיסיות שלה יושבות על המסך, וההודעה מהאפיק נושאת נקודה
-  /// גלובלית בלבד.
+  /// ⚠️ הרצועה כותבת לכאן ו-`InProcessTabDrops` קורא — לא להפך. רק הרצועה
+  /// יודעת היכן הכרטיסיות שלה יושבות על המסך.
   final ValueNotifier<int?> dropIndex = ValueNotifier<int?>(null);
 }
 

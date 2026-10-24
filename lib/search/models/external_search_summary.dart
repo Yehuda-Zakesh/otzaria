@@ -17,13 +17,10 @@ class ExternalSearchBook {
 }
 
 class ExternalSearchSummary {
-  final String provider;
-
   /// שם המקור להצגה (resultsTitle של שורת התוסף), למשל 'היברובוקס'.
   final String sourceTitle;
 
   final int totalBooks;
-  final int totalHits;
 
   /// ספירת ספרים לפי נתיב קטגוריה בספרייה (נתיבי עלים — בלי אבות; המיזוג
   /// לעץ מוסיף את האבות).
@@ -38,10 +35,8 @@ class ExternalSearchSummary {
   final List<ExternalSearchBook> namedOtherBooks;
 
   const ExternalSearchSummary({
-    required this.provider,
     required this.sourceTitle,
     required this.totalBooks,
-    required this.totalHits,
     required this.categoryBookCounts,
     required this.otherBooks,
     this.namedOtherBooks = const [],

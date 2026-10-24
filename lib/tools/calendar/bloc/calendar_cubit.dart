@@ -266,11 +266,6 @@ class CalendarCubit extends Cubit<CalendarState> {
     }
     if (isClosed) return;
     _updateTimesForDate(state.selectedGregorianDate, state.selectedCity);
-    // ההגדרות של חלון משני הן עותק; הבעלים מחזיר את המצב העדכני.
-    if (_alerts.needsSnapshot) {
-      await _alerts.send('snapshot');
-      if (isClosed) return;
-    }
     await _refreshGoogleConnectionStatus();
     if (isClosed) return;
     if (googleCalendarEnabled) {
@@ -399,8 +394,7 @@ class CalendarCubit extends Cubit<CalendarState> {
     return next;
   }
 
-  /// שולח פקודה לבעלים. בדחייה חוזרים לערכים המאושרים ומוצגת הודעה;
-  /// בפקיעת זמן המצב האופטימי נשאר עד העדכון הבא.
+  /// שולח פקודה לבעלים. בדחייה חוזרים לערכים המאושרים ומוצגת הודעה.
   Future<CalendarAlertsAck> _send(
     String op, [
     Map<String, Object?> args = const {},
@@ -411,13 +405,10 @@ class CalendarCubit extends Cubit<CalendarState> {
       case null:
         final revision = ack.update?.revision;
         if (revision != null) _awaitedScheduleRevision = revision;
-      case CalendarAlertsFailure.timeout:
-        UiSnack.showWarning(ToolsMessages.calendarMainWindowSlow);
-      case CalendarAlertsFailure.noOwner:
       case CalendarAlertsFailure.rejected:
         final confirmed = _confirmedValues;
         if (confirmed != null) emit(_withValues(state, confirmed));
-        UiSnack.showError(ToolsMessages.calendarMainWindowUnavailable);
+        UiSnack.showError(ToolsMessages.calendarChangeNotSaved);
     }
     return ack;
   }
@@ -1181,9 +1172,7 @@ class CalendarCubit extends Cubit<CalendarState> {
       'kind': 'file',
       'events': [for (final e in parsed) _eventJson(e)],
     });
-    return ack.ok || ack.failure == CalendarAlertsFailure.timeout
-        ? parsed.length
-        : 0;
+    return ack.ok ? parsed.length : 0;
   }
 
   /// מוסיף מנוי ליומן מקישור ICS ומייבא את האירועים ממנו.
@@ -1219,9 +1208,7 @@ class CalendarCubit extends Cubit<CalendarState> {
         'subscription': subscription.toJson(),
         'events': [for (final e in parsed) _eventJson(e)],
       });
-      return ack.ok || ack.failure == CalendarAlertsFailure.timeout
-          ? parsed.length
-          : null;
+      return ack.ok ? parsed.length : null;
     } catch (e) {
       if (!isClosed) {
         emit(
@@ -1403,10 +1390,7 @@ class CalendarCubit extends Cubit<CalendarState> {
     final updated = List<CustomEvent>.from(state.events)..add(newEvent);
     emit(state.copyWith(events: updated));
     final ack = await _send('upsertEvent', {'event': _eventJson(newEvent)});
-    if (ack.failure == CalendarAlertsFailure.noOwner ||
-        ack.failure == CalendarAlertsFailure.rejected) {
-      return;
-    }
+    if (!ack.ok) return;
 
     if (state.googleCalendarEnabled) {
       final googleId = await _upsertGoogleEvent(newEvent);
@@ -1425,10 +1409,7 @@ class CalendarCubit extends Cubit<CalendarState> {
       final ack = await _send('upsertEvent', {
         'event': _eventJson(updatedEvent),
       });
-      if (ack.failure == CalendarAlertsFailure.noOwner ||
-          ack.failure == CalendarAlertsFailure.rejected) {
-        return;
-      }
+      if (!ack.ok) return;
 
       if (state.googleCalendarEnabled) {
         final googleId = await _upsertGoogleEvent(updatedEvent);
@@ -1451,10 +1432,7 @@ class CalendarCubit extends Cubit<CalendarState> {
       ..removeWhere((e) => e.id == eventId);
     emit(state.copyWith(events: events));
     final ack = await _send('deleteEvent', {'id': eventId});
-    if (ack.failure == CalendarAlertsFailure.noOwner ||
-        ack.failure == CalendarAlertsFailure.rejected) {
-      return;
-    }
+    if (!ack.ok) return;
 
     if (state.googleCalendarEnabled && existing != null) {
       await _deleteGoogleEvent(existing);

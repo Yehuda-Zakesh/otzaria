@@ -494,8 +494,9 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
     if (mounted) setState(() => _visibleContentCache = null);
   }
 
-  /// סינון צ׳יפי לשונית הקישורים (סוג הקישור / דור המחבר).
-  Set<String> _selectedLinkTypes = const {};
+  /// סינון צ׳יפי לשונית הקישורים (סוג הקישור / דור המחבר). נוטיפייר ולא
+  /// setState, כדי ששינוי הסינון לא יבנה מחדש את רשימת המפרשים.
+  final ValueNotifier<Set<String>> _selectedLinkTypes = ValueNotifier(const {});
 
   String _getLinkKey(Link link) => pdfCommentaryItemKey(link);
 
@@ -808,6 +809,7 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
     widget.typeSelection?.removeListener(_onTypeSelectionChanged);
     _searchFocusNode.dispose();
     _commentaryFocusNode.dispose();
+    _selectedLinkTypes.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -1953,19 +1955,21 @@ class PdfCommentaryPanelState extends State<PdfCommentaryPanel>
 
     // אותה רשימה בדיוק כמו בכרטיסיית הטקסט: צ׳יפי סוג ודור, חיפוש בכותרת
     // ובתוכן, ורינדור SmartText.
-    return LinksListView(
-      links: relevantLinks,
-      chipSourceLinks: widget.tab.links,
-      openBookTitle: widget.tab.book.title,
-      selectedLinkTypes: _selectedLinkTypes,
-      onSelectedLinkTypesChanged: (types) =>
-          setState(() => _selectedLinkTypes = types),
-      openBookCallback: widget.openBookCallback,
-      fontSize: widget.fontSize,
-      displayProfile: widget.displayProfile,
-      copyDisplayProfile: widget.copyDisplayProfile,
-      contentScopeKey: _currentLinksScopeKey(),
-      emptyMessage: 'לא נמצאו קישורים לדף זה',
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: _selectedLinkTypes,
+      builder: (context, selectedLinkTypes, _) => LinksListView(
+        links: relevantLinks,
+        chipSourceLinks: widget.tab.links,
+        openBookTitle: widget.tab.book.title,
+        selectedLinkTypes: selectedLinkTypes,
+        onSelectedLinkTypesChanged: (types) => _selectedLinkTypes.value = types,
+        openBookCallback: widget.openBookCallback,
+        fontSize: widget.fontSize,
+        displayProfile: widget.displayProfile,
+        copyDisplayProfile: widget.copyDisplayProfile,
+        contentScopeKey: _currentLinksScopeKey(),
+        emptyMessage: 'לא נמצאו קישורים לדף זה',
+      ),
     );
   }
 

@@ -10,6 +10,7 @@ import 'package:otzaria/services/offline_report_script_builder.dart';
 import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
 import 'package:otzaria/settings/services/offline_send_target.dart';
 import 'package:otzaria/settings/services/safer_mode_guard.dart';
+import 'package:otzaria/theme/theme_exports.dart';
 import 'package:otzaria/utils/file/save_file_with_extension.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
 import 'package:path_provider/path_provider.dart';
@@ -40,6 +41,127 @@ Widget buildManagedActionButton({
   return IgnorePointer(
     ignoring: !enabled,
     child: Opacity(opacity: enabled ? 1 : 0.45, child: child),
+  );
+}
+
+/// The send, clear and download buttons above the saved reports; a column
+/// on a narrow panel.
+Widget buildPendingQueueToolbar({
+  required bool canSend,
+  required bool hasReports,
+  required VoidCallback onSend,
+  required bool isSending,
+  required VoidCallback onClear,
+  required bool isClearing,
+  required VoidCallback onExport,
+  required bool isExporting,
+}) {
+  return Padding(
+    padding: const EdgeInsets.only(right: 16, left: 16, top: 8, bottom: 16),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < LayoutBreakpoints.compact;
+        final send = buildManagedActionButton(
+          enabled: canSend,
+          child: ActionButton.recommended(
+            text: context.settingsText('שלח עכשיו'),
+            icon: FluentIcons.arrow_sync_24_regular,
+            onPressed: onSend,
+            isLoading: isSending,
+          ),
+        );
+        final clear = buildManagedActionButton(
+          enabled: hasReports,
+          child: ActionButton.neutral(
+            text: context.settingsText('נקה דיווחים'),
+            icon: FluentIcons.delete_24_regular,
+            onPressed: onClear,
+            isLoading: isClearing,
+          ),
+        );
+        final export = buildManagedActionButton(
+          enabled: hasReports,
+          child: ActionButton.neutral(
+            text: context.settingsText('הורד לשליחה במחשב מחובר'),
+            icon: FluentIcons.arrow_download_24_regular,
+            onPressed: onExport,
+            isLoading: isExporting,
+          ),
+        );
+        if (isNarrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              send,
+              const SizedBox(height: 8),
+              clear,
+              const SizedBox(height: 8),
+              export,
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: send),
+            const SizedBox(width: 12),
+            Expanded(child: clear),
+            const SizedBox(width: 12),
+            Expanded(child: export),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+/// Tells that the saved reports can still be downloaded while offline.
+Widget buildOfflineQueueNote(BuildContext context) {
+  return Padding(
+    padding: const EdgeInsets.only(right: 16, left: 16, bottom: 16),
+    child: Text(
+      context.settingsText(
+        'במצב מנותק אי אפשר לשלוח כעת, אך ניתן להוריד סקריפט לשליחה ממחשב מחובר.',
+      ),
+      style: kSettingsSubtitleStyle,
+    ),
+  );
+}
+
+/// The "clear all history" button above the sent reports.
+Widget buildClearSentHistoryButton(
+  BuildContext context, {
+  required bool enabled,
+  required VoidCallback onPressed,
+  required bool isLoading,
+}) {
+  return Padding(
+    padding: const EdgeInsets.only(right: 16, left: 16, bottom: 16),
+    child: Row(
+      children: [
+        Expanded(
+          child: buildManagedActionButton(
+            enabled: enabled,
+            child: ActionButton.neutral(
+              text: context.settingsText('נקה את כל ההיסטוריה'),
+              icon: FluentIcons.delete_24_regular,
+              onPressed: onPressed,
+              isLoading: isLoading,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// The subtitle of the saved reports section.
+String pendingReportsSubtitle(BuildContext context, {required int count}) {
+  if (count == 0) {
+    return context.settingsText('אין כרגע דיווחים שמורים בתור');
+  }
+  return context.settingsText(
+    'יש כרגע {count} דיווחים שמורים בתור',
+    args: {'count': count},
   );
 }
 
@@ -294,7 +416,9 @@ Future<void> exportOfflineSendScript<T>(
     'בחר מיקום לשמירת סקריפט השליחה',
   );
   final downloadsDirectory = await getDownloadsDirectory();
+  if (!context.mounted) return;
   final path = await saveFileWithExtension(
+    context: context,
     dialogTitle: saveDialogTitle,
     fileName: script.fileName,
     initialDirectory: downloadsDirectory?.path,

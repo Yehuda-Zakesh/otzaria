@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:collection';
 
 import 'package:flutter/material.dart';
-import 'package:otzaria/core/windowing/settings_sync.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/tools/calendar/models/calendar_event.dart';
 import 'package:otzaria/tools/calendar/services/calendar_alerts_store.dart';
@@ -155,22 +153,6 @@ class MemoryPluginIds implements PluginNotificationIdStore {
   }
 }
 
-/// האם [value] עובר ב-SendPort בין isolate groups, כמו בין חלונות.
-///
-/// נמדד מול ה-VM: מפה חייבת להיות LinkedHashMap (לא view ולא HashMap).
-bool isCrossGroupSendable(Object? value) => switch (value) {
-  null || bool() || num() || String() => true,
-  UnmodifiableMapView() ||
-  UnmodifiableListView() ||
-  UnmodifiableSetView() => false,
-  LinkedHashMap() => value.entries.every(
-    (e) => isCrossGroupSendable(e.key) && isCrossGroupSendable(e.value),
-  ),
-  LinkedHashSet() => value.every(isCrossGroupSendable),
-  List() => value.every(isCrossGroupSendable),
-  _ => false,
-};
-
 /// מצב הבעלים בזיכרון, עם יומן כתיבות הרישום.
 class MemoryAlertsStore implements CalendarAlertsStore {
   MemoryAlertsStore([Map<String, Object?> values = const {}])
@@ -210,9 +192,7 @@ class MemoryCacheProvider extends CacheProvider {
       value == null ? _values.remove(key) : _values[key] = value;
 
   @override
-  Future<void> init() async {
-    SettingsSync.instance.applyLocally = (key, value) async => put(key, value);
-  }
+  Future<void> init() async {}
 
   @override
   bool containsKey(String key) => _values.containsKey(key);
@@ -245,7 +225,6 @@ class MemoryCacheProvider extends CacheProvider {
   @override
   Future<void> remove(String key) async {
     _values.remove(key);
-    SettingsSync.instance.broadcastChange(key, null);
   }
 
   @override
@@ -268,7 +247,6 @@ class MemoryCacheProvider extends CacheProvider {
     // כמו Hive: הכתיבה אסינכרונית, ופקודה אחרת יכולה לקרוא באמצעה.
     await Future<void>.delayed(Duration.zero);
     put(key, value);
-    SettingsSync.instance.broadcastChange(key, value);
   }
 }
 

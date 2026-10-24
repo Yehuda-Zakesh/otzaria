@@ -1,4 +1,5 @@
 import 'package:flutter/rendering.dart';
+import 'package:otzaria/core/windowing/multiview/cocoa_view_window_native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
 import 'package:otzaria/core/windowing/multiview/host_window_app_window_controller.dart';
@@ -8,6 +9,61 @@ import '../../../test_helpers/fake_view_window.dart';
 import '../../../test_helpers/second_test_view.dart';
 
 void main() {
+  testWidgets('Cocoa שומר נקודות מסך גם כשלתצוגה DPR 2', (tester) async {
+    final view = SecondTestView(tester.view)..devicePixelRatio = 2;
+    final handle = StubWindowHandle(
+      StubWindowController(view),
+      (_) {},
+      fakeHwnd: 7,
+    );
+    const native = CocoaViewWindowNative();
+    var rect = const Rect.fromLTWH(-1600, 100, 800, 600);
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(CocoaViewWindowNative.defaultChannel, (
+      call,
+    ) async {
+      if (call.method == 'setFrame') {
+        final args = call.arguments as Map;
+        rect = Rect.fromLTWH(
+          args['x'] as double,
+          args['y'] as double,
+          args['width'] as double,
+          args['height'] as double,
+        );
+      }
+      if (call.method == 'frame') {
+        return {
+          'x': rect.left,
+          'y': rect.top,
+          'width': rect.width,
+          'height': rect.height,
+        };
+      }
+      if (call.method == 'visibleFrame') {
+        return {'x': 0, 'y': 0, 'width': 1440, 'height': 900, 'scale': 2};
+      }
+      return null;
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(
+        CocoaViewWindowNative.defaultChannel,
+        null,
+      ),
+    );
+    final window = HostWindowAppWindowController(
+      id: const AppWindowId('window-view-2'),
+      handle: handle,
+      onClose: () async {},
+      native: native,
+    );
+    expect(await window.getBounds(), rect);
+    const target = Rect.fromLTWH(1500, 120, 900, 700);
+    await window.setBounds(target);
+    expect(rect, target);
+    expect(await window.getBounds(), target);
+  });
+
   testWidgets('גבולות לוגיים לפי ה-DPR של התצוגה, ופעולות על החלון הזה', (
     tester,
   ) async {

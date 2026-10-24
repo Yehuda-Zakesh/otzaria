@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:otzaria/printing/safer_print_service.dart';
+import 'package:otzaria/core/ui_snack.dart' show navigatorKey;
+import 'package:otzaria/core/windowing/dialog_owner.dart';
 
 /// עימוד ה-PDF של דף תוסף (`ui.exportPdf` / `ui.print`). המידות במילימטרים;
 /// שדה שלא סופק משאיר את ברירת המחדל של מנוע ההדפסה.
@@ -95,9 +97,19 @@ class PluginPrintService {
     InAppWebViewController controller, {
     required String jobName,
     PluginPdfLayout? layout,
+    BuildContext? context,
   }) async {
+    final origin = context ?? navigatorKey.currentContext;
+    if (origin != null && !origin.mounted) return false;
+    final viewId = origin == null ? null : View.maybeOf(origin)?.viewId;
+    final owner =
+        DialogOwner.hwnd(context: origin) ?? (origin != null ? 0 : null);
     final pdf = await createPdf(controller, layout: layout);
+    if (origin != null && !origin.mounted) return false;
     return printPdfWithSaferMode(
+      context: origin,
+      ownerWindowHandle: owner,
+      ownerViewId: viewId,
       name: jobName,
       onLayout: (_) => pdf,
       // ה-PDF כבר מעומד ע"י מנוע ה-WebView; אין מה לפרוס מחדש לפי המדפסת.

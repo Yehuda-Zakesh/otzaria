@@ -5,7 +5,6 @@ import '../providers/shamor_zachor_data_provider.dart';
 import '../models/book_model.dart';
 
 class ShamorZachorSidebar extends StatefulWidget {
-  // Updated callback signature to include Top Level Name
   final Function(
     String categoryName,
     BookCategory category,

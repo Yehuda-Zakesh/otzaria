@@ -176,7 +176,6 @@ tz.TZDateTime _computeVisibleMoladInCity(
 ) {
   final molad = candidate.getMolad();
   final visibleMoladUtc = _calculateTrueConjunctionUtc(
-    candidate,
     fallbackLmtMolad: _meanMoladAsUtc(molad),
   );
   return tz.TZDateTime.from(visibleMoladUtc, tzLocation);
@@ -296,14 +295,13 @@ String _partOfDayLabel(int hour) {
 // חישוב true conjunction (אלגוריתם Meeus, "Astronomical Algorithms" פרק 49)
 // ============================================================================
 
-/// מחשב את הזמן האסטרונומי המדויק של ה-conjunction (מולד הנראה) בחודש העברי
-/// שהקלנדר מצביע עליו. מחזיר DateTime ב-UTC.
+/// מחשב את הזמן האסטרונומי המדויק של ה-conjunction (מולד הנראה) הקרוב
+/// ל-[fallbackLmtMolad]. מחזיר DateTime ב-UTC.
 ///
 /// אם החישוב נכשל מסיבה כלשהי, מחזיר את ה-fallback (המולד הממוצע).
 ///
 /// הדיוק של האלגוריתם הוא ±~3 דקות לתאריכים בעידן הנוכחי.
-DateTime _calculateTrueConjunctionUtc(
-  JewishCalendar targetMonthCalendar, {
+DateTime _calculateTrueConjunctionUtc({
   required DateTime fallbackLmtMolad,
 }) {
   try {

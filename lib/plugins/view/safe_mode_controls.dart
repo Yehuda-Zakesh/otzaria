@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria/core/app_runtime_reset.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/app_quit.dart';
 import 'package:otzaria/plugins/utils/plugin_safe_mode.dart';
 import 'package:otzaria/plugins/view/webview_environment_holder.dart';
 import 'package:otzaria/widgets/controls/bar_button.dart';
 import 'package:otzaria/widgets/dialogs/confirmation_dialog.dart';
-import 'package:otzaria/widgets/misc/restart_widget.dart';
 import 'package:otzaria/settings/l10n/settings_text.dart';
 
 /// יציאה ממצב בטוח לאחר אישור המשתמש.
@@ -26,9 +25,9 @@ Future<void> _restart(BuildContext context, {required bool safeMode}) async {
   PluginSafeMode.enteredAfterCrashes = false;
   await resetRuntimeStateForAppRestart();
   if (!context.mounted) return;
-  MultiWindowService.restartPeers(pluginSafeMode: safeMode);
-  RestartWidget.restartApp(
+  AppQuit.restartAll(
     context,
+    pluginSafeMode: safeMode,
     afterRestart: WebViewEnvironmentHolder.disposeForAppRestart,
   );
 }

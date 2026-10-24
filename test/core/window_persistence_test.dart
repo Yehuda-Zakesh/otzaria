@@ -1,7 +1,8 @@
 import 'dart:io';
 import 'dart:ui';
 
-import 'package:flutter/foundation.dart' show Listenable;
+import 'package:flutter/foundation.dart'
+    show Listenable, debugDefaultTargetPlatformOverride, TargetPlatform;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/window_bounds.dart';
@@ -12,6 +13,9 @@ import 'package:otzaria/core/windowing/app_window_id.dart';
 import 'package:window_manager/window_manager.dart' show TitleBarStyle;
 
 import '../test_helpers/second_test_view.dart';
+import '../test_helpers/memory_cache_provider.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
+import 'package:otzaria/settings/engine/settings_repository.dart';
 
 void main() {
   // מסך ראשי 1920x1080 ומסך משני משמאלו, בפיקסלים פיזיים.
@@ -142,6 +146,40 @@ void main() {
       );
     }
 
+    for (final currentDpr in [1.0, 2.0]) {
+      test(
+        'macOS משחזר גבולות שמורים בנקודות עם DPR ישן 2 ל-$currentDpr',
+        () async {
+          debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+          addTearDown(() => debugDefaultTargetPlatformOverride = null);
+          await Settings.init(cacheProvider: MemoryCacheProvider());
+          await Settings.setValue(SettingsRepository.keyLibraryPath, tmp.path);
+          const saved = WindowBounds(
+            left: -1600,
+            top: 100,
+            width: 800,
+            height: 600,
+            dpr: 2,
+          );
+          await sessions.saveBounds(1, saved.encode());
+          final window = _RecordingWindow(visible: false);
+          final persistence = WindowPersistenceBinding(
+            controller: window,
+            geometry: window,
+            slot: () => 1,
+            sessions: sessions,
+            devicePixelRatio: () => currentDpr,
+          );
+          await persistence.restoreIfAny();
+          await persistence.applyRestoredBounds();
+          expect(
+            window.appliedBounds,
+            const Rect.fromLTWH(-1600, 100, 800, 600),
+          );
+        },
+      );
+    }
+
     test('כל חלון שומר את הגבולות שלו לשורה שלו', () async {
       const a = Rect.fromLTWH(10, 20, 800, 600);
       const b = Rect.fromLTWH(900, 40, 640, 480);
@@ -218,6 +256,7 @@ class _RecordingWindow implements AppWindowController, AppWindowGeometry {
   final bool visible;
   final Rect bounds;
   final List<String> calls = [];
+  Rect? appliedBounds;
 
   @override
   AppWindowId get id => AppWindowId.primary;
@@ -226,7 +265,11 @@ class _RecordingWindow implements AppWindowController, AppWindowGeometry {
   @override
   Future<void> center() async => calls.add('center');
   @override
-  Future<void> setBounds(Rect bounds) async => calls.add('setBounds');
+  Future<void> setBounds(Rect bounds) async {
+    appliedBounds = bounds;
+    calls.add('setBounds');
+  }
+
   @override
   Future<void> setSize(Size size) async => calls.add('setSize');
 

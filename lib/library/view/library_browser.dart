@@ -36,6 +36,7 @@ import 'package:otzaria/library/view/otzar_book_dialog.dart';
 import 'package:otzaria/library/view/book_preview_panel.dart';
 import 'package:otzaria/library/view/category_preview_panel.dart';
 import 'package:otzaria/library/view/library_empty_state_widget.dart';
+import 'package:otzaria/search/utils/search_catalogue_order_helper.dart';
 import 'package:otzaria/search/view/search_dialog.dart';
 import 'package:otzaria/tabs/models/searching_tab.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
@@ -171,8 +172,6 @@ class FlatLibraryRow {
 List<FlatLibraryRow> buildFlatLibraryRows({
   required Category category,
   required Set<String> expandedPaths,
-  required int Function(Category) topCategoryOrder,
-  required int Function(int) normalizeOrder,
   Set<String> talmudTextTitles = const {},
 }) {
   final rows = <FlatLibraryRow>[];
@@ -185,14 +184,8 @@ List<FlatLibraryRow> buildFlatLibraryRows({
             )
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));
-    final subs = current.subCategories.where((c) => c.hasBooks).toList();
-    if (current is Library) {
-      subs.sort((a, b) => topCategoryOrder(a).compareTo(topCategoryOrder(b)));
-    } else {
-      subs.sort(
-        (a, b) => normalizeOrder(a.order).compareTo(normalizeOrder(b.order)),
-      );
-    }
+    final subs = current.subCategories.where((c) => c.hasBooks).toList()
+      ..sort(SearchCatalogueOrderHelper.subCategoryOrder(current));
 
     for (final sub in subs) {
       rows.add(
@@ -366,37 +359,6 @@ class _LibraryBrowserState extends State<LibraryBrowser>
 
   // רק המצב הריק מציג את טקסט החיפוש; בלעדיו הקלדה לא בונה מחדש את התוכן.
   bool _showsEmptyState = false;
-
-  static const List<String> _orderedTopCategories = [
-    'תנ"ך',
-    'מדרש',
-    'משנה',
-    'תלמוד בבלי',
-    'תלמוד ירושלמי',
-    'תוספתא',
-    'הלכה',
-    'שו"ת',
-    'קבלה',
-    'סדר התפילה',
-    'מחשבת ישראל',
-    'חסידות',
-    'ספרי מוסר',
-    'מילונים וספרי יעץ',
-    'לימוד יומי',
-    'ספרות עזר',
-    'בית שני',
-  ];
-
-  int _getTopCategoryOrder(Category cat) {
-    final normalized = cat.title
-        .replaceAll('\u05F4', '"')
-        .replaceAll('\u05F3', "'");
-    final idx = _orderedTopCategories.indexOf(normalized);
-    return idx >= 0 ? idx : _orderedTopCategories.length + cat.order;
-  }
-
-  static int _normalizeOrder(int order) =>
-      order >= 0 ? order : 1000 + order.abs();
 
   bool _isPreviewPanelVisible(SettingsState s) => libraryPreviewPaneEnabled(
     screenWidth: MediaQuery.sizeOf(context).width,
@@ -1554,18 +1516,9 @@ class _LibraryBrowserState extends State<LibraryBrowser>
   ) {
     final filteredBooks = _visibleBooks(category.books)
       ..sort((a, b) => a.order.compareTo(b.order));
-    final filteredSubCategories = category.subCategories
-        .where((c) => c.hasBooks)
-        .toList();
-    if (category is Library) {
-      filteredSubCategories.sort(
-        (a, b) => _getTopCategoryOrder(a).compareTo(_getTopCategoryOrder(b)),
-      );
-    } else {
-      filteredSubCategories.sort(
-        (a, b) => _normalizeOrder(a.order).compareTo(_normalizeOrder(b.order)),
-      );
-    }
+    final filteredSubCategories =
+        category.subCategories.where((c) => c.hasBooks).toList()
+          ..sort(SearchCatalogueOrderHelper.subCategoryOrder(category));
     return (subCategories: filteredSubCategories, books: filteredBooks);
   }
 
@@ -1866,8 +1819,6 @@ class _LibraryBrowserState extends State<LibraryBrowser>
       buildFlatLibraryRows(
         category: category,
         expandedPaths: _expandedCategories,
-        topCategoryOrder: _getTopCategoryOrder,
-        normalizeOrder: _normalizeOrder,
         talmudTextTitles: _talmudTextTitles(),
       );
 
@@ -1958,20 +1909,8 @@ class _LibraryBrowserState extends State<LibraryBrowser>
 
   List<Widget> _buildCategoryTree(Category category, int level) {
     final List<Widget> widgets = [];
-    final filteredBooks = _visibleBooks(category.books)
-      ..sort((a, b) => a.order.compareTo(b.order));
-    final filteredSubs = category.subCategories
-        .where((c) => c.hasBooks)
-        .toList();
-    if (category is Library) {
-      filteredSubs.sort(
-        (a, b) => _getTopCategoryOrder(a).compareTo(_getTopCategoryOrder(b)),
-      );
-    } else {
-      filteredSubs.sort(
-        (a, b) => _normalizeOrder(a.order).compareTo(_normalizeOrder(b.order)),
-      );
-    }
+    final (subCategories: filteredSubs, books: filteredBooks) =
+        _displayedContent(category);
     for (final sub in filteredSubs) {
       final isExpanded = _expandedCategories.contains(sub.path);
       final subChildren = isExpanded
@@ -2554,16 +2493,8 @@ class _LibraryBrowserState extends State<LibraryBrowser>
       ..sort((a, b) => a.order.compareTo(b.order));
     if (books.isNotEmpty) return books.first;
 
-    final subs = category.subCategories.toList();
-    if (category is Library) {
-      subs.sort(
-        (a, b) => _getTopCategoryOrder(a).compareTo(_getTopCategoryOrder(b)),
-      );
-    } else {
-      subs.sort(
-        (a, b) => _normalizeOrder(a.order).compareTo(_normalizeOrder(b.order)),
-      );
-    }
+    final subs = category.subCategories.toList()
+      ..sort(SearchCatalogueOrderHelper.subCategoryOrder(category));
     for (final sub in subs) {
       final book = _getFirstDisplayedBook(sub);
       if (book != null) return book;
@@ -2576,16 +2507,8 @@ class _LibraryBrowserState extends State<LibraryBrowser>
       return category;
     }
 
-    final subs = category.subCategories.toList();
-    if (category is Library) {
-      subs.sort(
-        (a, b) => _getTopCategoryOrder(a).compareTo(_getTopCategoryOrder(b)),
-      );
-    } else {
-      subs.sort(
-        (a, b) => _normalizeOrder(a.order).compareTo(_normalizeOrder(b.order)),
-      );
-    }
+    final subs = category.subCategories.toList()
+      ..sort(SearchCatalogueOrderHelper.subCategoryOrder(category));
 
     for (final sub in subs) {
       final match = _findTourCategoryWithBooks(sub);

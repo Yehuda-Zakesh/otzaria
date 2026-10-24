@@ -1,19 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:otzaria/tools/calendar/bloc/calendar_cubit.dart';
 import 'package:otzaria/tools/calendar/widgets/calendar_events_panel.dart';
 import 'package:otzaria/tools/calendar/widgets/calendar_times_panel.dart';
 
 enum CalendarSidePanelView { times, events }
 
 class CalendarSidePanel extends StatelessWidget {
-  final CalendarState state;
   final CalendarSidePanelView activeView;
   final CalendarTimesPanel timesPanel;
   final CalendarEventsPanel eventsPanel;
 
   const CalendarSidePanel({
     super.key,
-    required this.state,
     required this.activeView,
     required this.timesPanel,
     required this.eventsPanel,

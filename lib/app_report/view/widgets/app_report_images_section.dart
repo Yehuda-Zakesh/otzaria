@@ -89,7 +89,7 @@ class _AppReportImagesSectionState extends State<AppReportImagesSection>
 
   Future<void> _pick() async {
     try {
-      _add(await widget.sources.pickFiles());
+      _add(await widget.sources.pickFiles(context: context));
     } catch (error, stackTrace) {
       debugPrint('App report image pick failed: $error\n$stackTrace');
       UiSnack.showError(ReportMessages.appReportImageReadFailed);

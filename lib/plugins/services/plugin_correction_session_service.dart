@@ -526,7 +526,7 @@ class PluginCorrectionSessionService extends ChangeNotifier {
     if (session != null) unawaited(_end(session, 'user'));
   }
 
-  /// סגירת חלון משני מסתירה אותו בלבד, ולכן הסשנים שבו מסתיימים במפורש.
+  /// מסיים את כל הסשנים בתהליך (יציאה, העברת מסדים).
   void endAll(String reason) {
     _cancelledTabs.addAll(_pendingTabs);
     for (final session in _sessions.values.toList()) {
@@ -552,10 +552,10 @@ class PluginCorrectionSessionService extends ChangeNotifier {
     }
   }
 
-  void removeTab(String tabId) {
+  void removeTab(String tabId, {String reason = 'tab_closed'}) {
     final session = _sessionForTab(tabId);
     if (session != null) {
-      unawaited(_end(session, 'tab_closed'));
+      unawaited(_end(session, reason));
     } else if (_pendingTabs.contains(tabId)) {
       // begin שעדיין ממתין לא יירשם ללשונית שנסגרה.
       _cancelledTabs.add(tabId);

@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/windowing/app_window_controller.dart';
 import 'package:otzaria/core/windowing/window_manager_app_window_controller.dart';
 
@@ -25,10 +24,8 @@ class DockProgress {
   @visibleForTesting
   static bool? debugIsSupportedOverride;
 
-  /// הדוק שייך לתהליך, וחלון משני שידווח עליו יתנגש עם הראשי.
   static bool get isSupported =>
-      debugIsSupportedOverride ??
-      (!kIsWeb && Platform.isMacOS && ProcessDuties.current.isProcessOwner);
+      debugIsSupportedOverride ?? (!kIsWeb && Platform.isMacOS);
 
   /// מציג התקדמות [value] בין 0 ל-1, או חיווי בלתי-מוגדר כש-[value] הוא `null`.
   static Future<void> show({double? value}) =>

@@ -1,15 +1,10 @@
 import 'dart:async';
-import 'dart:isolate';
-import 'dart:ui';
 
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/attached_libraries/models/attached_library.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
-import 'package:otzaria/core/windowing/window_bus.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/core/messages/settings_messages.dart';
 import 'package:otzaria/indexing/bloc/indexing_bloc.dart';
 import 'package:otzaria/indexing/bloc/indexing_event.dart';
@@ -25,10 +20,6 @@ import 'package:otzaria/settings/services/custom_folders/custom_folder.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
 
 import '../../test_helpers/memory_cache_provider.dart';
-
-/// ⚠️ קידומת ייחודית לסוויטה: [IsolateNameServer] גלובלי לתהליך, ושתי
-/// סוויטות שרצות יחד היו תופסות את אותו כינוי בעלים.
-const String _busNamespace = 'otzaria.test.indexingbloc';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -50,9 +41,6 @@ void main() {
         ]);
   _FakeIndexingRepository repositoryOf(IndexingBloc bloc) =>
       (bloc as _FakeIndexingBloc).repository;
-
-  setUp(() => WindowRole.isSecondary = false);
-  tearDown(() => WindowRole.isSecondary = false);
 
   group('StartIndexing', () {
     test('callback משלים גם כשאין ספרים ולא נפלט InProgress', () async {
@@ -501,154 +489,6 @@ void main() {
         ),
       ),
       verify: (_) => expect(store.hasPendingVisibilityIndex, isTrue),
-    );
-  });
-
-  group('חלון משני', () {
-    late _FakeOwnerWindow owner;
-
-    setUp(() {
-      WindowRole.isSecondary = true;
-      WindowBus.namespace = _busNamespace;
-      owner = _FakeOwnerWindow()..register();
-    });
-
-    tearDown(() {
-      owner.dispose();
-      WindowBus.namespace = 'otzaria.window';
-    });
-
-    test('callback מסיים גם כשהעבודה מועברת לחלון הראשי', () async {
-      final bloc = _FakeIndexingBloc();
-      final settled = Completer<void>();
-      bloc.add(
-        StartIndexing(
-          libraryWithBooks(),
-          onSettled: settled.complete,
-        ),
-      );
-      await settled.future.timeout(const Duration(seconds: 2));
-      expect(bloc.repository.indexAllCalls, 0);
-      await bloc.close();
-    });
-
-    blocTest<IndexingBloc, IndexingState>(
-      'אינדוקס מלא אינו מגיע למאגר',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(StartIndexing(libraryWithBooks())),
-      verify: (bloc) => expect(repositoryOf(bloc).indexAllCalls, 0),
-    );
-
-    blocTest<IndexingBloc, IndexingState>(
-      'ריצת אינדוקס של רענון אינה מגיעה למאגר',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) {
-        final library = libraryWithBooks();
-        bloc.add(
-          RunIndexing(
-            library,
-            books: library.books,
-            changedBooks: library.books,
-            check: IndexCheckScope.library,
-          ),
-        );
-      },
-      verify: (bloc) => expect(repositoryOf(bloc).runs, isEmpty),
-    );
-
-    blocTest<IndexingBloc, IndexingState>(
-      'ניקוי רשומות יתומות אינו מגיע למאגר',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(DropOrphanedIndexEntries(libraryWithBooks())),
-      verify: (bloc) => expect(repositoryOf(bloc).dropOrphanedCalls, 0),
-    );
-
-    blocTest<IndexingBloc, IndexingState>(
-      'איפוס האינדקס אינו מגיע למאגר',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(ClearIndex()),
-      verify: (bloc) => expect(repositoryOf(bloc).clearCalls, 0),
-    );
-
-    // עבודת התחזוקה נשלחת בכל טעינת ספרייה, גם בחלון משני. חסימה שפולטת
-    // מצב פירושה הודעה למשתמש בכל פתיחת חלון — וגם דריסת מצב האינדקס.
-    blocTest<IndexingBloc, IndexingState>(
-      'ניקוי רשומות יתומות נחסם בשקט — בלי פליטת מצב',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(DropOrphanedIndexEntries(libraryWithBooks())),
-      expect: () => <IndexingState>[],
-    );
-
-    blocTest<IndexingBloc, IndexingState>(
-      'ריצת אינדוקס של רענון נחסמת בשקט — בלי פליטת מצב',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) {
-        final library = libraryWithBooks();
-        bloc.add(RunIndexing(library, books: library.books));
-      },
-      expect: () => <IndexingState>[],
-    );
-
-    // לעומתן — בקשה שהמשתמש יזם כן מדווחת ומאפסת את המצב.
-    blocTest<IndexingBloc, IndexingState>(
-      'אינדוקס מלא שהמשתמש ביקש מאפס את המצב (ומדווח למשתמש)',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(StartIndexing(libraryWithBooks())),
-      expect: () => [IndexingInitial()],
-    );
-
-    blocTest<IndexingBloc, IndexingState>(
-      'איפוס אינדקס שהמשתמש ביקש מאפס את המצב (ומדווח למשתמש)',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(ClearIndex()),
-      expect: () => [IndexingInitial()],
-    );
-
-    // כל חלון יכול ליזום; המארח הוא שמבצע.
-    blocTest<IndexingBloc, IndexingState>(
-      'אינדוקס מלא שהמשתמש ביקש נשלח למארח ולא מתבצע מקומית',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(StartIndexing(libraryWithBooks())),
-      wait: const Duration(milliseconds: 100),
-      verify: (bloc) {
-        expect(owner.receivedOps, [MultiWindowService.indexOpAll]);
-        expect(repositoryOf(bloc).indexAllCalls, 0);
-      },
-    );
-
-    blocTest<IndexingBloc, IndexingState>(
-      'איפוס אינדקס שהמשתמש ביקש נשלח למארח ולא מתבצע מקומית',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(ClearIndex()),
-      wait: const Duration(milliseconds: 100),
-      verify: (bloc) {
-        expect(owner.receivedOps, [MultiWindowService.indexOpClear]);
-        expect(repositoryOf(bloc).clearCalls, 0);
-      },
-    );
-
-    blocTest<IndexingBloc, IndexingState>(
-      'איפוס ובנייה מחדש נשלחים למארח כפעולה אחת ולא מתבצעים מקומית',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(ResetAndIndex(libraryWithBooks())),
-      wait: const Duration(milliseconds: 100),
-      expect: () => [IndexingInitial()],
-      verify: (bloc) {
-        expect(owner.receivedOps, [MultiWindowService.indexOpResetAndIndex]);
-        expect(repositoryOf(bloc).clearCalls, 0);
-        expect(repositoryOf(bloc).runs, isEmpty);
-      },
-    );
-
-    // עבודת התחזוקה רצה במארח בכל טעינת ספרייה — העברה הייתה מכפילה אותה.
-    blocTest<IndexingBloc, IndexingState>(
-      'עבודת רקע אינה נשלחת למארח',
-      build: _FakeIndexingBloc.new,
-      act: (bloc) => bloc.add(
-        RunIndexing(libraryWithBooks(), check: IndexCheckScope.library),
-      ),
-      wait: const Duration(milliseconds: 100),
-      verify: (_) => expect(owner.receivedOps, isEmpty),
     );
   });
 
@@ -1346,35 +1186,5 @@ class _UnusedTantivyDataProvider implements TantivyDataProvider {
   @override
   dynamic noSuchMethod(Invocation invocation) {
     throw UnimplementedError('Unexpected provider call: $invocation');
-  }
-}
-
-/// המארח המדומה: תופס את כינוי הבעלים באפיק ומתעד את הפעולות שהתבקשו.
-///
-/// [WindowBus] הוא סינגלטון פר-isolate ואינו יכול לשמש כשני חלונות, ולכן
-/// הצד המרוחק נרשם ישירות מול [IsolateNameServer] — אותו מנגנון בדיוק.
-class _FakeOwnerWindow {
-  final receivedOps = <String>[];
-  late final ReceivePort _port;
-
-  void register() {
-    _port = ReceivePort();
-    IsolateNameServer.registerPortWithName(
-      _port.sendPort,
-      '$_busNamespace.owner',
-    );
-    _port.listen((message) {
-      final map = message as Map;
-      final reply = map['reply'] as SendPort;
-      final body = Map<String, dynamic>.from(map['body'] as Map);
-      final accepted = body['type'] == MultiWindowService.requestIndex;
-      if (accepted) receivedOps.add(body['op'] as String);
-      reply.send({'ok': true, 'result': accepted});
-    });
-  }
-
-  void dispose() {
-    IsolateNameServer.removePortNameMapping('$_busNamespace.owner');
-    _port.close();
   }
 }

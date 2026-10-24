@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -47,7 +46,6 @@ class _AttachedLibrariesPanelState extends State<AttachedLibrariesPanel> {
     _links.tooLargeSlugs.addListener(_rebuild);
     _links.buildingSlugs.addListener(_rebuild);
     _links.incompleteSlugs.addListener(_rebuild);
-    unawaited(_links.refreshFromHost());
   }
 
   @override
@@ -65,23 +63,31 @@ class _AttachedLibrariesPanelState extends State<AttachedLibrariesPanel> {
 
   Future<void> _importFile() async {
     final bloc = context.read<AttachedLibrariesBloc>();
-    final files = await FilePicker.pickFiles(
-      // בורר המערכת במובייל אינו מכיר את הסיומת db; הקובץ נבדק לפי תוכנו.
-      type: widget.supportsLinking ? FileType.custom : FileType.any,
-      allowedExtensions: widget.supportsLinking ? const ['db'] : null,
-      dialogTitle: context.settingsText('בחר קובץ מסד ספרים'),
-      windowsOptions: kModalWindowsOptions,
-      linuxOptions: kModalLinuxOptions,
-    );
+    final files =
+        (await withFilePickerOwner(
+          context,
+          () => FilePicker.pickFiles(
+            // בורר המערכת במובייל אינו מכיר את הסיומת db; הקובץ נבדק לפי תוכנו.
+            type: widget.supportsLinking ? FileType.custom : FileType.any,
+            allowedExtensions: widget.supportsLinking ? const ['db'] : null,
+            dialogTitle: context.settingsText('בחר קובץ מסד ספרים'),
+            windowsOptions: modalWindowsOptions(context),
+            linuxOptions: kModalLinuxOptions,
+          ),
+        )) ??
+        [];
     final path = files.map((f) => f.path).whereType<String>().firstOrNull;
     if (path != null) bloc.add(ImportAttachedLibraryFile(path));
   }
 
   Future<void> _addFolder() async {
     final bloc = context.read<AttachedLibrariesBloc>();
-    final path = await FilePicker.getDirectoryPath(
-      windowsOptions: kModalWindowsOptions,
-      linuxOptions: kModalLinuxOptions,
+    final path = await withFilePickerOwner(
+      context,
+      () => FilePicker.getDirectoryPath(
+        windowsOptions: modalWindowsOptions(context),
+        linuxOptions: kModalLinuxOptions,
+      ),
     );
     if (path != null) bloc.add(AddAttachedLibraryFolder(path));
   }

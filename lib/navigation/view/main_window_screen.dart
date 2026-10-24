@@ -11,10 +11,9 @@ import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:otzaria/app_report/view/app_report_dialog.dart';
 import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
-import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/core/startup_timeline.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/core/windowing/window_opener.dart';
 import 'package:otzaria/widgets/misc/rtl_icon.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -140,7 +139,6 @@ import 'package:otzaria/tour/view/tour_overlay_screen.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/plugins/view/plugin_background_host.dart';
 import 'package:otzaria/plugins/view/plugin_install_screen.dart';
-import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 import 'package:otzaria/utils/navigation/external_action_dispatcher.dart';
 import 'package:otzaria/utils/navigation/external_book_link_resolver.dart';
 import 'package:otzaria/utils/navigation/open_book.dart';
@@ -150,7 +148,6 @@ import 'package:otzaria/tools/calendar/helpers/calendar_date_helpers.dart'
     show getDafYomi, formatAmud;
 import 'package:otzaria/tools/calendar/helpers/daf_yomi_navigation.dart'
     show openDafYomiBook;
-import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 
 /// פריט מאוחד לסרגל הניווט הראשי — מייצג תוסף או כלי-מובנה שהוצמד לסרגל.
 ///
@@ -268,6 +265,14 @@ Map<String, dynamic> hebrewBooksPathSettingsChangedPayload(String path) => {
   'key': SettingsRepository.keyHebrewBooksPath,
   'newValue': path,
 };
+
+/// האם קישור חיצוני מעלה את החלון לפני הטיפול. "חלון חדש" לא ביקש חלון קיים,
+/// אלא בחלון יחיד: שם הוא לא ייפתח, ולכן מציגים את הראשי (גם מוסתר).
+@visibleForTesting
+bool externalActionRaisesWindow(
+  ExternalUriAction action, {
+  required bool canOpenWindows,
+}) => action is! OpenNewWindowAction || !canOpenWindows;
 
 /// האם למקד אוטומטית את שדה החיפוש בכניסה למסך הספרייה — במובייל המקלדת
 /// הייתה נפתחת בכל כניסה, כולל בחזרה מההגדרות, ומכסה חצי מסך.
@@ -631,19 +636,17 @@ class MainWindowScreenState extends State<MainWindowScreen>
 
   /// האם לדלג על בניית קטלוג הספרייה בעלייה.
   ///
-  /// ⚠️ רק בחלון משני שנפתח עם כרטיסיה: המשתמש רואה ספר, לא את הספרייה,
+  /// ⚠️ רק בחלון Dart שנפתח עם כרטיסיה: המשתמש רואה ספר, לא את הספרייה,
   /// ובניית הקטלוג מעכבת את החשיפה בכ-700ms. `LibraryBrowser` טוען אותו
   /// ב-`initState` שלו כשנכנסים אליו, ולכן שום דבר לא אובד.
   bool get _skipsEagerLibraryLoad =>
       !_role.isPrimaryView && _role.openedWithTab;
 
   /// עבודה של bloc ברמת התהליך: עם חלונות Dart כל המסכים מאזינים לו.
-  bool get _ownsSharedLibraryUpdate =>
-      !MultiViewMode.enabled || _duties.isProcessOwner;
+  bool get _ownsSharedLibraryUpdate => _duties.isProcessOwner;
 
   /// דיאלוג שנולד מ-bloc משותף מוצג רק בחלון שהמשתמש עובד בו.
-  bool get _showsSharedPrompts =>
-      !MultiViewMode.enabled || identical(AppWindowKeys.current, _windowKeys);
+  bool get _showsSharedPrompts => identical(AppWindowKeys.current, _windowKeys);
 
   /// תפקיד החלון והעבודה פר-תהליך שלו; נקראים פעם אחת, ב-[initState].
   late final AppWindowRole _role;
@@ -1410,8 +1413,12 @@ class MainWindowScreenState extends State<MainWindowScreen>
         return false;
       }
 
-      // "חלון חדש" לא ביקש חלון קיים — הרמת חלון שרירותי (אולי מוסתר) מפתיעה.
-      if (action is! OpenNewWindowAction) await _bringWindowToFront();
+      if (externalActionRaisesWindow(
+        action,
+        canOpenWindows: RunnerWindowChannel.canOpenWindows,
+      )) {
+        await _bringWindowToFront();
+      }
       if (!mounted) return false;
       return await _dispatchExternalUriAction(action);
     } catch (e, stackTrace) {
@@ -1433,8 +1440,8 @@ class MainWindowScreenState extends State<MainWindowScreen>
     if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) return;
     if (!mounted) return;
     // `raiseSelf` מעלה את חלון ה-runner, כלומר את הראשי ולא חלון Dart.
-    if (MultiWindowService.canOpenWindows && !_role.isViewWindow) {
-      await const MultiWindowService().raiseSelf();
+    if (!_role.isViewWindow) {
+      await const RunnerWindowChannel().raiseSelf();
       return;
     }
     final window = AppWindowScope.controllerOf(context);
@@ -1797,12 +1804,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
     dispatchOpenBookAction(
       action: action,
       book: book,
-      coordinator: BookOpenCoordinator(
-        tabsBloc: context.read<TabsBloc>(),
-        historyBloc: context.read<HistoryBloc>(),
-        navigationBloc: context.read<NavigationBloc>(),
-        layoutWidth: readingLayoutWidthResolverOf(context),
-      ),
+      coordinator: bookOpenCoordinatorOf(context),
     );
     return true;
   }
@@ -1823,12 +1825,7 @@ class MainWindowScreenState extends State<MainWindowScreen>
     dispatchOpenPdfBookAction(
       action: action,
       book: book,
-      coordinator: BookOpenCoordinator(
-        tabsBloc: context.read<TabsBloc>(),
-        historyBloc: context.read<HistoryBloc>(),
-        navigationBloc: context.read<NavigationBloc>(),
-        layoutWidth: readingLayoutWidthResolverOf(context),
-      ),
+      coordinator: bookOpenCoordinatorOf(context),
     );
     return true;
   }

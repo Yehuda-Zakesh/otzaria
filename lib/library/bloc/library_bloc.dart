@@ -6,7 +6,6 @@ import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/core/error_log_file.dart';
-import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/library/bloc/library_event.dart';
@@ -101,28 +100,24 @@ class LibraryBloc extends Bloc<LibraryEvent, LibraryState> {
     on<UpdateSearchQuery>(_onUpdateSearchQuery);
     on<SelectBookForPreview>(_onSelectBookForPreview);
     on<SelectCategoryForPreview>(_onSelectCategoryForPreview);
-    if (MultiViewMode.enabled) {
-      _catalogChangedSub = _catalogChanged.stream.listen((source) {
-        if (!identical(source, this) && !isClosed) {
-          add(const LibraryChangedInOtherWindow());
-        }
-      });
-    }
+    _catalogChangedSub = _catalogChanged.stream.listen((source) {
+      if (!identical(source, this) && !isClosed) {
+        add(const LibraryChangedInOtherWindow());
+      }
+    });
   }
 
   /// חלונות Dart חולקים isolate, את הקטלוג ואת ההסתרות, אבל לא את ה-bloc:
   /// מי שבנה את העץ מחדש מודיע כאן, והשאר קוראים את העץ הטרי.
   static final StreamController<LibraryBloc> _catalogChanged =
       StreamController<LibraryBloc>.broadcast();
-  StreamSubscription<LibraryBloc>? _catalogChangedSub;
+  late final StreamSubscription<LibraryBloc> _catalogChangedSub;
 
-  void _announceCatalogChanged() {
-    if (MultiViewMode.enabled) _catalogChanged.add(this);
-  }
+  void _announceCatalogChanged() => _catalogChanged.add(this);
 
   @override
   Future<void> close() async {
-    await _catalogChangedSub?.cancel();
+    await _catalogChangedSub.cancel();
     return super.close();
   }
 

@@ -1,19 +1,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/plugins/models/plugin_valid_permissions.dart';
-import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/plugins/services/plugin_new_tab_page_registry.dart';
 
 /// שומר בחירת בעלים בהרשאות ומסדר בקשות מתחרות בלי תור להשתלטות עתידית.
 class PluginNewTabPageService {
   static final instance = PluginNewTabPageService();
-  static const requestChanged = 'pluginNewTabPageChanged';
   PluginNewTabPageService({PluginNewTabPageRegistry? registry})
     : _registry = registry ?? PluginNewTabPageRegistry.instance;
   final PluginNewTabPageRegistry _registry;
-
-  static void broadcastChanged() =>
-      WindowBus.instance.broadcast({'type': requestChanged});
 
   Future<void> syncOwner(PluginRegistryRepository repository) =>
       _serialize(() async {
@@ -110,7 +105,6 @@ class PluginNewTabPageService {
       _serialize(() async {
         await repository.clearNewTabPageRegistration(pluginId);
         _registry.remove(pluginId);
-        broadcastChanged();
       });
 
   Future<bool> _grant(
@@ -127,7 +121,6 @@ class PluginNewTabPageService {
       onGranted: () {
         if (_registry.activePluginId == pluginId) return;
         _registry.selectOwner(pluginId);
-        broadcastChanged();
       },
     );
   }

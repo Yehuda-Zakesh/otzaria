@@ -45,10 +45,6 @@ class ProcessedBook {
 /// מנוע העימוד. כל הפונקציות טהורות — בלי IO ובלי מצב — כדי שאפשר יהיה
 /// להריץ אותן ב-`Isolate.run`; לכן גם המימוש חייב להיות חסר שדות.
 abstract class TikkunEngine {
-  String cleanRawText(String raw);
-
-  List<TikkunToken> tokenizeText(String cleaned);
-
   /// [widths] הוא מודל רוחב גופן הסת"ם — הפריסה נגזרת ממנו, ולכן כל מטמון
   /// שורות חייב לכלול את `widths.id` במפתח שלו.
   List<TikkunLine> paginateAllTokens(

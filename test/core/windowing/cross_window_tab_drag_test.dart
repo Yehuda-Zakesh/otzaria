@@ -1,14 +1,7 @@
-// ⚠️ רצה בכל פלטפורמה, ובמכוון.
-//
-// כל מסלול הגרירה מגודר ב-`MultiWindowService.canOpenWindows`, שהוא
-// `Platform.isWindows`, ולכן הקובץ היה מסומן `@TestOn('windows')` — וה-CI
-// רץ על ubuntu. כלומר כל הבדיקות כאן היו ירוקות על מכונת המפתח בלבד.
-// ההיגיון שנבדק אינו תלוי פלטפורמה: מה שמעבר לערוץ מדומה ב-[_FakeRunner],
-// ו-`debugSupportedOverride` פותח את השער.
+// החלטות הגרירה נבדקות בכל פלטפורמה, עם חלון וערוץ runner מדומים.
 library;
 
 import 'dart:async';
-import 'dart:isolate';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -20,9 +13,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/windowing/cross_window_tab_drag.dart';
 import 'package:otzaria/core/windowing/drag_preview_colors.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/core/windowing/tab_drag_preview.dart';
-import 'package:otzaria/core/windowing/window_bus.dart';
+import 'package:otzaria/core/windowing/window_opener.dart';
+import 'package:otzaria/core/windowing/app_window_id.dart';
+import 'package:otzaria/core/windowing/multiview/in_process_tab_drop.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/plugins/repository/plugin_correction_draft_repository.dart';
@@ -37,9 +32,6 @@ import 'package:otzaria/tabs/utils/confirm_close_tabs.dart';
 
 import '../../test_helpers/controllable_correction_draft_repository.dart';
 import '../../test_helpers/memory_cache_provider.dart';
-
-/// ⚠️ קידומת ייחודית לסוויטה — [ui.IsolateNameServer] גלובלי לתהליך.
-const String _namespace = 'otzaria.test.crosswindowdrag';
 
 /// מסלול הגרירה בין חלונות נבדק עד כה **ידנית בלבד**, וזה הפער שהדוח סימן.
 /// כאן נבדקת ההחלטה עצמה: מה קורה לכרטיסיה בכל אחת מארבע התוצאות.
@@ -61,8 +53,8 @@ void main() {
   late CrossWindowTabDrag drag;
 
   setUp(() {
-    MultiWindowService.debugSupportedOverride = true;
-    WindowBus.namespace = _namespace;
+    RunnerWindowChannel.debugSupportedOverride = true;
+    _drops = _FakeDrops();
     runner = _FakeRunner()..install();
     tabsBloc = _RecordingTabsBloc(
       TabsState(
@@ -73,19 +65,14 @@ void main() {
         currentTabIndex: 0,
       ),
     );
-    drag = CrossWindowTabDrag();
+    drag = CrossWindowTabDrag(inProcess: _drops);
   });
 
   tearDown(() async {
-    MultiWindowService.debugSupportedOverride = null;
+    RunnerWindowChannel.debugSupportedOverride = null;
     drag.dispose();
     runner.uninstall();
     await tabsBloc.close();
-    WindowBus.instance.unregister();
-    for (var i = 1; i <= WindowBus.slotCount; i++) {
-      ui.IsolateNameServer.removePortNameMapping('$_namespace.$i');
-    }
-    WindowBus.namespace = 'otzaria.window';
   });
 
   OpenedTab firstTab() => tabsBloc.state.tabs.first;
@@ -173,12 +160,13 @@ void main() {
       expect(runner.endCalls, 0);
     });
 
-    test('פתיחת חלון משאירה אותה — היא תוחלף בחלון האמיתי', () async {
+    test('פתיחת חלון Dart מסתירה אותה — ה-runner אינו מכיר אותו', () async {
       runner.cursorTarget = (slot: null, isSelf: false, isShellTray: false);
 
       await drag.handleDroppedOutside(firstTab(), tabsBloc);
 
-      expect(runner.endCalls, 0);
+      expect(runner.openWindowCalls, 1);
+      expect(runner.endCalls, 1);
     });
 
     test('שחרור לחלון קיים מסתיר מיד — אין מה להחליף', () async {
@@ -1387,8 +1375,9 @@ class _FakeRunner {
   int endCalls = 0;
 
   void install() {
+    WindowOpener.debugOverride = _RunnerOpener(this);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(MultiWindowService.channel, (call) async {
+        .setMockMethodCallHandler(RunnerWindowChannel.channel, (call) async {
           switch (call.method) {
             case 'windowAtCursor':
               cursorQueries++;
@@ -1430,18 +1419,12 @@ class _FakeRunner {
                 'x': 100,
                 'y': 200,
               };
-            case 'openWindow':
-              openWindowCalls++;
-              lastOpenArgs = call.arguments as Map<Object?, Object?>?;
-              return openWindowResult;
             case 'freezeTabDrag':
               freezeCalls++;
               return null;
             case 'endTabDrag':
               endCalls++;
               return null;
-            case 'windowCount':
-              return {'count': 1, 'max': 4, 'engines': 1};
             default:
               return null;
           }
@@ -1449,43 +1432,108 @@ class _FakeRunner {
   }
 
   void uninstall() {
+    WindowOpener.debugOverride = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(MultiWindowService.channel, null);
+        .setMockMethodCallHandler(RunnerWindowChannel.channel, null);
   }
 }
 
-/// חלון יעד מדומה על האפיק.
+/// פתיחת חלון דרך [WindowOpener.current], מתועדת ב-[_FakeRunner].
+class _RunnerOpener implements WindowOpener {
+  _RunnerOpener(this.runner);
+
+  final _FakeRunner runner;
+
+  @override
+  Future<bool> openWindow({
+    OpenedTab? tab,
+    ({int x, int y})? origin,
+    ({int left, int top, int width, int height})? bounds,
+    bool inheritPlacement = true,
+  }) async {
+    runner.openWindowCalls++;
+    runner.lastOpenArgs = {
+      if (origin != null) 'originX': origin.x,
+      if (origin != null) 'originY': origin.y,
+      if (bounds != null)
+        'bounds': {
+          'left': bounds.left,
+          'top': bounds.top,
+          'width': bounds.width,
+          'height': bounds.height,
+        },
+    };
+    return runner.openWindowResult;
+  }
+
+  @override
+  Future<bool> openEmptyWindow() => openWindow();
+
+  @override
+  Future<bool> restoreLastClosedWindow() async => false;
+
+  @override
+  Future<bool> canOpenAnotherWindow() async => true;
+
+  @override
+  Future<({int count, int max})?> windowCount() async => (count: 1, max: 8);
+
+  @override
+  Future<void> reportOpenWindowFailure() async {}
+}
+
+late _FakeDrops _drops;
+
+/// חלונות התהליך המדומים: [resolve] מחזיר את המשבצת שה-runner המדומה דיווח.
+class _FakeDrops extends InProcessTabDrops {
+  _FakeDrops() : super(screenToClient: _noScreenToClient);
+
+  static Future<Offset?> _noScreenToClient(
+    int x,
+    int y,
+    double devicePixelRatio, {
+    int? hwnd,
+  }) async => null;
+
+  final Map<int, _FakePeer> receivers = {};
+
+  @override
+  int? resolve({int? hwnd, int? runnerSlot}) => runnerSlot;
+
+  @override
+  int? slotOf(AppWindowId id) => null;
+
+  @override
+  int? hwndOf(AppWindowId id) => null;
+
+  @override
+  Future<int?> notifyDragOver(int slot, int x, int y, String title) async =>
+      null;
+
+  @override
+  void notifyDragLeave(int slot) {}
+
+  /// כמו חלון שאינו עונה: לא ידוע אם קלט (null).
+  @override
+  Future<bool?> sendTabToWindow(int slot, OpenedTab tab, {int? index}) async {
+    final peer = receivers[slot];
+    if (peer == null) return null;
+    peer.receivedTabs++;
+    return peer.accept;
+  }
+}
+
+/// חלון יעד מדומה בתהליך.
 class _FakePeer {
   _FakePeer(this.slot, {required this.accept});
 
   final int slot;
   final bool accept;
   int receivedTabs = 0;
-  late final ReceivePort _port;
 
-  void register() {
-    _port = ReceivePort();
-    ui.IsolateNameServer.registerPortWithName(
-      _port.sendPort,
-      '$_namespace.$slot',
-    );
-    _port.listen((message) {
-      final map = message as Map;
-      final reply = map['reply'] as SendPort;
-      final body = Map<String, dynamic>.from(map['body'] as Map);
-      if (body['type'] == MultiWindowService.requestReceiveTab) {
-        receivedTabs++;
-        reply.send({'ok': true, 'result': accept});
-        return;
-      }
-      reply.send({'ok': true, 'result': null});
-    });
-  }
+  void register() => _drops.receivers[slot] = this;
 
-  void dispose() {
-    ui.IsolateNameServer.removePortNameMapping('$_namespace.$slot');
-    _port.close();
-  }
+  void dispose() => _drops.receivers.remove(slot);
 }
 
 class _RecordingTabsBloc extends Cubit<TabsState> implements TabsBloc {

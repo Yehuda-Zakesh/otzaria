@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 import 'package:otzaria/core/messages/pdf_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
+import 'package:otzaria/core/windowing/dialog_owner.dart';
 import 'package:otzaria/printing/safer_printer_filter.dart';
 import 'package:otzaria/printing/print_work_status.dart';
 import 'package:otzaria/printing/windows_printer_ports.dart';
@@ -21,7 +22,7 @@ typedef OnPrintSpooling = void Function(String? printerName);
 /// וההדפסה ישירה. דיאלוג המערכת נפתח בסייפר רק אחרי סיסמה.
 ///
 /// מחזיר האם ההדפסה נשלחה. [context] — לבדיקת מצב הסייפר ולדיאלוגים;
-/// כשלא סופק משתמשים בחלון הראשי. [onSpooling] נקרא רק ב-Windows: שם
+/// כשלא סופק משתמשים בחלון הפעיל בתחילת הפעולה. [onSpooling] נקרא רק ב-Windows: שם
 /// onLayout מגיע אחרי אישור המשתמש, ובמקומות אחרים לפני תצוגה מקדימה.
 Future<bool> printPdfWithSaferMode({
   required LayoutCallback onLayout,
@@ -30,6 +31,8 @@ Future<bool> printPdfWithSaferMode({
   bool dynamicLayout = true,
   bool usePrinterSettings = false,
   BuildContext? context,
+  int? ownerWindowHandle,
+  int? ownerViewId,
   OnPrintSpooling? onSpooling,
 }) async {
   LayoutCallback reportSpooling(String? printerName) {
@@ -48,10 +51,22 @@ Future<bool> printPdfWithSaferMode({
   }
 
   final effectiveContext = context ?? navigatorKey.currentContext;
+  if (effectiveContext != null && !effectiveContext.mounted) return false;
+  final viewId =
+      ownerViewId ??
+      (effectiveContext == null
+          ? null
+          : View.maybeOf(effectiveContext)?.viewId);
+  final owner =
+      ownerWindowHandle ??
+      DialogOwner.hwnd(context: effectiveContext) ??
+      (effectiveContext != null ? 0 : null);
   if (effectiveContext == null ||
       !shouldRequireSaferModePassword(effectiveContext)) {
     return PrintWorkStatus.track(
       () => Printing.layoutPdf(
+        windowHandle: owner,
+        viewId: viewId,
         onLayout: reportSpooling(null),
         name: name,
         format: format,
@@ -76,8 +91,11 @@ Future<bool> printPdfWithSaferMode({
     );
     if (useSystemDialog != true || !effectiveContext.mounted) return false;
     if (!await verifySaferModePassword(effectiveContext)) return false;
+    if (!effectiveContext.mounted) return false;
     return PrintWorkStatus.track(
       () => Printing.layoutPdf(
+        windowHandle: owner,
+        viewId: viewId,
         onLayout: reportSpooling(null),
         name: name,
         format: format,
@@ -101,12 +119,14 @@ Future<bool> printPdfWithSaferMode({
       searchHint: 'חיפוש מדפסת...',
     );
   }
-  if (printer == null) return false;
+  if (printer == null || !effectiveContext.mounted) return false;
   final selected = printer;
 
   UiSnack.show(PdfMessages.saferDirectPrint(selected.name));
   final printed = await PrintWorkStatus.track(
     () => Printing.directPrintPdf(
+      windowHandle: owner,
+      viewId: viewId,
       printer: selected,
       onLayout: reportSpooling(selected.name),
       name: name,

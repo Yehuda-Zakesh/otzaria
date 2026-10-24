@@ -11,7 +11,6 @@ import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
 import 'package:otzaria/settings/panels/report_panel_widgets.dart';
 import 'package:otzaria/settings/widgets/settings_widgets_exports.dart';
-import 'package:otzaria/theme/theme_exports.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
@@ -103,32 +102,25 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
             return ExpandableSection(
               icon: OtzariaIcons.task_list_24_regular,
               title: context.settingsText('ניהול דיווחים שמורים'),
-              subtitle: pending.isEmpty
-                  ? context.settingsText('אין כרגע דיווחים שמורים בתור')
-                  : context.settingsText(
-                      'יש כרגע {count} דיווחים שמורים בתור',
-                      args: {'count': pending.length},
-                    ),
+              subtitle: pendingReportsSubtitle(context, count: pending.length),
               hasContent: hasReports,
               onTap: () =>
                   setState(() => _isPendingExpanded = !_isPendingExpanded),
               isExpanded: _isPendingExpanded,
               children: [
-                if (hasReports) _buildPendingToolbar(context, hasReports),
-                if (widget.isOfflineMode && hasReports)
-                  Padding(
-                    padding: const EdgeInsets.only(
-                      right: 16,
-                      left: 16,
-                      bottom: 16,
-                    ),
-                    child: Text(
-                      context.settingsText(
-                        'במצב מנותק אי אפשר לשלוח כעת, אך ניתן להוריד סקריפט לשליחה ממחשב מחובר.',
-                      ),
-                      style: kSettingsSubtitleStyle,
-                    ),
+                if (hasReports)
+                  buildPendingQueueToolbar(
+                    canSend: !widget.isOfflineMode,
+                    hasReports: hasReports,
+                    onSend: _flush,
+                    isSending: _isFlushing,
+                    onClear: _clearPending,
+                    isClearing: _isClearingPending,
+                    onExport: _exportScript,
+                    isExporting: _isExporting,
                   ),
+                if (widget.isOfflineMode && hasReports)
+                  buildOfflineQueueNote(context),
                 ...pending.map((report) => _buildPendingTile(context, report)),
               ],
             );
@@ -153,27 +145,11 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
               onTap: () => setState(() => _isSentExpanded = !_isSentExpanded),
               isExpanded: _isSentExpanded,
               children: [
-                Padding(
-                  padding: const EdgeInsets.only(
-                    right: 16,
-                    left: 16,
-                    bottom: 16,
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: buildManagedActionButton(
-                          enabled: sent.isNotEmpty,
-                          child: ActionButton.neutral(
-                            text: context.settingsText('נקה את כל ההיסטוריה'),
-                            icon: FluentIcons.delete_24_regular,
-                            onPressed: _clearSent,
-                            isLoading: _isClearingSent,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                buildClearSentHistoryButton(
+                  context,
+                  enabled: sent.isNotEmpty,
+                  onPressed: _clearSent,
+                  isLoading: _isClearingSent,
                 ),
                 ...sent.map((report) => _buildSentTile(context, report)),
               ],
@@ -181,65 +157,6 @@ class _AppReportsPanelState extends State<AppReportsPanel> {
           },
         ),
       ],
-    );
-  }
-
-  Widget _buildPendingToolbar(BuildContext context, bool hasReports) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 16, left: 16, top: 8, bottom: 16),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isNarrow = constraints.maxWidth < LayoutBreakpoints.compact;
-          final send = buildManagedActionButton(
-            enabled: !widget.isOfflineMode,
-            child: ActionButton.recommended(
-              text: context.settingsText('שלח עכשיו'),
-              icon: FluentIcons.arrow_sync_24_regular,
-              onPressed: _flush,
-              isLoading: _isFlushing,
-            ),
-          );
-          final clear = buildManagedActionButton(
-            enabled: hasReports,
-            child: ActionButton.neutral(
-              text: context.settingsText('נקה דיווחים'),
-              icon: FluentIcons.delete_24_regular,
-              onPressed: _clearPending,
-              isLoading: _isClearingPending,
-            ),
-          );
-          final export = buildManagedActionButton(
-            enabled: hasReports,
-            child: ActionButton.neutral(
-              text: context.settingsText('הורד לשליחה במחשב מחובר'),
-              icon: FluentIcons.arrow_download_24_regular,
-              onPressed: _exportScript,
-              isLoading: _isExporting,
-            ),
-          );
-          if (isNarrow) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                send,
-                const SizedBox(height: 8),
-                clear,
-                const SizedBox(height: 8),
-                export,
-              ],
-            );
-          }
-          return Row(
-            children: [
-              Expanded(child: send),
-              const SizedBox(width: 12),
-              Expanded(child: clear),
-              const SizedBox(width: 12),
-              Expanded(child: export),
-            ],
-          );
-        },
-      ),
     );
   }
 

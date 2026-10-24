@@ -1,6 +1,6 @@
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/commentators_tab.dart';
@@ -25,16 +25,9 @@ void main() {
     await Settings.init(cacheProvider: MemoryCacheProvider());
   });
 
-  /// עובר את כל השרשרת, בדיוק כמו `openWindow` ואז `secondaryWindowMain`.
-  OpenedTab? throughPayload(OpenedTab tab) {
-    final payload = MultiWindowService.encodePayloadForTest(tab);
-    expect(
-      MultiWindowService.payloadHasTab(payload),
-      isTrue,
-      reason: 'המטען חייב להכיל כרטיסיה, אחרת החלון נפתח ריק במכוון',
-    );
-    return MultiWindowService.decodePayload(payload);
-  }
+  /// עובר את מסלול ההעברה כולו, דרך JSON, כמו [RunnerWindowChannel.canTransfer].
+  OpenedTab? throughPayload(OpenedTab tab) =>
+      RunnerWindowChannel.transferRoundTrip(tab);
 
   TextBookTab textTab() =>
       TextBookTab(book: TextBook(title: 'בראשית'), index: 12);

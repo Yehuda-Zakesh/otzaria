@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:otzaria/widgets/dialogs/app_dialogs.dart';
+import 'package:otzaria/widgets/dialogs/dialog_teardown.dart';
 
 /// דיאלוג אישור — thin wrapper מעל [AppDialog].
 /// [isDangerous] מפנה ל-[AppDialog.warning] (ביטול primary, אישור error).
@@ -43,7 +44,7 @@ Future<bool?> showConfirmationDialog({
   String confirmText = 'אישור',
   bool isDangerous = false,
   bool barrierDismissible = true,
-}) => showDialog<bool>(
+}) => showDialogUntilTornDown<bool>(
   context: context,
   barrierDismissible: barrierDismissible,
   // הדיאלוג נבנה ב-Overlay ולכן אינו יורש את הכיווניות של המסך שפתח אותו.

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,7 +15,13 @@ import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/models/tab.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
+import 'package:otzaria/tabs/models/text_tab.dart';
+import 'package:otzaria/models/books.dart';
+import 'package:otzaria/settings/engine/app_settings_store.dart';
+
 import 'package:otzaria/tabs/tabs_repository.dart';
+
+import '../../../test_helpers/memory_cache_provider.dart';
 
 class _MemoryTabsRepository extends TabsRepository {
   @override
@@ -32,61 +40,181 @@ class _NavigationBloc extends Cubit<NavigationState> implements NavigationBloc {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() async => Settings.init(cacheProvider: MemoryCacheProvider()));
   for (final split in [false, true]) {
-    testWidgets('העברה שומרת מיקום אחרי יצירת חלונית אטית: split=$split', (
-      tester,
-    ) async {
-      final drops = InProcessTabDrops();
+    testWidgets(
+      'יעד עסוק מסרב, ואחרי פתיחה נשמרים פיצול ומיקום: split=$split',
+      (
+        tester,
+      ) async {
+        final drops = InProcessTabDrops();
+        final tabs = TabsBloc(
+          repository: _MemoryTabsRepository(),
+          withCompanion: (tab) async {
+            if (tab.title == 'pending') {
+              await Future<void>.delayed(const Duration(milliseconds: 10));
+            }
+            if (split && tab.title == 'pending') {
+              return CombinedTab(
+                rightTab: tab,
+                leftTab: ToolTab(
+                  toolId: 'builtin.calendar',
+                  title: 'companion',
+                ),
+              );
+            }
+            return tab;
+          },
+        );
+        final nav = _NavigationBloc();
+        final before = ToolTab(toolId: 'builtin.calendar', title: 'existing');
+        tabs.add(AddTab(before));
+        await tester.pump();
+        await tester.pump();
+        expect(tabs.state.tabs, hasLength(1));
+        await tester.pumpWidget(
+          MultiBlocProvider(
+            providers: [
+              BlocProvider<TabsBloc>.value(value: tabs),
+              BlocProvider<NavigationBloc>.value(value: nav),
+            ],
+            child: InProcessTabDropReceiver(
+              drops: drops,
+              child: const SizedBox(),
+            ),
+          ),
+        );
+        tabs.add(AddTab(ToolTab(toolId: 'builtin.calendar', title: 'pending')));
+        await tester.pump();
+        final OpenedTab source = split
+            ? CombinedTab(
+                rightTab: ToolTab(
+                  toolId: 'builtin.gematria',
+                  title: 'incoming',
+                ),
+                leftTab: ToolTab(
+                  toolId: 'builtin.calendar',
+                  title: 'companion',
+                ),
+              )
+            : ToolTab(toolId: 'builtin.gematria', title: 'incoming');
+        expect(await drops.sendTabToWindow(1, source, index: 0), isFalse);
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.pump();
+        expect(await drops.sendTabToWindow(1, source, index: 0), isTrue);
+        final actual = tabs.state.tabs.map((t) => t.title).toList();
+        await tester.pumpWidget(const SizedBox());
+        await tester.runAsync(() async {
+          await tabs.close();
+          await nav.close();
+        });
+        expect(actual, [
+          split ? 'משולב: incoming | companion' : 'incoming',
+          'existing',
+          split ? 'משולב: pending | companion' : 'pending',
+        ]);
+        source.dispose();
+      },
+    );
+  }
+  test('העברת ספר ראשי אינה פותחת שוב מלווה שהמשתמש סגר', () async {
+    final tabs = TabsBloc(
+      repository: _MemoryTabsRepository(),
+      withCompanion: (_) async =>
+          throw StateError('transfer must preserve its panes'),
+    );
+    final primary = TextBookTab(book: TextBook(title: 'משנה ברורה'), index: 0);
+    expect(tabs.receiveTransferredTab(primary), isTrue);
+    expect(tabs.state.tabs, [same(primary)]);
+    expect(tabs.state.currentTabIndex, 0);
+    await tabs.close();
+  });
+
+  test('קליטה מסורבת בזמן שחזור שעדיין ממתין בתור', () async {
+    final tabs = TabsBloc(repository: _MemoryTabsRepository())..add(LoadTabs());
+    final incoming = ToolTab(toolId: 'builtin.calendar', title: 'לא נקלט');
+    expect(tabs.receiveTransferredTab(incoming), isFalse);
+    incoming.dispose();
+    await Future<void>.delayed(Duration.zero);
+    await tabs.close();
+  });
+
+  test('קליטה מסורבת כשכבר נשלחה החלפת שולחן', () async {
+    final tabs = TabsBloc(repository: _MemoryTabsRepository());
+    final replacement = ToolTab(toolId: 'builtin.calendar', title: 'שולחן חדש');
+    tabs.add(ReplaceAllTabs([replacement], 0));
+    final incoming = ToolTab(toolId: 'builtin.gematria', title: 'נשאר במקור');
+    expect(tabs.receiveTransferredTab(incoming), isFalse);
+    incoming.dispose();
+    await tabs.stream.firstWhere((state) => state.tabs.length == 1);
+    expect(tabs.state.tabs, [same(replacement)]);
+    await tabs.close();
+  });
+
+  for (final operation in ['closeAll', 'closeOther', 'adopt']) {
+    test('קליטה מסורבת בזמן שינוי רשימת הכרטיסיות: $operation', () async {
       final tabs = TabsBloc(
         repository: _MemoryTabsRepository(),
-        withCompanion: (tab) async {
-          if (tab.title == 'incoming') {
-            await Future<void>.delayed(const Duration(milliseconds: 10));
-          }
-          if (split && tab.title == 'incoming') {
-            return CombinedTab(
-              rightTab: tab,
-              leftTab: ToolTab(toolId: 'builtin.calendar', title: 'companion'),
-            );
-          }
-          return tab;
-        },
+        disposeDelay: Duration.zero,
       );
-      final nav = _NavigationBloc();
-      final before = ToolTab(toolId: 'builtin.calendar', title: 'existing');
+      final before = ToolTab(toolId: 'builtin.calendar', title: 'קיים');
       tabs.add(AddTab(before));
-      await tester.pump();
-      await tester.pump();
-      expect(tabs.state.tabs, hasLength(1));
-      await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<TabsBloc>.value(value: tabs),
-            BlocProvider<NavigationBloc>.value(value: nav),
-          ],
-          child: InProcessTabDropReceiver(
-            drops: drops,
-            child: const SizedBox(),
-          ),
-        ),
-      );
-      final source = ToolTab(toolId: 'builtin.gematria', title: 'incoming');
-      expect(await drops.sendTabToWindow(1, source, index: 0), isTrue);
-      await tester.pump();
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 20));
-      final actual = tabs.state.tabs.map((t) => t.title).toList();
-      await tester.pumpWidget(const SizedBox());
-      await tester.runAsync(() async {
-        await tabs.close();
-        await nav.close();
-      });
-      expect(actual, [
-        split ? 'משולב: incoming | companion' : 'incoming',
-        'existing',
-      ]);
+      await tabs.stream.firstWhere((state) => state.tabs.length == 1);
+      await Future<void>.delayed(Duration.zero);
+      final event = switch (operation) {
+        'closeAll' => CloseAllTabs(),
+        'closeOther' => CloseOtherTabs(before),
+        _ => AdoptTab(ToolTab(toolId: 'builtin.gematria', title: 'מאומץ')),
+      };
+      tabs.add(event);
+      final incoming = ToolTab(toolId: 'builtin.gematria', title: 'נשאר במקור');
+      expect(tabs.receiveTransferredTab(incoming), isFalse);
+      incoming.dispose();
+      await Future<void>.delayed(Duration.zero);
+      await tabs.close();
+      await Future<void>.delayed(Duration.zero);
     });
   }
+
+  for (final openOrFocus in [false, true]) {
+    test(
+      'סגירה מנקזת פתיחה ממתינה ומשחררת קוראים: openOrFocus=$openOrFocus',
+      () async {
+        final started = Completer<void>();
+        final release = Completer<void>();
+        final primary = TextBookTab(
+          book: TextBook(title: 'משנה ברורה'),
+          index: 0,
+        );
+        final companion = TextBookTab(
+          book: TextBook(title: 'ביאור הלכה'),
+          index: 0,
+        );
+        final readers = [primary.bloc, companion.bloc];
+        final tabs = TabsBloc(
+          repository: _MemoryTabsRepository(),
+          withCompanion: (tab) async {
+            started.complete();
+            await release.future;
+            return CombinedTab(rightTab: tab, leftTab: companion);
+          },
+        );
+        tabs.add(openOrFocus ? OpenOrFocusTab(primary) : AddTab(primary));
+        await started.future;
+        final closing = tabs.close();
+        final refused = ToolTab(toolId: 'builtin.calendar', title: 'מסורב');
+        expect(tabs.isClosed, isFalse);
+        expect(tabs.receiveTransferredTab(refused), isFalse);
+        refused.dispose();
+        release.complete();
+        await closing;
+        await Future<void>.delayed(Duration.zero);
+        expect(readers.every((reader) => reader.isClosed), isTrue);
+        expect(tabs.close(), same(closing));
+      },
+    );
+  }
+
   test('הכנסה מפורשת ברקע משמרת את הכרטיסיה הנוכחית', () async {
     final tabs = TabsBloc(
       repository: _MemoryTabsRepository(),

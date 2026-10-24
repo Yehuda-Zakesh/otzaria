@@ -1,4 +1,3 @@
-import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/data/book_identity.dart';
 import 'package:otzaria/data/data_providers/database_library_provider.dart';
 import 'package:otzaria/text_book/utils/inline_notes_utils.dart';
@@ -16,7 +15,6 @@ import 'package:flutter/foundation.dart' hide Category;
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/info/personal_folders_info.dart';
 import 'package:otzaria/core/messages/library_messages.dart';
-import 'package:otzaria/core/messages/window_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/data/cache/generation_cache.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
@@ -414,14 +412,6 @@ class IndexingRepository {
     required void Function(int processed, int total) onProgress,
     void Function()? onFinalizing,
   }) async {
-    if (!ProcessDuties.current.isProcessOwner) {
-      return const IndexingRunResult.cancelled(
-        processedBooks: 0,
-        totalBooks: 0,
-        indexedBooks: 0,
-      );
-    }
-
     final mode = indexUpdateMode();
     final hidden = hiddenStore.load();
     List<Book> eligible(List<Book> source, {bool? pdf}) => booksForIndexing(
@@ -2138,7 +2128,6 @@ class IndexingRepository {
 
   /// מעדכן במנוע את מיפוי הסדר; מיון התוצאות משתנה בלי אינדוקס מחדש.
   Future<void> syncBookOrder(Library library) async {
-    if (!ProcessDuties.current.isProcessOwner) return;
     try {
       final entries = await buildBookOrder(library);
       final engine = await _tantivyDataProvider.engine;
@@ -2237,10 +2226,7 @@ class IndexingRepository {
     List<Book> books, {
     bool checkLibrary = false,
   }) async {
-    if ((books.isEmpty && !checkLibrary) ||
-        !ProcessDuties.current.isProcessOwner) {
-      return;
-    }
+    if (books.isEmpty && !checkLibrary) return;
     await _tantivyDataProvider.engine;
     final store = PendingReindexStore.forIndex(
       _tantivyDataProvider.activeIndexPath,
@@ -2261,10 +2247,6 @@ class IndexingRepository {
 
   /// Clears the index and resets the list of indexed books.
   Future<bool> clearIndex() async {
-    if (!ProcessDuties.current.isProcessOwner) {
-      UiSnack.show(WindowMessages.indexResetOnlyInMainWindow);
-      return false;
-    }
     await _tantivyDataProvider.clear();
     return true;
   }
@@ -2273,7 +2255,6 @@ class IndexingRepository {
   /// ה-filePath שהמסמכים נכתבו איתו ([BookIdentity.indexedFilePath]), כך שספר
   /// אחר החולק את אותה כותרת אינו נפגע. מחזיר האם המחיקה נקלטה.
   Future<bool> dropBookIndexEntries(Iterable<Book> books) async {
-    if (!ProcessDuties.current.isProcessOwner) return false;
     final keys = <String>{
       for (final book in books) BookIdentity.indexedFilePath(book),
     }..remove('');
@@ -2281,7 +2262,6 @@ class IndexingRepository {
   }
 
   Future<bool> dropHiddenIndexEntries(Library library) async {
-    if (!ProcessDuties.current.isProcessOwner) return false;
     final hidden = hiddenStore.load();
     if (hidden.isEmpty) return true;
     await _tantivyDataProvider.engine;
@@ -2347,7 +2327,6 @@ class IndexingRepository {
     @visibleForTesting List<AttachedLibrary>? attachedLibraries,
     @visibleForTesting String? libraryRoot,
   }) async {
-    if (!ProcessDuties.current.isProcessOwner) return 0;
     final books = library.getIndexableBooks();
     if (books.isEmpty) return 0;
 

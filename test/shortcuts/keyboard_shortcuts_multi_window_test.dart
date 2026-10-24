@@ -16,7 +16,8 @@ import 'package:otzaria/core/windowing/app_window_controller.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/core/windowing/window_opener.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';
 import 'package:otzaria/history/bloc/history_event.dart';
@@ -65,7 +66,7 @@ class _StubNavigationBloc extends Bloc<NavigationEvent, NavigationState>
 
 class _FakeTabsRepository extends TabsRepository {
   @override
-  List<OpenedTab> loadTabs() => const [];
+  List<OpenedTab> loadTabs({bool newRuntime = false}) => const [];
 
   @override
   int loadCurrentTabIndex() => 0;
@@ -134,11 +135,7 @@ class _Window {
   final _StubNavigationBloc navigation = _StubNavigationBloc();
 
   Future<void> dispose() async {
-    final openTabs = List<OpenedTab>.from(tabs.state.tabs);
     await tabs.close();
-    for (final tab in openTabs) {
-      tab.dispose();
-    }
     await history.close();
     await navigation.close();
   }
@@ -208,7 +205,7 @@ void main() {
   setUp(() {
     ShortcutHelper.isMacForTesting = false;
     ShortcutHelper.isWindowsForTesting = false;
-    MultiWindowService.debugSupportedOverride = true;
+    RunnerWindowChannel.debugSupportedOverride = true;
     opener = _CountingOpener();
     WindowOpener.debugOverride = opener;
     settings = _MockSettingsBloc();
@@ -229,7 +226,7 @@ void main() {
     await settingsChanges.close();
     AppWindowKeys.resetForTest();
     WindowOpener.debugOverride = null;
-    MultiWindowService.debugSupportedOverride = null;
+    RunnerWindowChannel.debugSupportedOverride = null;
     ShortcutHelper.isMacForTesting = null;
     ShortcutHelper.isWindowsForTesting = null;
   });
@@ -372,6 +369,30 @@ void main() {
     expect(opener.restoredWindows, 1);
 
     await tester.pump(const Duration(milliseconds: 400));
+  });
+
+  testWidgets('macOS בלי handshake: הקיצור אינו פותח חלון ועובר הלאה', (
+    tester,
+  ) async {
+    // ⚠️ בלי דריסה: כך נגזר חלון יחיד כשה-runner לא הפך את ריבוי התצוגות.
+    RunnerWindowChannel.debugSupportedOverride = null;
+    MultiViewMode.debugOverride = null;
+    MultiViewMode.debugIsMacOS = true;
+    addTearDown(() {
+      MultiViewMode.debugOverride = false;
+      MultiViewMode.debugResetMacRunner();
+    });
+    createWindows();
+    AppWindowKeys.resetForTest();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Row(children: [a.build(settings, _FakeWindow(), scoped: false)]),
+      ),
+    );
+    await tester.pump();
+
+    await _press(tester, _ctrlAltN);
+    expect(opener.emptyWindows, 0);
   });
 
   testWidgets('חלון יחיד מטפל בקיצור גם בלי הפעלה מפורשת', (tester) async {

@@ -25,6 +25,7 @@ class WindowPersistence {
   static const double _minWidth = 420;
   static const double _minHeight = 400;
   static const Size minSize = Size(_minWidth, _minHeight);
+  static const Size defaultSize = Size(1280, 720);
   static const Duration _debounceDuration = Duration(milliseconds: 400);
 
   /// גובה רצועת האחיזה (פס הכותרת המותאם) בפיקסלים לוגיים. בדיקת הנגישות
@@ -111,7 +112,7 @@ class WindowPersistenceBinding {
     double Function()? devicePixelRatio,
     FlutterView? view,
   }) : _window = controller,
-       _slot = slot ?? (() => UserStateSlot.current),
+       _slot = slot ?? (() => UserStateSlot.main),
        _devicePixelRatio =
            devicePixelRatio ??
            (view == null
@@ -129,7 +130,7 @@ class WindowPersistenceBinding {
 
   /// הגבולות של החלון הזה מהסשן שלו; בהיעדרם — מפתחות ההגדרות הישנים,
   /// שבהם נשמרו גבולות החלון היחיד לפני שכל חלון קיבל סשן.
-  Future<WindowBounds> _loadSavedBounds() async {
+  Future<WindowBounds> loadSavedBounds() async {
     final slot = _slot();
     // בהפעלה ראשונה אין עדיין ספרייה, ופתיחת המסד הייתה יוצרת אותו במיקום
     // ברירת מחדל לפני שהמשתמש בחר; גם אין שם גבולות לקרוא.
@@ -158,10 +159,8 @@ class WindowPersistenceBinding {
   bool _pendingMaximize = false;
   bool _pendingFullscreen = false;
 
-  /// גבולות החלון השמורים **בפיקסלים פיזיים**, נקראים ב-[restoreIfAny] ומוחלים
-  /// ב-[applyRestoredBounds] — מוקדם, בעוד החלון מוסתר וה-splash מוצג (כדי
-  /// ששינוי ה-DPI אפשרי יתייצב לפני החשיפה). null = אין גבולות שמורים
-  /// (הפעלה ראשונה) → יוחל גודל ברירת מחדל.
+  /// גבולות לשחזור לפני החשיפה: macOS בנקודות מסך, ובשאר בפיקסלים פיזיים.
+  /// null בהפעלה ראשונה — יוחל גודל ברירת מחדל.
   Rect? _restoredPhysicalBounds;
 
   /// ה-devicePixelRatio של רגע השמירה — הגבולות נשמרים לוגיים (כפי ש-getBounds
@@ -199,7 +198,7 @@ class WindowPersistenceBinding {
     _isRestoring = true;
 
     try {
-      final saved = await _loadSavedBounds();
+      final saved = await loadSavedBounds();
       final left = saved.left;
       final top = saved.top;
       final width = saved.width;
@@ -227,9 +226,11 @@ class WindowPersistenceBinding {
       final clampedWidth = width < minSize.width ? minSize.width : width;
       final clampedHeight = height < minSize.height ? minSize.height : height;
 
-      // ממירים לפיזי לפי ה-DPR של רגע השמירה (שמירות ישנות ללא DPR — לפי
-      // הנוכחי). ההשוואה למסכים וההצבה נעשות בפיזי, אחיד לכל המסכים.
-      final dpr = (savedDpr != null && savedDpr > 0)
+      // macOS שומר נקודות גלובליות; הכפלה ב-DPR מעוותת מיקום בין מסכים.
+      // בשאר הפלטפורמות משחזרים פיקסלים לפי ה-DPR של רגע השמירה.
+      final dpr = defaultTargetPlatform == TargetPlatform.macOS
+          ? 1.0
+          : (savedDpr != null && savedDpr > 0)
           ? savedDpr
           : _devicePixelRatio();
       _restoredDpr = dpr;
@@ -257,12 +258,13 @@ class WindowPersistenceBinding {
       // ממוקסם מקטין אותו ומשאיר WS_MAXIMIZE, ו-maximize() כבר לא מתקן.
       if (await _window.isVisible()) return;
       final physicalBounds = _restoredPhysicalBounds;
-      // setBounds מכפיל את הערכים ב-DPR הנוכחי — חלוקה בו נותנת הצבה פיזית
-      // מדויקת גם כשהחלון נשמר על מסך עם קנה מידה שונה מהמסך הראשי.
-      final currentDpr = _devicePixelRatio();
+      // macOS מציב נקודות; בשאר הפלטפורמות מבטלים את המרת ה-DPR של setBounds.
+      final currentDpr = defaultTargetPlatform == TargetPlatform.macOS
+          ? 1.0
+          : _devicePixelRatio();
       if (physicalBounds == null) {
         // אין גבולות שמורים (הפעלה ראשונה) — גודל ברירת מחדל ממורכז.
-        await _geometry.setSize(const Size(1280, 720));
+        await _geometry.setSize(WindowPersistence.defaultSize);
         await _window.center();
       } else if (await _isReachableOnConnectedDisplay(physicalBounds)) {
         // הגבולות כבר עברו clamp ל-minSize (420x400) ב-restoreIfAny, וגודל
@@ -289,14 +291,16 @@ class WindowPersistenceBinding {
   Future<bool> _isReachableOnConnectedDisplay(Rect physicalBounds) async {
     try {
       final displays = await screenRetriever.getAllDisplays();
-      // screen_retriever מחזיר קואורדינטות לוגיות פר-מסך (מחולקות ב-scale של
-      // אותו מסך) — הכפלה ב-scaleFactor מחזירה אותן לפיזי, מרחב אחיד.
+      // מסכי macOS וחלונותיו משתמשים באותו מרחב נקודות גלובלי.
+      // בשאר הפלטפורמות משווים בפיקסלים פיזיים.
       final displayRects = [
         for (final display in displays)
           if (display.visiblePosition != null && display.visibleSize != null)
             WindowPersistence._scaleRect(
               display.visiblePosition! & display.visibleSize!,
-              (display.scaleFactor ?? 1).toDouble(),
+              defaultTargetPlatform == TargetPlatform.macOS
+                  ? 1.0
+                  : (display.scaleFactor ?? 1).toDouble(),
             ),
       ];
       if (displayRects.isEmpty) return true;

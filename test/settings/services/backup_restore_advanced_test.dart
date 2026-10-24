@@ -8,7 +8,7 @@ import 'package:otzaria/bookmarks/models/bookmark.dart';
 import 'package:otzaria/bookmarks/repository/bookmark_repository.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/data/data_providers/hive_data_provider.dart';
 import 'package:otzaria/history/history_repository.dart';
 import 'package:otzaria/models/books.dart';
@@ -54,7 +54,7 @@ void main() {
     await Hive.openBox<dynamic>(DirectErrorReportService.queueBoxName);
     await Hive.openBox<dynamic>(PluginReportService.queueBoxName);
     // בלי אפיק חלונות, ולכן המשבצת היא של החלון היחיד.
-    MultiWindowService.debugSupportedOverride = false;
+    RunnerWindowChannel.debugSupportedOverride = false;
     UserStateDatabase.instance.overridePath(
       p.join(tempDir.path, 'user_state.db'),
     );
@@ -76,7 +76,7 @@ void main() {
     PluginSystemDatabase.instance.resetForTests();
     await Hive.close();
     UserStateDatabase.instance.close();
-    MultiWindowService.debugSupportedOverride = null;
+    RunnerWindowChannel.debugSupportedOverride = null;
     AppPaths.debugOverrideDataRootPath(null);
     try {
       await tempDir.delete(recursive: true);

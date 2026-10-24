@@ -37,7 +37,7 @@ Uint8List _noise(int length, int seed) {
   return Uint8List.fromList(List.generate(length, (_) => random.nextInt(256)));
 }
 
-/// השעיית המסד בלי חלונות אחרים; [resumed] מסמן שהמטפל סיים, כולל ניקוי הגיבוי.
+/// השעיית המסד; [resumed] מסמן שהמטפל סיים, כולל ניקוי הגיבוי.
 class _Gate extends LibraryAccessGate {
   _Gate()
     : super(

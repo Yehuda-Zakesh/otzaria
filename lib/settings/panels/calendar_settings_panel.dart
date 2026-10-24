@@ -168,7 +168,7 @@ class _CalendarSettingsTabState extends State<CalendarSettingsTab> {
     return BlocBuilder<CalendarCubit, CalendarState>(
       builder: (context, state) {
         final isOfflineMode = context.watch<SettingsBloc>().state.isOfflineMode;
-        // [הוסר] SingleChildScrollView — ToolsSettingsTab גולל את כולם
+        // בלי גלילה משלו: ToolsSettingsTab ו-CalendarSettingsPanel גוללים אותו
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -592,11 +592,14 @@ class _CalendarSettingsTabState extends State<CalendarSettingsTab> {
 
   Future<void> _importIcsFile(BuildContext context) async {
     final cubit = context.read<CalendarCubit>();
-    final result = await FilePicker.pickFile(
-      type: FileType.custom,
-      allowedExtensions: ['ics'],
-      windowsOptions: kModalWindowsOptions,
-      linuxOptions: kModalLinuxOptions,
+    final result = await withFilePickerOwner(
+      context,
+      () => FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: ['ics'],
+        windowsOptions: modalWindowsOptions(context),
+        linuxOptions: kModalLinuxOptions,
+      ),
     );
     final path = result?.path;
     if (path == null) return;

@@ -11,7 +11,6 @@ import 'package:path/path.dart' as p;
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
 import 'package:otzaria/core/app_runtime_reset.dart';
-import 'package:otzaria/core/windowing/correction_storage_move.dart';
 import 'package:otzaria/core/messages/settings_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
@@ -22,6 +21,7 @@ import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/personal_notes/storage/personal_notes_database.dart';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/plugins/storage/plugin_system_database.dart';
 import 'package:otzaria/plugins/view/webview_environment_holder.dart';
 import 'package:otzaria/semantic_search/models/semantic_paths.dart';
@@ -341,6 +341,32 @@ Future<void> _closeUserDatabasesForMove() async {
   await PluginSystemDatabase.instance.close();
 }
 
+/// שומר את טיוטות התיקונים ונועל אותן עד [_releaseCorrectionStorageMove].
+/// false — הטיוטות לא נשמרו, והנעילה כבר שוחררה.
+Future<bool> _prepareCorrectionStorageMove(String requestId) async {
+  final corrections = PluginCorrectionSessionService.instance;
+  if (!corrections.beginProcessQuitPreparation(requestId)) return false;
+  try {
+    if (await corrections.prepareForStorageMove(requestId) &&
+        await corrections.finishStorageMovePreparation(requestId)) {
+      return true;
+    }
+  } catch (error, stackTrace) {
+    debugPrint(
+      'Correction storage move preparation failed: $error\n$stackTrace',
+    );
+  }
+  _releaseCorrectionStorageMove(requestId);
+  return false;
+}
+
+void _releaseCorrectionStorageMove(String requestId) {
+  PluginSystemDatabase.instance.releaseStorageMove(requestId);
+  PluginCorrectionSessionService.instance.cancelProcessQuitPreparation(
+    requestId,
+  );
+}
+
 /// מעביר את ספריית אוצריא למיקום חדש. [to] היא התיקייה שהמשתמש בחר, ותחתיה
 /// נוצרות `<to>/books`, `<to>/index` ו-`<to>/databases`, כך שמבנה
 /// התיקיות נשמר ולא נשפך לתיקיית האב.
@@ -423,7 +449,7 @@ Future<void> performLibraryMove({
   var finalDatabasesCreated = false;
   var finalVectorsCreated = false;
   var settingsUpdated = false;
-  CorrectionStorageMovePreparation? correctionMove;
+  String? correctionMoveId;
 
   try {
     await _ensureMoveTargetAvailable(newLibrary);
@@ -433,13 +459,12 @@ Future<void> performLibraryMove({
     if (databasesNeedsMove) {
       await _ensureMoveTargetAvailable(newDatabases);
     }
-    correctionMove = await prepareCorrectionStorageMove();
-    if (correctionMove == null) {
-      throw StateError('תיקוני התוספים לא נשמרו בכל החלונות.');
+    final moveId = 'storage-${DateTime.now().microsecondsSinceEpoch}';
+    if (!await _prepareCorrectionStorageMove(moveId)) {
+      throw StateError('תיקוני התוספים לא נשמרו.');
     }
-    await PluginSystemDatabase.instance.lockForStorageMove(
-      correctionMove.requestId,
-    );
+    correctionMoveId = moveId;
+    await PluginSystemDatabase.instance.lockForStorageMove(moveId);
     if (databasesNeedsMove) {
       await _closeUserDatabasesForMove();
     }
@@ -508,12 +533,6 @@ Future<void> performLibraryMove({
       SettingsRepository.keyDatabasesPath,
       newDatabases,
     );
-    if (!await synchronizeCorrectionStorageMoveDatabasePath(
-      correctionMove,
-      newDatabases,
-    )) {
-      throw StateError('נתיב מסד הטיוטות לא הסתנכרן בכל החלונות.');
-    }
     if (Platform.isAndroid) {
       await Settings.setValue<String>(
         SettingsRepository.keyAndroidLibraryRoot,
@@ -529,7 +548,7 @@ Future<void> performLibraryMove({
     }
     // 5. סגירת חיבורי ה-DB (משחרר את נעילת seforim.db) והפניה למיקום החדש.
     await resetRuntimeStateForAppRestart(
-      correctionStorageMoveRequestId: correctionMove.requestId,
+      correctionStorageMoveRequestId: moveId,
     );
     // 6. פתיחה מחדש של האינדקס בנתיב החדש — סוגר את האינדקס הישן ומשחרר אותו.
     try {
@@ -583,8 +602,8 @@ Future<void> performLibraryMove({
     UiSnack.showError(SettingsMessages.libraryMoveError(e));
     return;
   } finally {
-    if (correctionMove != null) {
-      await releaseCorrectionStorageMove(correctionMove);
+    if (correctionMoveId != null) {
+      _releaseCorrectionStorageMove(correctionMoveId);
     }
   }
 
@@ -727,9 +746,12 @@ class _ChangeLocationDialogContentState
       (_selectedPath ?? widget.currentPath) == widget.defaultPath;
 
   Future<void> _pickFolder() async {
-    final path = await FilePicker.getDirectoryPath(
-      windowsOptions: kModalWindowsOptions,
-      linuxOptions: kModalLinuxOptions,
+    final path = await withFilePickerOwner(
+      context,
+      () => FilePicker.getDirectoryPath(
+        windowsOptions: modalWindowsOptions(context),
+        linuxOptions: kModalLinuxOptions,
+      ),
     );
     if (path != null && mounted) setState(() => _selectedPath = path);
   }

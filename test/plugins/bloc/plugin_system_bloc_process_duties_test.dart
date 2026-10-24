@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/app_scope/process_duties.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_event.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
@@ -37,19 +36,16 @@ class _CountingSeedService implements BundledPluginSeedService {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  late bool oldSecondary;
   late _FakeRepo repo;
   late _CountingSeedService seed;
 
   setUp(() {
-    oldSecondary = WindowRole.isSecondary;
     PluginSafeMode.active.value = false;
     repo = _FakeRepo();
     seed = _CountingSeedService();
   });
 
   tearDown(() {
-    WindowRole.isSecondary = oldSecondary;
     ProcessDuties.debugOverride = null;
     PluginSafeMode.resetForTesting();
   });
@@ -67,8 +63,7 @@ void main() {
   );
 
   group('SeedBundledPlugins שואל את ProcessDuties', () {
-    test('לא-בעלים אינו זורע, גם כש-WindowRole אומר ראשי', () async {
-      WindowRole.isSecondary = false;
+    test('לא-בעלים אינו זורע', () async {
       await run(
         build(duties: ProcessDuties(isProcessOwner: () => false)),
         const SeedBundledPlugins(),
@@ -76,8 +71,7 @@ void main() {
       expect(seed.seeds, 0);
     });
 
-    test('בעלים זורע, גם כש-WindowRole אומר משני', () async {
-      WindowRole.isSecondary = true;
+    test('בעלים זורע', () async {
       await run(
         build(duties: ProcessDuties(isProcessOwner: () => true)),
         const SeedBundledPlugins(),
@@ -86,7 +80,6 @@ void main() {
     });
 
     test('בלי הזרקה — ProcessDuties.current, שנקרא בזמן האירוע', () async {
-      WindowRole.isSecondary = false;
       final bloc = build();
       ProcessDuties.debugOverride = ProcessDuties(isProcessOwner: () => false);
       await run(bloc, const SeedBundledPlugins());
@@ -96,7 +89,6 @@ void main() {
 
   group('RescanDevelopmentManifests שואל את ProcessDuties', () {
     test('לא-בעלים אינו סורק', () async {
-      WindowRole.isSecondary = false;
       await run(
         build(duties: ProcessDuties(isProcessOwner: () => false)),
         const RescanDevelopmentManifests(),
@@ -105,20 +97,11 @@ void main() {
     });
 
     test('בעלים סורק', () async {
-      WindowRole.isSecondary = true;
       await run(
         build(duties: ProcessDuties(isProcessOwner: () => true)),
         const RescanDevelopmentManifests(),
       );
       expect(repo.devPluginQueries, 1);
     });
-  });
-
-  test('ברירת המחדל שומרת על שער החלון המשני', () async {
-    WindowRole.isSecondary = true;
-    await run(build(), const SeedBundledPlugins());
-    await run(build(), const RescanDevelopmentManifests());
-    expect(seed.seeds, 0);
-    expect(repo.devPluginQueries, 0);
   });
 }

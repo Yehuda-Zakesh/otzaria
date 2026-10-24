@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/models/link_types.dart';
 import 'package:otzaria/models/links.dart';
 import 'package:otzaria/services/target_line_links_service.dart';
@@ -55,7 +55,7 @@ class _MenuProbe extends StatelessWidget {
 void main() {
   tearDown(() {
     TargetLineLinksService.resetInstanceForTesting();
-    MultiWindowService.debugSupportedOverride = null;
+    RunnerWindowChannel.debugSupportedOverride = null;
   });
 
   Future<List<AppContextMenuEntry>> buildMenu(
@@ -101,7 +101,7 @@ void main() {
     });
 
     testWidgets('"פתח בחלון חדש" מופיע רק כשריבוי חלונות נתמך', (tester) async {
-      MultiWindowService.debugSupportedOverride = true;
+      RunnerWindowChannel.debugSupportedOverride = true;
       var labels = (await buildMenu(tester)).map((e) => e.label).toList();
       expect(labels, contains('פתח בחלון חדש'));
       expect(
@@ -109,7 +109,7 @@ void main() {
         labels.indexOf(kOpenInNewTabLabel) + 1,
       );
 
-      MultiWindowService.debugSupportedOverride = false;
+      RunnerWindowChannel.debugSupportedOverride = false;
       labels = (await buildMenu(tester)).map((e) => e.label).toList();
       expect(labels, isNot(contains('פתח בחלון חדש')));
     });

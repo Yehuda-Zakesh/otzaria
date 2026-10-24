@@ -20,10 +20,8 @@ import 'package:otzaria/models/books.dart';
 import 'package:otzaria/settings/settings_exports.dart';
 import 'package:otzaria/shortcuts/shortcut_helper.dart';
 import 'package:otzaria/text_book/bloc/text_book_state.dart';
-import 'package:otzaria/models/phone_report_data.dart';
 import 'package:otzaria/services/data_collection_service.dart';
 import 'package:otzaria/services/direct_error_report_service.dart';
-import 'package:otzaria/services/phone_report_service.dart';
 import 'package:otzaria/services/book_details_service.dart';
 import 'package:otzaria/widgets/controls/action_buttons.dart';
 import 'package:otzaria/widgets/dialogs/dialogs_exports.dart';
@@ -69,17 +67,15 @@ class ReportSourceSnapshot {
 
 /// פעולה שנבחרה בדיאלוג האישור.
 enum ErrorReportAction {
-  cancel,
   sendEmail,
   sendDirect,
   saveForLater,
-  phone,
 }
 
 /// מחלקה עזר להחזרת תוצאה מהדיאלוג (פעולה + נתונים)
 class ReportDialogResult {
   final ErrorReportAction action;
-  final dynamic data; // ReportedErrorData OR PhoneReportData
+  final ReportedErrorData data;
 
   ReportDialogResult(this.action, this.data);
 }
@@ -767,47 +763,6 @@ $detailsSection
     );
   }
 
-  /// Handle phone report submission
-  static Future<void> handlePhoneReport(
-    BuildContext context,
-    PhoneReportData reportData,
-  ) async {
-    try {
-      // Show loading indicator
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-
-      final phoneReportService = PhoneReportService();
-      final result = await phoneReportService.submitReport(reportData);
-
-      if (!context.mounted) return;
-
-      // Hide loading indicator
-      if (context.mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-
-      if (result.isSuccess) {
-        // Success callback will be handled by caller
-      } else {
-        showSimpleSnack(context, result.message);
-      }
-    } catch (e) {
-      // Hide loading indicator
-      if (context.mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-
-      debugPrint('Phone report error: $e');
-      showSimpleSnack(context, ReportMessages.sendError(e));
-    }
-  }
-
   static Future<void> handleDirectReport(
     BuildContext context,
     DirectErrorReport reportData,
@@ -1087,34 +1042,28 @@ $detailsSection
     if (result == null || !context.mounted) return;
 
     try {
-      if (result.data is ReportedErrorData) {
-        final prepared = await prepareReport(result.data as ReportedErrorData);
-        if (!context.mounted) return;
-        if (result.action == ErrorReportAction.sendEmail ||
-            result.action == ErrorReportAction.saveForLater) {
-          await handleRegularReportAction(
-            context,
-            result.action,
-            prepared.data,
-            bookTitle,
-            prepared.currentRef,
-            bookDetails,
-            lineIndex + 1,
-            prepared.contextText,
-            prepared.libraryVersion,
-            source: source,
-          );
-        } else if (result.action == ErrorReportAction.sendDirect) {
-          final senderEmail = await ensureSenderEmail(context);
-          if (senderEmail == null || !context.mounted) {
-            return;
-          }
-          await handleDirectReport(context, buildFor(prepared, senderEmail));
+      final prepared = await prepareReport(result.data);
+      if (!context.mounted) return;
+      if (result.action == ErrorReportAction.sendEmail ||
+          result.action == ErrorReportAction.saveForLater) {
+        await handleRegularReportAction(
+          context,
+          result.action,
+          prepared.data,
+          bookTitle,
+          prepared.currentRef,
+          bookDetails,
+          lineIndex + 1,
+          prepared.contextText,
+          prepared.libraryVersion,
+          source: source,
+        );
+      } else if (result.action == ErrorReportAction.sendDirect) {
+        final senderEmail = await ensureSenderEmail(context);
+        if (senderEmail == null || !context.mounted) {
+          return;
         }
-      } else if (result.data is PhoneReportData) {
-        // === דיווח טלפוני ===
-        if (!context.mounted) return;
-        await handlePhoneReport(context, result.data as PhoneReportData);
+        await handleDirectReport(context, buildFor(prepared, senderEmail));
       }
     } catch (e) {
       debugPrint('Error handling report result: $e');
@@ -1365,19 +1314,6 @@ class _TabbedReportDialogState extends State<TabbedReportDialog>
       libraryVersion: _libraryVersion,
       bookId: _bookId,
       lineNumber: widget.currentLineNumber,
-      onSubmit: (selectedText, errorId, moreInfo, lineNumber) async {
-        final reportData = PhoneReportData(
-          selectedText: selectedText,
-          errorId: errorId,
-          moreInfo: moreInfo,
-          libraryVersion: _libraryVersion,
-          bookId: _bookId!,
-          lineNumber: lineNumber,
-        );
-        Navigator.of(
-          context,
-        ).pop(ReportDialogResult(ErrorReportAction.phone, reportData));
-      },
       onCancel: () {
         Navigator.of(context).pop();
       },

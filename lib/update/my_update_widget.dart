@@ -22,7 +22,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/core/windowing/app_window_controller.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/app_quit.dart';
 import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
 import 'app_release_version.dart';
@@ -890,12 +890,9 @@ class _ManagedUpdatWidgetState extends State<_ManagedUpdatWidget> {
           ),
         );
       }
-      // ⚠️ המעדכן מחליף קבצים רק אחרי שהתהליך יצא, וכל חלון הוא isolate
-      // נפרד. חלון שיסרב להיסגר פשוט משאיר את המעדכן ממתין — אי-אירוע.
-      MultiWindowService.closePeers();
-      // ⚠️ סגירה מנומסת ולא `quitApplication()`: האחרון הוא `PostQuitMessage`
-      // ומפיל את המנוע תחת Dart רץ. ראו התיעוד ב-`AppWindowController`.
-      await _appWindow.close();
+      // ⚠️ המעדכן מחליף קבצים רק אחרי שהתהליך יצא. חלון שיסרב להיסגר
+      // (שינויים שלא נשמרו) פשוט משאיר את המעדכן ממתין — אי-אירוע.
+      await AppQuit.quitAll(AppQuitReason.update, window: _appWindow);
     }
   }
 

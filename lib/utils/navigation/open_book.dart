@@ -8,6 +8,15 @@ import "package:flutter_bloc/flutter_bloc.dart";
 import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
 import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 
+/// מתאם פתיחת הספרים של החלון ש-[context] שייך אליו.
+BookOpenCoordinator bookOpenCoordinatorOf(BuildContext context) =>
+    BookOpenCoordinator(
+      tabsBloc: context.read<TabsBloc>(),
+      historyBloc: context.read<HistoryBloc>(),
+      navigationBloc: context.read<NavigationBloc>(),
+      layoutWidth: readingLayoutWidthResolverOf(context),
+    );
+
 void openBook(
   BuildContext context,
   Book book,
@@ -23,13 +32,7 @@ void openBook(
   bool navigateToPositionIfReused = false,
   List<String>? initialCommentators,
 }) {
-  final coordinator = BookOpenCoordinator(
-    tabsBloc: context.read<TabsBloc>(),
-    historyBloc: context.read<HistoryBloc>(),
-    navigationBloc: context.read<NavigationBloc>(),
-    layoutWidth: readingLayoutWidthResolverOf(context),
-  );
-  coordinator.openBook(
+  bookOpenCoordinatorOf(context).openBook(
     book,
     index,
     searchQuery,
@@ -51,11 +54,5 @@ void openPreparedTab(
   OpenedTab tab, {
   bool insertAdjacent = false,
 }) {
-  final coordinator = BookOpenCoordinator(
-    tabsBloc: context.read<TabsBloc>(),
-    historyBloc: context.read<HistoryBloc>(),
-    navigationBloc: context.read<NavigationBloc>(),
-    layoutWidth: readingLayoutWidthResolverOf(context),
-  );
-  coordinator.openTab(tab, insertAdjacent: insertAdjacent);
+  bookOpenCoordinatorOf(context).openTab(tab, insertAdjacent: insertAdjacent);
 }

@@ -24,7 +24,6 @@ import 'package:otzaria/history/bloc/history_bloc.dart';
 import 'package:otzaria/history/bloc/history_event.dart';
 import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/core/external_uri_router.dart';
-import 'package:otzaria/core/windowing/settings_sync.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/find_ref/repository/find_ref_visibility.dart';
 import 'package:otzaria/library/hidden/hidden_library_selection.dart';
@@ -362,7 +361,7 @@ class _FindRefDialogState extends State<FindRefDialog> {
 
   /// תקף כל עוד רענון ספרייה יוצר מופע `Category` חדש (`DataRepository.library`).
   LibraryBookIndex? _bookIndex;
-  StreamSubscription<String>? _visibilityChanges;
+  StreamSubscription<void>? _personalBooksChanges;
   StreamSubscription<HiddenLibrarySelection>? _localVisibilityChanges;
   late HiddenLibrarySelection _lastVisibilitySelection;
   int _visibilityRevision = 0;
@@ -392,17 +391,9 @@ class _FindRefDialogState extends State<FindRefDialog> {
       (_) => _refreshVisibilityIfChanged(),
     );
 
-    _visibilityChanges = SettingsSync.instance.changes.listen((key) {
-      if (key.isEmpty || key == FindRefPersonalBooksSetting.key) {
-        _syncPersonalBooksToggle();
-      }
-      if (key.isNotEmpty &&
-          key != HiddenLibraryStore.bookKeysSetting &&
-          key != HiddenLibraryStore.categoryPathsSetting) {
-        return;
-      }
-      _refreshVisibilityIfChanged();
-    });
+    _personalBooksChanges = FindRefPersonalBooksSetting.changes.listen(
+      (_) => _syncPersonalBooksToggle(),
+    );
 
     final recent = FindRefRecentStore.load();
     _suggestionsAreRecent = recent.isNotEmpty;
@@ -448,7 +439,7 @@ class _FindRefDialogState extends State<FindRefDialog> {
 
   @override
   void dispose() {
-    _visibilityChanges?.cancel();
+    _personalBooksChanges?.cancel();
     _localVisibilityChanges?.cancel();
     _resultsScrollController.removeListener(_updateHasMoreBelow);
     _resultsScrollController.dispose();

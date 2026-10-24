@@ -190,7 +190,6 @@ void main() {
     )) {
       expect(tile.onTap, isNull);
       expect(tile.onToggleExpand, isNull);
-      expect(tile.onFilter, isNull);
       expect(tile.hasChildren, isFalse);
     }
   });

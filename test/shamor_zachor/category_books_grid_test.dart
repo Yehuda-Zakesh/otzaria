@@ -79,12 +79,7 @@ class _FakeProgressProvider extends ShamorZachorProgressProvider {
       progressById[bookId]?.isNotEmpty ?? false;
 
   @override
-  Future<void> clearBookProgressById(
-    int bookId, {
-    String? categoryName,
-    String? bookName,
-    BookDetails? bookDetails,
-  }) async {
+  Future<void> clearBookProgressById(int bookId) async {
     clearedBookId = bookId;
     await clearCompleter.future;
   }

@@ -9,7 +9,6 @@ import 'package:otzaria/search_feedback/search_feedback_api.dart';
 import 'package:otzaria/search_feedback/search_feedback_identity.dart';
 import 'package:otzaria/search_feedback/search_feedback_queue.dart';
 import 'package:otzaria/search_feedback/search_feedback_service.dart';
-import 'package:otzaria/settings/engine/settings_repository.dart';
 
 import 'search_feedback_test_support.dart';
 
@@ -39,11 +38,7 @@ void main() {
     if (await dir.exists()) await dir.delete(recursive: true);
   });
 
-  SearchFeedbackService makeService({
-    bool secondary = false,
-    Uri? baseUrl,
-    Stream<String>? otherWindows,
-  }) => SearchFeedbackService(
+  SearchFeedbackService makeService({Uri? baseUrl}) => SearchFeedbackService(
     client: MockClient((request) async {
       requests.add(request);
       if (request.url.path.endsWith('/register')) {
@@ -66,8 +61,6 @@ void main() {
     osVersion: () => '10.0',
     locale: () => 'he',
     timerFactory: (_, _) => _NoTimer(),
-    isSecondaryWindow: () => secondary,
-    settingsChangesFromOtherWindows: otherWindows,
   );
 
   List<http.Request> eventPosts() =>
@@ -93,7 +86,7 @@ void main() {
   }
 
   test('האירועים נכתבים לתור בסדר שבו נרשמו', () async {
-    final service = makeService(secondary: true);
+    final service = makeService();
     await service.grant();
     final context = searchContext();
     service.recordSearch(context);
@@ -102,21 +95,6 @@ void main() {
     await service.whenQueued();
 
     expect(queuedEventTypes(), ['search', 'results_shown', 'vote']);
-  });
-
-  test('חלון משני רק כותב לתור; החלון הראשי שולח גם את מקטעיו', () async {
-    final secondary = makeService(secondary: true);
-    await secondary.grant();
-    secondary.recordSearch(searchContext());
-    await secondary.whenQueued();
-    await secondary.flush();
-    expect(requests, isEmpty);
-
-    final primary = makeService();
-    await primary.flush();
-
-    expect(eventPosts(), hasLength(1));
-    expect(queuedEventTypes(), isEmpty);
   });
 
   test('ביטול בחלון אחר מוחק את המפתח, והחלון הזה אינו משחזר אותו', () async {
@@ -142,25 +120,6 @@ void main() {
 
     expect(secondKey, isNot(firstKey));
     expect(jsonDecode(keyFile.readAsStringSync())['seed'], secondKey);
-  });
-
-  test('הסכמה שבוטלה בחלון אחר נקלטת בשימוש הבא', () async {
-    final otherWindows = StreamController<String>();
-    final service = makeService(otherWindows: otherWindows.stream);
-    await service.grant();
-    final changes = <SearchFeedbackConsent>[];
-    service.changes.listen(changes.add);
-
-    consent.state = 'declined';
-    otherWindows.add(SettingsRepository.keySearchFeedbackConsent);
-    await pumpEventQueue();
-
-    await service
-        .flush(); // Drain the already-started session flush before cleanup.
-    expect(requests, isEmpty);
-    expect(changes, [SearchFeedbackConsent.declined]);
-    expect(service.isCollecting, isFalse);
-    await otherWindows.close();
   });
 
   group('תצוגה מקדימה בפיתוח', () {

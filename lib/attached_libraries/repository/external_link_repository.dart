@@ -5,13 +5,9 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
-import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/attached_libraries/models/attached_library.dart';
 import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/attached_libraries/repository/external_link_core.dart';
-import 'package:otzaria/core/messages/window_messages.dart';
-import 'package:otzaria/core/ui_snack.dart';
-import 'package:otzaria/core/windowing/host_relay.dart';
 import 'package:otzaria/data/data_providers/cache_database_holder.dart';
 import 'package:otzaria/data/data_providers/sqlite_data_provider.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
@@ -44,19 +40,9 @@ class ExternalLinkRepository {
     ReadOnlyDbTarget? Function()? officialTarget,
   }) : _registryOverride = registry,
        _cacheDbPath = cacheDbPath ?? CacheDatabaseHolder.resolveDbPath,
-       _officialTargetOverride = officialTarget {
-    for (final state in _hostState) {
-      state.addListener(_hostStateBroadcaster.changed);
-    }
-  }
+       _officialTargetOverride = officialTarget;
 
   static ExternalLinkRepository instance = ExternalLinkRepository();
-
-  /// פקודת בנייה מחלון משני; רק המארח מחזיק את הבנייה ואת מילת הבקרה שלה.
-  static const String requestCommand = 'externalLinks.command';
-
-  /// תמונת מצב הבנייה: בקשה למארח, או שידור שלו לחלונות המשניים.
-  static const String requestState = 'externalLinks.state';
 
   final AttachedLibraryRegistry? _registryOverride;
   final Future<String> Function() _cacheDbPath;
@@ -390,12 +376,7 @@ class ExternalLinkRepository {
   void _invalidateIndexCaches() {
     _indexedTargetsCache = null;
     _commentatorSourcesCache.clear();
-    _indexGeneration++;
-    _hostStateBroadcaster.changed();
   }
-
-  /// גדל בכל בנייה מחדש; חלון משני מנקה את המטמון כשהוא משתנה.
-  int _indexGeneration = 0;
 
   /// slug → טביעת האצבע, לכל מסד מצורף תקין שאינו [exclude]. שורות של מסד לא
   /// נגיש, או שנבנו מגרסה אחרת שלו, אינן מוגשות.
@@ -465,7 +446,7 @@ class ExternalLinkRepository {
   }
 
   void _maybeSyncAfterReset() {
-    if (!_syncOnNextUse || !ProcessDuties.current.isProcessOwner) return;
+    if (!_syncOnNextUse) return;
     _syncOnNextUse = false;
     unawaited(
       sync().then<void>(
@@ -492,7 +473,6 @@ class ExternalLinkRepository {
     String? resumeSlug,
     bool autoResume = false,
   }) async {
-    if (!ProcessDuties.current.isProcessOwner) return const {};
     final libraries = _registry.libraries;
     if (libraries.isEmpty) {
       tooLargeSlugs.value = const {};
@@ -592,14 +572,12 @@ class ExternalLinkRepository {
   /// [rebuild] אחרים ממתינים עד [resumeBuild] או [cancelBuild]. אין השפעה כשאין
   /// בנייה.
   void pauseBuild() {
-    if (_forwardToHost('pause')) return;
     if (_control == null) return;
     _setControlBit(_ctlPaused, true);
     buildPaused.value = true;
   }
 
   void resumeBuild() {
-    if (_forwardToHost('resume')) return;
     if (_control == null) return;
     _setControlBit(_ctlPaused, false);
     buildPaused.value = false;
@@ -609,13 +587,11 @@ class ExternalLinkRepository {
   /// נשאר, והמסד נחשב לא שלם ([incompleteSlugs]) עד [requestResume] (המשך) או
   /// [requestRebuild] (מאפס).
   void cancelBuild() {
-    if (_forwardToHost('cancel')) return;
     _setControlBit(_ctlCancel, true);
   }
 
   /// מצב חסכוני: מנות קטנות יותר והשהיה קצרה ביניהן.
   void setBuildEconomy(bool on) {
-    if (_forwardToHost('economy', on: on)) return;
     if (_control == null) return;
     _setControlBit(_ctlEconomy, on);
     buildEconomy.value = on;
@@ -625,7 +601,6 @@ class ExternalLinkRepository {
   /// כך שמחיקת ה-meta אינה מקדימה סנכרון שכותב. הממשק משתמש ב-[requestRebuild].
   @visibleForTesting
   Future<void> rebuild(String slug) => _enqueue(() async {
-    if (!ProcessDuties.current.isProcessOwner) return;
     await _inIsolate(_forgetIndexMeta, (await _cacheDbPath(), slug));
     await _sync();
   });
@@ -634,134 +609,12 @@ class ExternalLinkRepository {
   /// שכבר נכתבו נשמרות. תקף רק לאותו קובץ ואותם מסדי יעד, אחרת המסד נבנה מאפס.
   /// המשך אוטומטי בהפעלה מתבצע ב-`sync(autoResume: true)`.
   void requestResume(String slug) {
-    if (_forwardToHost('requestResume', slug: slug)) return;
     _request(slug, () => _enqueue(() => _sync(resumeSlug: slug)));
   }
 
   /// בנייה מאפס מהממשק: מוחק את הסימון והשורות של [slug].
   void requestRebuild(String slug) {
-    if (_forwardToHost('requestRebuild', slug: slug)) return;
     _request(slug, () => rebuild(slug));
-  }
-
-  /// בחלון משני הפקודה נשלחת למארח, ומצבה חוזר בשידור [requestState].
-  bool _forwardToHost(String command, {String? slug, bool? on}) {
-    if (ProcessDuties.current.isProcessOwner) return false;
-    unawaited(() async {
-      final response = await HostRelay.sendToHost(
-        requestCommand,
-        args: {'command': command, 'slug': ?slug, 'on': ?on},
-      );
-      if (!response.delivered || response.result != true) {
-        UiSnack.showError(WindowMessages.mainWindowRequestFailed);
-      }
-    }());
-    return true;
-  }
-
-  /// מטפל בבקשות האפיק של אינדקס הקישורים, במארח ובחלון משני.
-  Object? handleWindowRequest(Map<String, dynamic> request) {
-    switch (request['type']) {
-      case requestState:
-        if (ProcessDuties.current.isProcessOwner) return _hostSnapshot();
-        final state = request['state'];
-        if (state is! Map) return false;
-        _applyHostState(state);
-        return true;
-      case requestCommand:
-        if (!ProcessDuties.current.isProcessOwner) return false;
-        final slug = request['slug'];
-        switch (request['command']) {
-          case 'pause':
-            pauseBuild();
-          case 'resume':
-            resumeBuild();
-          case 'cancel':
-            cancelBuild();
-          case 'economy':
-            final on = request['on'];
-            if (on is! bool) return false;
-            setBuildEconomy(on);
-          case 'requestResume' when slug is String:
-            requestResume(slug);
-          case 'requestRebuild' when slug is String:
-            requestRebuild(slug);
-          default:
-            return false;
-        }
-        return true;
-    }
-    return null;
-  }
-
-  /// מושך מהמארח את מצב הבנייה, לחלון משני שמתחיל להציג אותו.
-  Future<void> refreshFromHost() async {
-    if (ProcessDuties.current.isProcessOwner) return;
-    final state = await HostRelay.fetchHostSnapshot(requestState);
-    if (state != null) _applyHostState(state);
-  }
-
-  List<Listenable> get _hostState => [
-    buildProgress,
-    buildPaused,
-    buildEconomy,
-    tooLargeSlugs,
-    buildingSlugs,
-    incompleteSlugs,
-  ];
-
-  late final _hostStateBroadcaster = HostStateBroadcaster(
-    requestState,
-    _hostSnapshot,
-  );
-
-  Map<String, Object?> _hostSnapshot() => {
-    'progress': {
-      for (final MapEntry(:key, :value) in buildProgress.value.entries)
-        key: [value.done, value.total],
-    },
-    'paused': buildPaused.value,
-    'economy': buildEconomy.value,
-    'tooLarge': tooLargeSlugs.value.toList(),
-    'building': buildingSlugs.value.toList(),
-    'incomplete': incompleteSlugs.value.toList(),
-    'generation': _indexGeneration,
-  };
-
-  void _applyHostState(Map<Object?, Object?> state) {
-    Set<String> slugs(Object? value) =>
-        value is List ? value.whereType<String>().toSet() : const {};
-    final progress = state['progress'];
-    buildProgress.value = {
-      if (progress is Map)
-        for (final MapEntry(:key, :value) in progress.entries)
-          if (key is String &&
-              value is List &&
-              value.length == 2 &&
-              value[0] is int &&
-              value[1] is int)
-            key: ExternalLinkBuildProgress(
-              done: value[0] as int,
-              total: value[1] as int,
-            ),
-    };
-    buildPaused.value = state['paused'] == true;
-    buildEconomy.value = state['economy'] == true;
-    if (!setEquals(tooLargeSlugs.value, slugs(state['tooLarge']))) {
-      tooLargeSlugs.value = slugs(state['tooLarge']);
-    }
-    if (!setEquals(buildingSlugs.value, slugs(state['building']))) {
-      buildingSlugs.value = slugs(state['building']);
-    }
-    if (!setEquals(incompleteSlugs.value, slugs(state['incomplete']))) {
-      incompleteSlugs.value = slugs(state['incomplete']);
-    }
-    final generation = state['generation'];
-    if (generation is int && generation != _indexGeneration) {
-      _indexedTargetsCache = null;
-      _commentatorSourcesCache.clear();
-      _indexGeneration = generation;
-    }
   }
 
   final Set<String> _requestedSlugs = {};

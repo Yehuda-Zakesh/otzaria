@@ -4,7 +4,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:otzaria_icons/otzaria_icons.dart';
 import 'package:otzaria/widgets/misc/rtl_icon.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_bloc.dart';
 import 'package:otzaria/plugins/bloc/plugin_system_state.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
@@ -697,7 +697,7 @@ class ShortcutsSettingsTab extends StatelessWidget {
               icon: FluentIcons.grid_24_regular,
               allShortcuts: _shortcutsList,
             ),
-            if (MultiWindowService.canOpenWindows)
+            if (RunnerWindowChannel.canOpenWindows)
               _ShortcutTile(
                 settingKey: ShortcutValidator.openNewWindowKey,
                 label: context.settingsText('חלון חדש'),

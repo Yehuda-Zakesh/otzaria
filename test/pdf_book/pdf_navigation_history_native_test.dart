@@ -73,7 +73,6 @@ void main() {
     tabsBloc.emit(TabsState(tabs: [tab], currentTabIndex: 0));
     final settings = _SettingsBloc();
     final tour = TourCubit();
-    addTearDown(tab.dispose);
     addTearDown(tabsBloc.close);
     addTearDown(settings.close);
     addTearDown(tour.close);
@@ -163,18 +162,21 @@ void main() {
     expectRestored(systemLocation);
     expect(tab.navigationHistory.canGoBack, isFalse);
     await tester.tapAt(tester.getCenter(viewer));
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    final shortcutModifier = Platform.isMacOS
+        ? LogicalKeyboardKey.metaLeft
+        : LogicalKeyboardKey.controlLeft;
+    await tester.sendKeyDownEvent(shortcutModifier);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.digit0);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyUpEvent(shortcutModifier);
     await settle();
     final widthZoom = controller.currentZoom;
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(shortcutModifier);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.digit0);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyUpEvent(shortcutModifier);
     await settle();
     expect(controller.currentZoom, lessThan(widthZoom));
     expect(tab.navigationHistory.canGoBack, isFalse);

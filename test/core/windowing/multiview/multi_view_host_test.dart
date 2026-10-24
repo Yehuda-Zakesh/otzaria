@@ -15,26 +15,12 @@ import 'package:otzaria/settings/engine/settings_repository.dart';
 
 void main() {
   tearDown(() {
-    MultiViewMode.debugOverride = null;
     AppWindowKeys.resetForTest();
-  });
-
-  testWidgets('בלי הדגל MultiViewHost מחזיר את child כמו שהוא', (
-    tester,
-  ) async {
-    MultiViewMode.debugOverride = false;
-    const child = SizedBox.shrink();
-    await tester.pumpWidget(
-      MultiViewHost(registry: _registry(tester), child: child),
-    );
-    expect(find.byType(ViewAnchor), findsNothing);
-    expect(find.byWidget(child), findsOneWidget);
   });
 
   testWidgets('שני חלונות נטענים תחת AppScopeProviders אחד ונסגרים', (
     tester,
   ) async {
-    MultiViewMode.debugOverride = true;
     final registry = _registry(tester);
     final contexts = <int, BuildContext>{};
     late BuildContext mainContext;

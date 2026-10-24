@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
 
 /// כמו `DragToMoveArea` של window_manager, אבל גורר את החלון של ה-[AppWindowScope]
-/// שמעליו ולא את ה-singleton — כדי שחלון משני יגרור את עצמו.
+/// שמעליו ולא את ה-singleton — כדי שחלון Dart יגרור את עצמו.
 class AppDragToMoveArea extends StatelessWidget {
   const AppDragToMoveArea({super.key, required this.child});
 

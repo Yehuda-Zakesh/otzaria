@@ -98,7 +98,6 @@ void main() {
       notifications: notifications,
       pluginEvents: () async => const [],
       now: () => _now,
-      broadcast: (_) {},
       dedupeDuplicates: false,
     );
     cubit = CalendarCubit(

@@ -8,7 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/user_state_slot.dart';
 import 'package:otzaria/core/user_state/window_session_store.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
@@ -42,7 +42,7 @@ void main() {
   }
 
   Future<void> putSession(List<dynamic> tabs, int index) => sessions.save(
-    UserStateSlot.single,
+    UserStateSlot.main,
     tabsJson: jsonEncode(tabs),
     currentIndex: index,
   );
@@ -53,7 +53,7 @@ void main() {
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('restore_skipped_tab');
-    MultiWindowService.debugSupportedOverride = false;
+    RunnerWindowChannel.debugSupportedOverride = false;
     database = UserStateDatabase.openAt(p.join(tempDir.path, 'user_state.db'));
     await database.database;
     sessions = WindowSessionStore(database: database);
@@ -61,7 +61,7 @@ void main() {
 
   tearDown(() async {
     database.close();
-    MultiWindowService.debugSupportedOverride = null;
+    RunnerWindowChannel.debugSupportedOverride = null;
     if (await tempDir.exists()) await tempDir.delete(recursive: true);
   });
 
@@ -69,7 +69,7 @@ void main() {
     'session restore keeps the active tab when an earlier tab is skipped',
     () async {
       await sessions.save(
-        UserStateSlot.single,
+        UserStateSlot.main,
         tabsJson: jsonEncode([
           unknownTab,
           pdfJson('A'),
@@ -218,15 +218,15 @@ void main() {
         final expected = index < 0 ? 0 : 1;
 
         await repository.saveTabs(tabs, index);
-        final original = sessions.loadOpened(UserStateSlot.single)!;
+        final original = sessions.loadOpened(UserStateSlot.main)!;
         expect(original.currentIndex, expected);
         await repository.saveCurrentTabIndex(tabs, index);
         await repository.flushPendingWrites();
-        final saved = sessions.loadOpened(UserStateSlot.single)!;
+        final saved = sessions.loadOpened(UserStateSlot.main)!;
         expect(saved.currentIndex, expected);
         expect(saved.tabsJson, original.tabsJson);
         await repository.saveTabs([], index);
-        expect(sessions.loadOpened(UserStateSlot.single)!.currentIndex, 0);
+        expect(sessions.loadOpened(UserStateSlot.main)!.currentIndex, 0);
       },
     );
   }

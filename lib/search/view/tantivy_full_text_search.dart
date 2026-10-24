@@ -259,13 +259,30 @@ class _TantivyFullTextSearchState extends State<TantivyFullTextSearch>
           focusNode: _contentFocusNode,
           child: Scaffold(
             body: BlocBuilder<SearchBloc, SearchState>(
+              // המונים והתוצאות מאזינים בעצמם, כך ש"איתור ספר" וספירות העץ אינם
+              // בונים את המסך. isLoading: חיפוש חוזר קורא שוב את הטקסט הגולמי.
+              buildWhen: (previous, current) =>
+                  previous.searchQuery != current.searchQuery ||
+                  previous.isLoading != current.isLoading ||
+                  !identical(previous.configuration, current.configuration),
               builder: (context, state) => SearchResultsLayout(
                 tab: widget.tab,
                 hasQuery: state.searchQuery.isNotEmpty,
                 onEditSearch: _openEditDialog,
                 header: _buildIndexingWarning(),
                 countsBuilder: (context, collapsed) =>
-                    _buildResultCounts(context, state, collapsed: collapsed),
+                    BlocBuilder<SearchBloc, SearchState>(
+                      buildWhen: (previous, current) =>
+                          previous.results.length != current.results.length ||
+                          previous.isCounting != current.isCounting ||
+                          previous.totalResults != current.totalResults ||
+                          previous.totalGroups != current.totalGroups,
+                      builder: (context, state) => _buildResultCounts(
+                        context,
+                        state,
+                        collapsed: collapsed,
+                      ),
+                    ),
                 extraTrailingItems: _buildTrailingControls,
                 banners: [
                   if (_shouldShowFacetFilterBanner(state))

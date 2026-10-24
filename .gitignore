@@ -63,6 +63,8 @@ macos/Runner/*
 !macos/Runner/*.entitlements
 !macos/Runner/Assets.xcassets/
 !macos/Runner/Info.plist
+!macos/Runner/MultiViewSupport.swift
+!macos/Runner/ViewWindowChannel.swift
 !macos/Runner/Configs/
 macos/Runner/Configs/*
 !macos/Runner/Configs/AppInfo.xcconfig

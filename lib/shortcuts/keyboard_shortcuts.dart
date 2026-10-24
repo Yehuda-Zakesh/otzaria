@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/focus_repository.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/core/windowing/window_opener.dart';
 import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
@@ -534,7 +534,7 @@ class _KeyboardShortcutsState extends State<KeyboardShortcuts> {
     }
 
     // חלון אוצריא נוסף — רק בפלטפורמה תומכת, אחרת הקיצור ממשיך הלאה.
-    if (MultiWindowService.canOpenWindows &&
+    if (RunnerWindowChannel.canOpenWindows &&
         newWindowShortcut.isNotEmpty &&
         ShortcutHelper.matchesShortcut(event, newWindowShortcut)) {
       unawaited(WindowOpener.current.openEmptyWindow());

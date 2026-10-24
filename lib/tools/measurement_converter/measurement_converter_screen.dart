@@ -1,10 +1,4 @@
 // lib/tools/measurement_converter/measurement_converter_screen.dart
-//
-// שינויים עיצוביים (מ-PR mdb2-devsh):
-//  • ניווט קטגוריות: AppTopBar + AdaptiveSidePane + SidebarNavItem (במקום כרטיסים עליונים)
-//  • יחידות: כרטיסי chip (במקום רשימות אנכיות/אופקיות)
-//  • שדות קלט ותוצאה: בסרגל העליון (AppTopBar)
-//  • UiSnack להעתקה, CallbackShortcuts לקיצור Ctrl+F
 
 import 'package:flutter/material.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
@@ -23,7 +17,6 @@ import 'package:otzaria/widgets/text/rtl_text_field.dart';
 import 'package:otzaria/widgets/navigation/sidebar_nav_item.dart';
 import 'package:otzaria/core/ui_snack.dart';
 
-// START OF ADDITIONS - MODERN UNITS
 const List<String> modernLengthUnits = ['מ"מ', 'ס"מ', 'מטר', 'ק"מ'];
 const List<String> modernAreaUnits = ['ס"מ רבוע', 'מ"ר', 'ק"מ רבוע', 'דונם'];
 const List<String> modernVolumeUnits = [
@@ -53,7 +46,6 @@ const List<String> complexAncientTimeUnits = [
   'הילוך ארבעה מילים',
   'הילוך עשרה פרסאות',
 ];
-// END OF ADDITIONS
 
 class MeasurementConverterScreen extends StatefulWidget {
   const MeasurementConverterScreen({super.key});
@@ -87,7 +79,6 @@ class _MeasurementConverterScreenState
   final Map<String, String> _rememberedOpinions = {};
   final Map<String, String> _rememberedInputValues = {};
 
-  // Updated to include modern units
   final Map<String, List<String>> _units = {
     'אורך': lengthConversionFactors.keys.toList()..addAll(modernLengthUnits),
     'שטח': areaConversionFactors.keys.toList()..addAll(modernAreaUnits),
@@ -460,7 +451,6 @@ class _MeasurementConverterScreenState
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = AppSurfaces.panelBackground(context);
     final cs = Theme.of(context).colorScheme;
     final showOpinion = _shouldShowOpinionSelector();
     final hasResult = _resultController.text.isNotEmpty;
@@ -643,7 +633,6 @@ class _MeasurementConverterScreenState
                                   decoration: _barFieldDecoration(
                                     cs,
                                     enabled: showOpinion,
-                                    isCompact: isCompact,
                                   ),
                                   entries: _opinions[_selectedCategory]!
                                       .map(
@@ -728,7 +717,6 @@ class _MeasurementConverterScreenState
                                     decoration:
                                         _barFieldDecoration(
                                           cs,
-                                          isCompact: isCompact,
                                         ).copyWith(
                                           isDense: true,
                                           contentPadding: EdgeInsets.symmetric(
@@ -805,7 +793,7 @@ class _MeasurementConverterScreenState
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final isWide = constraints.maxWidth >= 700;
-                  return _buildAdaptiveContent(bgColor, isWide: isWide);
+                  return _buildAdaptiveContent(isWide: isWide);
                 },
               ),
             ),
@@ -819,7 +807,6 @@ class _MeasurementConverterScreenState
   InputDecoration _barFieldDecoration(
     ColorScheme cs, {
     bool enabled = true,
-    bool isCompact = false,
   }) {
     final noBorder = OutlineInputBorder(
       borderRadius: AppTokens.borderRadiusAll,
@@ -892,7 +879,7 @@ class _MeasurementConverterScreenState
   //  אדפטיבי: AdaptiveSidePane
   // ════════════════════════════════════════════════════════════════════════════
 
-  Widget _buildAdaptiveContent(Color bgColor, {required bool isWide}) {
+  Widget _buildAdaptiveContent({required bool isWide}) {
     return AdaptiveSidePane(
       isOpen: isWide ? _sidebarVisible : _narrowShowCategories,
       alignment:
@@ -944,17 +931,11 @@ class _MeasurementConverterScreenState
                 ],
               ),
             ),
-      paneContent: _buildCategoriesPane(
-        bgColor,
-        closeOnSelect: !isWide,
-      ),
+      paneContent: _buildCategoriesPane(closeOnSelect: !isWide),
     );
   }
 
-  Widget _buildCategoriesPane(
-    Color bgColor, {
-    required bool closeOnSelect,
-  }) {
+  Widget _buildCategoriesPane({required bool closeOnSelect}) {
     return Container(
       color: AppSurfaces.solidPanelBackground(context),
       padding: const EdgeInsets.symmetric(

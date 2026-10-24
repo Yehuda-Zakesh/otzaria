@@ -5,8 +5,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/window_session_store.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/data/data_providers/hive_data_provider.dart';
 import 'package:otzaria/main.dart' as app;
 
@@ -20,8 +19,7 @@ void main() {
     tmp = Directory.systemTemp.createTempSync('otzaria_user_state_startup_');
     AppPaths.debugOverrideDataRootPath(tmp.path);
     database.overridePath('${tmp.path}/user_state.db');
-    MultiWindowService.debugSupportedOverride = false;
-    WindowRole.isSecondary = false;
+    RunnerWindowChannel.debugSupportedOverride = false;
     Hive.init(tmp.path);
   });
 
@@ -29,7 +27,7 @@ void main() {
     await Hive.close();
     await pendingStaleRootsDeletion;
     database.close();
-    MultiWindowService.debugSupportedOverride = null;
+    RunnerWindowChannel.debugSupportedOverride = null;
     AppPaths.debugOverrideDataRootPath(null);
     tmp.deleteSync(recursive: true);
   });

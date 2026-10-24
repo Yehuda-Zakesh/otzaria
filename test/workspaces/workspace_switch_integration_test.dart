@@ -616,7 +616,7 @@ class _ControlledWorkspaceRepository extends WorkspaceRepository {
 
 class _TabsRepository extends TabsRepository {
   @override
-  List<OpenedTab> loadTabs() => [];
+  List<OpenedTab> loadTabs({bool newRuntime = false}) => [];
   @override
   int loadCurrentTabIndex() => 0;
   @override

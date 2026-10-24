@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/plugins/services/plugin_restore_state_store.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/tab.dart';
@@ -39,7 +39,7 @@ void main() {
 
   test('בדיקת יכולת העברה אינה מוחקת את מצב התוסף', () {
     final source = tool('טיוטה');
-    expect(MultiWindowService.canTransfer(source), isTrue);
+    expect(RunnerWindowChannel.canTransfer(source), isTrue);
     expect(source.toJson()['pluginRestoreState'], contains('טיוטה'));
     source.dispose();
   });

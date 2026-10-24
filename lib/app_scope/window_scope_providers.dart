@@ -8,7 +8,6 @@ import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/core/windowing/multiview/in_process_tab_drop.dart';
-import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/core/windowing/window_fullscreen_cubit.dart';
 import 'package:otzaria/find_ref/bloc/find_ref_bloc.dart';
 import 'package:otzaria/find_ref/repository/find_ref_factory.dart';
@@ -184,7 +183,12 @@ class WindowScopeProviders extends StatelessWidget {
             create: (context) {
               final tabsBloc = context.read<TabsBloc>();
               final session = tabsSession;
+              final windowKeys = AppWindowKeys.of(context);
+              final windowId = windowKeys.id;
               return WorkspaceBloc(
+                windowKeys: windowKeys,
+                isOpenInOtherWindow: (id) => InProcessTabDrops.current
+                    .isWorkspaceOpenElsewhere(windowId, id),
                 repository: WorkspaceRepository(
                   slot: session == null ? null : () => session.slot,
                 ),
@@ -227,10 +231,8 @@ class WindowScopeProviders extends StatelessWidget {
             ),
           ),
         ],
-        // ריבוי תצוגות: יעד להעברת כרטיסיה ישירה מחלון אחר בתהליך.
-        child: MultiViewMode.enabled
-            ? InProcessTabDropReceiver(child: child)
-            : child,
+        // יעד להעברת כרטיסיה ישירה מחלון אחר בתהליך.
+        child: InProcessTabDropReceiver(child: child),
       ),
     );
   }

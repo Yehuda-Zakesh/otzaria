@@ -69,14 +69,6 @@ class NavTreeTile extends StatelessWidget {
   /// המונה) שלחיצתו מנקה. משותף לחיפוש, הערות ושמור-וזכור.
   final VoidCallback? onClearFilter;
 
-  /// כשאינו null — קופסת האייקון הופכת ליעד סינון: בריחוף (או ב-[filterMode])
-  /// היא מציגה אייקון סינון, ולחיצה עליה מסננת לפריט זה. לחיצה על שאר השורה
-  /// נשארת ל-[onTap] (הרחבה/גלילה).
-  final VoidCallback? onFilter;
-
-  /// כופה את אייקון הסינון תמיד (ללא ריחוף) — למסכי מגע.
-  final bool filterMode;
-
   final VoidCallback? onTap;
   final VoidCallback? onToggleExpand;
 
@@ -99,8 +91,6 @@ class NavTreeTile extends StatelessWidget {
     this.leading,
     this.trailing,
     this.onClearFilter,
-    this.onFilter,
-    this.filterMode = false,
     this.onTap,
     this.onToggleExpand,
     this.extraIndent = 0,
@@ -118,8 +108,6 @@ class NavTreeTile extends StatelessWidget {
     int? count,
     Widget? trailing,
     VoidCallback? onClearFilter,
-    VoidCallback? onFilter,
-    bool filterMode = false,
     VoidCallback? onTap,
     VoidCallback? onToggleExpand,
   }) {
@@ -133,8 +121,6 @@ class NavTreeTile extends StatelessWidget {
       count: count,
       trailing: trailing,
       onClearFilter: onClearFilter,
-      onFilter: onFilter,
-      filterMode: filterMode,
       useFolderIcon: true,
       onTap: onTap,
       onToggleExpand: onToggleExpand,
@@ -154,8 +140,6 @@ class NavTreeTile extends StatelessWidget {
     Widget? leading,
     Widget? trailing,
     VoidCallback? onClearFilter,
-    VoidCallback? onFilter,
-    bool filterMode = false,
     VoidCallback? onTap,
   }) {
     return NavTreeTile(
@@ -170,8 +154,6 @@ class NavTreeTile extends StatelessWidget {
       leading: leading,
       trailing: trailing,
       onClearFilter: onClearFilter,
-      onFilter: onFilter,
-      filterMode: filterMode,
       onTap: onTap,
       extraIndent: 12,
       fontWeight: FontWeight.w500,
@@ -245,7 +227,7 @@ class NavTreeTile extends StatelessWidget {
               : FluentIcons.folder_24_regular)
         : icon;
 
-    final Widget? baseLeading =
+    final Widget? leadingWidget =
         leading ??
         (iconData == null
             ? null
@@ -257,15 +239,6 @@ class NavTreeTile extends StatelessWidget {
                   size: iconContentSize,
                 ),
               ));
-
-    // קופסת האייקון כיעד סינון: בריחוף/מגע מתחלפת לאייקון סינון ולחיצה מסננת.
-    final leadingWidget = (baseLeading == null || onFilter == null)
-        ? baseLeading
-        : _FilterableIconBox(
-            base: baseLeading,
-            filterMode: filterMode,
-            onFilter: onFilter!,
-          );
 
     final row = InkWell(
       onTap: onTap,
@@ -511,64 +484,6 @@ class NavTreeGroupCard extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-/// קופסת אייקון שהופכת ליעד סינון: בריחוף (או ב-[filterMode]) מציגה אייקון
-/// סינון על רקע primaryContainer; לחיצה מפעילה [onFilter]. אחרת מציגה את
-/// [base] (אייקון התיקייה/הספר הרגיל).
-class _FilterableIconBox extends StatefulWidget {
-  final Widget base;
-  final bool filterMode;
-  final VoidCallback onFilter;
-
-  const _FilterableIconBox({
-    required this.base,
-    required this.filterMode,
-    required this.onFilter,
-  });
-
-  @override
-  State<_FilterableIconBox> createState() => _FilterableIconBoxState();
-}
-
-class _FilterableIconBoxState extends State<_FilterableIconBox> {
-  static const double _size = 26;
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final showFilter = widget.filterMode || _hovered;
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onFilter,
-        child: showFilter
-            ? Tooltip(
-                message: 'סנן לפריט זה',
-                child: Container(
-                  width: _size,
-                  height: _size,
-                  decoration: BoxDecoration(
-                    color: cs.primaryContainer,
-                    borderRadius: AppTokens.borderRadiusAll,
-                  ),
-                  child: Center(
-                    child: Icon(
-                      FluentIcons.filter_24_regular,
-                      color: cs.onPrimaryContainer,
-                      size: 14,
-                    ),
-                  ),
-                ),
-              )
-            : widget.base,
       ),
     );
   }

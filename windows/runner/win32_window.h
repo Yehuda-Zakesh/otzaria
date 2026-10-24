@@ -7,37 +7,9 @@
 #include <memory>
 #include <string>
 
-// בקשה לסגור את החלון.
-//
-// ⚠️ **החלון מוסתר, לא נהרס** — וזו החלטה שנכפתה על ידי מדידה.
-//
-// `DestroyWindow` הורס את מנוע ה-Flutter של החלון. כשכל המנועים חולקים
-// את ה-thread הראשי, הריסת אחד מהם בזמן שאחר חי מפילה את התהליך —
-// נמדד: **כל** סגירת חלון גרמה ל-segfault, בין אם הראשון ובין אם משני,
-// וגם כשההריסה נדחתה לאיטרציה הבאה של לולאת ההודעות. כלומר זו אינה
-// ריאנטרנטיות אלא אי-בטיחות של ההריסה עצמה בתצורה הזו.
-//
-// בספייק, כשלכל מנוע היה thread ייעודי, הריסה **כן** עבדה נקי
-// (ראו docs/multi-window.md). אבל יצירת מנוע על thread ייעודי מפילה
-// את התהליך כשחלון אחר כבר רץ. שתי הדרישות סותרות, ולכן: יוצרים על
-// ה-thread הראשי, ולא הורסים עד ליציאת התהליך.
-//
-// **המחיר, במפורש:** המנוע של חלון סגור נשאר בזיכרון עד סגירת התוכנה.
-// עם תקרה של ארבעה חלונות זה חסום, אבל זהו חוב פתוח — הפתרון הנכון הוא
-// thread לכל מנוע, והוא חסום ביצירה.
+// בקשה לסגור את החלון: הוא מוסתר ולא נהרס. view 0 אינו ניתן להסרה
+// (flutter#193174), וחלונות Dart חיים על המנוע שלו.
 constexpr UINT kMsgDeferredDestroy = WM_APP + 0x102;
-
-// סגנון שמונע מחלון להיות מופעל, עד שהוא נחשף.
-//
-// ⚠️ **זהו התיקון ל"מריבת הפוקוסים".** חלון אוצריא נוצר מוסתר ונחשף רק
-// בפריים הראשון, אבל מנוע Flutter קורא `SetFocus` על ה-view שלו בזמן
-// היצירה — ו-`SetFocus` על ילד מפעיל את החלון העליון. כלומר חלון בלתי-נראה
-// חטף את ההפעלה, Windows החזיר אותה לחלון הקודם, החשיפה חטפה שוב, וחוזר
-// חלילה: נמדדה תנודה של ארבע החלפות תוך 200ms בין החלון החדש לחלון הראשי.
-//
-// `WS_EX_NOACTIVATE` פשוט מוציא את החלון מהמשחק עד שיש מה להראות. הוא
-// מוסר ב-[Win32Window::AllowActivation] רגע לפני ההצגה.
-constexpr DWORD kNoActivateUntilRevealed = WS_EX_NOACTIVATE;
 
 // A class abstraction for a high DPI-aware Win32 Window. Intended to be
 // inherited from by classes that wish to specialize with custom
@@ -66,27 +38,10 @@ class Win32Window {
   // consistent size this function will scale the inputted width and height as
   // as appropriate for the default monitor. The window is invisible until
   // |Show| is called. Returns true if the window was created successfully.
-  // [extended_style] נוסף לסגנונות המורחבים של החלון. ראו
-  // [kNoActivateUntilRevealed].
-  bool Create(const std::wstring& title, const Point& origin, const Size& size,
-              DWORD extended_style = 0);
-
-  // מסיר את [WS_EX_NOACTIVATE], כדי שהחלון יוכל להיות מופעל.
-  //
-  // ⚠️ חייב לקרות **לפני** שמציגים אותו, אחרת ההצגה לא תפעיל אותו.
-  //
-  // סטטי ומקבל `HWND`, כי מסלול החשיפה רץ בקולבק שמחזיק את ה-handle בלבד
-  // (מצביע לחלון עלול להיות תלוי עד שהפריים הראשון מגיע).
-  static void AllowActivation(HWND window);
+  bool Create(const std::wstring& title, const Point& origin, const Size& size);
 
   // רושם שהמשתמש בחר את [window] בלחיצה.
   static void NoteUserActivation(HWND window);
-
-  // החלון האחרון שהופעל (עכבר או מקלדת), או nullptr אם אין כזה חי.
-  //
-  // ⚠️ מקור האמת לניתוב `otzaria://`: `LastActiveWindow` בצד Dart הוא
-  // static פר-isolate, ולכן כל חלון רואה רק את עצמו.
-  static HWND LastActivatedWindow();
 
   // האם יש לחסום הפעלה של [window] כרגע.
   //
@@ -106,17 +61,6 @@ class Win32Window {
   // הפעלה תוכניתית של חלון אוצריא **אחר**. הפעלה שהמשתמש יזם, והפעלה של
   // חלונות שאינם שלנו, אינן נוגעות בשער.
   static bool ShouldVetoActivation(HWND window);
-
-  // יוצר חלון במסגרת שנתונה ב**פיקסלים פיזיים**, בלי שום המרת DPI.
-  //
-  // ⚠️ קיים כי [Create] מכפיל גם את המיקום וגם את הגודל ב-scale factor,
-  // כלומר הוא מצפה ליחידות **לוגיות**. מיקומים שמגיעים מגרירה
-  // (`GetWindowRect`, `GetCursorPos`, מסגרת שההצמדה נתנה) הם פיזיים,
-  // והעברתם ל-[Create] הכפילה אותם שוב: במסך 150% חלון שנגרר ל-x=1000
-  // נוצר ב-1500, והצמדה לחצי מסך של 960px נתנה חלון של 1440px. במסך יחיד
-  // ב-100% שום דבר מזה אינו נראה.
-  bool CreatePhysical(const std::wstring& title, const RECT& frame,
-                      DWORD extended_style = 0);
 
   // Show the current window. Returns true if the window was successfully shown.
   bool Show();

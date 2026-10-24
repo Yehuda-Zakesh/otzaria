@@ -1,15 +1,8 @@
-import 'dart:async';
-import 'dart:convert';
-
 import 'package:flutter/widgets.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/core/ui_snack.dart';
-import 'package:otzaria/core/messages/plugin_messages.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
-import 'package:otzaria/core/windowing/window_bus.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
-import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/plugins/services/plugin_unsaved_changes_registry.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
@@ -75,6 +68,16 @@ Map<String, TextBookTab> _correctionPanes(Iterable<OpenedTab> tabs) => {
       if (pane is TextBookTab)
         ?PluginCorrectionSessionService.knownTabIdFor(pane): pane,
 };
+
+/// לפני שחרור הכרטיסיות של חלון Dart שנסגר, שהיה מסיים בסיבה `tab_closed`.
+void endWindowCorrectionSessions(Iterable<OpenedTab> tabs) {
+  for (final tabId in _correctionPanes(tabs).keys) {
+    PluginCorrectionSessionService.instance.removeTab(
+      tabId,
+      reason: 'window_closed',
+    );
+  }
+}
 
 /// תיקונים שלא נשמרו ושאינם שייכים לאף אחת מ-[tabs] — הלשונית שלהם נסגרה.
 Future<List<String>> unsavedClosedTabCorrections(
@@ -152,7 +155,11 @@ Future<bool> confirmTabTransferWithUnsavedChanges(OpenedTab tab) async {
 
 Future<bool>? _pendingAppClose;
 int _nextProcessQuitRequest = 0;
-({String id, List<int> peers, Set<String> accepted})? _preparedProcessQuit;
+({
+  String id,
+  Set<({String tabId, String ownerName, String bookId})> accepted,
+})?
+_preparedProcessQuit;
 
 /// אישור סגירת התוכנה כשיש בכרטיסיות תוסף שינויים שלא נשמרו.
 ///
@@ -183,16 +190,12 @@ Future<bool> confirmAppCloseWithUnsavedChanges({
   return shared;
 }
 
-/// "סגירת החלון" כשנשאר חלון פתוח אחר — באפיק, או חלון Dart שאינו [closing].
+/// "סגירת החלון" כשנשאר חלון Dart פתוח שאינו [closing].
 /// הראשי אינו נספר: כשחלון Dart נסגר אחרון, הראשי מוסתר.
 String _closeSubtitle(AppWindowKeys closing) {
-  final others =
-      WindowBus.instance.hasOtherWindows ||
-      (MultiViewMode.enabled &&
-          AppWindowKeys.registered.any(
-            (keys) =>
-                keys.id != AppWindowId.primary && !identical(keys, closing),
-          ));
+  final others = AppWindowKeys.registered.any(
+    (keys) => keys.id != AppWindowId.primary && !identical(keys, closing),
+  );
   return others
       ? unsavedChangesWindowCloseSubtitle
       : unsavedChangesAppCloseSubtitle;
@@ -204,80 +207,37 @@ Future<bool> _confirmAllWindowCorrections(
 ) async {
   final corrections = PluginCorrectionSessionService.instance;
   final requestId =
-      '${WindowBus.instance.slot ?? 0}-${DateTime.now().microsecondsSinceEpoch}-${_nextProcessQuitRequest++}';
+      'quit-${DateTime.now().microsecondsSinceEpoch}-${_nextProcessQuitRequest++}';
   if (!corrections.beginProcessQuitPreparation(requestId)) return false;
-  final peers = WindowBus.instance.otherRegisteredSlots();
   var retained = false;
   try {
-    final replies = await Future.wait([
-      for (final slot in peers)
-        WindowBus.instance.request(
-          slot,
-          {
-            'type': MultiWindowService.requestPrepareCorrectionQuit,
-            'requestId': requestId,
-          },
-          timeout: MultiWindowService.correctionQuitRequestTimeout,
-        ),
-    ]);
-    final unavailable = replies.any(
-      (reply) => reply is! Map || reply['locked'] != true,
-    );
-    if (unavailable) {
-      UiSnack.showError(PluginMessages.correctionQuitUnverified);
-      return false;
-    }
     final unsaved = await corrections.unsavedStates();
     if (!context.mounted) return false;
-    final accepted = {
-      for (final state in unsaved)
-        jsonEncode([
-          WindowBus.instance.slot,
-          state.tabId,
-          state.ownerName,
-          state.bookId,
-        ]),
-      for (final reply in replies.cast<Map>())
-        for (final value in (reply['unsaved'] as List? ?? const []))
-          if (value is Map)
-            jsonEncode([
-              reply['slot'],
-              value['tabId'],
-              value['ownerName'],
-              value['bookId'],
-            ]),
-    };
-    final remoteMessages = [
-      for (final reply in replies.cast<Map>())
-        for (final value in (reply['unsaved'] as List? ?? const []))
-          if (value is Map)
-            'תיקוני התוסף ‹${value['ownerName']}› בספר "${value['bookId']}" עדיין לא נשמרו לטיוטת ההתאוששות.',
-    ];
-    remoteMessages.addAll([
+    final accepted = unsaved.toSet();
+    final messages = [
       for (final state in unsaved)
         'תיקוני התוסף ‹${state.ownerName}› בספר "${state.bookId}" עדיין לא נשמרו לטיוטת ההתאוששות.',
-    ]);
+    ];
     final tabs = <OpenedTab>{
       ...context.read<TabsBloc>().state.tabs,
-      if (MultiViewMode.enabled)
-        for (final window in AppWindowKeys.registered)
-          if (window.navigator.currentContext case final other?
-              when other.mounted)
-            ...other.read<TabsBloc>().state.tabs,
+      for (final window in AppWindowKeys.registered)
+        if (window.navigator.currentContext case final other?
+            when other.mounted)
+          ...other.read<TabsBloc>().state.tabs,
     };
     final confirmed = await confirmCloseTabs(
       context,
       tabs,
       subtitle: _closeSubtitle(keys),
       includeClosedTabCorrections: true,
-      additionalMessages: remoteMessages,
+      additionalMessages: messages,
     );
     if (!confirmed) return false;
-    _preparedProcessQuit = (id: requestId, peers: peers, accepted: accepted);
+    _preparedProcessQuit = (id: requestId, accepted: accepted);
     retained = true;
     return true;
   } finally {
-    if (!retained) await _cancelAllWindowCorrectionQuit(requestId, peers);
+    if (!retained) corrections.cancelProcessQuitPreparation(requestId);
   }
 }
 
@@ -285,80 +245,19 @@ Future<void> cancelPreparedProcessCorrectionQuit() async {
   final prepared = _preparedProcessQuit;
   _preparedProcessQuit = null;
   if (prepared != null) {
-    await _cancelAllWindowCorrectionQuit(prepared.id, prepared.peers);
+    PluginCorrectionSessionService.instance.cancelProcessQuitPreparation(
+      prepared.id,
+    );
   }
 }
 
 Future<bool> finishPreparedProcessCorrectionQuit() async {
   final prepared = _preparedProcessQuit;
   if (prepared == null) return false;
-  if (!MultiWindowService.correctionQuitPeersUnchanged(prepared.peers)) {
-    return false;
-  }
   final corrections = PluginCorrectionSessionService.instance;
   final remaining = await corrections.unsavedStates();
-  final remainingIds = {
-    for (final state in remaining)
-      jsonEncode([
-        WindowBus.instance.slot,
-        state.tabId,
-        state.ownerName,
-        state.bookId,
-      ]),
-  };
-  if (!remainingIds.every(prepared.accepted.contains)) return false;
-  final replies = await Future.wait([
-    for (final slot in prepared.peers)
-      WindowBus.instance.request(
-        slot,
-        {
-          'type': MultiWindowService.requestFinishCorrectionQuit,
-          'requestId': prepared.id,
-          'accepted': prepared.accepted.toList(),
-        },
-        timeout:
-            MultiWindowService.correctionQuitRequestTimeout +
-            const Duration(seconds: 2),
-      ),
-  ]);
-  if (replies.any((reply) => reply != true) ||
-      !MultiWindowService.correctionQuitPeersUnchanged(prepared.peers)) {
-    return false;
-  }
+  if (!remaining.every(prepared.accepted.contains)) return false;
   _preparedProcessQuit = null;
-  unawaited(
-    Future.wait([
-      for (final slot in prepared.peers)
-        WindowBus.instance.request(
-          slot,
-          {
-            'type': MultiWindowService.requestEndCorrectionSessions,
-            'requestId': prepared.id,
-          },
-          timeout: MultiWindowService.correctionQuitRequestTimeout,
-        ),
-    ]),
-  );
   await corrections.shutdown(timeout: const Duration(seconds: 5));
   return true;
-}
-
-Future<void> _cancelAllWindowCorrectionQuit(
-  String requestId,
-  List<int> peers,
-) async {
-  PluginCorrectionSessionService.instance.cancelProcessQuitPreparation(
-    requestId,
-  );
-  await Future.wait([
-    for (final slot in peers)
-      WindowBus.instance.request(
-        slot,
-        {
-          'type': MultiWindowService.requestCancelCorrectionQuit,
-          'requestId': requestId,
-        },
-        timeout: MultiWindowService.correctionQuitRequestTimeout,
-      ),
-  ]);
 }

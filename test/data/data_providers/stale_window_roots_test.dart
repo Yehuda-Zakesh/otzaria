@@ -51,6 +51,52 @@ void main() {
     expect(dataRoot.listSync(), isEmpty);
   });
 
+  test('model-A leftovers go; the main window data stays (multiview upgrade)', () async {
+    File p0(String rel) => File(p.join(dataRoot.path, rel));
+    final mainBox = p0('app_preferences.hive')..writeAsStringSync('main');
+    final userState = p0('user_state.db')..writeAsStringSync('sessions');
+    for (final slot in [2, 3, 4]) {
+      for (final name in [
+        'app_preferences.hive',
+        'app_preferences.lock',
+        'pdfium-window-$slot.dll',
+      ]) {
+        p0(p.join(windowRootsDirName, 'slot-$slot', name))
+          ..createSync(recursive: true)
+          ..writeAsStringSync('stale');
+      }
+    }
+
+    await deleteStaleWindowRoots();
+    await pendingStaleRootsDeletion;
+
+    expect(windows().existsSync(), isFalse);
+    expect(mainBox.readAsStringSync(), 'main');
+    expect(userState.readAsStringSync(), 'sessions');
+    expect(
+      dataRoot.listSync().map((e) => p.basename(e.path)).toSet(),
+      {'app_preferences.hive', 'user_state.db'},
+    );
+  });
+
+  test(
+    'a root still in use is left alone, without failing startup',
+    () async {
+      final dll = File(
+        p.join(windows().path, 'slot-2', 'pdfium-window-2.dll'),
+      )..createSync(recursive: true);
+      final handle = dll.openSync(mode: FileMode.append);
+      try {
+        await deleteStaleWindowRoots();
+        await pendingStaleRootsDeletion;
+        expect(dll.existsSync(), isTrue);
+      } finally {
+        handle.closeSync();
+      }
+    },
+    skip: Platform.isWindows ? false : 'רק ב-Windows קובץ פתוח חוסם שינוי שם',
+  );
+
   test(
     'a reused PID stale folder does not prevent cleanup of the window root',
     () async {

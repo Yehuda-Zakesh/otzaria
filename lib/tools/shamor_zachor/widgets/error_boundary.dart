@@ -78,7 +78,6 @@ class _ErrorBoundaryState extends State<ErrorBoundary> {
       return widget.fallbackWidget!;
     }
 
-    // הסרנו את ה-Scaffold והחלפנו במבנה גמיש
     return LayoutBuilder(
       builder: (context, constraints) {
         return SingleChildScrollView(
@@ -140,8 +139,6 @@ class _ErrorBoundaryState extends State<ErrorBoundary> {
                     ExpansionTile(
                       title: const Text('פרטים טכניים'),
                       children: [
-                        // This Container with a fixed height is the key.
-                        // It gives the inner SingleChildScrollView bounded constraints.
                         Container(
                           height: 150,
                           width: double.infinity,

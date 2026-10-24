@@ -12,7 +12,6 @@ import 'package:otzaria/widgets/widgets_exports.dart';
 import 'package:otzaria/widgets/dialogs/error_report_sender_email_dialog.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
 import 'package:otzaria/settings/widgets/settings_widgets_exports.dart';
-import 'package:otzaria/theme/theme_exports.dart';
 import 'package:otzaria/text_book/view/error_report_dialog.dart';
 import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 
@@ -97,12 +96,7 @@ class _ErrorReportsPanelState extends State<ErrorReportsPanel> {
             return ExpandableSection(
               icon: OtzariaIcons.task_list_24_regular,
               title: context.settingsText('ניהול דיווחים שמורים'),
-              subtitle: pendingCount == 0
-                  ? context.settingsText('אין כרגע דיווחים שמורים בתור')
-                  : context.settingsText(
-                      'יש כרגע {count} דיווחים שמורים בתור',
-                      args: {'count': pendingCount},
-                    ),
+              subtitle: pendingReportsSubtitle(context, count: pendingCount),
               hasContent: hasReports,
               onTap: () => setState(
                 () => _isPendingReportsExpanded = !_isPendingReportsExpanded,
@@ -110,86 +104,17 @@ class _ErrorReportsPanelState extends State<ErrorReportsPanel> {
               isExpanded: _isPendingReportsExpanded,
               children: [
                 if (hasReports)
-                  Padding(
-                    padding: const EdgeInsets.only(
-                      right: 16,
-                      left: 16,
-                      top: 8,
-                      bottom: 16,
-                    ),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final isNarrow =
-                            constraints.maxWidth < LayoutBreakpoints.compact;
-                        final sendButton = buildManagedActionButton(
-                          enabled: !widget.isOfflineMode,
-                          child: ActionButton.recommended(
-                            text: context.settingsText('שלח עכשיו'),
-                            icon: FluentIcons.arrow_sync_24_regular,
-                            onPressed: _flushPendingReports,
-                            isLoading: _isFlushingPendingReports,
-                          ),
-                        );
-                        final clearButton = buildManagedActionButton(
-                          enabled: hasReports,
-                          child: ActionButton.neutral(
-                            text: context.settingsText('נקה דיווחים'),
-                            icon: FluentIcons.delete_24_regular,
-                            onPressed: _clearPendingReports,
-                            isLoading: _isClearingPendingReports,
-                          ),
-                        );
-                        final exportButton = buildManagedActionButton(
-                          enabled: hasReports,
-                          child: ActionButton.neutral(
-                            text: context.settingsText(
-                              'הורד לשליחה במחשב מחובר',
-                            ),
-                            icon: FluentIcons.arrow_download_24_regular,
-                            onPressed: _exportPendingReportsScript,
-                            isLoading: _isExportingPendingReports,
-                          ),
-                        );
-
-                        if (isNarrow) {
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              sendButton,
-                              const SizedBox(height: 8),
-                              clearButton,
-                              const SizedBox(height: 8),
-                              exportButton,
-                            ],
-                          );
-                        }
-
-                        return Row(
-                          children: [
-                            Expanded(child: sendButton),
-                            const SizedBox(width: 12),
-                            Expanded(child: clearButton),
-                            const SizedBox(width: 12),
-                            Expanded(child: exportButton),
-                          ],
-                        );
-                      },
-                    ),
+                  buildPendingQueueToolbar(
+                    canSend: !widget.isOfflineMode,
+                    hasReports: hasReports,
+                    onSend: _flushPendingReports,
+                    isSending: _isFlushingPendingReports,
+                    onClear: _clearPendingReports,
+                    isClearing: _isClearingPendingReports,
+                    onExport: _exportPendingReportsScript,
+                    isExporting: _isExportingPendingReports,
                   ),
-                if (widget.isOfflineMode)
-                  Padding(
-                    padding: const EdgeInsets.only(
-                      right: 16,
-                      left: 16,
-                      bottom: 16,
-                    ),
-                    child: Text(
-                      context.settingsText(
-                        'במצב מנותק אי אפשר לשלוח כעת, אך ניתן להוריד סקריפט לשליחה ממחשב מחובר.',
-                      ),
-                      style: kSettingsSubtitleStyle,
-                    ),
-                  ),
+                if (widget.isOfflineMode) buildOfflineQueueNote(context),
                 if (pendingReports.isNotEmpty)
                   ...pendingReports.map(
                     (report) => _buildPendingReportTile(
@@ -225,29 +150,11 @@ class _ErrorReportsPanelState extends State<ErrorReportsPanel> {
               ),
               isExpanded: _isSentReportsExpanded,
               children: [
-                Padding(
-                  padding: const EdgeInsets.only(
-                    right: 16,
-                    left: 16,
-                    bottom: 16,
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: buildManagedActionButton(
-                          enabled: sentReports.isNotEmpty,
-                          child: ActionButton.neutral(
-                            text: context.settingsText(
-                              'נקה את כל ההיסטוריה',
-                            ),
-                            icon: FluentIcons.delete_24_regular,
-                            onPressed: _clearSentReports,
-                            isLoading: _isClearingSentReports,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                buildClearSentHistoryButton(
+                  context,
+                  enabled: sentReports.isNotEmpty,
+                  onPressed: _clearSentReports,
+                  isLoading: _isClearingSentReports,
                 ),
                 if (sentReports.isNotEmpty)
                   ...sentReports.map(

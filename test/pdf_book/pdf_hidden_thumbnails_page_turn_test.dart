@@ -106,7 +106,6 @@ void main() {
     tabsBloc.emit(TabsState(tabs: [tab], currentTabIndex: 0));
     final settings = _SettingsBloc();
     final tour = TourCubit();
-    addTearDown(tab.dispose);
     addTearDown(tabsBloc.close);
     addTearDown(settings.close);
     addTearDown(tour.close);
@@ -159,11 +158,6 @@ void main() {
       final tabsBloc = tester
           .element(find.byType(PdfBookScreen))
           .read<TabsBloc>();
-      final other = PdfBookTab(
-        book: PdfBook(title: 'טאב אחר', path: '${directory.path}/other.pdf'),
-        pageNumber: 1,
-      );
-      addTearDown(other.dispose);
       await tester.tapAt(tester.getCenter(find.byType(PdfViewer)));
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
@@ -182,6 +176,10 @@ void main() {
       await settle(tester);
       expect(pdfSharedImageBudget.retainedBytes, greaterThan(0));
 
+      final other = PdfBookTab(
+        book: PdfBook(title: 'טאב אחר', path: '${directory.path}/other.pdf'),
+        pageNumber: 1,
+      );
       // ignore: invalid_use_of_visible_for_testing_member
       tabsBloc.emit(TabsState(tabs: [tab, other], currentTabIndex: 1));
       await settle(tester);
@@ -232,14 +230,6 @@ void main() {
           final tabsBloc = tester
               .element(find.byType(PdfBookScreen))
               .read<TabsBloc>();
-          final other = PdfBookTab(
-            book: PdfBook(
-              title: 'טאב אחר',
-              path: '${directory.path}/other.pdf',
-            ),
-            pageNumber: 1,
-          );
-          addTearDown(other.dispose);
           bloc.add(const SetLayoutMode(PdfLayoutMode.bookView));
           await settle(tester, rounds: 30);
           expect(controller.pageNumber, 1);
@@ -257,6 +247,13 @@ void main() {
             controller.pageNumber,
             1,
             reason: 'הטאב צריך להיות מוסתר בזמן הצילום, לפני הניווט',
+          );
+          final other = PdfBookTab(
+            book: PdfBook(
+              title: 'טאב אחר',
+              path: '${directory.path}/other.pdf',
+            ),
+            pageNumber: 1,
           );
           // ignore: invalid_use_of_visible_for_testing_member
           tabsBloc.emit(TabsState(tabs: [tab, other], currentTabIndex: 1));

@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/library/bloc/library_bloc.dart';
 import 'package:otzaria/library/bloc/library_event.dart';
 import 'package:otzaria/library/bloc/library_state.dart';
@@ -15,9 +14,6 @@ import 'package:otzaria/models/books.dart';
 import 'package:otzaria/settings/panels/hidden_books_panel.dart';
 import 'package:otzaria/core/messages/settings_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
-import 'package:otzaria/core/windowing/settings_sync.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
 import 'package:otzaria/widgets/text/rtl_text_field.dart';
 
@@ -78,7 +74,6 @@ void main() {
 
   tearDown(() async {
     UiSnack.hide();
-    SettingsSync.instance.applyLocally = null;
     if (tempDir.existsSync()) await tempDir.delete(recursive: true);
   });
 
@@ -86,13 +81,7 @@ void main() {
     WidgetTester tester, {
     Future<String?> Function()? pickFile,
     Future<Library> Function()? libraryLoader,
-    Future<VisibilityChangeResult> Function(
-      HiddenLibrarySelection,
-      HiddenLibrarySelection,
-    )?
-    visibilityRequester,
     bool showSnacks = false,
-    ProcessDuties? windowDuties,
   }) async {
     await tester.binding.setSurfaceSize(const Size(1000, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -105,20 +94,16 @@ void main() {
             textDirection: TextDirection.rtl,
             child: Scaffold(
               body: SingleChildScrollView(
-                child: _withWindowDuties(
-                  windowDuties,
-                  HiddenBooksPanel(
-                    pickFileOverride: pickFile,
-                    libraryLoader: libraryLoader ?? () async => _library(),
-                    indexDropper: (books) async {
-                      droppedFromIndex.addAll(books.map((b) => b.title));
-                      return true;
-                    },
-                    indexAdder: (books, _) {
-                      addedToIndex.addAll(books.map((b) => b.title));
-                    },
-                    visibilityRequester: visibilityRequester,
-                  ),
+                child: HiddenBooksPanel(
+                  pickFileOverride: pickFile,
+                  libraryLoader: libraryLoader ?? () async => _library(),
+                  indexDropper: (books) async {
+                    droppedFromIndex.addAll(books.map((b) => b.title));
+                    return true;
+                  },
+                  indexAdder: (books, _) {
+                    addedToIndex.addAll(books.map((b) => b.title));
+                  },
                 ),
               ),
             ),
@@ -145,71 +130,6 @@ void main() {
     expect(droppedFromIndex, ['בראשית']);
   });
 
-  testWidgets('כשל IPC בחלון משני משאיר את הבחירה המקומית בלי שינוי', (
-    tester,
-  ) async {
-    WindowRole.isSecondary = true;
-    addTearDown(() => WindowRole.isSecondary = false);
-    await pump(tester);
-    await tester.tap(find.text('פתח רשימה'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(CheckboxListTile).first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('שמור'));
-    await tester.pumpAndSettle();
-
-    expect(const HiddenLibraryStore().load().isEmpty, isTrue);
-    expect(droppedFromIndex, isEmpty);
-  });
-
-  // ההעברה למארח נקבעת ב-ProcessDuties של ה-isolate, לא בתפקיד החלון.
-  testWidgets('מי שאינו בעל התהליך מעביר את השמירה למארח גם בחלון ראשי', (
-    tester,
-  ) async {
-    ProcessDuties.debugOverride = ProcessDuties(isProcessOwner: () => false);
-    addTearDown(() => ProcessDuties.debugOverride = null);
-    var forwarded = 0;
-    await pump(
-      tester,
-      visibilityRequester: (_, next) async {
-        forwarded++;
-        return (selection: null, saved: false, uncertain: false);
-      },
-    );
-    await tester.tap(find.text('פתח רשימה'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(CheckboxListTile).first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('שמור'));
-    await tester.pumpAndSettle();
-
-    expect(forwarded, 1);
-    expect(const HiddenLibraryStore().load().isEmpty, isTrue);
-    expect(droppedFromIndex, isEmpty);
-  });
-
-  // חלון Dart חולק את ה-isolate עם הבעלים: ה-duties שלו אינם מפעילים העברה.
-  testWidgets('duties של חלון שאינו בעלים אינם מעבירים לאפיק', (tester) async {
-    var forwarded = 0;
-    await pump(
-      tester,
-      windowDuties: ProcessDuties(isProcessOwner: () => false),
-      visibilityRequester: (_, next) async {
-        forwarded++;
-        return (selection: null, saved: false, uncertain: false);
-      },
-    );
-    await tester.tap(find.text('פתח רשימה'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(CheckboxListTile).first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('שמור'));
-    await tester.pumpAndSettle();
-
-    expect(forwarded, 0);
-    expect(const HiddenLibraryStore().load().bookKeys, {_key('בראשית')});
-  });
-
   testWidgets('פאנל פתוח קורא בחירה חדשה מהחנות לפני פעולת משתמש', (
     tester,
   ) async {
@@ -226,6 +146,16 @@ void main() {
           .value,
       isTrue,
     );
+  });
+
+  testWidgets('שמירה מחלון אחר מתעדכנת בפאנל פתוח', (tester) async {
+    await pump(tester);
+    await const HiddenLibraryStore().save(
+      HiddenLibrarySelection(bookKeys: {_key('בראשית')}),
+    );
+    await tester.pump();
+
+    expect(find.text('בחירות הסתרה ישירות: 1'), findsOneWidget);
   });
 
   testWidgets('הסתרה מרעננת את עץ הספרייה מיד (issue #1448)', (tester) async {
@@ -358,76 +288,6 @@ void main() {
       find.text(SettingsMessages.hiddenBooksSelectionSaveFailed),
       findsOneWidget,
     );
-    UiSnack.hide();
-  });
-
-  testWidgets('כשל החלה מקומית במשני משאיר UI תואם למצב החלקי', (
-    tester,
-  ) async {
-    WindowRole.isSecondary = true;
-    addTearDown(() => WindowRole.isSecondary = false);
-    SettingsSync.instance.applyLocally = (key, value) async {
-      if (key == HiddenLibraryStore.categoryPathsSetting) {
-        throw StateError('local category write failed');
-      }
-      await Settings.setValue<String>(key, value as String);
-    };
-    await pump(
-      tester,
-      showSnacks: true,
-      visibilityRequester: (_, _) async => (
-        selection: HiddenLibrarySelection(
-          bookKeys: {_key('בראשית')},
-          categoryPaths: const {'/תורה'},
-        ),
-        saved: true,
-        uncertain: false,
-      ),
-    );
-    await tester.tap(find.text('פתח רשימה'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(CheckboxListTile).first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('שמור'));
-    await tester.pumpAndSettle();
-
-    expect(const HiddenLibraryStore().load().bookKeys, {_key('בראשית')});
-    expect(const HiddenLibraryStore().load().categoryPaths, isEmpty);
-    expect(find.text('בחירות הסתרה ישירות: 1'), findsOneWidget);
-    expect(
-      find.text(SettingsMessages.hiddenBooksSelectionSaveFailed),
-      findsOneWidget,
-    );
-    UiSnack.hide();
-  });
-
-  testWidgets('ייבוא אינו מציג הצלחה כשבקשת IPC נדחתה', (tester) async {
-    WindowRole.isSecondary = true;
-    addTearDown(() => WindowRole.isSecondary = false);
-    final file = File('${tempDir.path}/rejected.csv')
-      ..writeAsStringSync('בראשית\n');
-    await pump(
-      tester,
-      pickFile: () async => file.path,
-      showSnacks: true,
-      visibilityRequester: (_, _) async => (
-        selection: null,
-        saved: false,
-        uncertain: false,
-      ),
-    );
-    await tester.runAsync(() async {
-      await tester.tap(find.text('בחר קובץ'));
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-    });
-    await tester.pumpAndSettle();
-
-    expect(const HiddenLibraryStore().load().isEmpty, isTrue);
-    expect(
-      find.text(SettingsMessages.hiddenBooksSelectionSaveFailed),
-      findsOneWidget,
-    );
-    expect(find.text(SettingsMessages.hiddenBooksImported(1, 0)), findsNothing);
     UiSnack.hide();
   });
 
@@ -692,7 +552,3 @@ class _TestLibraryBloc extends Cubit<LibraryState> implements LibraryBloc {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
-
-Widget _withWindowDuties(ProcessDuties? duties, Widget child) => duties == null
-    ? child
-    : RepositoryProvider<ProcessDuties>.value(value: duties, child: child);

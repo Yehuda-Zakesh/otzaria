@@ -109,7 +109,7 @@ class CrashCandidate {
 }
 
 /// מזהה יציאה לא נקייה של ההפעלה הקודמת. לוגיקה בלבד — הקריאה מהעלייה
-/// והסימון בסגירה שייכים לתהליך הראשי (לא לחלון משני).
+/// והסימון בסגירה שייכים לתהליך.
 class UncleanExitDetector {
   UncleanExitDetector({
     String? logsDirectory,

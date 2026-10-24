@@ -26,7 +26,7 @@ class WorkspaceRepository {
          store: store,
        ),
        _sessions = sessions ?? WindowSessionStore.instance,
-       _slot = slot ?? (() => UserStateSlot.current);
+       _slot = slot ?? (() => UserStateSlot.main);
 
   static const String boxName = 'workspaces';
   static const String workspacesKey = 'key-workspaces';

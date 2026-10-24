@@ -59,7 +59,6 @@ void main() {
       pluginEvents: () async => const [],
       // לפני הנץ, כדי שגם היום הראשון בחלון יתוזמן.
       now: () => DateTime(today.year, today.month, today.day, 0, 1),
-      broadcast: (_) {},
       dedupeDuplicates: false,
     );
     cubit = CalendarCubit(

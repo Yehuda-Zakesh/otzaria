@@ -358,7 +358,6 @@ List<TikkunLine> buildSpecialLines(
   List<TikkunToken> sectionTokens,
   int baseTokenIdx,
   SpecialSection section, {
-  int? openingChapter,
   int? openingVerse,
 }) {
   final verses = <_Verse>[];

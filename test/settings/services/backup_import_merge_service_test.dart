@@ -11,7 +11,7 @@ import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/user_state_slot.dart';
 import 'package:otzaria/core/user_state/window_session_store.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/data/data_providers/hive_data_provider.dart';
 import 'package:otzaria/history/history_repository.dart';
 import 'package:otzaria/models/books.dart';
@@ -45,7 +45,7 @@ void main() {
     await Hive.openBox<dynamic>(DirectErrorReportService.queueBoxName);
     await Hive.openBox<dynamic>(PluginReportService.queueBoxName);
     // בלי אפיק חלונות, ולכן המשבצת היא של החלון היחיד.
-    MultiWindowService.debugSupportedOverride = false;
+    RunnerWindowChannel.debugSupportedOverride = false;
     UserStateDatabase.instance.overridePath(
       p.join(tempDir.path, 'user_state.db'),
     );
@@ -67,7 +67,7 @@ void main() {
     PluginSystemDatabase.instance.resetForTests();
     await Hive.close();
     UserStateDatabase.instance.close();
-    MultiWindowService.debugSupportedOverride = null;
+    RunnerWindowChannel.debugSupportedOverride = null;
     AppPaths.debugOverrideDataRootPath(null);
     try {
       await tempDir.delete(recursive: true);
@@ -198,7 +198,7 @@ void main() {
     await Settings.setValue<double>('key-font-size', 20);
     final sessions = WindowSessionStore.instance;
     await sessions.save(
-      UserStateSlot.single,
+      UserStateSlot.main,
       tabsJson: '["טאב מהגיבוי"]',
       currentIndex: 0,
     );
@@ -206,7 +206,7 @@ void main() {
 
     await Settings.setValue<double>('key-font-size', 30);
     await sessions.save(
-      UserStateSlot.single,
+      UserStateSlot.main,
       tabsJson: '["טאב מקומי"]',
       currentIndex: 0,
     );
@@ -215,7 +215,7 @@ void main() {
 
     expect(Settings.getValue<double>('key-font-size'), 30);
     expect(
-      (await sessions.load(UserStateSlot.single))!.tabsJson,
+      (await sessions.load(UserStateSlot.main))!.tabsJson,
       '["טאב מקומי"]',
     );
   });

@@ -1,6 +1,4 @@
 // SidebarNavItem — פריט ניווט לסיידבר בסגנון Material 3.
-// מממש את הסגנון המשותף ל-SettingsScreen ו-MoreScreen:
-//  • תמיכה ב-imageAsset (עבור אייקונים מקובץ)
 
 import 'package:flutter/material.dart';
 import 'package:otzaria/theme/app_tokens.dart';

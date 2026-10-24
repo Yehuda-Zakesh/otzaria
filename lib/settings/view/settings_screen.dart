@@ -25,9 +25,6 @@ import 'package:otzaria/tour/tour_target_keys.dart';
 import 'package:otzaria/widgets/misc/rtl_icon.dart';
 import 'package:otzaria/widgets/navigation/sidebar_nav_item.dart';
 
-/// רוחב מקסימלי לתוכן ההגדרות — מרכוז על מסכים רחבים
-// kSettingsContentMaxWidth הוסר — משתמשים ב-LayoutConstraints.panelContentMaxWidth מ-layout_tokens.dart
-
 /// מייצג את לשוניות מסך ההגדרות שניתן לנווט אליהן בקוד.
 enum SettingsTab { design, text, library, tools, shortcuts, system, about }
 

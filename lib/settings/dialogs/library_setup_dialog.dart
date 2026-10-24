@@ -239,10 +239,13 @@ class _LibrarySetupDialogContentState
       false;
 
   Future<void> _pickTargetRoot() async {
-    final path = await FilePicker.getDirectoryPath(
-      windowsOptions: kModalWindowsOptions,
-      linuxOptions: kModalLinuxOptions,
-      dialogTitle: context.settingsText('בחר את תיקיית היעד לספרייה'),
+    final path = await withFilePickerOwner(
+      context,
+      () => FilePicker.getDirectoryPath(
+        windowsOptions: modalWindowsOptions(context),
+        linuxOptions: kModalLinuxOptions,
+        dialogTitle: context.settingsText('בחר את תיקיית היעד לספרייה'),
+      ),
     );
     if (path != null && mounted) setState(() => _targetRoot = path);
   }
@@ -253,10 +256,15 @@ class _LibrarySetupDialogContentState
     if (Platform.isAndroid || debugPickAndroidSourceFolder != null) {
       folder = await (debugPickAndroidSourceFolder ?? _pickSafFolder)();
     } else {
-      final path = await FilePicker.getDirectoryPath(
-        windowsOptions: kModalWindowsOptions,
-        linuxOptions: kModalLinuxOptions,
-        dialogTitle: context.settingsText('בחר תיקייה המכילה את קבצי הספרייה'),
+      final path = await withFilePickerOwner(
+        context,
+        () => FilePicker.getDirectoryPath(
+          windowsOptions: modalWindowsOptions(context),
+          linuxOptions: kModalLinuxOptions,
+          dialogTitle: context.settingsText(
+            'בחר תיקייה המכילה את קבצי הספרייה',
+          ),
+        ),
       );
       folder = path == null ? null : DirectoryPackageFolder(path);
     }
@@ -282,10 +290,13 @@ class _LibrarySetupDialogContentState
 
   /// בוחר תיקיית ספרייה קיימת לשימוש במקומה (ללא העתקה).
   Future<void> _pickInPlaceFolder() async {
-    final folder = await FilePicker.getDirectoryPath(
-      windowsOptions: kModalWindowsOptions,
-      linuxOptions: kModalLinuxOptions,
-      dialogTitle: context.settingsText('בחר את תיקיית הספרייה הקיימת'),
+    final folder = await withFilePickerOwner(
+      context,
+      () => FilePicker.getDirectoryPath(
+        windowsOptions: modalWindowsOptions(context),
+        linuxOptions: kModalLinuxOptions,
+        dialogTitle: context.settingsText('בחר את תיקיית הספרייה הקיימת'),
+      ),
     );
     if (folder == null || !mounted) return;
     final hasDb = await File(

@@ -39,8 +39,6 @@ class IndexingCrashCanary {
   @visibleForTesting
   static void Function(String entry) writeLog = ErrorLogFile.appendText;
 
-  static const finishRequest = 'finishIndexingCrashCanary';
-
   static const maxAttempts = 2;
 
   final File _file;

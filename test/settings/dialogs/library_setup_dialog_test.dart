@@ -8,7 +8,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
-import 'package:otzaria/core/windowing/library_suspension_marker.dart';
 import 'package:otzaria/library_update/services/library_access_gate.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -608,7 +607,6 @@ void main() {
           debugPickAndroidSourceFolder = null;
           debugAndroidStorageChoices = null;
           EmptyLibraryBloc.tempRootOverride = null;
-          LibrarySuspensionMarker.resetForTesting();
           await tester.runAsync(() => temp.delete(recursive: true));
         });
 
@@ -660,7 +658,7 @@ void main() {
           await tester.runAsync(lex.readAsString),
           outcome == 'success' ? 'new-lex' : 'old-lex',
         );
-        expect(LibrarySuspensionMarker.isRegistered, isFalse);
+        expect(gate.isSuspending, isFalse);
         if (outcome == 'success') {
           await pumpUntil(
             () => find.text('הספרייה הותקנה').evaluate().isNotEmpty,

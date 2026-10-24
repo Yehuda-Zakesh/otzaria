@@ -7,7 +7,6 @@ import 'package:otzaria/app_scope/external_activation_service.dart';
 import 'package:otzaria/core/external_activation_channel.dart';
 import 'package:otzaria/core/external_activation_queue.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:path/path.dart' as p;
 
 const _a = 'otzaria://library/reindex?n=1';
@@ -21,7 +20,6 @@ void main() {
   late Directory tempDir;
   late ExternalActivationQueue queue;
   late List<String> delivered;
-  late List<(int, Map<String, dynamic>)> forwarded;
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('ext_activation_svc_');
@@ -29,7 +27,6 @@ void main() {
       queueFilePath: p.join(tempDir.path, 'pending.jsonl'),
     );
     delivered = [];
-    forwarded = [];
   });
 
   tearDown(() => tempDir.delete(recursive: true));
@@ -40,27 +37,13 @@ void main() {
   }
 
   ExternalActivationService service({
-    bool canOpenWindows = true,
-    int? lastActive,
-    int? ownSlot = 0,
-    Object? forwardResult = true,
-    Future<int?> Function()? lastActiveSlot,
     ExternalActivationChannel? channel,
     Stream<FileSystemEvent> Function(Directory)? watchDirectory,
-    bool multiView = false,
     AppWindowId lastActiveWindow = AppWindowId.primary,
   }) => ExternalActivationService(
     queue: queue,
     channel: channel,
-    canOpenWindows: () => canOpenWindows,
-    lastActiveSlot: lastActiveSlot ?? () async => lastActive,
-    ownSlot: () => ownSlot,
-    forward: (slot, body) async {
-      forwarded.add((slot, body));
-      return forwardResult;
-    },
     watchDirectory: watchDirectory,
-    multiView: () => multiView,
     lastActiveWindow: () => lastActiveWindow,
   );
 
@@ -69,18 +52,17 @@ void main() {
       for (final uri in [_a, _b, _c]) {
         await queue.enqueueUriString(uri);
       }
-      final svc = service(canOpenWindows: false)..attachWindow(handler);
+      final svc = service()..attachWindow(handler);
 
       await svc.processPending();
       await svc.processPending();
 
       expect(delivered, [_a, _b, _c]);
-      expect(forwarded, isEmpty);
     });
 
     test('concurrent triggers coalesce without double delivery', () async {
       await queue.enqueueUriString(_a);
-      final svc = service(canOpenWindows: false)..attachWindow(handler);
+      final svc = service()..attachWindow(handler);
 
       final first = svc.processPending();
       await queue.enqueueUriString(_b);
@@ -92,7 +74,7 @@ void main() {
 
     test('leaves the queue untouched while no window is attached', () async {
       await queue.enqueueUriString(_a);
-      final svc = service(canOpenWindows: false);
+      final svc = service();
 
       await svc.processPending();
       expect(delivered, isEmpty);
@@ -100,79 +82,6 @@ void main() {
       svc.attachWindow(handler);
       await svc.processPending();
       expect(delivered, [_a]);
-    });
-  });
-
-  group('routing', () {
-    test('forwards to the last-active peer window over the bus', () async {
-      await queue.enqueueUriString(_a);
-      await queue.enqueueUriString(_b);
-      final svc = service(lastActive: 2)..attachWindow(handler);
-
-      await svc.processPending();
-
-      expect(delivered, isEmpty);
-      expect(forwarded.map((f) => f.$1), [2, 2]);
-      expect(forwarded.map((f) => f.$2), [
-        {'type': MultiWindowService.requestOpenUri, 'uri': _a},
-        {'type': MultiWindowService.requestOpenUri, 'uri': _b},
-      ]);
-    });
-
-    test('opens here when the peer does not handle it', () async {
-      await queue.enqueueUriString(_a);
-      final svc = service(lastActive: 2, forwardResult: null)
-        ..attachWindow(handler);
-
-      await svc.processPending();
-
-      expect(forwarded.single.$1, 2);
-      expect(delivered, [_a]);
-    });
-
-    test('opens here when this window or none was last active', () async {
-      await queue.enqueueUriString(_a);
-      final own = service(lastActive: 0)..attachWindow(handler);
-      await own.processPending();
-
-      await queue.enqueueUriString(_b);
-      final none = service(lastActive: null)..attachWindow(handler);
-      await none.processPending();
-
-      expect(delivered, [_a, _b]);
-      expect(forwarded, isEmpty);
-    });
-
-    test('a new-window link opens here without asking for a target', () async {
-      await queue.enqueueUriString(_newWindow);
-      var asked = false;
-      final svc = service(
-        lastActiveSlot: () async {
-          asked = true;
-          return 2;
-        },
-      )..attachWindow(handler);
-
-      await svc.processPending();
-
-      expect(asked, isFalse);
-      expect(delivered, [_newWindow]);
-    });
-
-    test('drops a URI when the window detaches mid-route', () async {
-      await queue.enqueueUriString(_a);
-      final target = Completer<int?>();
-      final svc = service(lastActiveSlot: () => target.future)
-        ..attachWindow(handler);
-
-      final drain = svc.processPending();
-      await pumpEventQueue();
-      svc.detachWindow(handler);
-      target.complete(2);
-      await drain;
-
-      expect(delivered, isEmpty);
-      expect(forwarded, isEmpty);
     });
   });
 
@@ -192,7 +101,6 @@ void main() {
     await queue.enqueueUriString(_b);
 
     final svc = service(
-      canOpenWindows: false,
       channel: ExternalActivationChannel(channel: channel),
       watchDirectory: (_) => events.stream,
     )..attachWindow(handler);
@@ -238,7 +146,7 @@ void main() {
     });
 
     ExternalActivationService hybrid(AppWindowId lastActive) {
-      final svc = service(multiView: true, lastActiveWindow: lastActive)
+      final svc = service(lastActiveWindow: lastActive)
         ..attachWindow(handler, isVisible: () async => mainVisible);
       for (final id in [viewA, viewB]) {
         svc.attachViewWindow(
@@ -256,7 +164,6 @@ void main() {
 
       expect(viewDelivered, [(viewA, _a)]);
       expect(delivered, isEmpty);
-      expect(forwarded, isEmpty);
     });
 
     test('main last active and visible keeps the link', () async {

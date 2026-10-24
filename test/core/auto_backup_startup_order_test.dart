@@ -30,12 +30,8 @@ void main() {
         );
       });
 
-      test('הגיבוי האוטומטי עדיין רץ, רק בחלון הראשי', () {
+      test('הגיבוי האוטומטי עדיין רץ', () {
         final body = deferredAutoBackup(source);
-        expect(
-          body.indexOf('if (WindowRole.isSecondary) return;'),
-          lessThan(body.indexOf('BackupService.shouldPerformAutoBackup()')),
-        );
         expect(body, contains('await BackupService.performAutoBackup();'));
         expect(body, contains('_logNonFatalInitializationError'));
       });

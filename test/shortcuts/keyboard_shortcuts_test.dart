@@ -117,7 +117,7 @@ class _StubTextBookBloc extends Bloc<TextBookEvent, TextBookState>
 
 class _FakeTabsRepository extends TabsRepository {
   @override
-  List<OpenedTab> loadTabs() => const [];
+  List<OpenedTab> loadTabs({bool newRuntime = false}) => const [];
 
   @override
   int loadCurrentTabIndex() => 0;
@@ -778,11 +778,7 @@ void main() {
       final navigationBloc = _StubNavigationBloc();
 
       addTearDown(() async {
-        final openTabs = List<OpenedTab>.from(tabsBloc.state.tabs);
         await tabsBloc.close();
-        for (final tab in openTabs) {
-          tab.dispose();
-        }
         await historyBloc.close();
         await navigationBloc.close();
       });
@@ -862,11 +858,7 @@ void main() {
       final historyBloc = _StubHistoryBloc();
       final navigationBloc = _StubNavigationBloc();
       addTearDown(() async {
-        final openTabs = List<OpenedTab>.from(tabsBloc.state.tabs);
         await tabsBloc.close();
-        for (final tab in openTabs) {
-          tab.dispose();
-        }
         await historyBloc.close();
         await navigationBloc.close();
       });
@@ -1322,11 +1314,7 @@ void main() {
       final historyBloc = _StubHistoryBloc();
       final navigationBloc = _StubNavigationBloc(screen);
       addTearDown(() async {
-        final openTabs = List<OpenedTab>.from(tabsBloc.state.tabs);
         await tabsBloc.close();
-        for (final tab in openTabs) {
-          tab.dispose();
-        }
         await historyBloc.close();
         await navigationBloc.close();
       });
@@ -1464,11 +1452,7 @@ void main() {
       final historyBloc = _StubHistoryBloc();
       final navigationBloc = _StubNavigationBloc();
       addTearDown(() async {
-        final openTabs = List<OpenedTab>.from(tabsBloc.state.tabs);
         await tabsBloc.close();
-        for (final tab in openTabs) {
-          tab.dispose();
-        }
         await historyBloc.close();
         await navigationBloc.close();
       });
@@ -1968,11 +1952,7 @@ void main() {
       final historyBloc = _StubHistoryBloc();
       final navigationBloc = _StubNavigationBloc();
       addTearDown(() async {
-        final openTabs = List<OpenedTab>.from(tabsBloc.state.tabs);
         await tabsBloc.close();
-        for (final tab in openTabs) {
-          tab.dispose();
-        }
         await historyBloc.close();
         await navigationBloc.close();
       });

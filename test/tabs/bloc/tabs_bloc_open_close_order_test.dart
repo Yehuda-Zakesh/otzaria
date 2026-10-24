@@ -9,6 +9,7 @@ import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/bloc/tabs_state.dart';
 import 'package:otzaria/tabs/models/tab.dart';
+import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/text_tab.dart';
 import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/tabs/tabs_repository.dart';
@@ -39,6 +40,18 @@ class _SlowOpen {
     started.complete();
     await release.future;
     return opened;
+  }
+}
+
+class _TrackedToolTab extends ToolTab {
+  _TrackedToolTab(String id) : super(toolId: id, title: id);
+
+  int disposals = 0;
+
+  @override
+  void dispose() {
+    disposals++;
+    super.dispose();
   }
 }
 
@@ -166,6 +179,40 @@ void main() {
         .timeout(const Duration(seconds: 2));
     expect(bloc.state.tabs.single.title, 'טאב אחר');
   });
+
+  for (final split in [false, true]) {
+    test(
+      'מיקוד אובייקט חי שומר בעלות ומשחרר עותק דחוי: split=$split',
+      () async {
+        final live = _TrackedToolTab('live.plugin');
+        final root = split
+            ? CombinedTab(
+                rightTab: ToolTab(toolId: 'companion.plugin', title: 'מלווה'),
+                leftTab: live,
+              )
+            : live;
+        bloc.add(AddTab(root));
+        bloc.add(AddTab(ToolTab(toolId: 'other.plugin', title: 'אחר')));
+        await bloc.stream.firstWhere((state) => state.tabs.length == 2);
+
+        final duplicate = _TrackedToolTab(live.toolId);
+        bloc.add(OpenOrFocusTab(duplicate));
+        await bloc.stream.firstWhere((state) => state.currentTabIndex == 0);
+        expect(duplicate.disposals, 1);
+        expect(live.disposals, 0);
+
+        bloc.add(SetCurrentTab(1));
+        await bloc.stream.firstWhere((state) => state.currentTabIndex == 1);
+        bloc.add(OpenOrFocusTab(live));
+        await bloc.stream.firstWhere((state) => state.currentTabIndex == 0);
+        expect(live.disposals, 0);
+        if (split) expect(bloc.state.activePane, same(live));
+        await bloc.close();
+        expect(live.disposals, 1);
+        expect(duplicate.disposals, 1);
+      },
+    );
+  }
 
   test('כשל ברזולוציית הכותרת אינו חוסם את סגירת התוסף', () async {
     final plugin = ToolTab(toolId: 'com.example.plugin', title: 'תוסף');

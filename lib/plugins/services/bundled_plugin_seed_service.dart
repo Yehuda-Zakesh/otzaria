@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:http/http.dart' as http;
 import 'package:otzaria/core/app_paths.dart';
-import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/plugins/models/installed_plugin.dart';
 import 'package:otzaria/plugins/models/plugin_permission_labels.dart';
 import 'package:otzaria/plugins/models/plugin_valid_permissions.dart';
@@ -13,7 +12,6 @@ import 'package:otzaria/plugins/repository/plugin_registry_repository.dart';
 import 'package:otzaria/plugins/services/bundled_plugin_ids.dart';
 import 'package:otzaria/plugins/services/plugin_installer_service.dart';
 import 'package:otzaria/plugins/services/plugin_new_tab_page_registry.dart';
-import 'package:otzaria/plugins/services/plugin_new_tab_page_service.dart';
 import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'package:otzaria/update/app_release_version.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -65,9 +63,7 @@ class BundledPluginSeedService {
        _isSiteReachable = isSiteReachable ?? _otzariaSiteReturnsOk;
 
   static Future<bool> _otzariaSiteReturnsOk() async {
-    // הבדיקה שייכת לחלון הראשי — אחרת כל חלון נוסף שולח בקשה משלו.
-    if (!ProcessDuties.current.isProcessOwner ||
-        (Settings.getValue<bool>(SettingsRepository.keyOfflineMode) ?? false)) {
+    if (Settings.getValue<bool>(SettingsRepository.keyOfflineMode) ?? false) {
       return false;
     }
     try {
@@ -227,7 +223,6 @@ class BundledPluginSeedService {
       );
       if (isUpgrade && grantedPermissions['navigation.write'] != true) {
         PluginNewTabPageRegistry.instance.remove(pluginId);
-        PluginNewTabPageService.broadcastChanged();
       }
       return true;
     } on PluginOverwriteException {

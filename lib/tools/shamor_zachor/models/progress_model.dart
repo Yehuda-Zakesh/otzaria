@@ -130,10 +130,10 @@ class PageProgress {
 
 /// Type definitions for complex progress data structures
 
-/// NEW: Progress map by book ID: BookId -> ItemIndex -> Progress
+/// Progress map by book ID: BookId -> ItemIndex -> Progress
 typedef ProgressMapById = Map<int, Map<String, PageProgress>>;
 
-/// NEW: Completion dates by book ID: BookId -> Completion Date (Hebrew)
+/// Completion dates by book ID: BookId -> Completion Date (Hebrew)
 typedef CompletionDatesByIdMap = Map<int, String>;
 
 /// Book progress summary for display purposes

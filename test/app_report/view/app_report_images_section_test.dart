@@ -21,6 +21,7 @@ class _FakeSources extends AppReportImageSources {
   final List<AppReportImage> clipboard;
   final List<AppReportImage> picked;
   final List<bool> clipboardReads = [];
+  BuildContext? pickerContext;
 
   @override
   Future<List<AppReportImage>> readClipboard({bool skipIfText = false}) async {
@@ -29,7 +30,10 @@ class _FakeSources extends AppReportImageSources {
   }
 
   @override
-  Future<List<AppReportImage>> pickFiles() async => picked;
+  Future<List<AppReportImage>> pickFiles({BuildContext? context}) async {
+    pickerContext = context;
+    return picked;
+  }
 }
 
 void main() {
@@ -109,7 +113,8 @@ void main() {
     testWidgets('לחיצה על האזור פותחת בחירה ומציגה את התמונות', (
       tester,
     ) async {
-      await pump(tester, _FakeSources(picked: [_image('a.png')]));
+      final sources = _FakeSources(picked: [_image('a.png')]);
+      await pump(tester, sources);
       expect(
         find.text(
           PluginFileDropService.isSupported
@@ -122,6 +127,10 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('app-report-image-area')));
       await tester.pump();
 
+      expect(
+        sources.pickerContext,
+        tester.element(find.byType(AppReportImagesSection)),
+      );
       expect(images.map((i) => i.fileName), ['a.png']);
       expect(find.byKey(const ValueKey('app-report-image-0')), findsOneWidget);
     });

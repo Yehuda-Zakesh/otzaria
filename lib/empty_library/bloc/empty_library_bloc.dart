@@ -94,7 +94,7 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
   final Duration downloadConnectTimeout;
   final Future<String?> Function(int? downloadSize)? downloadSpaceChecker;
 
-  /// חלון משני מחזיק את המסד פתוח, והזזתו לגיבוי נכשלת ב-Windows.
+  /// מוודא שהמסד שוחרר לפני הזזתו לגיבוי: מסד פתוח אינו זז ב-Windows.
   final LibraryAccessGate _accessGate;
   final LibraryPackageImporter _packageImporter;
 
@@ -162,7 +162,7 @@ class EmptyLibraryBloc extends Bloc<EmptyLibraryEvent, EmptyLibraryState> {
   );
 
   /// מריץ ייבוא שמחליף את הספרייה. עם [backupPath] (עדכון במקום) המסד מושעה
-  /// בכל החלונות, ה-DB הישן מגובה, ומשוחזר אם [body] לא הסתיים בבחירת ספרייה.
+  /// בתהליך, ה-DB הישן מגובה, ומשוחזר אם [body] לא הסתיים בבחירת ספרייה.
   Future<void> _replaceLibrarySafely(
     Emitter<EmptyLibraryState> emit, {
     required String? backupPath,

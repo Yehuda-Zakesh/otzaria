@@ -8,7 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/user_state_slot.dart';
 import 'package:otzaria/core/user_state/window_session_store.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/commentators_tab.dart';
@@ -31,7 +31,7 @@ void main() {
   /// כותב סשן גולמי למשבצת של החלון הזה, כמו שמירה קודמת על הדיסק.
   Future<void> putSession(List<dynamic> tabs, {int currentIndex = 0}) =>
       sessions.save(
-        UserStateSlot.single,
+        UserStateSlot.main,
         tabsJson: jsonEncode(tabs),
         currentIndex: currentIndex,
       );
@@ -43,7 +43,7 @@ void main() {
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('tabs_repository_test');
     // בלי אפיק חלונות, ולכן המשבצת היא של החלון היחיד.
-    MultiWindowService.debugSupportedOverride = false;
+    RunnerWindowChannel.debugSupportedOverride = false;
     database = UserStateDatabase.openAt(p.join(tempDir.path, 'user_state.db'));
     await database.database;
     sessions = WindowSessionStore(database: database);
@@ -52,7 +52,7 @@ void main() {
 
   tearDown(() async {
     database.close();
-    MultiWindowService.debugSupportedOverride = null;
+    RunnerWindowChannel.debugSupportedOverride = null;
     if (await tempDir.exists()) {
       await tempDir.delete(recursive: true);
     }

@@ -1,7 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/models/books.dart';
 import 'package:otzaria/tabs/models/combined_tab.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
@@ -24,7 +24,7 @@ void main() {
       book: PdfBook(title: 'ספר PDF', path: 'a.pdf'),
       pageNumber: 7,
     );
-    expect(MultiWindowService.canTransfer(tab), isTrue);
+    expect(RunnerWindowChannel.canTransfer(tab), isTrue);
   });
 
   test('כרטיסיית PDF עם מצב משתמש שורדת את מסלול המטען', () {
@@ -34,7 +34,7 @@ void main() {
     );
     tab.activeCommentators = {'רש"י'};
     tab.savedZoom = 1.5;
-    expect(MultiWindowService.canTransfer(tab), isTrue);
+    expect(RunnerWindowChannel.canTransfer(tab), isTrue);
   });
 
   test('טאב מפוצל שאחת מחלוניותיו PDF ניתן להעברה', () {
@@ -45,6 +45,6 @@ void main() {
       ),
       leftTab: ToolTab(toolId: 'builtin.gematria', title: 'גימטריה'),
     );
-    expect(MultiWindowService.canTransfer(split), isTrue);
+    expect(RunnerWindowChannel.canTransfer(split), isTrue);
   });
 }

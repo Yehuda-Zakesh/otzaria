@@ -7,7 +7,6 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/error_log_file.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/plugins/services/plugin_webview_failure_log.dart';
 import 'package:otzaria/plugins/services/webview2_creation_diagnostics.dart';
 import 'package:otzaria/plugins/view/webview_environment_holder.dart';
@@ -224,7 +223,6 @@ void main() {
     });
 
     tearDown(() {
-      WindowRole.isSecondary = false;
       WebView2CreationDiagnostics.debugReset();
       debugForcePluginWebViewFailureFileLog = false;
       AppPaths.debugOverrideDataRootPath(null);
@@ -257,31 +255,6 @@ void main() {
         WebView2CreationDiagnostics.recordCreationFailure(_conflict),
         isNull,
       );
-    });
-
-    test('secondary window skips the gate and runner', () async {
-      var runs = 0;
-      var gateCalls = 0;
-      WebView2CreationDiagnostics.startupGate = () async => gateCalls++;
-      addTearDown(
-        () =>
-            WebView2CreationDiagnostics.startupGate = () =>
-                Future<void>.value(),
-      );
-      WebView2CreationDiagnostics.debugRunnerOverride = (_) async {
-        runs++;
-        return _output(processes: const []);
-      };
-
-      WindowRole.isSecondary = true;
-      await WebView2CreationDiagnostics.recordCreationFailure(_conflict);
-      expect(runs, 0);
-      expect(gateCalls, 0);
-      expect(errorsTxt(), isEmpty);
-
-      WindowRole.isSecondary = false;
-      await WebView2CreationDiagnostics.recordCreationFailure(_conflict);
-      expect(runs, 1);
     });
 
     for (final failure in ['empty', 'browser query', 'parent query']) {

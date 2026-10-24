@@ -15,7 +15,8 @@ import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/messages/settings_messages.dart';
 import 'package:otzaria/core/app_runtime_reset.dart';
 import 'package:otzaria/core/update_check_frequency.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
+import 'package:otzaria/core/windowing/app_quit.dart';
 import 'package:otzaria/data/data_providers/hive_data_provider.dart';
 import 'package:otzaria/settings/engine/settings_engine_exports.dart';
 import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
@@ -45,6 +46,7 @@ import 'package:otzaria/widgets/misc/app_popup_menu.dart';
 import 'package:otzaria/widgets/misc/app_dropdown_field.dart';
 import 'package:otzaria/tools/calendar/helpers/calendar_date_helpers.dart';
 import 'package:otzaria/tour/bloc/tour_cubit.dart';
+import 'package:otzaria/utils/file/file_picker_dialog_options.dart';
 import 'package:otzaria/utils/file/open_in_file_manager.dart';
 import 'package:otzaria/utils/file/save_file_with_extension.dart';
 import 'package:otzaria/plugins/view/webview_environment_holder.dart';
@@ -871,7 +873,9 @@ class _SystemSettingsTabState extends State<SystemSettingsTab> {
   Future<void> _exportBackupFile(File file) async {
     try {
       final bytes = await file.readAsBytes();
+      if (!mounted) return;
       final path = await saveFileWithExtension(
+        context: context,
         fileName: p.basename(file.path),
         extension: 'json',
         bytes: bytes,
@@ -887,9 +891,14 @@ class _SystemSettingsTabState extends State<SystemSettingsTab> {
   /// שחזור מקובץ גיבוי שהמשתמש בוחר — הדרך היחידה לשחזר אחרי התקנה מחדש
   /// במובייל, שבו תיקיית הגיבוי הפנימית נמחקת עם האפליקציה.
   Future<void> _restoreFromPickedFile() async {
-    final result = await FilePicker.pickFile(
-      type: FileType.custom,
-      allowedExtensions: ['json'],
+    final result = await withFilePickerOwner(
+      context,
+      () => FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        windowsOptions: modalWindowsOptions(context),
+        linuxOptions: kModalLinuxOptions,
+      ),
     );
     final filePath = result?.path;
     if (filePath == null || !mounted) return;
@@ -912,9 +921,14 @@ class _SystemSettingsTabState extends State<SystemSettingsTab> {
   /// ייבוא ממזג מגיבוי של מכשיר אחר — מוסיף פריטים ואינו מוחק דבר, ולכן
   /// דיאלוג רגיל ולא אזהרה.
   Future<void> _importMergeFromPickedFile() async {
-    final result = await FilePicker.pickFile(
-      type: FileType.custom,
-      allowedExtensions: ['json'],
+    final result = await withFilePickerOwner(
+      context,
+      () => FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        windowsOptions: modalWindowsOptions(context),
+        linuxOptions: kModalLinuxOptions,
+      ),
     );
     final filePath = result?.path;
     if (filePath == null || !mounted) return;
@@ -1036,8 +1050,7 @@ class _SystemSettingsTabState extends State<SystemSettingsTab> {
     if (!mounted) return;
     await resetRuntimeStateForAppRestart();
     if (!mounted) return;
-    MultiWindowService.restartPeers();
-    RestartWidget.restartApp(
+    AppQuit.restartAll(
       context,
       afterRestart: WebViewEnvironmentHolder.disposeForAppRestart,
     );
@@ -1180,7 +1193,7 @@ class _SystemSettingsTabState extends State<SystemSettingsTab> {
       cardId: 'system.advanced',
       title: context.settingsText('מתקדם'),
       children: [
-        if (MultiWindowService.canOpenWindows)
+        if (RunnerWindowChannel.canOpenWindows)
           SettingsActionTile.switchTile(
             icon: FluentIcons.window_apps_24_regular,
             title: context.settingsText('שחזר את כל החלונות בהפעלה'),

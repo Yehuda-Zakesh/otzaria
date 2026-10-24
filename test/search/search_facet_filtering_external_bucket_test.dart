@@ -63,10 +63,8 @@ void main() {
       ExternalSearchBook(id: 43, title: 'דרשות הר"ן', hits: 2),
     ],
   }) => ExternalSearchSummary(
-    provider: 'hebrewbooks',
     sourceTitle: 'היברובוקס',
     totalBooks: 3,
-    totalHits: 12,
     categoryBookCounts: const {'/תנ"ך': 1},
     otherBooks: otherBooks,
     namedOtherBooks: books,

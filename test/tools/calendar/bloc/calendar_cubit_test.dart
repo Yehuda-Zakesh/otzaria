@@ -1588,7 +1588,6 @@ void main() {
         notifications: notifications,
         pluginEvents: () async => const [],
         now: () => notificationNow ?? DateTime.now(),
-        broadcast: (_) {},
         dedupeDuplicates: false,
       );
       await owner.restoreIfNeeded();

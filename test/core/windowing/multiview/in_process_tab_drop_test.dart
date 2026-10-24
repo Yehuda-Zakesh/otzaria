@@ -8,9 +8,8 @@ import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/core/windowing/cross_window_tab_drag.dart';
 import 'package:otzaria/core/windowing/drag_preview_colors.dart';
 import 'package:otzaria/core/windowing/external_tab_drag.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/core/windowing/multiview/in_process_tab_drop.dart';
-import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/core/windowing/multiview/view_window_registry.dart';
 import 'package:otzaria/core/windowing/window_opener.dart';
 import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
@@ -31,6 +30,13 @@ class _RecordingTabsBloc extends Cubit<TabsState> implements TabsBloc {
 
   @override
   void add(TabsEvent event) => events.add(event);
+
+  @override
+  bool receiveTransferredTab(OpenedTab tab, {int? index}) {
+    if (isClosed) return false;
+    events.add(AddTab(tab, index: index));
+    return true;
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -78,7 +84,7 @@ class _Runner {
   void install() => TestDefaultBinaryMessengerBinding
       .instance
       .defaultBinaryMessenger
-      .setMockMethodCallHandler(MultiWindowService.channel, (call) async {
+      .setMockMethodCallHandler(RunnerWindowChannel.channel, (call) async {
         calls.add(call);
         if (call.method == 'windowAtCursor') {
           return {'x': 300, 'y': 40, ...target};
@@ -98,14 +104,13 @@ class _Runner {
             ...systemDrag,
           };
         }
-        if (call.method == 'openWindow') return true;
         return null;
       });
 
   void uninstall() => TestDefaultBinaryMessengerBinding
       .instance
       .defaultBinaryMessenger
-      .setMockMethodCallHandler(MultiWindowService.channel, null);
+      .setMockMethodCallHandler(RunnerWindowChannel.channel, null);
 
   List<MethodCall> named(String method) =>
       calls.where((c) => c.method == method).toList();
@@ -149,21 +154,19 @@ void main() {
   }
 
   setUp(() {
-    MultiViewMode.debugOverride = true;
-    MultiWindowService.debugSupportedOverride = true;
+    RunnerWindowChannel.debugSupportedOverride = true;
     runner = _Runner()..install();
   });
 
   tearDown(() {
     runner.uninstall();
-    MultiViewMode.debugOverride = null;
-    MultiWindowService.debugSupportedOverride = null;
+    RunnerWindowChannel.debugSupportedOverride = null;
     WindowOpener.debugOverride = null;
     AppWindowKeys.resetForTest();
   });
 
   group('InProcessTabDrops', () {
-    testWidgets('HWND של חלון Dart → המשבצת שלו; משבצת אפיק → הראשי', (
+    testWidgets('HWND של חלון Dart → המשבצת שלו; המשבצת מה-runner → הראשי', (
       tester,
     ) async {
       final windows = FakeViewWindows(tester);
@@ -172,9 +175,12 @@ void main() {
       final drops = makeDrops(windows.registry);
 
       expect(drops.resolve(hwnd: a.handle.hwnd), a.slot);
-      expect(drops.resolve(hwnd: b.handle.hwnd, busSlot: 1), b.slot);
-      // ה-HWND של הראשי אינו ברשימה; המשבצת שלו באפיק היא שמזהה אותו.
-      expect(drops.resolve(hwnd: 4242, busSlot: 1), InProcessTabDrops.mainSlot);
+      expect(drops.resolve(hwnd: b.handle.hwnd, runnerSlot: 1), b.slot);
+      // ה-HWND של הראשי אינו ברשימה; המשבצת שה-runner מדווח היא שמזהה אותו.
+      expect(
+        drops.resolve(hwnd: 4242, runnerSlot: 1),
+        InProcessTabDrops.mainSlot,
+      );
       expect(drops.resolve(hwnd: 4242), isNull);
       expect(drops.resolve(), isNull);
       expect(drops.slotOf(a.id), a.slot);
@@ -229,6 +235,71 @@ void main() {
       expect(await drops.sendTabToWindow(1, tab), isFalse);
       drops.unregister(a.id, t.target);
       expect(await drops.sendTabToWindow(a.slot, tab), isFalse);
+    });
+
+    testWidgets('חלון שסגירתו אושרה אינו יעד ומסרב לקלוט', (tester) async {
+      final windows = FakeViewWindows(tester);
+      final a = windows.registry.open(size: const Size(800, 600))!;
+      final drops = makeDrops(windows.registry);
+      final t = _target(0);
+      drops.register(a.id, t.target);
+      final tab = ToolTab(toolId: 'builtin.calendar', title: 'לוח שנה');
+
+      a.closing = true;
+      expect(drops.peers(AppWindowId.primary), isEmpty);
+      expect(await drops.sendTabToWindow(a.slot, tab), isFalse);
+      expect(t.received, isEmpty);
+
+      // סגירה שבוטלה או נכשלה: שוב יעד.
+      a.closing = false;
+      expect(drops.peers(AppWindowId.primary).single.slot, a.slot);
+      expect(await drops.sendTabToWindow(a.slot, tab), isTrue);
+    });
+
+    testWidgets('peers: הראשי ושאר החלונות, בלי החלון עצמו ובלי חלון בלי עץ', (
+      tester,
+    ) async {
+      final windows = FakeViewWindows(tester);
+      final a = windows.registry.open(size: const Size(800, 600))!;
+      final b = windows.registry.open(size: const Size(800, 600))!;
+      windows.registry.open(size: const Size(800, 600));
+      final drops = makeDrops(windows.registry);
+      InProcessTabDropTarget described(String title, String? workspace) =>
+          InProcessTabDropTarget(
+            dragState: ExternalTabDragState(),
+            devicePixelRatio: () => 1,
+            receive: (_, _) => true,
+            describe: () => (
+              title: title,
+              tabCount: 3,
+              activeWorkspaceId: workspace,
+            ),
+          );
+      drops.register(AppWindowId.primary, described('ראשי', 'ws1'));
+      drops.register(b.id, described('שני', 'ws2'));
+      drops.register(a.id, described('ראשון', null));
+
+      expect(drops.peers(a.id).map((p) => (p.slot, p.title, p.isOwner)), [
+        (1, 'ראשי', true),
+        (b.slot, 'שני', false),
+      ]);
+      expect(drops.peers(AppWindowId.primary).map((p) => p.slot), [
+        a.slot,
+        b.slot,
+      ]);
+      expect(drops.peers(a.id).first.tabCount, 3);
+      expect(drops.isWorkspaceOpenElsewhere(a.id, 'ws2'), isTrue);
+      expect(drops.isWorkspaceOpenElsewhere(b.id, 'ws2'), isFalse);
+
+      // ראשי שנסגר מוסתר: לא יעד, לא נספר באזהרה, ומסרב לקלוט.
+      drops.setMainShown(false);
+      expect(drops.peers(a.id).first.isVisible, isFalse);
+      expect(drops.transferTargets(a.id).map((p) => p.slot), [b.slot]);
+      expect(drops.isWorkspaceOpenElsewhere(a.id, 'ws1'), isFalse);
+      final tab = ToolTab(toolId: 'builtin.calendar', title: 'לוח שנה');
+      expect(await drops.sendTabToWindow(1, tab), isFalse);
+      drops.setMainShown(true);
+      expect(drops.transferTargets(a.id).map((p) => p.slot), [1, b.slot]);
     });
   });
 
@@ -323,6 +394,13 @@ void main() {
       );
       final state = ExternalTabDragState.of(inner);
       expect(state, isNot(same(ExternalTabDragState.current)));
+      // התיאור לתפריט נקרא מה-TabsBloc; בלי WorkspaceBloc — בלי שולחן.
+      final described = drops.peers(AppWindowId.primary).single;
+      expect(
+        (described.slot, described.title, described.tabCount),
+        (entry.slot, 'חלון ריק', 0),
+      );
+      expect(described.activeWorkspaceId, isNull);
 
       // הראשי אינו רשום, ולכן גרירה מעליו אינה נוגעת בחלון הזה.
       expect(await drops.notifyDragOver(1, 10, 10, 'x'), isNull);
@@ -412,7 +490,7 @@ void main() {
       await source.close();
     });
 
-    testWidgets('שחרור מעל חלון המקור (Dart) מבוטל גם בלי משבצת אפיק', (
+    testWidgets('שחרור מעל חלון המקור (Dart) מבוטל גם בלי משבצת מה-runner', (
       tester,
     ) async {
       final windows = FakeViewWindows(tester);
@@ -634,55 +712,9 @@ void main() {
       await source.close();
     });
 
-    testWidgets('בלי הדגל: אותן קריאות כמו היום, ושום העברה ישירה', (
+    testWidgets('גרירה למערכת שנכלאה בקצה אזור העבודה מבוטלת', (
       tester,
     ) async {
-      MultiViewMode.debugOverride = false;
-      final windows = FakeViewWindows(tester);
-      final view = windows.registry.open(size: const Size(800, 600))!;
-      final drops = makeDrops(windows.registry);
-      final t = _target(0);
-      drops.register(view.id, t.target);
-      // מודל A פותח מנוע דרך ה-runner; כאן רק נבדק שהשחרור הגיע לפתיחה.
-      final opener = _FakeOpener();
-      WindowOpener.debugOverride = opener;
-      final source = _RecordingTabsBloc();
-      final tab = ToolTab(toolId: 'builtin.calendar', title: 'לוח שנה');
-      final drag = CrossWindowTabDrag(inProcess: drops)
-        ..begin(tab, colors, tabsBloc: source, sourceWindow: view.id);
-      runner.target = {
-        'hwnd': view.handle.hwnd,
-        'isSelf': false,
-        'isShellTray': false,
-      };
-      drag.end();
-
-      await drag.handleDroppedOutside(tab, source);
-
-      expect(t.received, isEmpty);
-      expect(opener.opened, hasLength(1));
-      expect(source.events.single, RemoveTab(tab));
-      // הרוח נשארת: ה-runner מסתיר אותה כשהמנוע החדש נחשף.
-      expect(runner.named('endTabDrag'), isEmpty);
-      expect(screenCalls, isEmpty);
-      expect(
-        runner.named('windowAtCursor').map((c) => c.arguments),
-        allOf(isNotEmpty, everyElement(isNull)),
-      );
-      expect(
-        (runner.named('beginTabDrag').single.arguments as Map).containsKey(
-          'sourceHwnd',
-        ),
-        isFalse,
-      );
-      drag.dispose();
-      await source.close();
-    });
-
-    testWidgets('בלי הדגל: גרירה למערכת שנכלאה בקצה אזור העבודה מבוטלת', (
-      tester,
-    ) async {
-      MultiViewMode.debugOverride = false;
       final windows = FakeViewWindows(tester);
       final drops = makeDrops(windows.registry);
       final opener = _FakeOpener();
@@ -690,7 +722,7 @@ void main() {
       final source = _RecordingTabsBloc();
       final tab = ToolTab(toolId: 'builtin.calendar', title: 'לוח שנה');
       var cancelled = 0;
-      // מודל A: שחרור ב-(1000,1060) נמדד ב-(1000,1031) מעל שולחן העבודה.
+      // שחרור ב-(1000,1060) נמדד ב-(1000,1031) מעל שולחן העבודה.
       runner.target = {'isSelf': false, 'isShellTray': false};
       runner.systemDrag = {
         'y': 1031,
@@ -702,7 +734,7 @@ void main() {
 
       await tester.pump(const Duration(seconds: 1));
 
-      expect(runner.named('dragOutToSystem').single.arguments, isNull);
+      expect(runner.named('dragOutToSystem'), hasLength(1));
       expect(cancelled, 1);
       expect(opener.opened, isEmpty);
       expect(source.events, isEmpty);
@@ -711,10 +743,9 @@ void main() {
       await source.close();
     });
 
-    testWidgets('בלי הדגל: גרירה למערכת שהוצמדה בקצה אזור העבודה נפתחת', (
+    testWidgets('גרירה למערכת שהוצמדה בקצה אזור העבודה נפתחת', (
       tester,
     ) async {
-      MultiViewMode.debugOverride = false;
       final windows = FakeViewWindows(tester);
       final drops = makeDrops(windows.registry);
       final opener = _FakeOpener();
@@ -734,10 +765,9 @@ void main() {
       await source.close();
     });
 
-    testWidgets('בלי הדגל: שחרור על שולחן העבודה מחוץ לאזור העבודה מבוטל', (
+    testWidgets('שחרור על שולחן העבודה מחוץ לאזור העבודה מבוטל', (
       tester,
     ) async {
-      MultiViewMode.debugOverride = false;
       final windows = FakeViewWindows(tester);
       final drops = makeDrops(windows.registry);
       final opener = _FakeOpener();
@@ -760,10 +790,9 @@ void main() {
       await source.close();
     });
 
-    testWidgets('בלי הדגל: חלון אוצריא מחוץ לאזור העבודה (מסך מלא) קולט', (
+    testWidgets('חלון אוצריא מחוץ לאזור העבודה (מסך מלא) קולט', (
       tester,
     ) async {
-      MultiViewMode.debugOverride = false;
       final windows = FakeViewWindows(tester);
       final drops = makeDrops(windows.registry);
       final opener = _FakeOpener();
@@ -777,7 +806,7 @@ void main() {
         'inWorkArea': false,
       };
 
-      // ההעברה עצמה עוברת באפיק, שאינו קיים כאן; נבדק רק שאין ביטול.
+      // אין כאן יעד רשום לראשי; נבדק רק שאין ביטול.
       final logs = <String>[];
       final original = debugPrint;
       debugPrint = (message, {wrapWidth}) => logs.add(message ?? '');

@@ -16,6 +16,7 @@ import 'package:otzaria/settings/services/custom_folders/personal_books_import_s
 import 'package:otzaria/settings/services/orphan_library_service.dart';
 import 'package:otzaria/settings/widgets/settings_widgets_exports.dart';
 import 'package:otzaria/utils/file/document_format.dart';
+import 'package:otzaria/utils/file/file_picker_dialog_options.dart';
 import 'package:otzaria/theme/app_tokens.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
 import 'package:path/path.dart' as p;
@@ -94,11 +95,18 @@ class _PersonalBooksImportPanelState extends State<PersonalBooksImportPanel> {
     final override = widget.pickFilesOverride;
     if (override != null) return override();
 
-    final files = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: kSupportedBookExtensions,
-      dialogTitle: context.settingsText('בחר קבצי ספרים לייבוא'),
-    );
+    final files =
+        (await withFilePickerOwner(
+          context,
+          () => FilePicker.pickFiles(
+            type: FileType.custom,
+            allowedExtensions: kSupportedBookExtensions,
+            dialogTitle: context.settingsText('בחר קבצי ספרים לייבוא'),
+            windowsOptions: modalWindowsOptions(context),
+            linuxOptions: kModalLinuxOptions,
+          ),
+        )) ??
+        [];
     return files.map((f) => f.path).whereType<String>().toList();
   }
 

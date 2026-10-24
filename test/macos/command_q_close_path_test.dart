@@ -35,7 +35,7 @@ void main() {
     expect(appDelegate, contains('applicationShouldHandleReopen('));
     expect(appDelegate, contains('restoreLastClosedWindow()'));
     final hide = mainWindow.indexOf('private func hide(');
-    final hideEnd = mainWindow.indexOf('private func revive(');
+    final hideEnd = mainWindow.indexOf('func showMainWindow(');
     expect(
       mainWindow.substring(hide, hideEnd),
       isNot(contains('exit(')),

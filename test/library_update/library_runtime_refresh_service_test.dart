@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/app_runtime_reset.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
-import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/data/cache/books_cache.dart';
 import 'package:otzaria/data/data_providers/cache_database_holder.dart';
 import 'package:otzaria/data/data_providers/db_read_worker.dart';
@@ -118,7 +117,6 @@ void main() {
   setUp(() async {
     temp = await Directory.systemTemp.createTemp('library_runtime_refresh_');
     AppPaths.debugOverrideDataRootPath(temp.path);
-    WindowBus.namespace = 'otzaria.test.library_runtime_refresh';
     await Settings.init(cacheProvider: MemoryCacheProvider());
     await Settings.setValue<String>(
       SettingsRepository.keyLibraryPath,
@@ -171,7 +169,6 @@ void main() {
     BookFacetMetadataCache.instance.clear();
     BooksCache.instance.clear();
     AppPaths.debugOverrideDataRootPath(null);
-    WindowBus.namespace = 'otzaria.window';
     await temp.delete(recursive: true);
   });
 

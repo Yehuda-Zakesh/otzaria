@@ -7,10 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/core/messages/plugin_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
-import 'package:otzaria/history/bloc/history_bloc.dart';
 import 'package:otzaria/library/bloc/library_bloc.dart';
 import 'package:otzaria/models/books.dart';
-import 'package:otzaria/navigation/bloc/navigation_bloc.dart';
 import 'package:otzaria/plugins/declarative/services/declarative_library_book_access.dart';
 import 'package:otzaria/plugins/services/plugin_external_search_service.dart';
 import 'package:otzaria/plugins/services/plugin_in_book_search_service.dart';
@@ -26,13 +24,11 @@ import 'package:otzaria/search/utils/facet_helper.dart';
 import 'package:otzaria/search/utils/snippet_builder.dart';
 import 'package:otzaria/search/view/external_result_title_row.dart';
 import 'package:otzaria/settings/settings_exports.dart';
-import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/models/external_book_matches.dart';
 import 'package:otzaria/tabs/models/searching_tab.dart';
 import 'package:otzaria/theme/app_tokens.dart';
-import 'package:otzaria/utils/navigation/book_open_coordinator.dart';
+import 'package:otzaria/utils/navigation/open_book.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
-import 'package:otzaria/utils/ui/reading_left_pane_policy.dart';
 
 /// מדור תוצאות ממקור חיצוני של תוסף (למשל היברובוקס) בטאב החיפוש המובנה.
 ///
@@ -508,10 +504,6 @@ class _ExternalSearchResultsSectionState
         counts[path] = (counts[path] ?? 0) + 1;
       }
     }
-    var totalHits = 0;
-    for (final entry in index) {
-      totalHits += entry.hits;
-    }
     // שורות הדלי בעץ הן הרשימה הזו, ואין להן סדר קטלוגי כמו לספרי הספרייה —
     // לכן העשיר במופעים ראשון, ובתיקו לפי שם, כדי שהסדר יהיה יציב וקריא.
     namedOther.sort((a, b) {
@@ -521,10 +513,8 @@ class _ExternalSearchResultsSectionState
 
     _categoryById = categories;
     _summary = ExternalSearchSummary(
-      provider: active.$1,
       sourceTitle: active.$2,
       totalBooks: index.length,
-      totalHits: totalHits,
       categoryBookCounts: counts,
       otherBooks: other,
       namedOtherBooks: namedOther,
@@ -552,14 +542,7 @@ class _ExternalSearchResultsSectionState
 
   /// לוכדים את התלויות לפני נקודות ה-await — ה-context עלול להתפרק בינתיים.
   DeclarativeLibraryBookAccess _bookAccess() =>
-      DeclarativeLibraryBookAccess.otzaria(
-        BookOpenCoordinator(
-          tabsBloc: context.read<TabsBloc>(),
-          historyBloc: context.read<HistoryBloc>(),
-          navigationBloc: context.read<NavigationBloc>(),
-          layoutWidth: readingLayoutWidthResolverOf(context),
-        ),
-      );
+      DeclarativeLibraryBookAccess.otzaria(bookOpenCoordinatorOf(context));
 
   /// לחיצה אחת: כשהתצוגה המקדימה פעילה — טוגל שלה, אחרת פתיחה בעיון.
   /// אותה התנהגות כמו בכרטיס תוצאה של המנוע המובנה.

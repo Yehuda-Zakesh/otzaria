@@ -6,8 +6,8 @@ import 'package:otzaria/migration/database/sqlite3_utils.dart';
 /// מסד מצב המשתמש המשותף לכל החלונות: היסטוריה, סימניות, שולחנות, סשני
 /// חלונות ותורי דיווח.
 ///
-/// קובץ אחד שכל חלון פותח ישירות (WAL, כמה כותבים מאותו תהליך). אין "חלון
-/// בעלים": הסדר בין כותבים מוכרע בנעילת SQLite, לא בניתוב באפיק.
+/// חיבור אחד ב-isolate לכל החלונות (WAL); הנעילה של SQLite חשובה רק מול
+/// תהליך אחר (גיבוי, checkpoint).
 class UserStateDatabase {
   UserStateDatabase._();
 

@@ -29,7 +29,6 @@ void main() {
   late List<CustomEvent> pluginEvents;
   late List<CalendarScheduleStatus> statuses;
   late MemoryPluginIds pluginIds;
-  late List<Map<String, Object?>> broadcasts;
 
   CalendarAlertsOwner owner({
     WindowsLikeNotifications? using,
@@ -44,7 +43,6 @@ void main() {
       pluginEvents: () async => pluginEvents,
       now: () => now,
       zmanPlanner: zmanPlanner,
-      broadcast: broadcasts.add,
       dedupeDuplicates: dedupe,
       pluginEventsDelay: const Duration(milliseconds: 200),
     );
@@ -89,37 +87,6 @@ void main() {
     pluginEvents = [];
     statuses = [];
     pluginIds = MemoryPluginIds();
-    broadcasts = [];
-  });
-
-  test('השידור והאישור נשלחים בין isolate groups', () async {
-    final o = owner();
-    final acks = [
-      await o.execute('upsertEvent', eventArgs(futureEvent('a'))),
-      await o.execute('snapshot', const {}),
-      await o.execute('pluginEventsChanged', const {}),
-      await o.execute('pluginSchedule', {
-        'pluginId': 'p',
-        'id': 3,
-        'title': 't',
-        'body': 'b',
-        'at': now.add(const Duration(hours: 1)).toIso8601String(),
-      }),
-      await o.execute('deleteEvent', const {}),
-    ];
-    await o.handleSettingsReset();
-    await o.idle;
-
-    expect(acks.map((a) => a['ok']), [true, true, true, true, false]);
-    expect(acks.where((a) => !isCrossGroupSendable(a)), isEmpty);
-    expect(
-      broadcasts.map((b) => b['type']).toSet(),
-      {
-        CalendarAlertsOwner.requestStateChanged,
-        CalendarAlertsOwner.requestScheduleStatus,
-      },
-    );
-    expect(broadcasts.where((b) => !isCrossGroupSendable(b)), isEmpty);
   });
 
   test('תזכורת לאירוע חדש מתוזמנת, ומחיקה מבטלת אותה', () async {
@@ -215,7 +182,6 @@ void main() {
         notifications: notifications,
         pluginEvents: () async => [],
         now: () => now,
-        broadcast: (_) {},
         dedupeDuplicates: false,
       );
       unawaited(o.restoreIfNeeded());
@@ -443,7 +409,6 @@ void main() {
       notifications: notifications,
       pluginEvents: adapter.loadAllPluginEvents,
       now: () => now,
-      broadcast: (_) {},
       dedupeDuplicates: false,
     );
     o.scheduleStatuses.listen(statuses.add);
@@ -830,7 +795,6 @@ void main() {
   test('לולאת פרסום של אירועי תוספים מייצרת שידור אחד', () async {
     final o = owner();
     await o.restoreIfNeeded();
-    broadcasts.clear();
     final updates = <CalendarAlertsUpdate>[];
     o.updates.listen(updates.add);
 
@@ -843,12 +807,6 @@ void main() {
 
     expect(updates, hasLength(1));
     expect(updates.single.pluginEventsChanged, isTrue);
-    expect(
-      broadcasts.where(
-        (b) => b['type'] == CalendarAlertsOwner.requestStateChanged,
-      ),
-      hasLength(1),
-    );
     expect(notifications.present, {
       for (var i = 0; i < 20; i++) reminderId('p:$i'),
     });
@@ -876,7 +834,8 @@ void main() {
       final o = owner();
       await o.restoreIfNeeded();
       expect(notifications.present, {reminderId('a')});
-      broadcasts.clear();
+      final updates = <CalendarAlertsUpdate>[];
+      o.updates.listen(updates.add);
       final revision = o.revision;
 
       // האיפוס מוחק גם את הרישום השמור; הבעלים מבטל לפי מה שבזיכרון.
@@ -887,12 +846,10 @@ void main() {
       await o.handleSettingsReset();
       await o.idle;
 
-      final changed = broadcasts.singleWhere(
-        (b) => b['type'] == CalendarAlertsOwner.requestStateChanged,
-      );
-      expect(changed['revision'], revision + 1);
+      final changed = updates.single;
+      expect(changed.revision, revision + 1);
       expect(
-        (changed['values'] as Map)[CalendarAlertsKeys.events],
+        changed.values[CalendarAlertsKeys.events],
         CalendarAlertsKeys.defaults[CalendarAlertsKeys.events],
       );
       expect(notifications.present, isEmpty);
@@ -970,7 +927,6 @@ void main() {
         notifications: service,
         pluginEvents: () async => const [],
         now: () => now,
-        broadcast: (_) {},
         dedupeDuplicates: false,
       );
       addTearDown(o.dispose);

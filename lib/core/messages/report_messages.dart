@@ -169,32 +169,4 @@ abstract class ReportMessages {
   static String appReportImagesTotalTooLarge(int maxMegabytes) =>
       'הגודל הכולל של התמונות מוגבל ל-$maxMegabytes MB.';
   static const String appReportImageReadFailed = 'לא ניתן היה לקרוא את התמונה.';
-
-  // ── דיווח טלפוני (PhoneReportService) ──────────────────────────────────
-
-  static const String phoneSent = 'הדיווח נשלח בהצלחה';
-  static const String phoneBadRequest =
-      'שגיאה בנתוני הדיווח. בדוק שכל השדות מלאים';
-  static const String phoneUnauthorized = 'שגיאת הרשאה. פנה לתמיכה טכנית';
-  static const String phoneForbidden =
-      'אין הרשאה לשלוח דיווח. פנה לתמיכה טכנית';
-  static const String phoneServiceUnavailable =
-      'שירות הדיווח אינו זמין. פנה לתמיכה טכנית';
-  static const String phoneTooManyRequests =
-      'יותר מדי בקשות. המתן מספר דקות ונסה שוב';
-  static const String phoneServerUnavailable =
-      'השרת אינו זמין כעת. נסה שוב מאוחר יותר';
-  static const String phoneNoInternet =
-      'אין חיבור לאינטרנט. בדוק את החיבור ונסה שוב';
-  static const String phoneClientError =
-      'שגיאה בשליחת הנתונים. נסה שוב מאוחר יותר';
-  static const String phoneUnexpectedRetry =
-      'שגיאה לא צפויה. נסה שוב מאוחר יותר';
-  static const String phoneUnexpected = 'שגיאה לא צפויה';
-
-  static String phoneUnexpectedStatus(int statusCode) =>
-      'שגיאה לא צפויה: $statusCode';
-
-  static String phoneSendDataError(int statusCode) =>
-      'שגיאה בשליחת הנתונים ($statusCode)';
 }

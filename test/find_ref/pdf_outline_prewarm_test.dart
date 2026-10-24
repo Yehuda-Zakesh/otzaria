@@ -7,7 +7,6 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/find_ref/repository/reference_books_cache.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
@@ -59,27 +58,6 @@ void main() {
   });
 
   group('prewarmAllPdfOutlines', () {
-    test('⚠️ חלון משני אינו מקדים — PDFium אינו מאותחל שם מיוזמתנו', () async {
-      final cache = ReferenceBooksCache.instance;
-      cache.setFsPdfBooksForTesting(
-        ['/a.pdf', '/b.pdf'].map(_fakeBook).toList(),
-      );
-
-      var called = false;
-      cache.pdfOutlineParser = (_) async {
-        called = true;
-        return const [];
-      };
-
-      WindowRole.isSecondary = true;
-      addTearDown(() => WindowRole.isSecondary = false);
-
-      await cache.prewarmAllPdfOutlines();
-
-      expect(called, isFalse);
-      expect(cache.pdfOutlineCacheForTesting, isEmpty);
-    });
-
     test('רשימת FS PDFs ריקה — אינו קורא לפרסר ומסיים מיד', () async {
       final cache = ReferenceBooksCache.instance;
       cache.setFsPdfBooksForTesting(const []);

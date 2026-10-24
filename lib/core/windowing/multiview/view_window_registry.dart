@@ -73,6 +73,11 @@ class ViewWindowEntry {
   /// מכאן החלון אינו כותב לסשן שלו.
   void endSession() => _sessionEnded = true;
 
+  /// סגירה שאושרה: כרטיסיה שתועבר לחלון מעכשיו תאבד איתו.
+  bool get isClosing => _closing || _sessionEnded;
+  bool _closing = false;
+  set closing(bool value) => _closing = value;
+
   /// מסלול הסגירה של החלון, כשהעץ שלו מורכב; בלעדיו — הריסה ישירה.
   Future<void> Function()? closeHandler;
 
@@ -89,7 +94,7 @@ class ViewWindowEntry {
 class ViewWindowRegistry extends ChangeNotifier {
   ViewWindowRegistry({ViewWindowFactory? factory, ViewWindowNative? native})
     : _factory = factory ?? createViewWindow,
-      _native = native ?? const Win32ViewWindowNative();
+      _native = native ?? ViewWindowNative.platform();
 
   static final ViewWindowRegistry instance = ViewWindowRegistry();
 
@@ -126,10 +131,11 @@ class ViewWindowRegistry extends ChangeNotifier {
       _native,
       initialTab,
     );
+    handle.onRetire = () => _retire(entry);
     AppWindowKeys.register(entry.keys);
     _windows.add(entry);
     notifyListeners();
-    final hwnd = handle.hwnd;
+    final hwnd = handle.nativeHandle;
     if (hwnd != null) {
       unawaited(_native.installViewHooks(hwnd));
       // לפני הפריים הראשון, בעוד החלון מוסתר: בלי הבהוב של המסגרת.
@@ -151,16 +157,28 @@ class ViewWindowRegistry extends ChangeNotifier {
   }
 
   void _remove(ViewWindowEntry entry) {
-    if (!_windows.remove(entry)) return;
-    entry.handle.markDestroyed();
-    entry.endSession();
-    entry.closeHandler = null;
-    AppWindowKeys.unregister(entry.keys);
-    notifyListeners();
+    if (!_detach(entry) && !entry.handle.isRetiring) return;
     // הבקר משוחרר רק אחרי שהעץ שלו פורק בפריים הבא.
     SchedulerBinding.instance.addPostFrameCallback(
       (_) => entry.handle.dispose(),
     );
     SchedulerBinding.instance.scheduleFrame();
+  }
+
+  /// הריסה נדחית: החלון יוצא מהרשימה ומהעץ ומוסתר עכשיו, ונהרס אחר כך.
+  void _retire(ViewWindowEntry entry) {
+    final native = entry.handle.nativeHandle;
+    _detach(entry);
+    if (native != null) _native.hide(native);
+  }
+
+  bool _detach(ViewWindowEntry entry) {
+    if (!_windows.remove(entry)) return false;
+    entry.handle.markDestroyed();
+    entry.endSession();
+    entry.closeHandler = null;
+    AppWindowKeys.unregister(entry.keys);
+    notifyListeners();
+    return true;
   }
 }

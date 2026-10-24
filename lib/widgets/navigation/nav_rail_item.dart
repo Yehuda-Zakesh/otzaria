@@ -2,13 +2,6 @@
 //
 // NavRailItem — כפתור ניווט אנכי בסגנון Material 3.
 //
-// מממש את הסגנון של _buildNavButton ב-MainWindowScreen:
-//  • אייקון (24px) מעל תווית
-//  • Active Indicator: AnimatedContainer + AnimatedScale → secondaryContainer pill
-//  • AnimatedSwitcher להחלפת regular ↔ filled
-//  • AnimatedDefaultTextStyle לאנימציית צבע הטקסט
-//  • תמיכה ב-Tooltip לקיצורי מקלדת
-//
 // **שימוש:**
 // ```dart
 // NavRailItem(

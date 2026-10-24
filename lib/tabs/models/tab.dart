@@ -40,16 +40,21 @@ abstract class OpenedTab {
   factory OpenedTab.from(OpenedTab tab) => tab.clone();
 
   /// מטען להעברה עם בעלות נפרדת על מצב התוספים, גם בחלוניות מפוצלות.
-  Map<String, dynamic> toTransferJson() {
-    Map<String, dynamic> detach(Map<String, dynamic> json) => {
-      for (final entry in json.entries)
-        entry.key: entry.value is Map<String, dynamic>
-            ? detach(entry.value as Map<String, dynamic>)
-            : entry.value,
-      if (json['type'] == 'ToolTab') 'instanceId': ToolTab.newInstanceId(),
-    };
-    return detach(toJson());
-  }
+  Map<String, dynamic> toTransferJson() => withNewRuntimeIdentity(toJson());
+
+  /// מנתק זהות של מופעי תוספים לפני יצירת עץ טאבים חי נוסף.
+  static Map<String, dynamic> withNewRuntimeIdentity(
+    Map<String, dynamic> json,
+  ) => switch (json['type']) {
+    'ToolTab' => {...json, 'instanceId': ToolTab.newInstanceId()},
+    'CombinedTab' => {
+      ...json,
+      for (final side in ['rightTab', 'leftTab'])
+        if (json[side] case final Map<String, dynamic> pane)
+          side: withNewRuntimeIdentity(pane),
+    },
+    _ => json,
+  };
 
   factory OpenedTab.fromBook(
     Book book,
@@ -79,42 +84,29 @@ abstract class OpenedTab {
         dedupeKey: dedupeKey,
         externalMatches: externalMatches,
       );
-    } else if (book is ConvertibleDocumentBook) {
+    }
+    final textBook = switch (book) {
       // ספרי מסמך רצים דרך זרימת TextBook — העטיפה דרך toTextBook משמרת
       // id/categoryId/externalLibraryId שדרושים ל-LibraryProviderManager.
-      return TextBookTab(
-        book: book.toTextBook(),
-        index: index,
-        initialReadingAnchor: initialReadingAnchor,
-        searchText: searchText,
-        highlightText: highlightText,
-        permanentHighlightLine: permanentHighlightLine,
-        commentators: commentators,
-        openLeftPane: openLeftPane,
-        isPinned: isPinned,
-        showPageShapeView: showPageShapeView,
-        pinpointHighlight: pinpointHighlight,
-        pinpointHighlightSectionIndex: pinpointHighlightSectionIndex,
-        dedupeKey: dedupeKey,
-      );
-    } else if (book is TextBook) {
-      return TextBookTab(
-        book: book,
-        index: index,
-        initialReadingAnchor: initialReadingAnchor,
-        searchText: searchText,
-        highlightText: highlightText,
-        permanentHighlightLine: permanentHighlightLine,
-        commentators: commentators,
-        openLeftPane: openLeftPane,
-        isPinned: isPinned,
-        showPageShapeView: showPageShapeView,
-        pinpointHighlight: pinpointHighlight,
-        pinpointHighlightSectionIndex: pinpointHighlightSectionIndex,
-        dedupeKey: dedupeKey,
-      );
-    }
-    throw UnsupportedError("Unsupported book type: ${book.runtimeType}");
+      final ConvertibleDocumentBook document => document.toTextBook(),
+      final TextBook text => text,
+      _ => throw UnsupportedError("Unsupported book type: ${book.runtimeType}"),
+    };
+    return TextBookTab(
+      book: textBook,
+      index: index,
+      initialReadingAnchor: initialReadingAnchor,
+      searchText: searchText,
+      highlightText: highlightText,
+      permanentHighlightLine: permanentHighlightLine,
+      commentators: commentators,
+      openLeftPane: openLeftPane,
+      isPinned: isPinned,
+      showPageShapeView: showPageShapeView,
+      pinpointHighlight: pinpointHighlight,
+      pinpointHighlightSectionIndex: pinpointHighlightSectionIndex,
+      dedupeKey: dedupeKey,
+    );
   }
 
   /// מפענח טאב שמור; טיפוס לא מוכר זורק כדי שלא יישמר במקומו טאב שגוי.

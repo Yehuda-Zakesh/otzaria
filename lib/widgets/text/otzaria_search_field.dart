@@ -1,16 +1,4 @@
 // lib/widgets/text/otzaria_search_field.dart
-//
-// OtzariaSearchField  v5.0
-//
-// שינויים מ-v4:
-// • הוסר shrinkOnScroll / isShrunkenNotifier — הגובה נקבע אך ורק לפי [slim].
-//   פונקציית ה"כיווץ בגלילה" נגרמה לבלבול בין גובה הסרגל לגובה השדה,
-//   ופעלה בצורה שונה על מסכים שונים.
-// • [slim] = null (ברירת מחדל): יורש מ-[compactMenuMode] אם זמין ב-SettingsBloc
-// • [slim] = false (touch / מרווח): גובה 48px, גופן 16px
-// • [slim] = true  (desktop / compact): גובה 36px, גופן 13px
-// • אין גלילה ב-RtlTextField: scrollPhysics = NeverScrollableScrollPhysics
-// • שאר ה-API ללא שינוי; שדות shrinkOnScroll / isShrunkenNotifier הוסרו.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';

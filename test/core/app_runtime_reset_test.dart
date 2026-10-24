@@ -1,9 +1,6 @@
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/app_runtime_reset.dart';
-import 'package:otzaria/core/windowing/settings_sync.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
-import 'package:otzaria/tools/calendar/services/calendar_alerts_client.dart';
 import 'package:otzaria/tools/calendar/services/calendar_alerts_owner.dart';
 import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/data/data_providers/book_composite_key.dart';
@@ -166,41 +163,12 @@ void main() {
   });
 
   group('התראות לוח השנה אחרי איפוס', () {
-    tearDown(() => WindowRole.isSecondary = false);
-
-    test('בחלון הראשי הבעלים משדר את המצב השמור', () async {
+    test('הבעלים משדר את המצב השמור', () async {
       final revision = CalendarAlertsOwner.instance.revision;
 
       await resetRuntimeStateAfterSettingsReset();
 
       expect(CalendarAlertsOwner.instance.revision, revision + 1);
-    });
-
-    test('בחלון משני הבעלים אינו משתנה, וה-snapshot הבא מוחל', () async {
-      WindowRole.isSecondary = true;
-      final applied = <String, Object?>{};
-      SettingsSync.instance.applyLocally = (key, value) async =>
-          applied[key] = value;
-      addTearDown(() => SettingsSync.instance.applyLocally = null);
-      final client = RemoteCalendarAlertsClient.instance;
-      final snapshot = CalendarAlertsUpdate(
-        epoch: 'owner',
-        revision: 7,
-        values: {SettingsRepository.keyCalendarEvents: '[{"id":"kept"}]'},
-      );
-      expect(await client.accept(snapshot), isTrue);
-      // האיפוס מחק את העותק המקומי.
-      applied.clear();
-      await Settings.clearCache();
-      final revision = CalendarAlertsOwner.instance.revision;
-
-      await resetRuntimeStateAfterSettingsReset();
-
-      expect(CalendarAlertsOwner.instance.revision, revision);
-      expect(await client.accept(snapshot), isTrue);
-      expect(applied, {
-        SettingsRepository.keyCalendarEvents: '[{"id":"kept"}]',
-      });
     });
   });
 

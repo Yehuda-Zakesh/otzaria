@@ -179,8 +179,6 @@ and waits for the reveal with a timeout so it still runs if the reveal never lan
 
 ```dart
 Future<void> _runDeferredThing() async {
-  // פר-תהליך: חלון משני היה מריץ את זה שוב על אותם משאבים.
-  if (WindowRole.isSecondary) return;
   try {
     await _mainWindowRevealedCompleter.future.timeout(const Duration(seconds: 20));
   } on TimeoutException {
@@ -196,8 +194,10 @@ Future<void> _runDeferredThing() async {
 
 Three parts, all mandatory:
 
-1. **`WindowRole.isSecondary` guard** for anything per-process or per-machine (registry, system
-   notifications, update checks, error-report flush). Without it every extra window repeats it.
+1. **Once per process** for anything per-process or per-machine (registry, system
+   notifications, update checks, error-report flush). `main()` runs once, so start it there; work
+   started from a per-window widget (e.g. `MainWindowScreen`) is gated with
+   `ProcessDuties.of(context).isProcessOwner`, or every Dart window repeats it.
 2. **Reveal gate with a timeout** — never an unguarded `await` on the completer.
    **Exception:** a step that makes a synchronous native call (e.g. loading `sentry.dll` in
    `_initializeSentry`) awaits the reveal with **no** timeout. Running it before reveal is the

@@ -1,32 +1,20 @@
 import 'dart:io';
-import 'dart:isolate';
-import 'dart:ui' as ui show IsolateNameServer;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/user_state_list_store.dart';
-import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
-import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/data/repository/user_state_list_repository.dart';
-
-const String _namespace = 'otzaria.test.userstate';
 
 void main() {
   late Directory tmp;
   late String dbPath;
 
   setUp(() {
-    WindowBus.namespace = _namespace;
     tmp = Directory.systemTemp.createTempSync('otzaria_user_state_');
     dbPath = '${tmp.path}${Platform.pathSeparator}user_state.db';
   });
 
   tearDown(() {
-    WindowBus.instance.unregister();
-    for (var i = 1; i <= WindowBus.slotCount; i++) {
-      ui.IsolateNameServer.removePortNameMapping('$_namespace.$i');
-    }
-    WindowBus.namespace = 'otzaria.window';
     tmp.deleteSync(recursive: true);
   });
 
@@ -95,63 +83,7 @@ void main() {
     dbB.close();
   });
 
-  test('כתיבה משדרת לחלונות אחרים ולא לעצמה', () async {
-    final db = UserStateDatabase.openAt(dbPath);
-    final store = UserStateListStore(database: db);
-    WindowBus.instance.register();
-    final mySlot = WindowBus.instance.slot!;
-
-    // חלון מדומה במשבצת אחרת שרושם את ההודעות שקיבל.
-    final peerPort = ReceivePort();
-    final peerSlot = mySlot == 1 ? 2 : 1;
-    ui.IsolateNameServer.registerPortWithName(
-      peerPort.sendPort,
-      '$_namespace.$peerSlot',
-    );
-    final received = <Map<String, dynamic>>[];
-    peerPort.listen((message) {
-      final map = message as Map;
-      received.add(Map<String, dynamic>.from(map['body'] as Map));
-      (map['reply'] as SendPort).send({'ok': true, 'result': true});
-    });
-    addTearDown(peerPort.close);
-
-    final ownChanges = <UserStateListChange>[];
-    final sub = store.changes.listen(ownChanges.add);
-    addTearDown(sub.cancel);
-
-    await store.write('history', 'history', [1]);
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-
-    expect(received, hasLength(1));
-    expect(received.single['type'], UserStateListStore.requestChanged);
-    expect(received.single['box'], 'history');
-    expect(received.single['origin'], mySlot);
-
-    // ההודעה שחוזרת מהחלון האחר כן מזינה את הזרם המקומי...
-    store.handleRequest({
-      'type': UserStateListStore.requestChanged,
-      'box': 'history',
-      'key': 'history',
-      'origin': peerSlot,
-    });
-    // ...אבל הודעה שמקורה בחלון הזה עצמו — לא.
-    store.handleRequest({
-      'type': UserStateListStore.requestChanged,
-      'box': 'history',
-      'key': 'history',
-      'origin': mySlot,
-    });
-    await Future<void>.delayed(Duration.zero);
-    expect(ownChanges, hasLength(1));
-    expect(ownChanges.single.key, 'history');
-    expect(ownChanges.single.origin, isNull);
-    db.close();
-  });
-
   group('חלונות Dart באותו isolate', () {
-    tearDown(() => MultiViewMode.debugOverride = null);
-
     UserStateListRepository<int> repo(UserStateListStore store) =>
         UserStateListRepository<int>(
           boxName: 'history',
@@ -162,7 +94,6 @@ void main() {
         );
 
     test('כתיבה בחלון אחד מגיעה לשני, ולא לכותב עצמו', () async {
-      MultiViewMode.debugOverride = true;
       final db = UserStateDatabase.openAt(dbPath);
       final store = UserStateListStore(database: db);
       final a = repo(store);
@@ -183,22 +114,6 @@ void main() {
 
       expect(seenByA, 1);
       expect(seenByB, 4);
-      db.close();
-    });
-
-    test('בלי הדגל כתיבה מקומית אינה משודרת לעצמה', () async {
-      final db = UserStateDatabase.openAt(dbPath);
-      final store = UserStateListStore(database: db);
-      final a = repo(store);
-      final b = repo(store);
-      var seen = 0;
-      final subB = b.remoteChanges.listen((_) => seen++);
-      addTearDown(subB.cancel);
-
-      await a.mutate((current) => [...current, 1]);
-      await Future<void>.delayed(Duration.zero);
-
-      expect(seen, 0);
       db.close();
     });
   });

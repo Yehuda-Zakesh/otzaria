@@ -10,21 +10,13 @@ class PluginSafeMode {
   static bool get isActive => active.value;
 
   static Future<void> ready = SynchronousFuture<void>(null);
-  static const String readyRequest = 'pluginSafeModeReady';
 
   /// ההחלטה מתקבלת אחרי חשיפת החלון ולפני קריאת מצב התוספים.
   static Future<void> initializeSession({
-    required bool isSecondary,
-    Future<bool> Function()? waitForPrimary,
     void Function(Object, StackTrace)? onError,
   }) async {
     try {
-      if (isSecondary) {
-        if (waitForPrimary == null) {
-          throw StateError('Primary decision required');
-        }
-        active.value = await waitForPrimary();
-      } else if (!StartupCrashCounter.recordedThisProcess) {
+      if (!StartupCrashCounter.recordedThisProcess) {
         final earlyEnds = await StartupCrashCounter.recordLaunch();
         if (earlyEnds >= StartupCrashCounter.safeModeThreshold && !isActive) {
           active.value = true;

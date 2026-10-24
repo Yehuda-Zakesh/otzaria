@@ -123,6 +123,7 @@ void main() {
   late List<({String path, String jobName})> printed;
   late bool userActivated;
   late Completer<bool>? printGate;
+  Completer<void>? printEntered;
   var httpHits = 0;
 
   setUp(() async {
@@ -133,6 +134,7 @@ void main() {
     printed = [];
     userActivated = true;
     printGate = null;
+    printEntered = null;
     httpHits = 0;
     originalResolver = PluginNetworkAccessResolver.instance;
     PluginNetworkAccessResolver.instance = PluginNetworkAccessResolver(
@@ -193,6 +195,7 @@ void main() {
         hasUserActivation: (pluginId, instanceId) async => userActivated,
         printPluginFile: (file, {required jobName}) async {
           printed.add((path: file.path, jobName: jobName));
+          printEntered?.complete();
           return await (printGate?.future ?? Future.value(true));
         },
       ),
@@ -847,9 +850,10 @@ void main() {
       final adapter = buildAdapter();
       final res = await fetchFile(adapter);
       printGate = Completer<bool>();
+      printEntered = Completer<void>();
 
       final first = adapter.execute('ui', 'printFile', {'token': res['token']});
-      await Future<void>.delayed(Duration.zero);
+      await printEntered!.future;
       await expectLater(
         adapter.execute('ui', 'printFile', {'token': res['token']}),
         _failsWith('error.forbidden'),

@@ -5,14 +5,18 @@ import FlutterMacOS
 class AppDelegate: FlutterAppDelegate {
   private let externalActivationQueueFileName = "pending_external_activations.jsonl"
 
-  // חלון שהמשתמש סוגר מוסתר (orderOut) ולא נסגר, ולכן זה חל רק על סגירה
-  // נייטיב לפני ש-Dart התקין את טיפול הסגירה — ושם יציאה היא הנכונה.
+  // לפני ש-Dart התקין טיפול בסגירה, סגירה נייטיב יוצאת. אחריו Dart מחליט: חלון Dart
+  // נסגר (close) כשהראשי מוסתר, והאפליקציה נשארת ב-Dock.
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-    return true
+    return !(mainWindow(of: sender)?.isDartCloseHandlingEnabled ?? false)
+  }
+
+  private func mainWindow(of app: NSApplication) -> MainFlutterWindow? {
+    return app.windows.first(where: { $0 is MainFlutterWindow }) as? MainFlutterWindow
   }
 
   override func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    guard let window = sender.windows.first(where: { $0 is MainFlutterWindow }) as? MainFlutterWindow else {
+    guard let window = mainWindow(of: sender) else {
       return .terminateNow
     }
     return window.applicationShouldTerminate()
@@ -22,7 +26,12 @@ class AppDelegate: FlutterAppDelegate {
   override func applicationShouldHandleReopen(
     _ sender: NSApplication, hasVisibleWindows flag: Bool
   ) -> Bool {
-    if !flag && OtzariaWindowManager.shared.restoreLastClosedWindow() {
+    if flag { return true }
+    // רק Dart יודע איזה חלון נסגר אחרון. אם לא שחזר — מציגים את הראשי.
+    let askedDart = OtzariaViewWindows.shared.requestReopen {
+      OtzariaWindowManager.shared.showMainWindow()
+    }
+    if askedDart || OtzariaWindowManager.shared.restoreLastClosedWindow() {
       return false
     }
     return true

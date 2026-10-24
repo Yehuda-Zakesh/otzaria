@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:provider/provider.dart';
 import 'package:otzaria/app_scope/external_activation_service.dart';
-import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/bookmarks/bloc/bookmark_bloc.dart';
 import 'package:otzaria/bookmarks/repository/bookmark_repository.dart';
 import 'package:otzaria/core/startup_timeline.dart';
@@ -92,14 +91,11 @@ class AppScopeProviders extends StatelessWidget {
               isOfflineMode: () =>
                   Settings.getValue<bool>(SettingsRepository.keyOfflineMode) ??
                   false,
-              // בדיקת עדכונים רצה רק במארח, כדי שחלונות משניים לא יכפילו
-              // בקשות GitHub ויקבלו 403.
               areUpdatesEnabled: () =>
-                  ProcessDuties.current.isProcessOwner &&
-                  (Settings.getValue<bool>(
-                        SettingsRepository.keySoftwareAndBookUpdatesEnabled,
-                      ) ??
-                      true),
+                  Settings.getValue<bool>(
+                    SettingsRepository.keySoftwareAndBookUpdatesEnabled,
+                  ) ??
+                  true,
               // עדכוני ספרייה תמיד ליציב בלבד — מנותק מערוץ הפיתוח, שמשפיע רק
               // על עדכוני התוכנה.
               allowPrerelease: () => false,
@@ -112,7 +108,7 @@ class AppScopeProviders extends StatelessWidget {
             lazy: true,
             create: (_) => PluginUpdatesCubit(),
           ),
-          // נוצר רק כשהחלון המארח מבקש אותו — חלון משני אינו מנקז.
+          // נוצר רק כשהחלון הראשי מבקש אותו; חלונות Dart נרשמים אליו.
           Provider<ExternalActivationService>(
             lazy: true,
             create: (_) => ExternalActivationService(),

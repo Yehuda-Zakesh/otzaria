@@ -24,7 +24,6 @@ import 'package:otzaria/widgets/feedback/tool_empty_state.dart';
 /// Screen for displaying and managing progress for a specific book
 class BookDetailScreen extends StatefulWidget {
   final String topLevelCategoryKey;
-  final String categoryName;
   final String bookName;
   final int? bookId; // NEW: Book ID from DB
   final BookDetails?
@@ -34,7 +33,6 @@ class BookDetailScreen extends StatefulWidget {
   const BookDetailScreen({
     super.key,
     required this.topLevelCategoryKey,
-    required this.categoryName,
     required this.bookName,
     this.bookId, // NEW
     this.bookDetails,

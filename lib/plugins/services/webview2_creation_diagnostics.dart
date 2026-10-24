@@ -6,7 +6,6 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/error_log_file.dart';
-import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria_report_contract/otzaria_report_contract.dart';
 import 'package:path/path.dart' as p;
 
@@ -123,7 +122,6 @@ $r.events = Section {
   /// מחזיר את ה-Future לצורכי בדיקה בלבד; הקוראים אינם ממתינים לו.
   static Future<void>? recordCreationFailure(Object error) {
     try {
-      if (!ProcessDuties.current.isProcessOwner) return null;
       if (_triggered) return null;
       if (!_isWindows) return null;
       _triggered = true;

@@ -10,7 +10,6 @@
 #include <memory>
 #include <queue>
 #include <string>
-#include <vector>
 
 #include "win32_window.h"
 
@@ -25,30 +24,6 @@ class FlutterWindow : public Win32Window {
                          bool headless = false);
   virtual ~FlutterWindow();
 
-  // מציג את החלון ברגע שהפריים הראשון מצויר, ומביא אותו לחזית.
-  //
-  // ⚠️ נועד לחלונות משניים. החלון הראשון נחשף מ-Dart רק כשהתוכן מוכן, כי
-  // ה-splash הנייטיב מכסה את ההמתנה. לחלון משני אין splash, ולכן המתנה
-  // עד סיום האתחול נראית למשתמש כאילו הלחיצה לא עשתה כלום — הפריים
-  // הראשון הוא מסך הטעינה של האפליקציה, וזו התשובה הוויזואלית המיידית.
-  void RevealOnFirstFrame();
-
-  // האם החשיפה הראשונה תמקסם את החלון — כשהחלון שפתח אותו ממוקסם (#2989).
-  void SetRevealMaximized(bool maximized) { reveal_maximized_ = maximized; }
-
-  // מחזיר לשימוש חלון שנסגר (הוסתר) עם מטען חדש.
-  //
-  // ⚠️ זה מה שהופך פתיחת חלון למיידית. המנוע כבר עלה, ה-blocs חיים,
-  // הספרייה טעונה — נשאר רק להציג ולשלוח את הכרטיסיה. בלי זה כל פתיחה
-  // משלמת שוב את מלוא האתחול, וכל מחזור פתיחה-סגירה מוסיף מנוע לזיכרון.
-  // [origin_x]/[origin_y] הם **פינת** החלון בקואורדינטות מסך, או 0 כשאין
-  // — ואז המיקום נשאר כשהיה.
-  // [bounds] היא מסגרת מדויקת שדוחה את [origin_x]/[origin_y] — כך חלון
-  // שהמשתמש הצמיד בגרירה נוצר בדיוק במסגרת שההצמדה נתנה.
-  void ReviveWith(const std::string& payload, int width, int height,
-                  int origin_x = 0, int origin_y = 0,
-                  const RECT* bounds = nullptr, bool maximized = false);
-
  protected:
   // Win32Window:
   bool OnCreate() override;
@@ -59,6 +34,9 @@ class FlutterWindow : public Win32Window {
 
  private:
   void ArmForceExitWatchdog(uint32_t timeout_ms);
+
+  // מציג שוב את החלון אם המשתמש סגר (הסתיר) אותו; false אם לא נסגר.
+  bool RestoreClosedWindow();
 
   // שוטף את הכתיבות התלויות של Dart לפני שאנחנו מאשרים סיום סשן.
   //
@@ -75,44 +53,16 @@ class FlutterWindow : public Win32Window {
 
   // When true, skip Show() in the first-frame callback. Used by CLI commands.
   bool headless_ = false;
-  // ראו [SetRevealMaximized].
-  bool reveal_maximized_ = false;
+  // המשתמש סגר את החלון: הוא מוסתר ולא נהרס. להבדיל מחלון שטרם נחשף.
+  bool closed_by_user_ = false;
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       process_control_channel_;
-  // ערוץ ריבוי החלונות (otzaria/multiwindow). Dart קורא "openWindow" עם
-  // מטען JSON, וה-runner יוצר חלון נוסף על ה-thread הראשי.
+  // ערוץ החלונות (otzaria/multiwindow): סגירה והעלאה של הראשי וגרירה.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       multiwindow_channel_;
-  // בקשת פתיחת חלון שממתינה לאיטרציה הבאה של לולאת ההודעות.
-  //
-  // ⚠️ ה-`result` נשמר ונענה **אחרי** שהחלון נוצר בפועל. קודם לכן הערוץ
-  // החזיר `true` מיד אחרי ההכנסה לתור, וערך ההחזרה של היצירה עצמה נזרק —
-  // כלומר Dart קיבל "הצלחה" על חלון שאולי לא קם, ומחק את הכרטיסיה על סמך
-  // התשובה הזו.
-  struct PendingSecondaryWindow {
-    std::string payload;
-    int width = 0;
-    int height = 0;
-    // פינת החלון בקואורדינטות מסך, או 0 כשהפתיחה לא באה מגרירה.
-    int origin_x = 0;
-    int origin_y = 0;
-    // מסגרת מדויקת, כשהגרירה הסתיימה בהצמדה של Windows.
-    //
-    // ⚠️ דוחה את `origin_x`/`origin_y`. חלון שהמשתמש הצמיד לחצי מסך חייב
-    // להיווצר באותה מסגרת, אחרת ההצמדה שהוא ראה נעלמת ברגע שהחלון
-    // האמיתי מופיע.
-    bool has_bounds = false;
-    RECT bounds{};
-    // החלון שפתח אותו ממוקסם — החדש נחשף ממוקסם, ו-[bounds] היא המסגרת הרגילה.
-    bool maximized = false;
-    std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>> result;
-  };
-  // נכתב בטיפול בערוץ ונקרא בלולאת ההודעות של אותו thread, ולכן אין כאן
-  // גישה חוצת-threads.
-  std::queue<PendingSecondaryWindow> pending_secondary_windows_;
   // בקשות "מסור את הגרירה ל-Windows" שממתינות ללולאת ההודעות.
   //
   // ⚠️ נענות **אחרי** שהמשתמש שחרר, כי התשובה היא המסגרת הסופית — כולל
@@ -130,50 +80,6 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       splash_channel_;
   std::atomic_bool force_exit_watchdog_armed_ = false;
-  // האם החלון עדיין נספר ב-`g_live_window_count`. מונע הפחתה כפולה
-  // כשמגיעות שתי בקשות סגירה, **וגם** ספירה כפולה בשימוש חוזר.
-  bool counted_ = true;
-
-  // ראו [hidden_at].
-  unsigned long long hidden_at_ = 0;
-
- public:
-  // האם החלון נסגר על ידי המשתמש (הוסתר), להבדיל מחלון חדש שטרם נחשף.
-  //
-  // ⚠️ אסור להסיק זאת מ-`IsWindowVisible`. חלון נוצר מוסתר ונחשף רק
-  // בפריים הראשון — כ-422ms אחר כך. בפער הזה הוא נראה בדיוק כמו חלון
-  // סגור, ולכן פתיחה שנייה "מיחזרה" חלון שעוד נטען: המונה נופח לצמיתות,
-  // התהליך לא יצא לעולם, והזומבי החזיק את מנעול המופע היחיד — כלומר
-  // התוכנה גם לא ניתנת להפעלה מחדש.
-  bool IsClosedByUser() const { return hidden_flag_->load(); }
-
-  // מתי החלון הוסתר, בסידור עולה. 0 פירושו "לא הוסתר מעולם".
-  //
-  // ⚠️ נדרש כי סדר היצירה אינו סדר הסגירה, ו-Ctrl+Shift+T מחזיר את
-  // **האחרון שנסגר**.
-  unsigned long long hidden_at() const { return hidden_at_; }
-
-  // דגל משותף עם שעון-הביטחון של החשיפה, שרץ על thread מנותק ואינו יכול
-  // להחזיק מצביע לחלון.
-  std::shared_ptr<std::atomic<bool>> hidden_flag() const {
-    return hidden_flag_;
-  }
-
-  // כל חלונות אוצריא בתהליך, **כולל הראשון**.
-  //
-  // ⚠️ מצביעים גולמיים, והבעלות נשארת במקומה: הראשון יושב במחסנית של
-  // `wWinMain` והמשניים ב-`SecondaryWindowsOnThisThread`. הרישום נעשה
-  // בקונסטרוקטור ומוסר בדסטרקטור, ולכן אין כאן מצביע תלוי.
-  //
-  // קיים כי שתי הלולאות שמחפשות חלון מוסתר — מיחזור בפתיחה ושחזור
-  // ב-Ctrl+Shift+T — סרקו את המשניים בלבד. חלון ראשון שהמשתמש סגר לא היה
-  // ניתן לשחזור לעולם, ולא מוחזר לשימוש: במקומו נוצר מנוע נוסף, והתקרה
-  // נחרגה באחד.
-  static std::vector<FlutterWindow*>& AllWindowsInProcess();
-
- private:
-  std::shared_ptr<std::atomic<bool>> hidden_flag_ =
-      std::make_shared<std::atomic<bool>>(false);
 
   // Win32 Job Object that contains this process plus any child processes
   // it spawns (notably WebView2's msedgewebview2.exe instances). Configured

@@ -3,11 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:otzaria/core/app_runtime_reset.dart';
 import 'package:otzaria/core/messages/settings_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/app_quit.dart';
 import 'package:otzaria/plugins/view/webview_environment_holder.dart';
 import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
 import 'package:otzaria/settings/services/backup_service.dart';
-import 'package:otzaria/widgets/misc/restart_widget.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
 
 /// מסלול השחזור (החלפה) המשותף למסך ההגדרות ולהודעת העלייה: אישור, שחזור,
@@ -114,8 +113,7 @@ class BackupRestoreFlow {
     if (!context.mounted) return;
     await resetRuntimeStateAfterSettingsReset();
     if (!context.mounted) return;
-    MultiWindowService.restartPeers();
-    RestartWidget.restartApp(
+    AppQuit.restartAll(
       context,
       afterRestart: WebViewEnvironmentHolder.disposeForAppRestart,
     );

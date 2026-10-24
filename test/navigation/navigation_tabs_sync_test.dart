@@ -44,7 +44,7 @@ class _FakeNavigationRepository implements NavigationRepository {
 
 class _FakeTabsRepository implements TabsRepository {
   @override
-  List<OpenedTab> loadTabs() => [];
+  List<OpenedTab> loadTabs({bool newRuntime = false}) => [];
 
   @override
   Future<void> flushPendingWrites() async {}

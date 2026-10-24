@@ -539,6 +539,22 @@ class CommentaryListBaseState extends State<CommentaryListBase>
     return items;
   }
 
+  /// הקישורים ש-[_itemKeys] סונכרנו אליהם; בנייה על אותה רשימה אינה גוזרת שוב.
+  List<Link>? _keyedLinks;
+
+  /// מפתחות הפריטים והטקסט המרונדר — רק לקישורים של [links].
+  void _syncItemKeys(List<Link> links) {
+    if (identical(_keyedLinks, links)) return;
+    _keyedLinks = links;
+    final currentLinkKeys = links.map(_getLinkKey).toSet();
+    _itemKeys.removeWhere((key, _) => !currentLinkKeys.contains(key));
+    for (final key in currentLinkKeys) {
+      _itemKeys.putIfAbsent(key, GlobalKey.new);
+    }
+    _renderedTextByKey.removeWhere((key, _) => !currentLinkKeys.contains(key));
+    _renderedTitleByKey.removeWhere((key, _) => !currentLinkKeys.contains(key));
+  }
+
   Key _flatItemKey(CommentaryFlatItem item) => item.link == null
       ? ValueKey('h:${item.group.bookTitle}')
       : ValueKey('l:${_getLinkKey(item.link!)}');
@@ -2033,25 +2049,8 @@ class CommentaryListBaseState extends State<CommentaryListBase>
                     _schedulePendingCommentatorScroll();
                   }
 
-                  // מנקה מפתחות ישנים ומכין מפתחות חדשים
-                  final currentLinkKeys = data
-                      .map((l) => _getLinkKey(l))
-                      .toSet();
-
                   _scheduleSearchCompute();
-                  _itemKeys.removeWhere(
-                    (key, value) => !currentLinkKeys.contains(key),
-                  );
-                  for (final key in currentLinkKeys) {
-                    _itemKeys.putIfAbsent(key, () => GlobalKey());
-                  }
-                  _renderedTextByKey.removeWhere(
-                    (key, value) => !currentLinkKeys.contains(key),
-                  );
-                  _renderedTitleByKey.removeWhere(
-                    (key, value) => !currentLinkKeys.contains(key),
-                  );
-
+                  _syncItemKeys(data);
                   pruneCommentaryExpansionStates(_expansionStates, data);
 
                   // מיירט גם את CopySelectionTextIntent, ולא רק את צירוף
@@ -2899,6 +2898,14 @@ class _NotesCommentaryWidget extends StatefulWidget {
 class _NotesCommentaryWidgetState extends State<_NotesCommentaryWidget> {
   String? _selectedText;
   final Object _selectionOwner = Object();
+  // onExit של ספאן מגיע גם אחרי שהווידג'ט הוסר מהעץ, וכבר אין context.
+  late final AppWindowKeys _previewWindow;
+
+  @override
+  void initState() {
+    super.initState();
+    _previewWindow = AppWindowKeys.of(context);
+  }
 
   void _onNotesSelectionChanged(String? text) {
     _selectedText = text;
@@ -3094,9 +3101,7 @@ class _NotesCommentaryWidgetState extends State<_NotesCommentaryWidget> {
                             onAnchorTap: _openAnchor,
                             onAnchorHover: _previewAnchor,
                             onAnchorHoverExit: (_) =>
-                                LinkPreviewOverlay.scheduleHide(
-                                  AppWindowKeys.of(context),
-                                ),
+                                LinkPreviewOverlay.scheduleHide(_previewWindow),
                           ),
                         );
                       }),

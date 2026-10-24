@@ -22,7 +22,6 @@ void main() {
         }),
         notifications: notifications,
         pluginEvents: () async => [],
-        broadcast: (_) {},
       );
       await owner.restoreIfNeeded();
       expect(notifications.initCalls, 0, reason: empty);
@@ -47,7 +46,6 @@ void main() {
             notifications: notifications,
             pluginEvents: () async => fromPlugin ? [event] : [],
             now: () => now,
-            broadcast: (_) {},
             dedupeDuplicates: false,
           );
       final firstNotifications = WindowsLikeNotifications();
@@ -75,7 +73,6 @@ void main() {
       store: store,
       notifications: notifications,
       pluginEvents: () async => [],
-      broadcast: (_) {},
       dedupeDuplicates: false,
     );
     await owner.restoreIfNeeded();

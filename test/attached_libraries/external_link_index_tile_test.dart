@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/attached_libraries/models/attached_library.dart';
 import 'package:otzaria/attached_libraries/repository/external_link_repository.dart';
 import 'package:otzaria/attached_libraries/view/external_link_index_tile.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 
 class _FakeLinks extends ExternalLinkRepository {
   final calls = <String>[];
@@ -64,19 +63,6 @@ void main() {
       ]),
       isEmpty,
     );
-  });
-
-  // הבנייה רצה במארח; המאגר מעביר אליו את הפקודה ומשקף את מצבו.
-  testWidgets('חלון משני מציג את פקדי בניית האינדקס', (tester) async {
-    final previousRole = WindowRole.isSecondary;
-    addTearDown(() => WindowRole.isSecondary = previousRole);
-    WindowRole.isSecondary = true;
-    await pump(tester);
-    expect(find.text('אינדקס קישורים'), findsOneWidget);
-    links.incompleteSlugs.value = {'dbA'};
-    await tester.pump();
-    await tester.tap(find.text('המשך בנייה'));
-    expect(links.calls, ['resume:dbA']);
   });
 
   testWidgets('מעודכן כשאין בנייה', (tester) async {

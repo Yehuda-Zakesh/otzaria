@@ -240,23 +240,9 @@ class SearchNavigationTree extends StatelessWidget {
     return false;
   }
 
-  List<Category> _sortedSubCategories(Category category) {
-    final subs = category.subCategories.toList();
-    if (category is Library) {
-      subs.sort(
-        (a, b) => SearchCatalogueOrderHelper.topCategoryOrder(
-          a,
-        ).compareTo(SearchCatalogueOrderHelper.topCategoryOrder(b)),
-      );
-    } else {
-      subs.sort(
-        (a, b) => SearchCatalogueOrderHelper.normalizeOrder(
-          a.order,
-        ).compareTo(SearchCatalogueOrderHelper.normalizeOrder(b.order)),
-      );
-    }
-    return subs;
-  }
+  List<Category> _sortedSubCategories(Category category) =>
+      category.subCategories.toList()
+        ..sort(SearchCatalogueOrderHelper.subCategoryOrder(category));
 
   Widget _buildFlatRow(
     BuildContext context,
@@ -596,21 +582,7 @@ class SearchNavigationTree extends StatelessWidget {
     final all = <Book>[];
     void collect(Category cat) {
       all.addAll(_uniqueBooks(cat.books));
-      final subs = cat.subCategories.toList();
-      if (cat is Library) {
-        subs.sort(
-          (a, b) => SearchCatalogueOrderHelper.topCategoryOrder(
-            a,
-          ).compareTo(SearchCatalogueOrderHelper.topCategoryOrder(b)),
-        );
-      } else {
-        subs.sort(
-          (a, b) => SearchCatalogueOrderHelper.normalizeOrder(
-            a.order,
-          ).compareTo(SearchCatalogueOrderHelper.normalizeOrder(b.order)),
-        );
-      }
-      for (final sub in subs) {
+      for (final sub in _sortedSubCategories(cat)) {
         collect(sub);
       }
     }

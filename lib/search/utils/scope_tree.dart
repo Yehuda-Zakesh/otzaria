@@ -103,11 +103,8 @@ class ScopeTree {
   // התיקיות העליונות בסדר מסך הספרייה (topCategoryOrder), בדיוק כמו
   // library_browser; הרמות הפנימיות ממויינות לפי normalizeOrder.
   static List<Category> _sortedTop(Library library) =>
-      library.subCategories.toList()..sort(
-        (a, b) => SearchCatalogueOrderHelper.topCategoryOrder(
-          a,
-        ).compareTo(SearchCatalogueOrderHelper.topCategoryOrder(b)),
-      );
+      library.subCategories.toList()
+        ..sort(SearchCatalogueOrderHelper.subCategoryOrder(library));
 
   static int _byOrder(int a, int b) =>
       SearchCatalogueOrderHelper.normalizeOrder(

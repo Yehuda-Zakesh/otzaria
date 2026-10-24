@@ -603,7 +603,6 @@ List<TikkunLine> paginateAllTokens(
               sectionTokens,
               i + 1,
               section,
-              openingChapter: tok.openingChapter,
               openingVerse: tok.openingVerse,
             );
 

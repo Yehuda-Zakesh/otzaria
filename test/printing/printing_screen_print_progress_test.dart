@@ -81,6 +81,7 @@ Future<Uint8List> _onePagePdf() {
 
 void main() {
   const pathProviderChannel = MethodChannel('plugins.flutter.io/path_provider');
+  final originalModulePath = Pdfrx.pdfiumModulePath;
   late PrintingPlatform originalPlatform;
   late Directory tempDir;
   late WorkStatusCubit workStatus;
@@ -89,6 +90,14 @@ void main() {
 
   setUpAll(() async {
     await Settings.init(cacheProvider: MemorySettingsCache());
+    final moduleName = Platform.isWindows
+        ? 'pdfium.dll'
+        : Platform.isMacOS
+        ? 'libpdfium.dylib'
+        : 'libpdfium.so';
+    Pdfrx.pdfiumModulePath = File(
+      'build/native_assets/${Platform.operatingSystem}/$moduleName',
+    ).absolute.path;
     originalPlatform = PrintingPlatform.instance;
     tempDir = Directory.systemTemp.createTempSync('otzaria-print-progress-');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -99,6 +108,7 @@ void main() {
   });
 
   tearDownAll(() {
+    Pdfrx.pdfiumModulePath = originalModulePath;
     PrintingPlatform.instance = originalPlatform;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(pathProviderChannel, null);

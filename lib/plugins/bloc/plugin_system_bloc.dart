@@ -624,7 +624,6 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       if (!event.manifest.permissions.contains('navigation.write') ||
           event.grantedPermissions['navigation.write'] != true) {
         PluginNewTabPageRegistry.instance.remove(event.manifest.id);
-        PluginNewTabPageService.broadcastChanged();
       }
       UiSnack.showSuccess(
         event.isUpdate
@@ -741,7 +740,6 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       await _installerService.uninstallPlugin(event.pluginId);
       _pluginCalendarEventsRemoved();
       PluginNewTabPageRegistry.instance.remove(event.pluginId);
-      PluginNewTabPageService.broadcastChanged();
       add(LoadPlugins());
     } catch (e) {
       UiSnack.showError(PluginMessages.uninstallPluginError(e));
@@ -846,7 +844,6 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       if (plugin != null) {
         await repository.savePlugin(plugin.copyWith(enabled: false));
         PluginNewTabPageRegistry.instance.remove(event.pluginId);
-        PluginNewTabPageService.broadcastChanged();
         PluginRuntimeDispatcher.instance.invalidatePlugin(event.pluginId);
         add(LoadPlugins());
       }
@@ -921,7 +918,6 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
         if (event.permission == 'navigation.write' ||
             event.permission == pluginNewTabPagePermission) {
           PluginNewTabPageRegistry.instance.remove(event.pluginId);
-          PluginNewTabPageService.broadcastChanged();
         }
         if (event.permission == 'reader.local_edit') {
           PluginCorrectionSessionService.instance.removeOwner(event.pluginId);
@@ -995,7 +991,6 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
         );
         if (!manifest.permissions.contains('navigation.write')) {
           PluginNewTabPageRegistry.instance.remove(manifest.id);
-          PluginNewTabPageService.broadcastChanged();
         }
         add(LoadPlugins());
         UiSnack.showSuccess(PluginMessages.devPluginReloaded);
@@ -1032,7 +1027,6 @@ class PluginSystemBloc extends Bloc<PluginSystemEvent, PluginSystemState> {
       PluginFileServer.instance.revokeAllForPlugin(event.pluginId);
       await repository.detachDevelopmentPlugin(event.pluginId);
       PluginNewTabPageRegistry.instance.remove(event.pluginId);
-      PluginNewTabPageService.broadcastChanged();
       devWatchService.stopWatcher(event.pluginId);
       add(LoadPlugins());
     } catch (e) {

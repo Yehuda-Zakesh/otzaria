@@ -9,8 +9,6 @@ import 'package:http/http.dart' as http;
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/error_log_file.dart';
 import 'package:otzaria/core/http_client_registry.dart';
-import 'package:otzaria/core/windowing/settings_sync.dart';
-import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/search_feedback/search_feedback_api.dart';
 import 'package:otzaria/search_feedback/search_feedback_events.dart';
 import 'package:otzaria/search_feedback/search_feedback_identity.dart';
@@ -127,8 +125,6 @@ class SearchFeedbackService
     String Function()? locale,
     Random? random,
     SearchFeedbackTimerFactory? timerFactory,
-    bool Function()? isSecondaryWindow,
-    Stream<String>? settingsChangesFromOtherWindows,
     this.flushDebounce = const Duration(seconds: 30),
     this.periodicInterval = const Duration(minutes: 10),
     int maxQueuedEvents = 5000,
@@ -151,8 +147,6 @@ class SearchFeedbackService
        _locale = locale ?? _defaultLocale,
        _random = random ?? Random.secure(),
        _timerFactory = timerFactory ?? Timer.new,
-       _isSecondaryWindow =
-           isSecondaryWindow ?? (() => !ProcessDuties.current.isProcessOwner),
        _baseUrl = baseUrl ?? resolveBaseUrl(_baseUrlOverride) {
     final directory = storageDirectory ?? _defaultStorageDirectory;
     _directory = directory;
@@ -167,10 +161,6 @@ class SearchFeedbackService
       client: _httpClient,
       baseUrl: _baseUrl,
       clock: _clock,
-    );
-    // הסכמה שהשתנתה בחלון אחר מגיעה ל-box המקומי דרך SettingsSync.
-    (settingsChangesFromOtherWindows ?? SettingsSync.instance.changes).listen(
-      _onSettingChangedElsewhere,
     );
   }
 
@@ -233,7 +223,6 @@ class SearchFeedbackService
   final String Function() _locale;
   final Random _random;
   final SearchFeedbackTimerFactory _timerFactory;
-  final bool Function() _isSecondaryWindow;
   final Uri _baseUrl;
 
   static const String _localOnlyMarker = '"$kSearchFeedbackLocalOnlyKey":true';
@@ -297,18 +286,6 @@ class SearchFeedbackService
   @visibleForTesting
   Future<void> settle() => whenQueued();
 
-  void _onSettingChangedElsewhere(String key) {
-    if (key != SettingsRepository.keySearchFeedbackConsent && key.isNotEmpty) {
-      return;
-    }
-    final current = consent;
-    if (current != SearchFeedbackConsent.granted) {
-      _epoch++;
-      _cancelTimers();
-    }
-    _changes.add(current);
-  }
-
   // ── הסכמה ────────────────────────────────────────────────────────────────
 
   @override
@@ -319,7 +296,7 @@ class SearchFeedbackService
       if (state == 'granted' &&
           (_consentPersistence.readVersion() ?? 0) >=
               kSearchFeedbackConsentVersion) {
-        if (!_sessionFlushDone && _isDesktop && !_isSecondaryWindow()) {
+        if (!_sessionFlushDone && _isDesktop) {
           _sessionFlushDone = true;
           _timerFactory(Duration.zero, _flushFromTimer);
         }
@@ -509,8 +486,6 @@ class SearchFeedbackService
     final epoch = _epoch;
     try {
       if (!_isDesktop || consent != SearchFeedbackConsent.granted) return;
-      // חלון משני רק כותב לתור המשותף; החלון הראשי הוא ששולח.
-      if (_isSecondaryWindow()) return;
       await _reloadIdentity();
       if (_blocked || epoch != _epoch || !isCollecting) return;
       // בתיקייה מאומצת כל מקטע נכתב בגרסה שמסמנת נתוני פיתוח — מותר להכשיר.
@@ -816,16 +791,11 @@ class SearchFeedbackService
     _backoffUntil = _clock().add(delay);
   }
 
-  /// טיימר מחזורי מרווח מגלה גם אירועים חדשים מחלונות אחרים; בזמן השהיה — עד סופה.
+  /// טיימר מחזורי מרווח; בזמן השהיה — עד סופה.
   void _scheduleNextFlush() {
     _nextFlushTimer?.cancel();
     _nextFlushTimer = null;
-    if (_blocked ||
-        !isCollecting ||
-        !_buildAllowsSending ||
-        _isSecondaryWindow()) {
-      return;
-    }
+    if (_blocked || !isCollecting || !_buildAllowsSending) return;
     final until = _backoffUntil;
     final now = _clock();
     final delay = until != null && now.isBefore(until)

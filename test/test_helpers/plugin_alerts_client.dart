@@ -15,7 +15,6 @@ CalendarAlertsClient pluginAlertsClientFor(
     store: MemoryAlertsStore(),
     pluginIds: RegistryPluginNotificationIdStore(repository),
     pluginEvents: () async => const [],
-    broadcast: (_) {},
     dedupeDuplicates: false,
   );
   addTearDown(() async {

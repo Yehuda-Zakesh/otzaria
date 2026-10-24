@@ -146,7 +146,6 @@ void main({bool initializeNotifications = true, bool resetFirst = false}) {
       notifications: NotificationService(),
       pluginIds: RegistryPluginNotificationIdStore(repo),
       pluginEvents: () async => const [],
-      broadcast: (_) {},
       dedupeDuplicates: false,
     );
     final bloc = PluginSystemBloc(

@@ -29,7 +29,6 @@ import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/core/windowing/app_window_controller.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';
 import 'package:otzaria/history/bloc/history_event.dart';
 import 'package:otzaria/history/bloc/history_state.dart';
@@ -86,10 +85,6 @@ void main() {
       'חשיפת ספר ${source.identitySuffix} משחררת את שער SQLite אחרי הציור',
       (tester) async {
         await Settings.init(cacheProvider: MemoryCacheProvider());
-        final oldSecondary = WindowRole.isSecondary;
-        final oldOpenedWithTab = WindowRole.openedWithTab;
-        WindowRole.isSecondary = false;
-        WindowRole.openedWithTab = false;
         await tester.binding.setSurfaceSize(const Size(1200, 900));
         final book = TextBook(
           id: SeforimFixtureIds.bereshitId,
@@ -251,8 +246,6 @@ void main() {
             const MethodChannel('otzaria/splash'),
             null,
           );
-          WindowRole.isSecondary = oldSecondary;
-          WindowRole.openedWithTab = oldOpenedWithTab;
           await tester.binding.setSurfaceSize(null);
           dbDir.deleteSync(recursive: true);
         });

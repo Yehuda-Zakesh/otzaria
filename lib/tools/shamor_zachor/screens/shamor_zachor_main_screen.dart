@@ -572,8 +572,6 @@ class _ShamorZachorMainScreenState extends State<ShamorZachorMainScreen>
                                             topLevelCategoryKey:
                                                 _selectedTopLevelName ??
                                                 _selectedCategoryName!,
-                                            categoryName:
-                                                _selectedCategoryName!,
                                             bookName: _selectedBookName!,
                                             bookId: _selectedBookDetails!.id,
                                             bookDetails: _selectedBookDetails!,

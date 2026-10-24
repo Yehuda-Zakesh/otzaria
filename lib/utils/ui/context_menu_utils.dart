@@ -9,7 +9,7 @@ import 'package:otzaria/book_protection/repository/book_protection_repository.da
 import 'package:otzaria/book_protection/utils/copy_guard.dart';
 import 'package:super_clipboard/super_clipboard.dart';
 import 'package:otzaria/core/messages/common_messages.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/core/windowing/window_opener.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/models/books.dart';
@@ -222,7 +222,7 @@ class ContextMenuUtils {
         icon: FluentIcons.tab_add_24_regular,
         onTap: () => openLinkTargetInBackground(context, link),
       ),
-      if (MultiWindowService.canOpenWindows)
+      if (RunnerWindowChannel.canOpenWindows)
         AppContextMenuEntry(
           label: 'פתח בחלון חדש',
           icon: FluentIcons.window_new_24_regular,

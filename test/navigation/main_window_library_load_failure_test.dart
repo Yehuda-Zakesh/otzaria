@@ -95,7 +95,7 @@ void main() {
   });
 
   testWidgets(
-    'החלטת האינדוקס בעלייה שואלת את ProcessDuties ולא את WindowRole',
+    'החלטת האינדוקס בעלייה שואלת את ProcessDuties',
     (
       tester,
     ) async {
@@ -106,8 +106,6 @@ void main() {
         tester,
         Future.value(Library(categories: [])),
       );
-      // החלון "ראשי", אבל אינו בעלי התהליך — הענף של מי שאינו בעלים חייב לרוץ.
-      WindowRole.isSecondary = false;
       harness.libraryChanges.add(
         harness.initialState.copyWith(isLoading: false),
       );
@@ -182,10 +180,11 @@ Future<_Harness> _pumpMainWindow(
   Stream<IndexingState> indexingStates = const Stream.empty(),
 }) async {
   await Settings.init(cacheProvider: MemoryCacheProvider());
-  final oldSecondary = WindowRole.isSecondary;
-  final oldOpenedWithTab = WindowRole.openedWithTab;
-  WindowRole.isSecondary = true;
-  WindowRole.openedWithTab = true;
+  // כמו חלון שאינו בעל התהליך: בלי ניקוז הפעלות חיצוניות.
+  if (ProcessDuties.current.isProcessOwner) {
+    ProcessDuties.debugOverride = ProcessDuties(isProcessOwner: () => false);
+    addTearDown(() => ProcessDuties.debugOverride = null);
+  }
   DataRepository.instance.library = catalog;
   // הבדיקה מאזינה בעצמה לכשל; כאן רק מונעים שה-Future המקורי ידווח כלא מטופל.
   DataRepository.instance.library.ignore();
@@ -267,8 +266,6 @@ Future<_Harness> _pumpMainWindow(
       await bloc.close();
     }
     DataRepository.instance.invalidateLibraryCache();
-    WindowRole.isSecondary = oldSecondary;
-    WindowRole.openedWithTab = oldOpenedWithTab;
     await tester.binding.setSurfaceSize(null);
   });
   const window = _FakeWindow(AppWindowId('test-window'));
@@ -276,6 +273,7 @@ Future<_Harness> _pumpMainWindow(
     AppWindowScope(
       controller: window,
       geometry: window,
+      role: const AppWindowRole(isPrimaryView: false, openedWithTab: true),
       child: RepositoryProvider<FocusRepository>.value(
         value: focus,
         child: MultiBlocProvider(

@@ -24,6 +24,7 @@
 //
 export 'confirmation_dialog.dart';
 export 'app_dialogs.dart';
+export 'dialog_teardown.dart';
 export 'details_info_section.dart';
 export 'input_dialog.dart';
 export 'selection_dialog.dart';

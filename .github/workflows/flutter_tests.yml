@@ -412,9 +412,9 @@ jobs:
       EnforceProcessCountAcrossBuilds: 'true'
       CMAKE_BUILD_PARALLEL_LEVEL: '4'
     # מדידה מקומית: בנייה קרה 6 דקות. ראנר CI איטי יותר ומוסיף checkout,
-    # setup ו-pub get. 30 נותן מרווח בלי לתת ל-job תקוע לשרוף שעה שלמה.
+    # setup ו-pub get, ועוד בדיקת ריבוי התצוגות. 40 נותן מרווח בלי לתת ל-job תקוע לשרוף שעה שלמה.
     # לכווץ אחרי הריצה הראשונה לפי הזמן שנמדד בפועל.
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Checkout code
@@ -457,6 +457,15 @@ jobs:
       - name: Engine SQLite integration test (Windows)
         run: flutter test integration_test/external_line_text_test.dart -d windows --timeout 5m
 
+      # ריבוי תצוגות באפליקציה המלאה. `flutter drive` ולא integration_test: ה-binding
+      # של הבדיקות מחזיר engineId=1, ובלי בעלים אמיתי לא נפתחים חלונות Dart.
+      # portable.marker: נתונים ומופע יחיד בתוך תיקיית הבנייה. DSN ריק משבית את Sentry.
+      - name: Multiview smoke (Windows)
+        shell: pwsh
+        run: |
+          New-Item -ItemType File -Force build/windows/x64/runner/Debug/portable.marker | Out-Null
+          flutter drive -d windows -t test_driver/multiview_smoke.dart --dart-define=SENTRY_DSN=
+
       # שומר לוגים בכישלון: כשהבנייה נופלת, הלוג של MSBuild הוא הדבר היחיד
       # שמסביר למה — ההודעה ב-stdout מפנה לכיוון הלא נכון בדרך כלל.
       - name: Upload build logs on failure
@@ -467,6 +476,7 @@ jobs:
           path: |
             build/windows/x64/**/*.log
             build/windows/x64/**/*.tlog
+            build/windows/x64/runner/Debug/otzaria_data/logs/**
           if-no-files-found: ignore
           retention-days: 7
 

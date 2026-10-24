@@ -3,11 +3,8 @@ import 'dart:async';
 import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:otzaria/app_scope/process_duties.dart';
-import 'package:otzaria/core/messages/window_messages.dart';
 import 'package:otzaria/core/messages/settings_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/indexing/bloc/indexing_event.dart';
 import 'package:otzaria/indexing/bloc/indexing_state.dart';
 import 'package:otzaria/indexing/models/indexing_run_result.dart';
@@ -106,20 +103,6 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
       } catch (e) {
         debugPrint('⚠️ שמירת ספרים שהשתנו מריצה שבוטלה נכשלה: $e');
       }
-      return;
-    }
-
-    // רק בקשה שהמשתמש יזם מדווחת. אירועי התחזוקה האוטומטיים (ניקוי יתומים,
-    // ספרים חדשים/שהשתנו) נשלחים בכל חלון בכל טעינת ספרייה, וההודעה עליהם
-    // קפצה בכל פתיחת חלון משני.
-    if (_delegateIndexMutationToMainWindow(
-      emit,
-      forwardOp: switch (event) {
-        StartIndexing() => MultiWindowService.indexOpAll,
-        ResetAndIndex() => MultiWindowService.indexOpResetAndIndex,
-        _ => null,
-      },
-    )) {
       return;
     }
 
@@ -450,42 +433,9 @@ class IndexingBloc extends Bloc<IndexingEvent, IndexingState> {
     ClearIndex event,
     Emitter<IndexingState> emit,
   ) async {
-    if (_delegateIndexMutationToMainWindow(
-      emit,
-      forwardOp: MultiWindowService.indexOpClear,
-    )) {
-      return;
-    }
     _activeWorkId = null;
     if (!await _repository.clearIndex()) return;
     emit(IndexingInitial());
-  }
-
-  /// בחלון משני האינדוקס אינו רץ כאן — המארח מחזיק את נעילת ה-writer של
-  /// Tantivy ומבצע במקומנו.
-  ///
-  /// [forwardOp] null בעבודת רקע: היא נשלחת בכל חלון בכל טעינת ספרייה,
-  /// והמארח מריץ אותה בעצמו — העברה הייתה מכפילה אותה ומודיעה למשתמש בכל
-  /// פתיחת חלון. אז גם אין `IndexingInitial` שידרוס את מצב האינדקס
-  /// ש-[CheckIndexStatus] פלט באותה עלייה.
-  bool _delegateIndexMutationToMainWindow(
-    Emitter<IndexingState> emit, {
-    required String? forwardOp,
-  }) {
-    if (ProcessDuties.current.isProcessOwner) return false;
-    if (forwardOp != null) {
-      emit(IndexingInitial());
-      unawaited(_forwardToMainWindow(forwardOp));
-    }
-    return true;
-  }
-
-  Future<void> _forwardToMainWindow(String op) async {
-    if (await const MultiWindowService().requestIndexOperation(op)) {
-      UiSnack.show(WindowMessages.indexingRunsInMainWindow);
-    } else {
-      UiSnack.showError(WindowMessages.indexingRequestFailed);
-    }
   }
 
   /// Handles the UpdateIndexingProgress event

@@ -1,0 +1,73 @@
+name: macOS Runner
+
+# ה-runner של macOS נשען על משתנה פרטי של המנוע (ריבוי חלונות), ולכן כל שינוי בו
+# או בקוד החלונות נבנה ונבדק ב-XCTest על Mac אמיתי.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - dev
+    paths:
+      - 'macos/**'
+      - 'lib/core/windowing/**'
+      - '.github/workflows/macos_runner.yml'
+
+concurrency:
+  group: macos-runner-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos_runner:
+    name: macOS runner build and XCTest
+    runs-on: macos-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          # ב-macOS ה-cache (~2.5GB) כמעט לא נמצא בין ריצות, ושמירתו איטית מהתקנה.
+          cache: false
+
+      # רק אם למנוע החיפוש אין בינארי מפורסם ל-hash שלו.
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Build macOS app (debug, with retry)
+        run: |
+          # xcodebuild נכשל לפעמים ב-"never received target ended message"; ניסיון חוזר פותר.
+          for attempt in 1 2 3; do
+            if flutter build macos --debug; then
+              exit 0
+            fi
+            echo "flutter build macos failed (attempt $attempt)"
+            sleep 15
+          done
+          exit 1
+
+      - name: Run RunnerTests (XCTest)
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -workspace macos/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Debug \
+            -destination "platform=macOS,arch=$(uname -m)" \
+            -derivedDataPath build/macos \
+            -resultBundlePath build/macos_runner_tests.xcresult
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: macos-runner-tests-xcresult
+          path: build/macos_runner_tests.xcresult
+          retention-days: 7

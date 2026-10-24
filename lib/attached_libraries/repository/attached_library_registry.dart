@@ -5,7 +5,6 @@ import 'dart:isolate';
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:otzaria/attached_libraries/models/attached_library.dart';
 import 'package:otzaria/attached_libraries/repository/attached_library_store.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/find_ref/repository/attached_find_ref_worker.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
@@ -47,18 +46,6 @@ class AttachedLibraryRegistry {
 
   /// null — בלי סגירה אוטומטית.
   final Duration? idleTimeout;
-
-  /// חלון משני מחזיק את הקובץ בתהליך נפרד, שהסרה או עדכון בחלון הראשי אינם
-  /// יכולים לשחרר — לכן שם הוא משוחרר מהר יותר.
-  static const secondaryWindowIdleTimeout = Duration(seconds: 30);
-
-  Duration? get _idleTimeout {
-    final timeout = idleTimeout;
-    if (timeout == null || !WindowRole.isSecondary) return timeout;
-    return timeout < secondaryWindowIdleTimeout
-        ? timeout
-        : secondaryWindowIdleTimeout;
-  }
 
   /// ניתן להחלפה בבדיקות שאינן טוענות את המנוע.
   @visibleForTesting
@@ -289,7 +276,7 @@ class AttachedLibraryRegistry {
       });
 
   void _scheduleIdleCheck() {
-    final timeout = _idleTimeout;
+    final timeout = idleTimeout;
     if (timeout == null || _idleTimer != null) return;
     _idleTimer = Timer.periodic(timeout ~/ 2, (_) => closeIdle());
   }
@@ -298,7 +285,7 @@ class AttachedLibraryRegistry {
   /// ייפתח מחדש בשאילתה הבאה.
   @visibleForTesting
   void closeIdle({DateTime? now}) {
-    final timeout = _idleTimeout;
+    final timeout = idleTimeout;
     if (timeout == null) return;
     final cutoff = (now ?? DateTime.now()).subtract(timeout);
     for (final entry in _open.values) {

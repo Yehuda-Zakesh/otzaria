@@ -1069,9 +1069,12 @@ class _PathMenuButtonState extends State<_PathMenuButton> {
   bool _isLoading = false;
 
   Future<void> _pickAndChange() async {
-    final path = await FilePicker.getDirectoryPath(
-      windowsOptions: kModalWindowsOptions,
-      linuxOptions: kModalLinuxOptions,
+    final path = await withFilePickerOwner(
+      context,
+      () => FilePicker.getDirectoryPath(
+        windowsOptions: modalWindowsOptions(context),
+        linuxOptions: kModalLinuxOptions,
+      ),
     );
     if (path == null || !mounted) return;
     setState(() => _isLoading = true);

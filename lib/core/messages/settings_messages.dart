@@ -170,8 +170,6 @@ abstract class SettingsMessages {
       'לא ניתן להסיר את הספרים המוסתרים מאינדקס החיפוש';
   static const String hiddenBooksIndexUpdateFailed =
       'עדכון אינדקס החיפוש לאחר שינוי ההסתרה לא הושלם';
-  static const String hiddenBooksIndexUpdateUnconfirmed =
-      'לא התקבל אישור על השלמת עדכון אינדקס החיפוש';
   static const String hiddenBooksSelectionSaveFailed =
       'שמירת בחירות ההסתרה לא הושלמה';
 

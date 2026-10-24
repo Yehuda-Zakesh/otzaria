@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/text_book/bloc/text_book_bloc.dart';
 import 'package:otzaria/models/books.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
@@ -20,7 +20,7 @@ class _MemoryTabs extends TabsRepository {
   List<OpenedTab> tabs;
 
   @override
-  List<OpenedTab> loadTabs() => tabs;
+  List<OpenedTab> loadTabs({bool newRuntime = false}) => tabs;
   @override
   int loadCurrentTabIndex() => 0;
   @override
@@ -312,9 +312,7 @@ void main() {
     for (final copy in [
       combined.clone(),
       OpenedTab.fromJson(combined.toJson()),
-      MultiWindowService.decodePayload(
-        MultiWindowService.encodePayloadForTest(combined),
-      )!,
+      RunnerWindowChannel.transferRoundTrip(combined)!,
     ]) {
       addTearDown(copy.dispose);
       expect(leafPanes(copy).map((p) => p.historySlot), ['a', 'b']);

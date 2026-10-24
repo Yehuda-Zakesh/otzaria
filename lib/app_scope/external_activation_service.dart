@@ -7,9 +7,6 @@ import 'package:otzaria/core/external_activation_queue.dart';
 import 'package:otzaria/core/external_uri_router.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
 import 'package:otzaria/core/windowing/last_active_window.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
-import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
-import 'package:otzaria/core/windowing/window_bus.dart';
 
 /// פותח קישור בחלון הזה. מחזיר `true` אם הקישור טופל.
 typedef ExternalUriHandler = Future<bool> Function(String uriString);
@@ -26,34 +23,16 @@ class ExternalActivationService {
   ExternalActivationService({
     ExternalActivationQueue? queue,
     ExternalActivationChannel? channel,
-    bool Function()? canOpenWindows,
-    Future<int?> Function()? lastActiveSlot,
-    int? Function()? ownSlot,
-    Future<Object?> Function(int slot, Map<String, dynamic> body)? forward,
     Stream<FileSystemEvent> Function(Directory dir)? watchDirectory,
-    bool Function()? multiView,
     AppWindowId Function()? lastActiveWindow,
   }) : _queue = queue ?? const ExternalActivationQueue(),
        _channel = channel ?? ExternalActivationChannel(),
-       _canOpenWindows =
-           canOpenWindows ?? (() => MultiWindowService.canOpenWindows),
-       _lastActiveSlot =
-           lastActiveSlot ??
-           (() => const MultiWindowService().lastActiveSlot()),
-       _ownSlot = ownSlot ?? (() => WindowBus.instance.slot),
-       _forward = forward ?? _forwardOverBus,
        _watchDirectory = watchDirectory ?? ((dir) => dir.watch()),
-       _multiView = multiView ?? (() => MultiViewMode.enabled),
        _lastActiveWindow = lastActiveWindow ?? (() => LastActiveWindow.id);
 
   final ExternalActivationQueue _queue;
   final ExternalActivationChannel _channel;
-  final bool Function() _canOpenWindows;
-  final Future<int?> Function() _lastActiveSlot;
-  final int? Function() _ownSlot;
-  final Future<Object?> Function(int slot, Map<String, dynamic> body) _forward;
   final Stream<FileSystemEvent> Function(Directory dir) _watchDirectory;
-  final bool Function() _multiView;
   final AppWindowId Function() _lastActiveWindow;
 
   late final CoalescingDrainRunner _drainRunner = CoalescingDrainRunner(
@@ -69,15 +48,6 @@ class ExternalActivationService {
 
   static Future<bool> _alwaysVisible() async => true;
 
-  static Future<Object?> _forwardOverBus(
-    int slot,
-    Map<String, dynamic> body,
-  ) => WindowBus.instance.request(
-    slot,
-    body,
-    timeout: const Duration(seconds: 5),
-  );
-
   /// רושם את החלון של ה-isolate הזה כיעד המקומי.
   void attachWindow(
     ExternalUriHandler handler, {
@@ -92,7 +62,7 @@ class ExternalActivationService {
     if (_window == handler) _window = null;
   }
 
-  /// רושם חלון Dart ([MultiViewMode]) כיעד אפשרי לקישורים שנוקזו.
+  /// רושם חלון Dart כיעד אפשרי לקישורים שנוקזו.
   void attachViewWindow(
     AppWindowId id,
     ExternalUriHandler handler, {
@@ -164,43 +134,21 @@ class ExternalActivationService {
 
   /// מפנה קישור שנוקז אל החלון הגלוי שהיה פעיל אחרון, או מטפל בו כאן.
   ///
-  /// המארח הוא המנקז היחיד, ולכן בלי ההפניה הזו הקישור היה נפתח תמיד בו —
+  /// הראשי הוא המנקז היחיד, ולכן בלי ההפניה הזו הקישור היה נפתח תמיד בו —
   /// גם כשהמשתמש עובד בחלון אחר.
   Future<void> _routeDrainedUri(String uriString) async {
     final uri = Uri.tryParse(uriString);
     final action = uri == null ? null : ExternalUriRouter.parseUri(uri);
     // "חלון חדש" לא ביקש חלון קיים — אין למי להפנות.
-    if (action is OpenNewWindowAction || !_canOpenWindows()) {
-      await _deliverHere(uriString);
-      return;
-    }
-    // החלונות באותו isolate: ה-runner מכיר רק את החלון הראשי.
-    if (_multiView()) {
+    if (action is! OpenNewWindowAction) {
       final view = await _viewWindowTarget();
       if (view != null && await view(uriString)) return;
-      await _deliverHere(uriString);
-      return;
     }
-
-    final slot = await _lastActiveSlot();
-    if (_window == null) return;
-    // null = אין חלון גלוי; אז המארח מוצג בכוונה — משהו חייב להופיע.
-    if (slot == null || slot == _ownSlot()) {
-      await _deliverHere(uriString);
-      return;
-    }
-
-    final handled = await _forward(slot, {
-      'type': MultiWindowService.requestOpenUri,
-      'uri': uriString,
-    });
-    if (handled == true || _window == null) return;
-    // היעד לא ענה או סירב — עדיף שהקישור ייפתח כאן מאשר שייעלם.
     await _deliverHere(uriString);
   }
 
-  /// כמו `lastActiveSlot` של ה-runner: החלון הגלוי שהיה פעיל אחרון. ראשי
-  /// מוסתר אינו מוחזר כל עוד חלון אחר גלוי; `null` — החלון הראשי.
+  /// החלון הגלוי שהיה פעיל אחרון. ראשי מוסתר אינו מוחזר כל עוד חלון אחר
+  /// גלוי; `null` — החלון הראשי.
   Future<ExternalUriHandler?> _viewWindowTarget() async {
     if (_views.isEmpty) return null;
     final last = _views[_lastActiveWindow()];
@@ -209,7 +157,7 @@ class ExternalActivationService {
     for (final view in _views.values.toList().reversed) {
       if (await view.isVisible()) return view.handler;
     }
-    // אין חלון גלוי: הראשי מציג את עצמו, כמו ב-runner.
+    // אין חלון גלוי: הראשי מציג את עצמו.
     return null;
   }
 

@@ -429,10 +429,7 @@ class ShamorZachorProgressProvider with ChangeNotifier {
   }
 
   /// Clear all progress for a specific book by ID
-  Future<void> clearBookProgressById(
-    int bookId, {
-    BookDetails? bookDetails,
-  }) async {
+  Future<void> clearBookProgressById(int bookId) async {
     try {
       _progressById.remove(bookId);
       _completionDatesById.remove(bookId);

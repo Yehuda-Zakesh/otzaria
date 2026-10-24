@@ -1,12 +1,15 @@
 import 'dart:async';
-import 'dart:isolate';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
-import 'package:otzaria/core/windowing/window_bus.dart';
+import 'package:otzaria/core/messages/window_messages.dart';
+import 'package:otzaria/core/windowing/app_window_id.dart';
+import 'package:otzaria/core/windowing/app_window_scope.dart';
+import 'package:otzaria/core/windowing/external_tab_drag.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
+import 'package:otzaria/core/windowing/multiview/in_process_tab_drop.dart';
+import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/core/windowing/window_opener.dart';
 import 'package:otzaria/history/bloc/history_bloc.dart';
 import 'package:otzaria/history/bloc/history_event.dart';
@@ -23,6 +26,8 @@ import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/widgets/misc/app_menu_exports.dart';
 import 'package:otzaria/workspaces/bloc/workspace_bloc.dart';
 import 'package:otzaria/workspaces/bloc/workspace_state.dart';
+
+import '../test_helpers/fake_view_window.dart';
 
 class _StubTab extends OpenedTab {
   _StubTab(super.title);
@@ -45,6 +50,7 @@ void main() {
     WidgetTester tester, {
     required OpenedTab tab,
     required TabsState state,
+    Widget Function(Widget child)? wrap,
   }) async {
     tabsBloc = _TestTabsBloc(state);
     settingsBloc = _TestSettingsBloc(SettingsState.initial());
@@ -58,33 +64,32 @@ void main() {
     });
 
     late List<AppContextMenuEntry> entries;
-    await tester.pumpWidget(
-      MultiBlocProvider(
-        providers: [
-          BlocProvider<TabsBloc>.value(value: tabsBloc),
-          BlocProvider<SettingsBloc>.value(value: settingsBloc),
-          BlocProvider<HistoryBloc>.value(value: historyBloc),
-          BlocProvider<WorkspaceBloc>.value(value: workspaceBloc),
-        ],
-        child: MaterialApp(
-          home: Directionality(
-            textDirection: TextDirection.rtl,
-            child: Builder(
-              builder: (context) {
-                entries = buildTabContextMenuEntries(
-                  context,
-                  tab,
-                  state,
-                  onCloseTab: (_) {},
-                  onCloseSelectedTabs: () {},
-                );
-                return const SizedBox.shrink();
-              },
-            ),
+    final tree = MultiBlocProvider(
+      providers: [
+        BlocProvider<TabsBloc>.value(value: tabsBloc),
+        BlocProvider<SettingsBloc>.value(value: settingsBloc),
+        BlocProvider<HistoryBloc>.value(value: historyBloc),
+        BlocProvider<WorkspaceBloc>.value(value: workspaceBloc),
+      ],
+      child: MaterialApp(
+        home: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Builder(
+            builder: (context) {
+              entries = buildTabContextMenuEntries(
+                context,
+                tab,
+                state,
+                onCloseTab: (_) {},
+                onCloseSelectedTabs: () {},
+              );
+              return const SizedBox.shrink();
+            },
           ),
         ),
       ),
     );
+    await tester.pumpWidget(wrap == null ? tree : wrap(tree));
     return entries;
   }
 
@@ -168,61 +173,75 @@ void main() {
     expect(entries.any((e) => e.label == 'סגור כרטיסיות משמאל'), isFalse);
   });
 
-  /// מיזוג חלון של כרטיסיה אחת חזרה לחלון המקור — המחווה הטבעית של
-  /// issue #1187. חלון שהתרוקן נשאר פתוח על הספרייה, ולכן אין מה לחסום.
-  group('העברת הכרטיסיה האחרונה בחלון', () {
-    late _FakeRunner runner;
+  /// ריבוי תצוגות: היעדים הם חלונות ה-Dart והראשי, וההעברה ישירה בלי אפיק.
+  group('"העבר לחלון קיים" בריבוי תצוגות', () {
+    late InProcessTabDrops drops;
+    late FakeViewWindows windows;
+    final received = <(int, OpenedTab)>[];
+
+    InProcessTabDropTarget target(
+      int slot,
+      String title, {
+      bool accepts = true,
+    }) => InProcessTabDropTarget(
+      dragState: ExternalTabDragState(),
+      devicePixelRatio: () => 1,
+      receive: (tab, _) {
+        expectSync(tabsBloc.addedEvents.whereType<RemoveTab>(), isEmpty);
+        received.add((slot, tab));
+        return accepts;
+      },
+      describe: () => (title: title, tabCount: 2, activeWorkspaceId: null),
+    );
 
     setUp(() {
-      MultiWindowService.debugSupportedOverride = true;
-      WindowBus.namespace = _namespace;
-      runner = _FakeRunner()..install();
+      MultiViewMode.debugOverride = true;
+      RunnerWindowChannel.debugSupportedOverride = true;
+      received.clear();
     });
 
     tearDown(() {
-      runner.uninstall();
-      MultiWindowService.debugSupportedOverride = null;
-      MultiWindowService.publishKnownPeers(const []);
-      WindowBus.namespace = 'otzaria.window';
+      InProcessTabDrops.debugOverride = null;
+      MultiViewMode.debugOverride = false;
+      RunnerWindowChannel.debugSupportedOverride = null;
     });
 
-    testWidgets('לחלון קיים — עוברת', (tester) async {
-      final peer = _FakePeer(2)..register();
-      addTearDown(peer.dispose);
-      MultiWindowService.publishKnownPeers(const [
-        WindowPeer(slot: 2, title: 'חלון שני', tabCount: 1),
+    testWidgets('מהראשי: מפרט את חלונות ה-Dart ומעביר ישירות', (tester) async {
+      windows = FakeViewWindows(tester);
+      final a = windows.registry.open(size: const Size(800, 600))!;
+      final b = windows.registry.open(size: const Size(800, 600))!;
+      drops = InProcessTabDrops(registry: windows.registry);
+      InProcessTabDrops.debugOverride = drops;
+      drops.register(AppWindowId.primary, target(1, 'ראשי'));
+      drops.register(a.id, target(a.slot, 'חלון א'));
+      drops.register(b.id, target(b.slot, 'חלון ב'));
+
+      final tab = ToolTab(toolId: 'builtin.calendar', title: 'לוח שנה');
+      final entries = await buildEntries(
+        tester,
+        tab: tab,
+        state: TabsState(tabs: [tab], currentTabIndex: 0),
+      );
+      final submenu = entryOf(entries, 'העבר לחלון קיים').children!;
+      expect(submenu.map((e) => e.label), [
+        WindowMessages.peerWithTabs('חלון א', 2),
+        WindowMessages.peerWithTabs('חלון ב', 2),
       ]);
-      final tab = ToolTab(toolId: 'builtin.calendar', title: 'לוח שנה');
-      final entries = await buildEntries(
-        tester,
-        tab: tab,
-        state: TabsState(tabs: [tab], currentTabIndex: 0),
-      );
 
-      await tester.runAsync(() async {
-        entryOf(entries, 'העבר לחלון קיים').children!.single.onTap!();
-        // ⚠️ המסירה עוברת ב-ReceivePort אמיתי, ש-FakeAsync של pumpAndSettle
-        // אינו מקדם — ההמתנה חייבת להיות בזמן אמת.
-        // RemoveTab נשלח רק אחרי אישור המסירה, כלומר אחרי שהיעד כבר קיבל.
-        for (
-          var i = 0;
-          i < 200 &&
-              (peer.receivedTabs == 0 ||
-                  tabsBloc.addedEvents.whereType<RemoveTab>().isEmpty);
-          i++
-        ) {
-          await Future<void>.delayed(const Duration(milliseconds: 10));
-        }
-      });
+      submenu[1].onTap!();
       await tester.pump();
 
-      expect(peer.receivedTabs, 1);
+      expect(received.single.$1, b.slot);
+      expect(received.single.$2, isNot(same(tab)));
       expect(tabsBloc.addedEvents.whereType<RemoveTab>().single.tab, same(tab));
     });
 
-    testWidgets('לחלון חדש — עוברת, והחלון נשאר פתוח על הספרייה', (
-      tester,
-    ) async {
+    testWidgets('סירוב היעד משאיר את הכרטיסיה האחרונה במקור', (tester) async {
+      windows = FakeViewWindows(tester);
+      final a = windows.registry.open(size: const Size(800, 600))!;
+      drops = InProcessTabDrops(registry: windows.registry);
+      InProcessTabDrops.debugOverride = drops;
+      drops.register(a.id, target(a.slot, 'חלון א', accepts: false));
       final tab = ToolTab(toolId: 'builtin.calendar', title: 'לוח שנה');
       final entries = await buildEntries(
         tester,
@@ -230,30 +249,63 @@ void main() {
         state: TabsState(tabs: [tab], currentTabIndex: 0),
       );
 
-      await tester.runAsync(() async {
-        entryOf(entries, 'העבר לחלון חדש').onTap!();
-        await runner.opened.future.timeout(const Duration(seconds: 5));
-      });
+      entryOf(entries, 'העבר לחלון קיים').children!.single.onTap!();
       await tester.pump();
 
-      expect(runner.openWindowCalls, 1);
-      expect(tabsBloc.addedEvents.whereType<RemoveTab>().single.tab, same(tab));
+      expect(received.single.$1, a.slot);
+      expect(received.single.$2, isNot(same(tab)));
+      expect(tabsBloc.addedEvents.whereType<RemoveTab>(), isEmpty);
+      expect(tabsBloc.state.tabs.single, same(tab));
+    });
+
+    testWidgets('מחלון Dart: הראשי ברשימה כל עוד הוא מוצג', (tester) async {
+      windows = FakeViewWindows(tester);
+      final a = windows.registry.open(size: const Size(800, 600))!;
+      drops = InProcessTabDrops(registry: windows.registry);
+      InProcessTabDrops.debugOverride = drops;
+      drops.register(AppWindowId.primary, target(1, 'ראשי'));
+      drops.register(a.id, target(a.slot, 'חלון א'));
+      final tab = ToolTab(toolId: 'builtin.calendar', title: 'לוח שנה');
+
+      Future<List<AppContextMenuEntry>> fromView() => buildEntries(
+        tester,
+        tab: tab,
+        state: TabsState(tabs: [tab], currentTabIndex: 0),
+        wrap: (child) => AppWindowScope(
+          controller: a.controller,
+          geometry: a.controller,
+          keys: a.keys,
+          child: child,
+        ),
+      );
+
+      final entries = await fromView();
+      expect(
+        entryOf(entries, 'העבר לחלון קיים').children!.map((e) => e.label),
+        [WindowMessages.peerWithTabs('ראשי', 2)],
+      );
+
+      // הראשי נסגר (מוסתר): אין יעד, ולכן אין תת-תפריט.
+      drops.setMainShown(false);
+      final hidden = await fromView();
+      expect(hidden.any((e) => e.label == 'העבר לחלון קיים'), isFalse);
+      await tester.pumpWidget(const SizedBox());
     });
   });
 
   group('"חלון חדש"', () {
-    late _FakeRunner runner;
+    tearDown(() => RunnerWindowChannel.debugSupportedOverride = null);
 
-    setUp(() => runner = _FakeRunner());
-
-    tearDown(() {
-      runner.uninstall();
-      MultiWindowService.debugSupportedOverride = null;
-    });
-
-    testWidgets('פותח חלון ריק ואינו נוגע בכרטיסיה', (tester) async {
-      MultiWindowService.debugSupportedOverride = true;
-      runner.install();
+    testWidgets('macOS בלי handshake: אף פריט של חלון אחר אינו מופיע', (
+      tester,
+    ) async {
+      RunnerWindowChannel.debugSupportedOverride = null;
+      MultiViewMode.debugOverride = null;
+      MultiViewMode.debugIsMacOS = true;
+      addTearDown(() {
+        MultiViewMode.debugOverride = false;
+        MultiViewMode.debugResetMacRunner();
+      });
       final tab = _StubTab('ספר א');
       final entries = await buildEntries(
         tester,
@@ -261,18 +313,14 @@ void main() {
         state: TabsState(tabs: [tab], currentTabIndex: 0),
       );
 
-      await tester.runAsync(() async {
-        entryOf(entries, 'חלון חדש').onTap!();
-        await runner.opened.future.timeout(const Duration(seconds: 5));
-      });
-      await tester.pump();
-
-      expect(runner.openWindowCalls, 1);
-      expect(tabsBloc.addedEvents.whereType<RemoveTab>(), isEmpty);
+      final labels = entries.map((entry) => entry.label).toSet();
+      for (final label in ['חלון חדש', 'העבר לחלון חדש', 'העבר לחלון קיים']) {
+        expect(labels, isNot(contains(label)));
+      }
     });
 
     testWidgets('אינו מופיע כשריבוי חלונות אינו נתמך', (tester) async {
-      MultiWindowService.debugSupportedOverride = false;
+      RunnerWindowChannel.debugSupportedOverride = false;
       final tab = _StubTab('ספר א');
       final entries = await buildEntries(
         tester,
@@ -288,33 +336,49 @@ void main() {
     late _FakeWindowOpener opener;
 
     setUp(() {
-      MultiWindowService.debugSupportedOverride = true;
+      RunnerWindowChannel.debugSupportedOverride = true;
       opener = _FakeWindowOpener();
       WindowOpener.debugOverride = opener;
     });
 
     tearDown(() {
       WindowOpener.debugOverride = null;
-      MultiWindowService.debugSupportedOverride = null;
+      RunnerWindowChannel.debugSupportedOverride = null;
     });
 
-    testWidgets('"העבר לחלון חדש" פותח עם הכרטיסיה וסוגר אותה כאן', (
-      tester,
-    ) async {
-      final tab = ToolTab(toolId: 'builtin.calendar', title: 'לוח שנה');
-      final entries = await buildEntries(
-        tester,
-        tab: tab,
-        state: TabsState(tabs: [tab], currentTabIndex: 0),
-      );
+    for (final accepted in [true, false]) {
+      testWidgets('"העבר לחלון חדש" ממתין לאישור: $accepted', (tester) async {
+        opener.openResult = Completer<bool>();
+        final tab = ToolTab(toolId: 'builtin.calendar', title: 'לוח שנה');
+        final entries = await buildEntries(
+          tester,
+          tab: tab,
+          state: TabsState(tabs: [tab], currentTabIndex: 0),
+        );
 
-      entryOf(entries, 'העבר לחלון חדש').onTap!();
-      await tester.pump();
+        entryOf(entries, 'העבר לחלון חדש').onTap!();
+        await tester.pump();
 
-      expect(opener.calls, ['canOpenAnotherWindow', 'openWindow']);
-      expect(opener.openedTabs.single, same(tab));
-      expect(tabsBloc.addedEvents.whereType<RemoveTab>().single.tab, same(tab));
-    });
+        expect(opener.calls, ['canOpenAnotherWindow', 'openWindow']);
+        expect(opener.openedTabs.single, same(tab));
+        expect(tabsBloc.addedEvents.whereType<RemoveTab>(), isEmpty);
+        expect(tabsBloc.state.tabs.single, same(tab));
+
+        opener.openResult!.complete(accepted);
+        await tester.pump();
+
+        if (accepted) {
+          expect(
+            tabsBloc.addedEvents.whereType<RemoveTab>().single.tab,
+            same(tab),
+          );
+        } else {
+          expect(tabsBloc.addedEvents.whereType<RemoveTab>(), isEmpty);
+          expect(tabsBloc.state.tabs.single, same(tab));
+          expect(opener.calls.last, 'reportOpenWindowFailure');
+        }
+      });
+    }
 
     testWidgets('"חלון חדש" פותח חלון ריק', (tester) async {
       final tab = _StubTab('ספר א');
@@ -328,71 +392,11 @@ void main() {
       await tester.pump();
 
       expect(opener.calls, ['openEmptyWindow']);
+      expect(opener.openedTabs, isEmpty);
       expect(tabsBloc.addedEvents.whereType<RemoveTab>(), isEmpty);
+      expect(tabsBloc.state.tabs.single, same(tab));
     });
   });
-}
-
-/// ⚠️ קידומת ייחודית לסוויטה — [ui.IsolateNameServer] גלובלי לתהליך.
-const String _namespace = 'otzaria.test.tabcontextmenu';
-
-class _FakeRunner {
-  int openWindowCalls = 0;
-  final Completer<void> opened = Completer<void>();
-
-  void install() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(MultiWindowService.channel, (call) async {
-          switch (call.method) {
-            case 'windowCount':
-              return {'count': 2, 'max': 4, 'engines': 2};
-            case 'openWindow':
-              openWindowCalls++;
-              if (!opened.isCompleted) opened.complete();
-              return true;
-            default:
-              return null;
-          }
-        });
-  }
-
-  void uninstall() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(MultiWindowService.channel, null);
-  }
-}
-
-/// חלון יעד מדומה על האפיק.
-class _FakePeer {
-  _FakePeer(this.slot);
-
-  final int slot;
-  int receivedTabs = 0;
-  late final ReceivePort _port;
-
-  void register() {
-    _port = ReceivePort();
-    ui.IsolateNameServer.registerPortWithName(
-      _port.sendPort,
-      '$_namespace.$slot',
-    );
-    _port.listen((message) {
-      final map = message as Map;
-      final reply = map['reply'] as SendPort;
-      final body = Map<String, dynamic>.from(map['body'] as Map);
-      if (body['type'] == MultiWindowService.requestReceiveTab) {
-        receivedTabs++;
-        reply.send({'ok': true, 'result': true});
-        return;
-      }
-      reply.send({'ok': true, 'result': null});
-    });
-  }
-
-  void dispose() {
-    ui.IsolateNameServer.removePortNameMapping('$_namespace.$slot');
-    _port.close();
-  }
 }
 
 class _TestTabsBloc extends Cubit<TabsState> implements TabsBloc {
@@ -438,6 +442,7 @@ class _TestHistoryBloc extends Cubit<HistoryState> implements HistoryBloc {
 class _FakeWindowOpener implements WindowOpener {
   final List<String> calls = [];
   final List<OpenedTab?> openedTabs = [];
+  Completer<bool>? openResult;
 
   @override
   Future<bool> openWindow({
@@ -448,7 +453,7 @@ class _FakeWindowOpener implements WindowOpener {
   }) async {
     calls.add('openWindow');
     openedTabs.add(tab);
-    return true;
+    return openResult?.future ?? true;
   }
 
   @override
@@ -470,8 +475,7 @@ class _FakeWindowOpener implements WindowOpener {
   }
 
   @override
-  Future<({int count, int max, int engines})?> windowCount() async =>
-      (count: 1, max: 4, engines: 1);
+  Future<({int count, int max})?> windowCount() async => (count: 1, max: 4);
 
   @override
   Future<void> reportOpenWindowFailure() async {

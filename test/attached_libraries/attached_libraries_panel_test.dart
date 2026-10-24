@@ -10,7 +10,6 @@ import 'package:otzaria/attached_libraries/repository/attached_libraries_reposit
 import 'package:otzaria/attached_libraries/repository/external_link_repository.dart';
 import 'package:otzaria/attached_libraries/view/attached_libraries_panel.dart';
 import 'package:otzaria/library/bloc/library_event.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 
 import '../helpers/memory_settings_cache.dart';
 
@@ -170,23 +169,6 @@ void main() {
       ExternalLinkRepository.instance.tooLargeSlugs.value = {'dbB'};
       await tester.pump();
       expect(find.text(message), findsOneWidget);
-    });
-
-    testWidgets('חלון משני מציע לבנות מחדש את אינדקס המסד', (
-      tester,
-    ) async {
-      final previousRole = WindowRole.isSecondary;
-      final links = ExternalLinkRepository.instance;
-      addTearDown(() {
-        WindowRole.isSecondary = previousRole;
-        links.incompleteSlugs.value = const {};
-      });
-      WindowRole.isSecondary = true;
-      links.incompleteSlugs.value = {'dbA'};
-      final repository = _FakeRepository([_library('dbA')]);
-      AttachedLibrariesRepository.instance = repository;
-      await pumpPanel(tester, repository);
-      expect(find.text('בנה אינדקס מחדש'), findsOneWidget);
     });
 
     testWidgets('אינדקס קישורים בבנייה או שנקטע מציג הודעה בשורת המסד', (

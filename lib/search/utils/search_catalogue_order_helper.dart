@@ -34,16 +34,8 @@ class SearchCatalogueOrderHelper {
     final attachedKeys = <T>[];
 
     void collectBooks(Category category) {
-      final sortedSubCategories = category.subCategories.toList();
-      if (category is Library) {
-        sortedSubCategories.sort(
-          (a, b) => topCategoryOrder(a).compareTo(topCategoryOrder(b)),
-        );
-      } else {
-        sortedSubCategories.sort(
-          (a, b) => normalizeOrder(a.order).compareTo(normalizeOrder(b.order)),
-        );
-      }
+      final sortedSubCategories = category.subCategories.toList()
+        ..sort(subCategoryOrder(category));
 
       // ספרי הקטגוריה קודמים לתת-הקטגוריות: "מפרשים" הוא תת-קטגוריה של
       // הספר שהוא מפרש, וסריקתו קודם הציבה את המפרשים לפני המדרש עצמו.
@@ -90,4 +82,15 @@ class SearchCatalogueOrderHelper {
 
   static int normalizeOrder(int order) =>
       order >= 0 ? order : 1000 + order.abs();
+
+  /// סדר התצוגה של תת-הקטגוריות של [parent], כמו במסך הספרייה: התיקיות
+  /// העליונות לפי [topCategoryOrder], וכל רמה פנימית לפי [normalizeOrder].
+  static Comparator<Category> subCategoryOrder(Category parent) =>
+      parent is Library ? _compareTopCategories : _compareNestedCategories;
+
+  static int _compareTopCategories(Category a, Category b) =>
+      topCategoryOrder(a).compareTo(topCategoryOrder(b));
+
+  static int _compareNestedCategories(Category a, Category b) =>
+      normalizeOrder(a.order).compareTo(normalizeOrder(b.order));
 }

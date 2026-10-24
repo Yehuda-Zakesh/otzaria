@@ -13,13 +13,10 @@ import 'package:otzaria/attached_libraries/repository/attached_library_probe.dar
 import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/user_state/pending_report_store.dart';
-import 'package:otzaria/core/messages/window_messages.dart';
-import 'package:otzaria/core/windowing/window_bus.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
 import 'package:otzaria/core/user_state/user_state_slot.dart';
 import 'package:otzaria/core/user_state/window_session_store.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/data/data_providers/hive_data_provider.dart';
 import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
@@ -41,7 +38,6 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart' as sqlite3;
 
 import '../../support/fake_line_source_engine.dart';
-import '../../test_helpers/fake_host_window.dart';
 import '../../models/direct_error_report_text_correction_test.dart'
     show buildCorrectionReport, trickyLine;
 
@@ -62,8 +58,7 @@ void main() {
     Hive.init(tempDir.path);
     box = await Hive.openBox<dynamic>(HiveCache.keyName);
     // בלי אפיק חלונות, ולכן המשבצת היא של החלון היחיד.
-    MultiWindowService.debugSupportedOverride = false;
-    WindowRole.isSecondary = false;
+    RunnerWindowChannel.debugSupportedOverride = false;
     UserStateDatabase.instance.overridePath(
       p.join(tempDir.path, 'user_state.db'),
     );
@@ -85,140 +80,9 @@ void main() {
     // פתוחים), ומאפס את ה-override של נתיב הנתונים.
     PluginSystemDatabase.instance.resetForTests();
     UserStateDatabase.instance.close();
-    MultiWindowService.debugSupportedOverride = null;
-    WindowRole.isSecondary = false;
+    RunnerWindowChannel.debugSupportedOverride = null;
     AppPaths.debugOverrideDataRootPath(null);
     await tempDir.delete(recursive: true);
-  });
-
-  group('שחזור מחלון משני רץ במארח', () {
-    const namespace = 'otzaria.test.backup.relay';
-
-    test('בלי מארח — הודעה שהבקשה לא הועברה', () async {
-      WindowRole.isSecondary = true;
-      WindowBus.namespace = namespace;
-      addTearDown(() => WindowBus.namespace = 'otzaria.window');
-
-      await expectLater(
-        BackupService.restoreFromBackup(p.join(tempDir.path, 'missing.json')),
-        throwsA(
-          isA<BackupRestoreFailure>().having(
-            (e) => e.toString(),
-            'message',
-            WindowMessages.mainWindowRequestFailed,
-          ),
-        ),
-      );
-    });
-
-    test('המארח משחזר ומחזיר את סיכום השחזור', () async {
-      final host = FakeHostWindow(
-        namespace: namespace,
-        respond: (_) => {
-          'skippedSections': ['סימניות'],
-          'missingCustomFolders': ['D:/ספרים'],
-          'hasLegacyPartialSettings': true,
-          'notesWithoutAnchor': 2,
-          'restoredPlugins': 1,
-          'userBooksNotReplaced': false,
-          'added': {'bookmarks': 4, 'history': 3},
-        },
-      )..register();
-      addTearDown(host.dispose);
-      WindowRole.isSecondary = true;
-
-      final result = await BackupService.restoreFromBackup(
-        'C:/backup.json',
-        mode: BackupImportMode.merge,
-      );
-
-      final request = host.ofType(BackupService.requestRestore).single;
-      expect(request['path'], 'C:/backup.json');
-      expect(request['mode'], 'merge');
-      expect(result.skippedSections, ['סימניות']);
-      expect(result.missingCustomFolders, ['D:/ספרים']);
-      expect(result.hasLegacyPartialSettings, isTrue);
-      expect(result.notesWithoutAnchor, 2);
-      expect(result.restoredPlugins, 1);
-      expect(result.added?.bookmarks, 4);
-      expect(result.added?.history, 3);
-      expect(result.added?.notes, 0);
-    });
-
-    test('כשל במארח מוצג בחלון המשני כפי שהוא', () async {
-      final host = FakeHostWindow(
-        namespace: namespace,
-        respond: (_) => {'error': 'קובץ הגיבוי לא נמצא'},
-      )..register();
-      addTearDown(host.dispose);
-      WindowRole.isSecondary = true;
-
-      await expectLater(
-        BackupService.restoreFromBackup('C:/missing.json'),
-        throwsA(
-          isA<BackupRestoreFailure>().having(
-            (e) => e.toString(),
-            'message',
-            'קובץ הגיבוי לא נמצא',
-          ),
-        ),
-      );
-    });
-
-    test('סיכום השחזור עובר את האפיק בלי אובדן', () {
-      final added = BackupImportCounts()
-        ..bookmarks = 1
-        ..bookmarkGroups = 2
-        ..history = 3
-        ..notes = 4
-        ..notesUpdated = 5
-        ..workspaces = 6
-        ..plugins = 7
-        ..shamorZachorBooks = 8;
-      final BackupRestoreResult result = (
-        skippedSections: ['א'],
-        missingCustomFolders: ['ב'],
-        hasLegacyPartialSettings: true,
-        notesWithoutAnchor: 9,
-        restoredPlugins: 10,
-        userBooksNotReplaced: true,
-        added: added,
-      );
-      final back = BackupService.restoreResultFromMap(
-        BackupService.restoreResultToMap(result),
-      );
-      expect(back.skippedSections, ['א']);
-      expect(back.missingCustomFolders, ['ב']);
-      expect(back.hasLegacyPartialSettings, isTrue);
-      expect(back.notesWithoutAnchor, 9);
-      expect(back.restoredPlugins, 10);
-      expect(back.userBooksNotReplaced, isTrue);
-      expect(
-        [
-          back.added!.bookmarks,
-          back.added!.bookmarkGroups,
-          back.added!.history,
-          back.added!.notes,
-          back.added!.notesUpdated,
-          back.added!.workspaces,
-          back.added!.plugins,
-          back.added!.shamorZachorBooks,
-        ],
-        [1, 2, 3, 4, 5, 6, 7, 8],
-      );
-    });
-
-    test('המארח מחזיר כשל במקום לזרוק', () async {
-      final response = await BackupService.handleRestoreRequest({
-        'path': p.join(tempDir.path, 'missing.json'),
-        'mode': 'replace',
-      });
-      expect(response, {'error': 'קובץ הגיבוי לא נמצא'});
-      expect(
-        await BackupService.handleRestoreRequest({'path': 'x', 'mode': '?'}),
-        {'error': WindowMessages.mainWindowRequestFailed},
-      );
-    });
   });
 
   test('createBackup מגבה מפתחות sz דינמיים מה-Box', () async {
@@ -523,17 +387,6 @@ void main() {
       });
     }
   }
-
-  test('חלון משני אינו מגדיר ואינו סוגר את מקור הספרים האישיים', () async {
-    final engine = FakeLineSourceEngine();
-    LibraryLineSource.debugReset(engine: engine);
-    addTearDown(LibraryLineSource.debugReset);
-    WindowRole.isSecondary = true;
-
-    await UserBooksDatabaseHolder.instance.repository;
-    await UserBooksDatabaseHolder.instance.close();
-    expect(engine.userBooksCalls, isEmpty);
-  });
 
   test('מפתחות ההסתרה מוצהרים ונכנסים גם במסלול הנסיגה (issue #1448)', () {
     // כש-Hive אינו פתוח הגיבוי אוסף את הרשימה המוצהרת בלבד. מפתח שאינו שם
@@ -1626,11 +1479,11 @@ void main() {
 
     /// הכרטיסיות בסשן של החלון הזה, כפי שנשמרו.
     Future<List<dynamic>> storedTabs() async =>
-        jsonDecode((await sessions.load(UserStateSlot.single))!.tabsJson)
+        jsonDecode((await sessions.load(UserStateSlot.main))!.tabsJson)
             as List<dynamic>;
 
     Future<void> putTabs(List<dynamic> tabs, int currentIndex) => sessions.save(
-      UserStateSlot.single,
+      UserStateSlot.main,
       tabsJson: jsonEncode(tabs),
       currentIndex: currentIndex,
     );
@@ -1663,7 +1516,7 @@ void main() {
       await BackupService.restoreFromBackup(path);
 
       expect(await storedTabs(), hasLength(2));
-      expect((await sessions.load(UserStateSlot.single))!.currentIndex, 1);
+      expect((await sessions.load(UserStateSlot.main))!.currentIndex, 1);
     });
 
     test('גיבוי בלי סעיף טאבים אינו מרוקן את הטאבים הקיימים', () async {

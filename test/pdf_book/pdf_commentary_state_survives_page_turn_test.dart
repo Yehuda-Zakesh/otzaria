@@ -16,6 +16,7 @@ import 'package:otzaria/settings/engine/settings_event.dart';
 import 'package:otzaria/settings/engine/settings_state.dart';
 import 'package:otzaria/services/commentary_service.dart';
 import 'package:otzaria/tabs/models/pdf_tab.dart';
+import 'package:otzaria/widgets/commentary/commentary_content.dart';
 import 'package:otzaria/widgets/commentary/links_list_view.dart';
 
 import '../helpers/memory_settings_cache.dart';
@@ -154,6 +155,44 @@ void main() {
       tester.state(find.byType(LinksListView)),
       same(before),
       reason: 'טקסט החיפוש והפתיחות בלשונית הקישורים היו נמחקים בכל דפדוף',
+    );
+  });
+
+  testWidgets('סינון הצ׳יפים בלשונית הקישורים אינו בונה את רשימת המפרשים', (
+    tester,
+  ) async {
+    final tab = _tab();
+    addTearDown(tab.dispose);
+    await tester.pumpWidget(
+      _wrap(
+        PdfCommentaryPanel(
+          tab: tab,
+          linksCount: tab.links.length,
+          linksLoading: false,
+          openBookCallback: (_) {},
+          fontSize: 16.0,
+          commentaryGroupsLoader: (links) async => [
+            LinkGroup(bookTitle: 'rashi', links: links),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('קישורים'));
+    await tester.pumpAndSettle();
+    final commentary = find.byType(CommentaryContent, skipOffstage: false);
+    expect(commentary, findsWidgets);
+    final before = tester.widget(commentary.first);
+    LinksListView links() => tester.widget(find.byType(LinksListView));
+
+    links().onSelectedLinkTypesChanged({'commentary'});
+    await tester.pump();
+
+    expect(links().selectedLinkTypes, {'commentary'});
+    expect(
+      identical(tester.widget(commentary.first), before),
+      isTrue,
+      reason: 'שינוי סינון הקישורים בנה מחדש את כל פריטי המפרשים',
     );
   });
 

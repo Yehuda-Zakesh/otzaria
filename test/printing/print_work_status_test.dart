@@ -75,5 +75,26 @@ void main() {
         }
       });
     }
+
+    testWidgets('אתחול מחדש שמפרק את הדיאלוג נחשב לביטול ואינו נתקע', (
+      tester,
+    ) async {
+      await pumpApp(tester);
+      final job = Completer<bool>();
+      final printing = PrintWorkStatus.track(() => job.future);
+      try {
+        bool? result;
+        unawaited(confirmCloseWhilePrinting().then((v) => result = v));
+        await tester.pumpAndSettle();
+        expect(find.text(PdfMessages.closeWhilePrinting), findsOneWidget);
+        // כמו RestartWidget עם מסך פתיחה: ה-Navigator נהרס עם הדיאלוג.
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump();
+        expect(result, isFalse);
+      } finally {
+        job.complete(false);
+        await printing;
+      }
+    });
   });
 }

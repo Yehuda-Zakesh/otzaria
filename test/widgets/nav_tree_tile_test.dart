@@ -60,28 +60,6 @@ void main() {
       expect(cleared, isTrue);
     });
 
-    testWidgets('filterMode מציג אייקון סינון והלחיצה עליו מפעילה onFilter', (
-      tester,
-    ) async {
-      var filtered = false;
-      await pump(
-        tester,
-        NavTreeTile.category(
-          title: 'תנ"ך',
-          level: 0,
-          filterMode: true,
-          onFilter: () => filtered = true,
-        ),
-      );
-
-      final filterIcon = find.byTooltip('סנן לפריט זה');
-      expect(filterIcon, findsOneWidget);
-
-      await tester.tap(filterIcon);
-      await tester.pump();
-      expect(filtered, isTrue);
-    });
-
     testWidgets('לחיצה על השורה מפעילה onTap', (tester) async {
       var tapped = false;
       await pump(

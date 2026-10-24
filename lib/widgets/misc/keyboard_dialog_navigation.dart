@@ -1,16 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  keyboard_dialog_navigation.dart
-//
-//  מכיל את [DialogKeyboardNavigator] ו-[DialogNavigationMixin] יחדיו —
-//  שניהם עוסקים אך ורק בניווט מקלדת בתוך דיאלוגים.
-//
-//  שאר קבצי ניווט מקלדת נשארים נפרדים:
-//  • keyboard_navigator.dart  — ניווט Ctrl+Tab בין טאבים (מטרה שונה)
-// ─────────────────────────────────────────────────────────────────────────────
-
 /// Widget לניהול קיצורי מקלדת בדיאלוגים.
 ///
 /// מספק:

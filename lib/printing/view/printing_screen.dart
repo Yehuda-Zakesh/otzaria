@@ -1782,7 +1782,9 @@ class _PrintingScreenState extends State<PrintingScreen> {
         bytes = await _createOutputPdf(format);
         successMessage = PdfMessages.pdfFileSaved;
       }
+      if (!mounted) return false;
       final path = await saveFileWithExtension(
+        context: context,
         dialogTitle: 'ייצוא קובץ',
         fileName: '${_sanitizeFileName(widget.bookId)}.$selectedExtension',
         extension: selectedExtension,

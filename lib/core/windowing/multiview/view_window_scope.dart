@@ -1,9 +1,12 @@
+import 'dart:ui' show ViewFocusEvent, ViewFocusState;
+
 import 'package:flutter/widgets.dart';
 import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/app_scope/window_scope_providers.dart';
 import 'package:otzaria/core/window_persistence.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
+import 'package:otzaria/core/windowing/multiview/view_focus_sync.dart';
 import 'package:otzaria/core/windowing/multiview/view_window_close_flow.dart';
 import 'package:otzaria/core/windowing/multiview/view_window_registry.dart';
 import 'package:otzaria/core/windowing/window_role.dart';
@@ -16,8 +19,7 @@ import 'package:otzaria/tabs/models/tab.dart';
 typedef ViewWindowCloseFlowFactory =
     ViewWindowCloseFlow Function(ViewWindowEntry entry);
 
-/// היקף החלון של חלון Dart: בקר, מפתחות, תפקיד וספקי חלון משלו, בלי
-/// `WindowBusHost` (האפיק שייך ל-isolate, ומופע שני היה גונב את הבקשות).
+/// היקף החלון של חלון Dart: בקר, מפתחות, תפקיד וספקי חלון משלו.
 class ViewWindowScope extends StatefulWidget {
   const ViewWindowScope({
     super.key,
@@ -47,7 +49,8 @@ class ViewWindowScope extends StatefulWidget {
   State<ViewWindowScope> createState() => _ViewWindowScopeState();
 }
 
-class _ViewWindowScopeState extends State<ViewWindowScope> {
+class _ViewWindowScopeState extends State<ViewWindowScope>
+    with WidgetsBindingObserver {
   late final ViewWindowEntry _entry = widget.entry;
   late final OpenedTab? _initialTab;
   late final ViewWindowCloseFlow _closeFlow = widget.closeFlow(_entry);
@@ -73,6 +76,7 @@ class _ViewWindowScopeState extends State<ViewWindowScope> {
     _entry.closeHandler = _close;
     WindowTitleSync.bind(_entry.keys, _titleSync);
     _entry.handle.changes.addListener(_onWindowChanged);
+    WidgetsBinding.instance.addObserver(this);
     _onWindowChanged();
   }
 
@@ -88,18 +92,33 @@ class _ViewWindowScopeState extends State<ViewWindowScope> {
     if (_entry.handle.isActivated && AppWindowKeys.current.id != _entry.id) {
       AppWindowKeys.activateWindow(_entry.id);
     }
+    if (_entry.handle.isActivated) ViewFocusSync.windowActivated(_viewId);
     // אין הודעה על הזזה בלבד: מיקום חדש נשמר בשינוי הבא.
     _persistence.scheduleSave();
   }
 
   @override
+  void didChangeViewFocus(ViewFocusEvent event) {
+    if (!ViewFocusSync.activationFollowsViewFocus ||
+        event.viewId != _viewId ||
+        event.state != ViewFocusState.focused) {
+      return;
+    }
+    if (AppWindowKeys.current.id != _entry.id) {
+      AppWindowKeys.activateWindow(_entry.id);
+    }
+  }
+
+  @override
   void dispose() {
     _entry.handle.changes.removeListener(_onWindowChanged);
+    WidgetsBinding.instance.removeObserver(this);
     _persistence.dispose();
     WindowTitleSync.unbind(_entry.keys, _titleSync);
     if (_entry.closeHandler == _close) {
       _entry.closeHandler = null;
     }
+    _closeFlow.abandon();
     // התוספים שהוצגו בחלון אינם מוצגים עוד; בלי זה היו נשארים רצים.
     PluginRuntimeDispatcher.instance.forgetWindow(_viewId);
     super.dispose();

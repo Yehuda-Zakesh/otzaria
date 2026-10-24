@@ -5,7 +5,6 @@ import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:otzaria/core/windowing/library_suspension_marker.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/empty_library/bloc/empty_library_bloc.dart';
 import 'package:otzaria/empty_library/bloc/empty_library_event.dart';
@@ -19,7 +18,7 @@ import 'package:path/path.dart' as path;
 import '../test_helpers/memory_cache_provider.dart';
 import 'library_release_test_support.dart';
 
-/// מתעד את קריאות ההשעיה; בלי חלונות אחרים ההשעיה עצמה אמיתית.
+/// מתעד את קריאות ההשעיה; ההשעיה עצמה אמיתית.
 class _RecordingGate extends LibraryAccessGate {
   _RecordingGate({this.failSuspend = false, this.verification})
     : super(
@@ -41,7 +40,7 @@ class _RecordingGate extends LibraryAccessGate {
   Future<LibrarySuspension> suspendAll() async {
     calls.add('suspend');
     if (failSuspend) {
-      throw const LibrarySuspendFailed('חלון אחר לא שחרר', slots: [2]);
+      throw const LibrarySuspendFailed('החלפה אחרת רצה');
     }
     return super.suspendAll();
   }
@@ -90,7 +89,6 @@ void main() {
   tearDown(() async {
     EmptyLibraryBloc.tempRootOverride = null;
     IOOverrides.global = null;
-    LibrarySuspensionMarker.resetForTesting();
     if (await temp.exists()) await temp.delete(recursive: true);
   });
 
@@ -174,10 +172,10 @@ void main() {
     expect(bloc.state.isLoading, isFalse);
     expect(gate.calls.last, 'resume:false');
     expect(await File(path.join(libDir.path, dbName)).readAsString(), 'old-db');
-    expect(LibrarySuspensionMarker.isRegistered, isFalse);
+    expect(gate.isSuspending, isFalse);
   });
 
-  test('עדכון מוצלח משעה את כל החלונות ומחדש עם דגל החלפה', () async {
+  test('עדכון מוצלח משעה את הספרייה ומחדש עם דגל החלפה', () async {
     final gate = _RecordingGate();
     final bloc = updateBloc(gate, 'new-db');
     addTearDown(bloc.close);
@@ -187,14 +185,14 @@ void main() {
 
     expect(bloc.state, isA<EmptyLibraryDirectorySelected>());
     expect(gate.calls, ['suspend', 'verify:$dbName', 'resume:true']);
-    expect(LibrarySuspensionMarker.isRegistered, isFalse);
+    expect(gate.isSuspending, isFalse);
     expect(
       await File(path.join(libDir.path, dbName)).readAsString(),
       'new-db',
     );
   });
 
-  test('עדכון שנכשל מחדש את החלונות בלי דגל החלפה', () async {
+  test('עדכון שנכשל מחדש את הספרייה בלי דגל החלפה', () async {
     final gate = _RecordingGate();
     final bloc = updateBloc(gate, null);
     addTearDown(bloc.close);
@@ -210,7 +208,7 @@ void main() {
     );
   });
 
-  test('חלון שלא שחרר: המסד לא זז והמשתמש מקבל שגיאה', () async {
+  test('החלפה שכבר רצה: המסד לא זז והמשתמש מקבל שגיאה', () async {
     final gate = _RecordingGate(failSuspend: true);
     final bloc = updateBloc(gate, 'new-db');
     addTearDown(bloc.close);
@@ -222,7 +220,7 @@ void main() {
     bloc.add(update());
     final state = await error.timeout(const Duration(seconds: 5));
 
-    expect(state.errorMessage, contains('חלון אחר לא שחרר'));
+    expect(state.errorMessage, contains('החלפה אחרת רצה'));
     expect(gate.calls, ['suspend']);
     expect(
       await File(path.join(libDir.path, dbName)).readAsString(),

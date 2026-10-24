@@ -1322,7 +1322,6 @@
   "מקור ההורדה של רכיב החיפוש של {name} עוד לא הוגדר.": "The download source of the {name} search component has not been set yet.",
   "נתוני {name} מתעדכנים כרגע. הניסיון יחזור מעצמו בעוד כמה דקות.": "The {name} data is being updated right now. It will retry by itself in a few minutes.",
   "גרסה זו של נתוני {name} אינה נתמכת עדיין. יש לעדכן את התוכנה.": "This version of the {name} data is not supported yet. Update Otzaria.",
-  "לא ניתן היה להעביר את הבקשה לחלון הראשי של אוצריא. נסה שוב.": "The request could not be passed to the main Otzaria window. Try again.",
   "מיקום הספרייה מועבר כעת. נסו שוב בסיום ההעברה.": "The library is being moved. Try again when the move is done.",
   "{label} ({percent}%)": "{label} ({percent}%)",
   "שאל אותי": "Ask me",

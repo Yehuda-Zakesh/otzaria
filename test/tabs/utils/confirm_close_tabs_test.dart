@@ -5,8 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
-import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
+import 'package:otzaria/data/sqlite/sqlite3_api.dart' show Database, sqlite3;
 import 'package:otzaria/models/books.dart';
+import 'package:otzaria/plugins/repository/plugin_correction_draft_repository.dart';
+import 'package:otzaria/plugins/services/plugin_correction_session_service.dart';
 import 'package:otzaria/plugins/services/plugin_unsaved_changes_registry.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
@@ -17,6 +19,7 @@ import 'package:otzaria/tabs/models/tool_tab.dart';
 import 'package:otzaria/tabs/tabs_repository.dart';
 import 'package:otzaria/tabs/utils/confirm_close_tabs.dart';
 
+import '../../test_helpers/controllable_correction_draft_repository.dart';
 import '../../test_helpers/memory_cache_provider.dart';
 
 class _FakeTabsRepository implements TabsRepository {
@@ -232,14 +235,12 @@ void main() {
     late AppWindowKeys view;
 
     setUp(() {
-      MultiViewMode.debugOverride = true;
       mainTabs = TabsBloc(repository: _FakeTabsRepository());
       viewTabs = TabsBloc(repository: _FakeTabsRepository());
       view = AppWindowKeys(id: const AppWindowId('window-view-2'));
       AppWindowKeys.register(view);
     });
     tearDown(() async {
-      MultiViewMode.debugOverride = null;
       AppWindowKeys.resetForTest();
       PluginUnsavedChangesRegistry.instance.removeInstance(key);
       await mainTabs.close();
@@ -355,6 +356,146 @@ void main() {
       await tester.tap(find.text(unsavedChangesCloseAnyway));
       await tester.pumpAndSettle();
       expect(await result, isTrue);
+    });
+  });
+
+  group('יציאה מלאה עם תיקון קורא שלא נשמר בחלון אחר', () {
+    final service = PluginCorrectionSessionService.instance;
+    late Database draftDb;
+    late ControllableCorrectionDraftRepository drafts;
+    late TabsBloc mainTabs;
+    late TabsBloc viewTabs;
+    late AppWindowKeys view;
+    late TextBookTab tab;
+    late String tabId;
+
+    setUp(() {
+      PluginCorrectionSessionService.flushTimeout = const Duration(
+        milliseconds: 100,
+      );
+      draftDb = sqlite3.openInMemory();
+      drafts = ControllableCorrectionDraftRepository(
+        PluginCorrectionDraftRepository.direct(draftDb),
+      );
+      service.draftRepository = drafts;
+      mainTabs = TabsBloc(repository: _FakeTabsRepository());
+      viewTabs = TabsBloc(repository: _FakeTabsRepository());
+      view = AppWindowKeys(id: const AppWindowId('window-view-2'));
+      AppWindowKeys.register(view);
+      tab = TextBookTab(book: TextBook(title: 'ספר'), index: 0);
+      tabId = PluginCorrectionSessionService.tabIdFor(tab);
+    });
+
+    tearDown(() async {
+      AppWindowKeys.resetForTest();
+      drafts.failWrites = false;
+      if (!service.processQuitPending) await service.purgeOwner('p');
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      draftDb.close();
+      PluginCorrectionSessionService.flushTimeout = const Duration(seconds: 3);
+      await mainTabs.close();
+      await viewTabs.close();
+    });
+
+    /// סשן תיקון שלא נשמר בלשונית של חלון התצוגה; היציאה מתחילה בראשי.
+    Future<Future<bool>> startQuit(WidgetTester tester) async {
+      await tester.runAsync(
+        () => service.begin(
+          owner: 'p',
+          tabId: tabId,
+          bookId: 'ספר',
+          bookUid: 'id:1',
+          libraryVersion: 'v1',
+          loadSource: (_) async => 'מקור',
+        ),
+      );
+      drafts.failWrites = true;
+      service.editParagraph(tabId, 0, 'מקור', 'תיקון');
+      final primary = AppWindowKeys.registered.firstWhere(
+        (keys) => keys.id == AppWindowId.primary,
+      );
+      Widget window(AppWindowKeys keys, TabsBloc tabs) => BlocProvider.value(
+        value: tabs,
+        child: MaterialApp(
+          navigatorKey: keys.navigator,
+          home: const SizedBox(),
+        ),
+      );
+      await tester.pumpWidget(
+        Row(
+          textDirection: TextDirection.rtl,
+          children: [
+            Expanded(child: window(primary, mainTabs)),
+            Expanded(child: window(view, viewTabs)),
+          ],
+        ),
+      );
+      viewTabs.add(ReplaceAllTabs([tab], 0));
+      await tester.pump();
+      AppWindowKeys.activate(primary);
+      final result = confirmAppCloseWithUnsavedChanges(allWindows: true);
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await tester.pumpAndSettle();
+      return result;
+    }
+
+    /// הכתיבה החוזרת רצה בשעון המדומה; בלעדיה נשאר טיימר בסוף הבדיקה.
+    Future<void> letRetrySave(WidgetTester tester) async {
+      drafts.failWrites = false;
+      await tester.pump(const Duration(seconds: 11));
+      await tester.pump(const Duration(seconds: 4));
+    }
+
+    testWidgets('ביטול היציאה אחרי האישור משחרר את הנעילה ומשאיר את הסשן', (
+      tester,
+    ) async {
+      final result = await startQuit(tester);
+      await tester.tap(find.text(unsavedChangesCloseAnyway));
+      await tester.pumpAndSettle();
+      expect(await result, isTrue);
+
+      await cancelPreparedProcessCorrectionQuit();
+      expect(service.processQuitPending, isFalse);
+      expect(service.hasSessionForTab(tabId), isTrue);
+      expect(
+        await tester.runAsync(finishPreparedProcessCorrectionQuit),
+        isFalse,
+      );
+      await letRetrySave(tester);
+    });
+
+    testWidgets('ביטול בדיאלוג: אין נעילה והסשן נשאר', (tester) async {
+      final result = await startQuit(tester);
+      await tester.tap(find.text('ביטול'));
+      await tester.pumpAndSettle();
+      expect(await result, isFalse);
+      expect(service.processQuitPending, isFalse);
+      expect(service.hasSessionForTab(tabId), isTrue);
+      await letRetrySave(tester);
+    });
+
+    // אחרון בקובץ: יציאה שהושלמה נשארת נעולה עד סוף התהליך.
+    testWidgets('דיאלוג אחד; אישור מסיים את הסשן של החלון האחר', (
+      tester,
+    ) async {
+      final result = await startQuit(tester);
+      expect(find.text(unsavedChangesDialogTitle), findsOneWidget);
+      expect(find.textContaining('‹p›'), findsWidgets);
+      await tester.tap(find.text(unsavedChangesCloseAnyway));
+      await tester.pumpAndSettle();
+      expect(await result, isTrue);
+      expect(service.processQuitPending, isTrue, reason: 'עריכות נחסמות');
+
+      drafts.failWrites = false;
+      final finished = await tester.runAsync(
+        finishPreparedProcessCorrectionQuit,
+      );
+      expect(finished, isTrue);
+      expect(service.hasSessionForTab(tabId), isFalse);
     });
   });
 }

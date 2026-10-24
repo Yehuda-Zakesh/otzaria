@@ -1,12 +1,16 @@
+import 'dart:async';
+import 'dart:ui' show ViewFocusEvent, ViewFocusState;
+
 import 'package:flutter/material.dart';
+import 'package:otzaria/core/windowing/multiview/cocoa_view_window_native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/user_state/window_bounds.dart';
 import 'package:otzaria/core/user_state/window_session_store.dart';
 import 'package:otzaria/core/window_persistence.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
 import 'package:otzaria/core/windowing/multiview/multi_view_host.dart';
 import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
+import 'package:otzaria/core/windowing/multiview/view_focus_sync.dart';
 import 'package:otzaria/core/windowing/multiview/view_window_close_flow.dart';
 import 'package:otzaria/core/windowing/multiview/view_window_opener.dart';
 import 'package:otzaria/core/windowing/multiview/view_window_registry.dart';
@@ -88,6 +92,18 @@ class _DpiChangeNative extends FakeViewWindowNative {
   );
 }
 
+class _GatedRevealNative extends FakeViewWindowNative {
+  final revealStarted = Completer<void>();
+  final allowReveal = Completer<void>();
+
+  @override
+  Future<void> reveal(int hwnd) async {
+    revealStarted.complete();
+    await allowReveal.future;
+    await super.reveal(hwnd);
+  }
+}
+
 /// מסד שהמחיקה בו נכשלת (נעול, למשל).
 class _FailingDeleteSessions extends _MemorySessions {
   @override
@@ -111,7 +127,7 @@ void main() {
   setUp(() => MultiViewMode.debugOverride = true);
 
   tearDown(() {
-    MultiViewMode.debugOverride = null;
+    MultiViewMode.debugOverride = false;
     WindowOpener.debugOverride = null;
     AppWindowKeys.resetForTest();
   });
@@ -120,6 +136,8 @@ void main() {
   late _MemorySessions sessions;
   late bool mainVisible;
   late int mainRestores;
+  late bool mainRestoreResult;
+  late int mainShows;
 
   ViewWindowOpener makeOpener(
     WidgetTester tester, {
@@ -128,11 +146,14 @@ void main() {
     _MemorySessions? store,
     int? mainHwnd,
     bool mainFullscreen = false,
+    bool keepsProcess = false,
   }) {
     windows = FakeViewWindows(tester);
     sessions = store ?? _MemorySessions();
     mainVisible = true;
     mainRestores = 0;
+    mainRestoreResult = true;
+    mainShows = 0;
     return ViewWindowOpener(
       registry: windows.registry,
       native: native ?? windows.native,
@@ -140,8 +161,10 @@ void main() {
       isMainWindowVisible: () async => mainVisible,
       restoreMainWindow: () async {
         mainRestores++;
-        return true;
+        return mainRestoreResult;
       },
+      showMainWindow: () async => mainShows++,
+      keepsProcessAfterLastWindow: keepsProcess,
       defaultSize: () => const Size(1000, 700),
       mainWindowHwnd: () async => mainHwnd,
       isMainWindowFullscreen: () async => mainFullscreen,
@@ -161,10 +184,27 @@ void main() {
     return future;
   }
 
-  testWidgets('הדגל קובע את המימוש של WindowOpener.current', (tester) async {
+  testWidgets('בלי בעלים נשארים בחלון יחיד, ולעולם לא פותחים מנוע נוסף', (
+    tester,
+  ) async {
     expect(WindowOpener.current, same(ViewWindowOpener.instance));
     MultiViewMode.debugOverride = false;
-    expect(WindowOpener.current, isA<MultiWindowService>());
+    expect(WindowOpener.current, same(ViewWindowOpener.instance));
+    MultiViewMode.debugOverride = null;
+    expect(WindowOpener.current, same(ViewWindowOpener.instance));
+  });
+
+  testWidgets('בלי בעלים לחלונות Dart לא נפתח שום חלון', (tester) async {
+    final opener = makeOpener(tester);
+    await pumpHost(tester);
+    // תחת binding של בדיקות הבעלים אינו מותקן, כמו ב-integration_test.
+    MultiViewMode.debugOverride = null;
+
+    expect(await opener.canOpenAnotherWindow(), isFalse);
+    expect(await opener.openWindow(), isFalse);
+    // חלון יחיד: האפשרות מוסתרת, ולכן גם אין הודעה.
+    expect(await opener.openEmptyWindow(), isFalse);
+    expect(windows.registry.windows, isEmpty);
   });
 
   testWidgets('openWindow: חלון עם כרטיסיה, שארית במשבצת נמחקת', (
@@ -188,7 +228,7 @@ void main() {
     expect(windows.native.hooked, [windows.handleOf(entry).fakeHwnd]);
     expect(windows.native.frameless, [windows.handleOf(entry).fakeHwnd]);
     final count = (await opener.windowCount())!;
-    expect((count.count, count.max, count.engines), (2, 8, 1));
+    expect((count.count, count.max), (2, 8));
   });
 
   testWidgets('openWindow: החלון מקבל עותק, ושחרור המקור אינו סוגר אותו', (
@@ -540,6 +580,305 @@ void main() {
     expect(opener.pendingRestoreForTest, isEmpty);
   });
 
+  testWidgets(
+    'מעבר ממודל A: סשני משבצות 2-4 נפתחים כחלונות Dart באותן משבצות',
+    (
+      tester,
+    ) async {
+      final opener = makeOpener(tester);
+      await pumpHost(tester);
+      for (final slot in [2, 3, 4]) {
+        sessions.rows[slot] = WindowSession(
+          slot: slot,
+          tabsJson: '[]',
+          currentIndex: 0,
+          activeWorkspaceId: 'ws$slot',
+        );
+      }
+
+      await settle(tester, opener.restoreAllWindows([2, 3, 4]));
+
+      final entries = windows.registry.windows;
+      expect(entries.map((w) => w.slot), [2, 3, 4]);
+      for (final entry in entries) {
+        // הסשן, השולחן והגבולות של החלון נקראים ונכתבים לפי אותה משבצת.
+        expect(entry.tabsSession.slot, entry.slot);
+        expect(entry.id.value, 'window-view-${entry.slot}');
+        expect(sessions.rows[entry.slot]!.activeWorkspaceId, 'ws${entry.slot}');
+      }
+      expect(opener.pendingRestoreForTest, isEmpty);
+    },
+  );
+
+  testWidgets('הסתרת הראשי ממתינה לחשיפה הנייטיבית, מעבר לפריים הראשון', (
+    tester,
+  ) async {
+    final native = _GatedRevealNative();
+    final opener = makeOpener(tester, native: native);
+    await pumpHost(tester);
+    final opened = opener.openWindow();
+    for (var i = 0; i < 6; i++) {
+      await tester.pump();
+    }
+    expect(native.revealStarted.isCompleted, isTrue);
+    var canHide = false;
+    final hide = opener.beforeMainWindowHides().then((_) => canHide = true);
+    await tester.pump();
+    expect(canHide, isFalse);
+    native.allowReveal.complete();
+    await tester.pump();
+    await hide;
+    expect(await opened, isTrue);
+    expect(native.revealed, hasLength(1));
+    expect(canHide, isTrue);
+  });
+
+  testWidgets(
+    'חלון שנהרס אחרי פריים ראשון ולפני אישור החשיפה אינו יעד שהצליח',
+    (tester) async {
+      final native = _GatedRevealNative();
+      final opener = makeOpener(tester, native: native);
+      await pumpHost(tester);
+      final opened = opener.openWindow();
+      for (var i = 0; i < 6; i++) {
+        await tester.pump();
+      }
+      expect(native.revealStarted.isCompleted, isTrue);
+      windows.registry.windows.single.handle.destroy();
+      native.allowReveal.complete();
+      await tester.pump();
+      expect(await opened, isFalse);
+      expect(windows.registry.windows, isEmpty);
+    },
+  );
+
+  testWidgets('כשל פתיחה מסתיים לפני הסתרת הראשי ואינו משאיר חלון', (
+    tester,
+  ) async {
+    final opener = makeOpener(tester, timeout: const Duration(seconds: 1));
+    final opened = opener.openWindow();
+    await tester.pump();
+    final hide = opener.beforeMainWindowHides();
+    await tester.pump(const Duration(seconds: 2));
+    await hide;
+    expect(await opened, isFalse);
+    expect(windows.registry.windows, isEmpty);
+  });
+
+  for (final scenario in [
+    (
+      name: 'ראשי zoom',
+      secondary: false,
+      fullscreen: false,
+      saved: true,
+      legacy: false,
+    ),
+    (
+      name: 'ראשי fullscreen',
+      secondary: false,
+      fullscreen: true,
+      saved: true,
+      legacy: false,
+    ),
+    (
+      name: 'משני zoom',
+      secondary: true,
+      fullscreen: false,
+      saved: true,
+      legacy: false,
+    ),
+    (
+      name: 'משני fullscreen',
+      secondary: true,
+      fullscreen: true,
+      saved: true,
+      legacy: false,
+    ),
+    (
+      name: 'ראשי legacy',
+      secondary: false,
+      fullscreen: false,
+      saved: false,
+      legacy: true,
+    ),
+    (
+      name: 'ראשי ללא normal שמור',
+      secondary: false,
+      fullscreen: true,
+      saved: false,
+      legacy: false,
+    ),
+  ]) {
+    testWidgets('Cocoa expanded source: ${scenario.name}', (tester) async {
+      makeOpener(tester);
+      await pumpHost(tester);
+      final source = scenario.secondary
+          ? windows.registry.open(size: const Size(800, 600))
+          : null;
+      if (source != null) {
+        windows.stubOf(source)
+          ..maximized = !scenario.fullscreen
+          ..fullscreen = scenario.fullscreen;
+      }
+      final sourceHandle = source?.handle.nativeHandle ?? 1;
+      final slot = source?.slot ?? 1;
+      const normal = WindowBounds(
+        left: 100,
+        top: 80,
+        width: 800,
+        height: 600,
+        dpr: 2,
+      );
+      if (scenario.saved) {
+        sessions.rows[slot] = WindowSession(
+          slot: slot,
+          tabsJson: '[]',
+          currentIndex: 0,
+          boundsJson: normal.encode(),
+        );
+      }
+      if (scenario.legacy) {
+        final values = {
+          'window_bounds_left': 100.0,
+          'window_bounds_top': 80.0,
+          'window_bounds_width': 800.0,
+          'window_bounds_height': 600.0,
+          'window_bounds_dpr': 2.0,
+        };
+        for (final entry in values.entries) {
+          await Settings.setValue(entry.key, entry.value);
+        }
+        addTearDown(() async {
+          for (final key in values.keys) {
+            await Settings.setValue<Object?>(key, null);
+          }
+        });
+      }
+      final frames = <int, Rect>{
+        sourceHandle: const Rect.fromLTWH(0, 0, 1920, 1080),
+      };
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(CocoaViewWindowNative.defaultChannel, (
+        call,
+      ) async {
+        final args = call.arguments as Map?;
+        final handle = args?['handle'] as int?;
+        if (call.method == 'keyWindow') return sourceHandle;
+        if (call.method == 'setFrame') {
+          frames[handle!] = Rect.fromLTWH(
+            args!['x'] as double,
+            args['y'] as double,
+            args['width'] as double,
+            args['height'] as double,
+          );
+        }
+        if (call.method == 'frame' || call.method == 'placement') {
+          final rect = frames[handle] ?? const Rect.fromLTWH(0, 0, 1000, 700);
+          return {
+            'x': rect.left,
+            'y': rect.top,
+            'width': rect.width,
+            'height': rect.height,
+            'maximized': !scenario.fullscreen,
+          };
+        }
+        if (call.method == 'visibleFrame') {
+          return {
+            'x': 0.0,
+            'y': 25.0,
+            'width': 1920.0,
+            'height': 1015.0,
+            'scale': 2.0,
+          };
+        }
+        if (call.method == 'reveal') return true;
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(
+          CocoaViewWindowNative.defaultChannel,
+          null,
+        ),
+      );
+      final opener = ViewWindowOpener(
+        registry: windows.registry,
+        native: const CocoaViewWindowNative(),
+        sessions: sessions,
+        mainWindowHwnd: () async => 1,
+        isMainWindowFullscreen: () async => scenario.fullscreen,
+      );
+      expect(await settle(tester, opener.openWindow()), isTrue);
+      final created = windows.handles.last;
+      expect(created.stub.maximized, isTrue);
+      expect(created.stub.fullscreen, isFalse);
+      expect(
+        frames[created.fakeHwnd],
+        scenario.saved || scenario.legacy
+            ? const Rect.fromLTWH(130, 110, 800, 600)
+            : const Rect.fromLTWH(30, 30, 1280, 720),
+      );
+    });
+  }
+
+  testWidgets('שחזור Cocoa משתמש בנקודות הסשן הישן עם DPR 2', (tester) async {
+    makeOpener(tester);
+    const saved = WindowBounds(
+      left: -1600,
+      top: 100,
+      width: 800,
+      height: 600,
+      dpr: 2,
+    );
+    sessions.rows[2] = WindowSession(
+      slot: 2,
+      tabsJson: '[]',
+      currentIndex: 0,
+      boundsJson: saved.encode(),
+    );
+    var actual = const Rect.fromLTWH(100, 100, 800, 600);
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(CocoaViewWindowNative.defaultChannel, (
+      call,
+    ) async {
+      if (call.method == 'setFrame') {
+        final args = call.arguments as Map;
+        actual = Rect.fromLTWH(
+          args['x'] as double,
+          args['y'] as double,
+          args['width'] as double,
+          args['height'] as double,
+        );
+      }
+      if (call.method == 'frame') {
+        return {
+          'x': actual.left,
+          'y': actual.top,
+          'width': actual.width,
+          'height': actual.height,
+        };
+      }
+      if (call.method == 'reveal') return true;
+      return null;
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(
+        CocoaViewWindowNative.defaultChannel,
+        null,
+      ),
+    );
+    final opener = ViewWindowOpener(
+      registry: windows.registry,
+      native: const CocoaViewWindowNative(),
+      sessions: sessions,
+    );
+    await pumpHost(tester);
+    await settle(tester, opener.restoreAllWindows([2]));
+    expect(actual, const Rect.fromLTWH(-1600, 100, 800, 600));
+    expect(windows.registry.windows.single.slot, 2);
+  });
+
   testWidgets('Ctrl+Shift+T: חלון שנסגר חוזר עם הסשן שלו; אחריו הראשי', (
     tester,
   ) async {
@@ -571,6 +910,34 @@ void main() {
     expect(await settle(tester, opener.restoreLastClosedWindow()), isTrue);
     expect(mainRestores, 1);
     expect(await settle(tester, opener.restoreLastClosedWindow()), isFalse);
+  });
+
+  testWidgets('מאישור הסגירה החלון אינו יעד; כשל לפני ההריסה מחזיר אותו', (
+    tester,
+  ) async {
+    final opener = makeOpener(tester);
+    await pumpHost(tester);
+    expect(await settle(tester, opener.openWindow()), isTrue);
+    final entry = windows.registry.windows.single;
+    expect(entry.isClosing, isFalse);
+    bool? closingDuringFlush;
+    final failing = ViewWindowCloseFlow(
+      entry: entry,
+      flush: () async {
+        closingDuringFlush = entry.isClosing;
+        throw StateError('flush');
+      },
+      discardSession: sessions.delete,
+      opener: opener,
+    );
+    final outcome = failing.run().then<Object?>(
+      (_) => null,
+      onError: (Object e) => e,
+    );
+    expect(await settle(tester, outcome), isStateError);
+    expect(closingDuringFlush, isTrue);
+    expect(entry.isClosing, isFalse);
+    expect(windows.stubOf(entry).destroyed, isFalse);
   });
 
   testWidgets('החלון האחרון על המסך (הראשי מוסתר): סגירה היא יציאה', (
@@ -798,4 +1165,125 @@ void main() {
     expect(opener.closedCountForTest, 0);
     expect(sessions.rows[2]!.tabsJson, '["draft"]');
   });
+
+  testWidgets('אחרי הפריים הראשון: reveal, ובמק אירוע פוקוס לתצוגה החדשה', (
+    tester,
+  ) async {
+    ViewFocusSync.debugMacOSOverride = false;
+    final focus = _FocusEvents();
+    tester.binding.addObserver(focus);
+    addTearDown(() {
+      tester.binding.removeObserver(focus);
+      ViewFocusSync.resetForTest();
+    });
+    final opener = makeOpener(tester);
+    await pumpHost(tester);
+
+    expect(await settle(tester, opener.openWindow()), isTrue);
+    final a = windows.registry.windows.single;
+    expect(windows.native.revealed, [windows.handleOf(a).fakeHwnd]);
+    expect(focus.events, isEmpty, reason: 'Windows/Linux: המנוע שולח בעצמו');
+
+    ViewFocusSync.debugMacOSOverride = true;
+    expect(await settle(tester, opener.openWindow()), isTrue);
+    final b = windows.registry.windows.last;
+    expect(windows.native.revealed.last, windows.handleOf(b).fakeHwnd);
+    expect(focus.events.single.viewId, b.handle.view.viewId);
+    expect(focus.events.single.state, ViewFocusState.focused);
+  });
+
+  testWidgets('macOS: החלון האחרון נסגר — נשארים ב-Dock והסשן נשמר', (
+    tester,
+  ) async {
+    final opener = makeOpener(tester, keepsProcess: true);
+    await pumpHost(tester);
+    var exits = 0;
+    opener.endProcess = () async => exits++;
+    expect(await settle(tester, opener.openWindow()), isTrue);
+    expect(await settle(tester, opener.openWindow()), isTrue);
+    final [a, b] = windows.registry.windows;
+    await sessions.save(a.slot, tabsJson: '["a"]', currentIndex: 0);
+    await sessions.save(b.slot, tabsJson: '["b"]', currentIndex: 0);
+    mainVisible = false;
+    ViewWindowCloseFlow flowOf(ViewWindowEntry entry) => ViewWindowCloseFlow(
+      entry: entry,
+      flush: () async {},
+      discardSession: sessions.delete,
+      opener: opener,
+    );
+
+    expect(await settle(tester, flowOf(a).run()), isTrue);
+    await tester.pump();
+    expect(sessions.rows[a.slot], isNull);
+
+    expect(await settle(tester, flowOf(b).run()), isTrue);
+    await tester.pump();
+    expect(exits, 0);
+    expect(windows.stubOf(b).destroyed, isTrue);
+    expect(sessions.rows[b.slot]!.tabsJson, '["b"]');
+
+    // ה-Dock מחזיר את האחרון למשבצת הפנויה, והשורה הישנה אינה נשארת כפולה.
+    expect(await settle(tester, opener.reopenFromDock()), isTrue);
+    final restored = windows.registry.windows.single;
+    expect(restored.slot, a.slot);
+    expect(sessions.rows[restored.slot]!.tabsJson, '["b"]');
+    expect(sessions.rows[b.slot], isNull);
+    expect(mainRestores, 0);
+  });
+
+  testWidgets('macOS: שחזור אינו מוחק שורה שמורה שחלון חדש כבר תפס', (
+    tester,
+  ) async {
+    final opener = makeOpener(tester, keepsProcess: true);
+    await pumpHost(tester);
+    opener.endProcess = () async {};
+    expect(await settle(tester, opener.openWindow()), isTrue);
+    final a = windows.registry.windows.single;
+    await sessions.save(a.slot, tabsJson: '["a"]', currentIndex: 0);
+    mainVisible = false;
+    expect(
+      await settle(
+        tester,
+        ViewWindowCloseFlow(
+          entry: a,
+          flush: () async {},
+          discardSession: sessions.delete,
+          opener: opener,
+        ).run(),
+      ),
+      isTrue,
+    );
+    await tester.pump();
+
+    // חלון חדש תופס את המשבצת של השורה השמורה.
+    mainVisible = true;
+    expect(await settle(tester, opener.openWindow()), isTrue);
+    final fresh = windows.registry.windows.single;
+    expect(fresh.slot, a.slot);
+    await sessions.save(fresh.slot, tabsJson: '["fresh"]', currentIndex: 0);
+
+    expect(await settle(tester, opener.restoreLastClosedWindow()), isTrue);
+    expect(sessions.rows[fresh.slot]!.tabsJson, '["fresh"]');
+    final restored = windows.registry.windows.last;
+    expect(sessions.rows[restored.slot]!.tabsJson, '["a"]');
+  });
+
+  testWidgets('Dock בלי חלון סגור: הראשי, ואם לא שוחזר — הצגה', (tester) async {
+    final opener = makeOpener(tester);
+    await pumpHost(tester);
+
+    expect(await opener.reopenFromDock(), isTrue);
+    expect((mainRestores, mainShows), (1, 0));
+
+    mainRestoreResult = false;
+    expect(await opener.reopenFromDock(), isTrue);
+    expect((mainRestores, mainShows), (2, 1));
+  });
+}
+
+class _FocusEvents with WidgetsBindingObserver {
+  final List<ViewFocusEvent> events = [];
+
+  @override
+  void didChangeViewFocus(ViewFocusEvent event) => events.add(event);
 }

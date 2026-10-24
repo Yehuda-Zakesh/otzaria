@@ -55,6 +55,8 @@ static void my_application_activate(GApplication* application) {
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
       project, self->dart_entrypoint_arguments);
+  // ⚠️ אין לשנות את ui_thread_policy: חלונות Dart קוראים ל-GTK ב-FFI סינכרוני,
+  // ולכן ה-isolate חייב לרוץ על ה-thread הראשי (ברירת המחדל).
 
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;
@@ -72,8 +74,7 @@ static void my_application_activate(GApplication* application) {
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
-  // ריבוי חלונות: ערוץ `otzaria/multiwindow` על המנוע הראשי. חובה **אחרי**
-  // רישום התוספים — ראו multi_window.h.
+  // ערוץ `otzaria/multiwindow` של החלון הראשי (הסתרה, הבאה לחזית ושחזור).
   otzaria_multi_window_register_main(window, view);
 
   // ערוץ "otzaria/splash" לסגירת ה-splash הנייטיב בעת חשיפת החלון הראשי.

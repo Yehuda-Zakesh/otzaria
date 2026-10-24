@@ -20,21 +20,12 @@
 
 static const wchar_t* kSingleInstanceMutexName = L"OtzariaAppSingleInstance";
 static const wchar_t* kFlutterWindowClassName = L"FLUTTER_RUNNER_WIN32_WINDOW";
-// חלון Dart של המנוע (ריבוי תצוגות, OTZARIA_MULTIVIEW). בלי הדגל אין כזה.
+// חלון Dart של המנוע (ריבוי תצוגות).
 static const wchar_t* kDartHostWindowClassName = L"FLUTTER_HOST_WINDOW";
 static const wchar_t* kMainWindowTitle = L"אוצריא";
 
-// מאפיין חלון שמסמן את החלון **הראשי**, לזיהוי מתהליך אחר.
-//
-// ⚠️ נדרש בגלל ריבוי חלונות. `FindWindowW(class, title)` מחזיר חלון
-// **שרירותי** מבין המתאימים, וכל חלונות אוצריא חולקים את אותה מחלקה ואת
-// אותה כותרת. כלומר מופע שני יכול היה להעלות חלון משני — או גרוע מכך חלון
-// **מוסתר** (חלון שהמשתמש סגר אינו נהרס), ואז `otzaria://` או הפעלה חוזרת
-// לא עשו שום דבר נראה. השבירות הזו הייתה תיאורטית בחלון יחיד.
-//
-// זהו אחד משלושת המנגנונים ש-T-1.6 מונה, והזול מביניהם: מאפיין חלון נגיש
-// דרך `GetPropW` מכל תהליך. החלפת המנגנון בבעלות נייטיבית מלאה היא T-G1.1;
-// עד אז זה החוזה, והכותרת נשארת עזר נפילה-לאחור בלבד.
+// מאפיין שמסמן את החלון הראשי לזיהוי ממופע שני; הכותרת היא עזר נפילה-לאחור
+// בלבד, כי `FindWindowW` מחזיר חלון שרירותי מבין המתאימים.
 static const wchar_t* kMainWindowPropName = L"OtzariaMainWindow";
 
 static std::wstring ExeDir() {
@@ -130,10 +121,7 @@ BOOL CALLBACK FindMainWindowProc(HWND hwnd, LPARAM param) {
     return TRUE;
   }
 
-  // ⚠️ **גלוי** קודם לכול, וזה לא ניואנס. חלון שהמשתמש סגר מוסתר ולא
-  // נהרס, והמאפיין נשאר עליו — כלומר הסריקה החזירה חלון בלתי-נראה, ומופע
-  // שני או `otzaria://` "העלו" חלון שאיש אינו רואה. עם ריבוי חלונות זה
-  // הפסיק להיות תרחיש תיאורטי.
+  // גלוי קודם לכול: ראשי שהמשתמש סגר מוסתר ולא נהרס, וחלון Dart גלוי עדיף עליו.
   if (::IsWindowVisible(hwnd)) {
     // בין חלונות גלויים מעדיפים את זה שנושא את המאפיין — הראשי.
     if (search->visible == nullptr ||
@@ -477,13 +465,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     return EXIT_FAILURE;
   }
   startup_watchdog::RefreshModules();
-  // ⚠️ `false` ולא `true`: עם ריבוי חלונות, סגירת החלון הראשי אינה
-  // מסיימת את התהליך כל עוד חלונות אחרים פתוחים. `FlutterWindow::OnDestroy`
-  // מפרסם `WM_QUIT` רק כשנסגר החלון האחרון.
+  // סגירת הראשי מסתירה אותו; היציאה נקבעת ב-`FlutterWindow::OnWindowHidden`
+  // ובמסלול הסגירה של Dart, לפי חלונות ה-Dart הגלויים.
   window.SetQuitOnClose(false);
 
-  // מסמן את החלון הזה כראשי, כדי שמופע שני יעלה **אותו** ולא חלון משני
-  // שרירותי. ראו [kMainWindowPropName].
+  // ראו [kMainWindowPropName].
   if (const HWND main_hwnd = window.GetHandle()) {
     ::SetPropW(main_hwnd, kMainWindowPropName, reinterpret_cast<HANDLE>(1));
     if (!is_cli_invocation) hang_monitor::SetMainWindow(main_hwnd);

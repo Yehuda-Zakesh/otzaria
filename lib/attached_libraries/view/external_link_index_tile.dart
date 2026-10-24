@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:otzaria/attached_libraries/external_link_work_status.dart';
@@ -75,7 +73,6 @@ class _ExternalLinkIndexTileState extends State<ExternalLinkIndexTile> {
   void initState() {
     super.initState();
     _state.addListener(_onStateChanged);
-    unawaited(_repository.refreshFromHost());
   }
 
   @override

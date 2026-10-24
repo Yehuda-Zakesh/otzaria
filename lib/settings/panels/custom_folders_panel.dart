@@ -132,9 +132,12 @@ class _CustomFoldersPanelState extends State<CustomFoldersPanel> {
 
   Future<void> _addFolder() async {
     final bloc = context.read<CustomFoldersBloc>();
-    final path = await FilePicker.getDirectoryPath(
-      windowsOptions: kModalWindowsOptions,
-      linuxOptions: kModalLinuxOptions,
+    final path = await withFilePickerOwner(
+      context,
+      () => FilePicker.getDirectoryPath(
+        windowsOptions: modalWindowsOptions(context),
+        linuxOptions: kModalLinuxOptions,
+      ),
     );
     if (path == null) return;
 
@@ -653,12 +656,17 @@ class UserContentImportTile extends StatelessWidget {
 
   Future<void> _import(BuildContext context) async {
     final bloc = context.read<CustomFoldersBloc>();
-    final files = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['csv', 'json'],
-      windowsOptions: kModalWindowsOptions,
-      linuxOptions: kModalLinuxOptions,
-    );
+    final files =
+        (await withFilePickerOwner(
+          context,
+          () => FilePicker.pickFiles(
+            type: FileType.custom,
+            allowedExtensions: const ['csv', 'json'],
+            windowsOptions: modalWindowsOptions(context),
+            linuxOptions: kModalLinuxOptions,
+          ),
+        )) ??
+        [];
     final paths = files.map((f) => f.path).whereType<String>().toList();
     if (paths.isEmpty) return;
     bloc.add(ImportUserContentFiles(paths));

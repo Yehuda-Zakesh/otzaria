@@ -90,7 +90,6 @@ void main() {
             home: Scaffold(
               body: BookDetailScreen(
                 topLevelCategoryKey: 'הלכה',
-                categoryName: 'הלכה',
                 bookName: 'בן איש חי',
                 bookId: 7,
                 bookDetails: book,
@@ -163,7 +162,6 @@ void main() {
                 child: Scaffold(
                   body: BookDetailScreen(
                     topLevelCategoryKey: 'הלכה',
-                    categoryName: 'הלכה',
                     bookName: 'ספר',
                     bookId: 7,
                     bookDetails: book,

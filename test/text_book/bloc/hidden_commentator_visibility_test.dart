@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/app_paths.dart';
-import 'package:otzaria/core/windowing/settings_sync.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/library/hidden/hidden_library_selection.dart';
@@ -297,37 +296,5 @@ void main() {
       (state) => state.availableCommentators.contains('מפרש מוסתר'),
     );
     expect(result.activeCommentators, ['מפרש גלוי']);
-  });
-
-  test('איפוס הגדרות מרוחק מחזיר מפרש לטאב טקסט פתוח', () async {
-    bloc.emit(_loaded(book));
-    await store.save(
-      const HiddenLibrarySelection(categoryPaths: {'/מוסתרת'}),
-    );
-    await _waitFor(
-      bloc,
-      (state) => !state.availableCommentators.contains('מפרש מוסתר'),
-    );
-
-    final sync = SettingsSync.instance;
-    final previousClear = sync.clearLocally;
-    sync.clearLocally = () async {
-      await Settings.setValue<String>(HiddenLibraryStore.bookKeysSetting, '[]');
-      await Settings.setValue<String>(
-        HiddenLibraryStore.categoryPathsSetting,
-        '[]',
-      );
-    };
-    addTearDown(() => sync.clearLocally = previousClear);
-    expect(
-      await sync.handleRequest({'type': SettingsSync.requestReset}),
-      isTrue,
-    );
-
-    final result = await _waitFor(
-      bloc,
-      (state) => state.availableCommentators.contains('מפרש מוסתר'),
-    );
-    expect(result.book, same(book));
   });
 }

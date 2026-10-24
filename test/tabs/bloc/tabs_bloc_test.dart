@@ -2853,7 +2853,7 @@ class _FakeTabsRepository extends TabsRepository {
   int _currentTabIndex = 0;
 
   @override
-  List<OpenedTab> loadTabs() =>
+  List<OpenedTab> loadTabs({bool newRuntime = false}) =>
       _tabsJson.map((tab) => TextBookTab.fromJson(tab)).toList();
 
   @override

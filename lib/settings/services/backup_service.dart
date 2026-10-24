@@ -4,7 +4,6 @@ import 'dart:isolate';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:hive_ce/hive.dart';
 import 'package:path/path.dart' as p;
-import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:logging/logging.dart';
 import 'package:otzaria/bookmarks/models/bookmark_group.dart';
@@ -41,9 +40,7 @@ import 'package:otzaria/data/data_providers/user_books_database_holder.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart' as sqlite3;
 import 'package:otzaria/core/user_state/pending_report_store.dart';
-import 'package:otzaria/core/windowing/host_relay.dart';
 import 'package:otzaria/core/messages/settings_messages.dart';
-import 'package:otzaria/core/messages/window_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/settings/services/backup/backup_import_merge.dart';
 import 'package:otzaria/settings/services/backup/backup_maintenance.dart';
@@ -59,16 +56,6 @@ typedef BackupRestoreResult = ({
   bool userBooksNotReplaced,
   BackupImportCounts? added,
 });
-
-/// כשל שחזור שהמארח דיווח לחלון משני; הטקסט מוצג כמות שהוא.
-class BackupRestoreFailure implements Exception {
-  const BackupRestoreFailure(this.message);
-
-  final String message;
-
-  @override
-  String toString() => message;
-}
 
 /// Status of the most recent backup and whether a new one is recommended.
 class BackupStatus {
@@ -288,8 +275,8 @@ class BackupService {
         'מונה הפעלות שהסתיימו לפני שהתוכנה התייצבה; מקומי לריצה במכשיר זה',
     'biographies.tsb': 'נתוני ביוגרפיות ארוזים באפליקציה ומתעדכנים מהרשת',
     windowRootsDirName:
-        'עותקי box ההגדרות של חלונות נוספים; נמחקים בהפעלה קרה '
-        '(deleteStaleWindowRoots) ומסונכרנים חי עם ההגדרות של החלון הראשון',
+        'שאריות של חלונות נוספים מגרסה קודמת; נמחקות בהפעלה '
+        '(deleteStaleWindowRoots)',
     'cache.db': 'קאש חישובים, נבנה מחדש לפי הצורך',
     'search_feedback':
         'זהות אנונימית של ההתקנה ותור משוב שלא נשלח — אסור שיעברו להתקנה אחרת',
@@ -851,103 +838,6 @@ class BackupService {
     return shamorZachorData;
   }
 
-  /// בקשת שחזור מחלון משני; המארח משחזר ומחזיר את [BackupRestoreResult].
-  static const String requestRestore = 'backup.restore';
-
-  static Future<BackupRestoreResult> _restoreInMainWindow(
-    String backupPath,
-    BackupImportMode mode,
-  ) async {
-    final response = await HostRelay.sendToHost(
-      requestRestore,
-      args: {'path': backupPath, 'mode': mode.name},
-      // השחזור עצמו רץ במארח, ומסד גדול נמשך דקות.
-      timeout: const Duration(minutes: 30),
-    );
-    final result = response.result;
-    if (!response.delivered || result is! Map) {
-      throw const BackupRestoreFailure(WindowMessages.mainWindowRequestFailed);
-    }
-    final error = result['error'];
-    if (error is String) throw BackupRestoreFailure(error);
-    return restoreResultFromMap(result);
-  }
-
-  /// מבצע במארח שחזור שחלון משני ביקש.
-  static Future<Map<String, Object?>> handleRestoreRequest(
-    Map<String, dynamic> request,
-  ) async {
-    final path = request['path'];
-    final mode = BackupImportMode.values.asNameMap()[request['mode']];
-    if (path is! String ||
-        mode == null ||
-        !ProcessDuties.current.isProcessOwner) {
-      return {'error': WindowMessages.mainWindowRequestFailed};
-    }
-    try {
-      return restoreResultToMap(await restoreFromBackup(path, mode: mode));
-    } catch (error) {
-      return {'error': _errorText(error)};
-    }
-  }
-
-  static String _errorText(Object error) => switch (error) {
-    StateError(:final message) => message,
-    _ => '$error'.replaceFirst('Exception: ', ''),
-  };
-
-  @visibleForTesting
-  static Map<String, Object?> restoreResultToMap(BackupRestoreResult result) {
-    final added = result.added;
-    return {
-      'skippedSections': result.skippedSections,
-      'missingCustomFolders': result.missingCustomFolders,
-      'hasLegacyPartialSettings': result.hasLegacyPartialSettings,
-      'notesWithoutAnchor': result.notesWithoutAnchor,
-      'restoredPlugins': result.restoredPlugins,
-      'userBooksNotReplaced': result.userBooksNotReplaced,
-      if (added != null)
-        'added': {
-          'bookmarks': added.bookmarks,
-          'bookmarkGroups': added.bookmarkGroups,
-          'history': added.history,
-          'notes': added.notes,
-          'notesUpdated': added.notesUpdated,
-          'workspaces': added.workspaces,
-          'plugins': added.plugins,
-          'shamorZachorBooks': added.shamorZachorBooks,
-        },
-    };
-  }
-
-  @visibleForTesting
-  static BackupRestoreResult restoreResultFromMap(Map<Object?, Object?> map) {
-    List<String> strings(Object? value) =>
-        value is List ? value.whereType<String>().toList() : const [];
-    int count(Map<Object?, Object?> source, String key) =>
-        source[key] is int ? source[key] as int : 0;
-    final added = map['added'];
-    return (
-      skippedSections: strings(map['skippedSections']),
-      missingCustomFolders: strings(map['missingCustomFolders']),
-      hasLegacyPartialSettings: map['hasLegacyPartialSettings'] == true,
-      notesWithoutAnchor: count(map, 'notesWithoutAnchor'),
-      restoredPlugins: count(map, 'restoredPlugins'),
-      userBooksNotReplaced: map['userBooksNotReplaced'] == true,
-      added: added is Map
-          ? (BackupImportCounts()
-              ..bookmarks = count(added, 'bookmarks')
-              ..bookmarkGroups = count(added, 'bookmarkGroups')
-              ..history = count(added, 'history')
-              ..notes = count(added, 'notes')
-              ..notesUpdated = count(added, 'notesUpdated')
-              ..workspaces = count(added, 'workspaces')
-              ..plugins = count(added, 'plugins')
-              ..shamorZachorBooks = count(added, 'shamorZachorBooks'))
-          : null,
-    );
-  }
-
   /// Restore from backup file.
   ///
   /// [skippedSections] — סעיפים שחסרו בקובץ הגיבוי או שדולגו בזמן השחזור.
@@ -971,11 +861,6 @@ class BackupService {
     String backupPath, {
     BackupImportMode mode = BackupImportMode.replace,
   }) async {
-    // שטיפת תורי הדיווחים פועלת בחלון הראשי. שחזור מחלון משני היה מוחק
-    // ומוסיף מחדש את אותן שורות במקביל לשטיפה, ולכן חייב לרוץ אצל הבעלים.
-    if (!ProcessDuties.current.isProcessOwner) {
-      return _restoreInMainWindow(backupPath, mode);
-    }
     final file = File(backupPath);
     if (!await file.exists()) {
       throw Exception('קובץ הגיבוי לא נמצא');

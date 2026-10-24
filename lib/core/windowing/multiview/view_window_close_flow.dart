@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/core/pre_close_registry.dart';
@@ -13,8 +15,8 @@ import 'package:otzaria/tabs/utils/confirm_close_tabs.dart';
 typedef ViewWindowCloseConfirm =
     Future<bool> Function(BuildContext context, List<OpenedTab> tabs);
 
-/// סגירת חלון Dart: רק מה ששייך לחלון הזה. העבודה של התהליך (שומר
-/// התוספים, טיוטות התיקונים, יציאה) שייכת לחלון הראשי ואינה רצה כאן.
+/// סגירת חלון Dart: רק מה ששייך לחלון הזה, כולל סשני התיקון שבכרטיסיות
+/// שלו. העבודה של התהליך (שומר התוספים, יציאה) שייכת לחלון הראשי.
 class ViewWindowCloseFlow {
   ViewWindowCloseFlow({
     required this.entry,
@@ -32,6 +34,12 @@ class ViewWindowCloseFlow {
   final Future<void> Function(int slot) _discardSession;
   final ViewWindowOpener? _opener;
   bool _running = false;
+  final Completer<bool> _abandoned = Completer<bool>();
+
+  /// עץ החלון פורק (אתחול מחדש): שאלה פתוחה נחשבת לביטול ומשחררת את התור.
+  void abandon() {
+    if (!_abandoned.isCompleted) _abandoned.complete(false);
+  }
 
   static Future<bool> _confirmUnsavedTabs(
     BuildContext context,
@@ -44,42 +52,62 @@ class ViewWindowCloseFlow {
 
   /// מחזיר false כשהמשתמש ביטל; לחיצה חוזרת בזמן ריצה אינה עושה דבר.
   Future<bool> run() async {
-    if (_running) return false;
+    if (_running || _abandoned.isCompleted) return false;
     _running = true;
+    var destroyed = false;
     try {
       final opener = _opener ?? ViewWindowOpener.instance;
       return await opener.serializeClose(() async {
+        if (_abandoned.isCompleted) return false;
         final endProcess = opener.endProcess;
-        if (endProcess != null && await opener.isLastVisibleWindow(entry)) {
+        final isLast =
+            endProcess != null && await opener.isLastVisibleWindow(entry);
+        if (_abandoned.isCompleted) return false;
+        // macOS: נשארים ב-Dock, והסשן נשמר להפעלה הבאה כמו בחלון הראשי.
+        final staysInDock = isLast && opener.keepsProcessAfterLastWindow;
+        if (endProcess != null && isLast && !staysInDock) {
           // החלון האחרון על המסך: יציאה מהתוכנה, עם השאלות של יציאה. אם חזרה — בוטלה.
           AppWindowKeys.activateWindow(entry.id);
           await endProcess();
           return false;
         }
         final context = entry.keys.navigator.currentContext;
+        var tabs = const <OpenedTab>[];
         if (context != null && context.mounted) {
-          final tabs = context.read<TabsBloc>().state.tabs;
-          if (!await _confirm(context, tabs)) return false;
+          tabs = context.read<TabsBloc>().state.tabs;
+          // דיאלוג שה-Navigator שלו נהרס אינו חוזר; בלי זה התור ננעל לכל החלונות.
+          final confirmed = await Future.any([
+            _confirm(context, tabs),
+            _abandoned.future,
+          ]);
+          if (!confirmed || _abandoned.isCompleted) return false;
         }
+        // מכאן החלון אינו יעד להעברה: הכרטיסיה לא הייתה נשמרת.
+        entry.closing = true;
         try {
           // שוטף את כל החלונות; כתיבה מיותרת בחלון אחר אינה מזיקה.
           await _flush();
         } on PreCloseFlushFailure catch (e) {
           debugPrint('view window close: flush failed: $e');
         }
-        await opener.rememberClosed(entry.slot);
+        if (_abandoned.isCompleted) return false;
+        // מכאן הסגירה שאושרה מושלמת גם אם העץ נבנה מחדש.
+        await opener.rememberClosed(entry.slot, keptRow: staysInDock);
         // סגירה מכוונת מוחקת את הסשן; קודם endSession, ששמירה באמצע לא תחזיר אותו.
         entry.endSession();
         try {
-          await _discardSession(entry.slot);
+          if (!staysInDock) await _discardSession(entry.slot);
         } catch (e) {
           // השורה תאומץ בהפעלה הבאה; החלון נסגר בכל מקרה.
           debugPrint('view window close: discard failed: $e');
         }
+        endWindowCorrectionSessions(tabs);
         entry.handle.destroy();
+        destroyed = true;
         return true;
       });
     } finally {
+      if (!destroyed) entry.closing = false;
       _running = false;
     }
   }

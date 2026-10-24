@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
-import 'package:otzaria/core/windowing/library_suspension_marker.dart';
 import 'package:otzaria/data/data_providers/book_database_resolver.dart';
 import 'package:otzaria/data/data_providers/book_text_reader.dart';
 import 'package:otzaria/data/data_providers/db_read_worker.dart';
@@ -59,16 +58,12 @@ class SqliteDataProvider {
       return;
     }
 
-    // מחוץ ל-future של האתחול, כדי ש-suspend לא ימתין לשחרור של עצמו.
-    await LibrarySuspensionMarker.waitUntilReleased();
-    if (_isInitialized) return;
-
     // קוראים ממתינים לחיבור ה-RO, בלי לפתוח אותו במהלך כתיבה חיצונית.
     if (_activeWriteSessions > 0) {
       // תקרה לקורא בלבד: session פעיל ממשיך לחסום פתיחה.
       var polls = 0;
       for (; _activeWriteSessions > 0 && !_isInitialized; polls++) {
-        if (polls >= _maxExternalWriteWaitPolls) {
+        if (polls >= _maxExternalWriteWaitPolls && !libraryReplacing) {
           // יש לאתר close שלא קיבל reopen תואם.
           debugPrint(
             '⚠️ [SqliteDataProvider] initialize() חרג מתקרת ההמתנה '
@@ -196,6 +191,10 @@ class SqliteDataProvider {
   /// נותנת את תקרת ההמתנה הכוללת (כיום ~30ש') — מספיק ארוך לסנכרון לגיטימי
   /// בעלייה, ועדיין חוסם קיפאון לצמיתות בדליפת session.
   int _maxExternalWriteWaitPolls = 15;
+
+  /// מוצב ב-[LibraryAccessGate] לכל משך החלפת הספרייה. ייבוא או הורדה מחדש
+  /// סוגרים את המסד לדקות, ולכן קוראים ממתינים בלי תקרת הדליפה.
+  bool libraryReplacing = false;
 
   /// עקיפת פרמטרי ההמתנה ל-gate בטסטים בלבד, כדי לבדוק את חסימת הקיפאון
   /// בלי להמתין את התקרה המלאה (~30ש').

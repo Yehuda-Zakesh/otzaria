@@ -17,21 +17,11 @@ import 'package:otzaria/tabs/tabs_repository.dart';
 import '../helpers/memory_settings_cache.dart';
 
 void main() {
-  late bool oldSecondary;
-  late bool oldOpenedWithTab;
-
   setUpAll(() async {
     await Settings.init(cacheProvider: MemorySettingsCache());
   });
 
-  setUp(() {
-    oldSecondary = WindowRole.isSecondary;
-    oldOpenedWithTab = WindowRole.openedWithTab;
-  });
-
   tearDown(() {
-    WindowRole.isSecondary = oldSecondary;
-    WindowRole.openedWithTab = oldOpenedWithTab;
     ProcessDuties.debugOverride = null;
   });
 
@@ -183,32 +173,18 @@ void main() {
       return context;
     }
 
-    testWidgets('ברירת המחדל משקפת את WindowRole בכל קריאה', (tester) async {
+    testWidgets('בלי תפקיד מפורש — החלון הראשי', (tester) async {
       final context = await pumpScope(tester);
-      WindowRole.isSecondary = false;
-      WindowRole.openedWithTab = false;
-      expect(
-        AppWindowScope.roleOf(context),
-        const AppWindowRole(isPrimaryView: true),
-      );
-      WindowRole.isSecondary = true;
-      WindowRole.openedWithTab = true;
-      expect(
-        AppWindowScope.roleOf(context),
-        const AppWindowRole(isPrimaryView: false, openedWithTab: true),
-      );
+      expect(AppWindowScope.roleOf(context), AppWindowRole.main);
     });
 
-    testWidgets('תפקיד מפורש גובר על WindowRole', (tester) async {
-      WindowRole.isSecondary = true;
-      const role = AppWindowRole(isPrimaryView: true);
+    testWidgets('תפקיד מפורש גובר על ברירת המחדל', (tester) async {
+      const role = AppWindowRole.view(openedWithTab: true);
       final context = await pumpScope(tester, role: role);
       expect(AppWindowScope.roleOf(context), role);
     });
 
-    testWidgets('בלי scope מעל — AppWindowRole.current', (tester) async {
-      WindowRole.isSecondary = true;
-      WindowRole.openedWithTab = false;
+    testWidgets('בלי scope מעל — AppWindowRole.main', (tester) async {
       late BuildContext context;
       await tester.pumpWidget(
         Builder(
@@ -220,7 +196,7 @@ void main() {
       );
       expect(
         AppWindowScope.roleOf(context),
-        const AppWindowRole(isPrimaryView: false),
+        AppWindowRole.main,
       );
     });
   });

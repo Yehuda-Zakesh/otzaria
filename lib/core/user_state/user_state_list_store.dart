@@ -3,36 +3,28 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:otzaria/core/user_state/user_state_database.dart';
-import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
-import 'package:otzaria/core/windowing/window_bus.dart';
 import 'package:otzaria/data/sqlite/sqlite3_api.dart';
 
 /// שינוי ברשימה של [UserStateListStore]: שם המאגר ההיסטורי ומפתח בתוכו.
-/// `origin` — מי שכתב באותו isolate; `null` כשהגיע מחלון אחר באפיק.
+/// `origin` — מי שכתב; `null` בכתיבה שאינה של חלון מסוים.
 typedef UserStateListChange = ({String box, String key, Object? origin});
 
 /// רשימות מצב המשתמש (היסטוריה, סימניות, שולחנות) — רשימה שלמה לכל מפתח.
 ///
 /// הפריטים אין להם מזהה יציב, ולכן היחידה היא הרשימה, ו-[mutate] מבטיח
-/// read-modify-write אטומי בטרנזקציה `BEGIN IMMEDIATE`: שני חלונות שכותבים
-/// באותו רגע מסתדרים בנעילה, ואף עדכון אינו נדרס.
+/// read-modify-write אטומי בטרנזקציה `BEGIN IMMEDIATE`: הכתיבה מחושבת מהמסד
+/// ולא מהעותק שבזיכרון של חלון, ואף עדכון אינו נדרס.
 class UserStateListStore {
-  UserStateListStore({UserStateDatabase? database, WindowBus? bus})
-    : _database = database ?? UserStateDatabase.instance,
-      _bus = bus ?? WindowBus.instance;
+  UserStateListStore({UserStateDatabase? database})
+    : _database = database ?? UserStateDatabase.instance;
 
   static final UserStateListStore instance = UserStateListStore();
 
-  /// הודעת האפיק "רשימה השתנתה בחלון אחר".
-  static const String requestChanged = 'userStateChanged';
-
   final UserStateDatabase _database;
-  final WindowBus _bus;
   final StreamController<UserStateListChange> _changes =
       StreamController<UserStateListChange>.broadcast();
 
-  /// רשימות ששונו בחלון אחר. בחלונות Dart (isolate אחד) גם כתיבה מקומית
-  /// משודרת, עם ה-[origin] שלה, כדי שהכותב יוכל לסנן את עצמו.
+  /// כל כתיבה משודרת עם ה-[origin] שלה, כדי שהכותב יוכל לסנן את עצמו.
   Stream<UserStateListChange> get changes => _changes.stream;
 
   Future<List<dynamic>> read(String box, String key) async {
@@ -73,18 +65,6 @@ class UserStateListStore {
     final db = await _database.database;
     db.execute('DELETE FROM lists WHERE box = ? AND key = ?', [box, key]);
     _notifyPeers(box, key, origin);
-  }
-
-  /// מטפל בהודעת [requestChanged] שהגיעה באפיק. מחזיר null כשאינה שלנו.
-  Object? handleRequest(Map<String, dynamic> request) {
-    if (request['type'] != requestChanged) return null;
-    final box = request['box'];
-    final key = request['key'];
-    if (box is! String || key is! String) return null;
-    if (request['origin'] != _bus.slot) {
-      _changes.add((box: box, key: key, origin: null));
-    }
-    return true;
   }
 
   List<dynamic> _readIn(Database db, String box, String key) {
@@ -129,26 +109,8 @@ class UserStateListStore {
     }
   }
 
-  /// fire-and-forget: חלון שלא קיבל את ההודעה יקרא את הערך הנכון בפעם
-  /// הבאה שיטען את הרשימה.
-  void _notifyPeers(String box, String key, Object? origin) {
-    // חלונות Dart חולקים isolate ואין ביניהם אפיק.
-    if (MultiViewMode.enabled) {
+  void _notifyPeers(String box, String key, Object? origin) =>
       _changes.add((box: box, key: key, origin: origin));
-    }
-    final slot = _bus.slot;
-    if (slot == null) return;
-    try {
-      _bus.broadcast({
-        'type': requestChanged,
-        'box': box,
-        'key': key,
-        'origin': slot,
-      });
-    } catch (e) {
-      debugPrint('UserStateListStore broadcast failed: $e');
-    }
-  }
 
   @visibleForTesting
   void dispose() => _changes.close();

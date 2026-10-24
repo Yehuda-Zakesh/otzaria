@@ -18,8 +18,11 @@ import 'package:otzaria/search/bloc/search_bloc.dart';
 import 'package:otzaria/search/bloc/search_event.dart';
 import 'package:otzaria/search/bloc/search_state.dart';
 import 'package:otzaria/search/models/external_search_status.dart';
+import 'package:otzaria/search/models/search_configuration.dart';
 import 'package:otzaria/search/view/full_text_settings_widgets.dart';
 import 'package:otzaria/search/view/search_navigation_tree.dart';
+import 'package:otzaria/search/view/search_results_layout.dart';
+import 'package:otzaria/search/view/tantivy_search_results.dart';
 import 'package:otzaria/search/view/tantivy_full_text_search.dart';
 import 'package:otzaria/settings/engine/settings_bloc.dart';
 import 'package:otzaria/settings/engine/settings_event.dart';
@@ -28,8 +31,11 @@ import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
 import 'package:otzaria/tabs/bloc/tabs_event.dart';
 import 'package:otzaria/tabs/bloc/tabs_state.dart';
 import 'package:otzaria/tabs/models/searching_tab.dart';
+import 'package:otzaria/widgets/misc/app_dropdown_field.dart';
 import 'package:otzaria/widgets/misc/app_popup_menu.dart';
 import 'package:otzaria/widgets/text/otzaria_search_field.dart';
+import 'package:otzaria_search_engine/otzaria_search_engine.dart'
+    show ResultsOrder, SearchResult, TextStatus;
 
 import '../test_helpers/memory_cache_provider.dart';
 import '../support/search_engine_test_init.dart';
@@ -222,6 +228,97 @@ Future<void> main() async {
     expect(tester.widget<SearchNavigationTree>(treeFinder).facetCounts, counts);
     expect(identical(tester.widget(treeFinder), tree), isFalse);
   });
+
+  for (final width in [1200.0, 700.0]) {
+    testWidgets('"איתור ספר" וספירות העץ אינם בונים את המסך (רוחב $width)', (
+      tester,
+    ) async {
+      if (!engineReady) {
+        markTestSkipped(searchEngineSkipReason);
+        return;
+      }
+      SearchResult result(int i) => SearchResult(
+        id: BigInt.from(i),
+        title: 'ספר $i',
+        reference: 'ספר $i, א',
+        text: 'טקסט <b>בדיקה</b> $i',
+        segment: BigInt.from(i),
+        isPdf: false,
+        filePath: 'book_$i.txt',
+        mergedCount: 1,
+        merged: const [],
+        textStatus: TextStatus.ok,
+        continuesToNextLine: false,
+      );
+      final searchBloc = await pumpSearch(
+        tester,
+        width: width,
+        externalProvider: false,
+        state: SearchState(
+          searchQuery: 'בדיקה',
+          results: [result(1), result(2)],
+          totalResults: 3,
+        ),
+      );
+      final parts = {
+        'layout': find.byType(SearchResultsLayout),
+        'counts': find.textContaining('2/3'),
+        'card': find.byType(SearchResultOpenInNewTabRegion).first,
+        'terms': find
+            .descendant(
+              of: find.byType(SearchTermsDisplay),
+              matching: find.byType(RichText),
+            )
+            .first,
+        'order': find.descendant(
+          of: find.byType(OrderOfResults),
+          matching: find.byWidgetPredicate(
+            (w) =>
+                w is AppDropdownField<ResultsOrder> ||
+                w is AppPopupMenuButton<ResultsOrder>,
+          ),
+        ),
+        'grouping': find.descendant(
+          of: find.byType(GroupingOfResults),
+          matching: find.byWidgetPredicate(
+            (w) =>
+                w is AppDropdownField<ResultGroupingMode> ||
+                w is AppPopupMenuButton<ResultGroupingMode>,
+          ),
+        ),
+      };
+      final before = {
+        for (final e in parts.entries) e.key: tester.widget(e.value),
+      };
+      void expectNotRebuilt(Iterable<String> names) {
+        for (final name in names) {
+          expect(
+            identical(tester.widget(parts[name]!), before[name]),
+            isTrue,
+            reason: '$name נבנה מחדש',
+          );
+        }
+      }
+
+      searchBloc.add(UpdateFilterQuery('תה'));
+      await tester.pump();
+      await tester.pump();
+      searchBloc.publish(searchBloc.state.copyWith(facetCounts: {'/': 3}));
+      await tester.pump();
+      await tester.pump();
+      expectNotRebuilt(parts.keys);
+
+      // אצוות תוצאות: הרשימה והמונים מתעדכנים, הסרגל נשאר.
+      searchBloc.publish(
+        searchBloc.state.copyWith(results: [result(1), result(2), result(3)]),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(find.textContaining('3/3'), findsOneWidget);
+      expect(find.byType(SearchResultOpenInNewTabRegion), findsNWidgets(3));
+      expectNotRebuilt(['layout', 'terms', 'order', 'grouping']);
+    });
+  }
 
   testWidgets('הסרגל הרחב שומר ספירות ומיקום של תוצאות חיצוניות', (
     tester,

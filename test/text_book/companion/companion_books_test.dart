@@ -230,7 +230,7 @@ void main() {
 
 class _FakeTabsRepository extends TabsRepository {
   @override
-  List<OpenedTab> loadTabs() => [];
+  List<OpenedTab> loadTabs({bool newRuntime = false}) => [];
 
   @override
   int loadCurrentTabIndex() => 0;

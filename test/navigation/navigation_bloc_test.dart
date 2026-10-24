@@ -35,7 +35,8 @@ class _FakeTabsRepository implements TabsRepository {
   _FakeTabsRepository({this.hasTabs = false});
 
   @override
-  List<OpenedTab> loadTabs() => hasTabs ? [_DummyTab()] : [];
+  List<OpenedTab> loadTabs({bool newRuntime = false}) =>
+      hasTabs ? [_DummyTab()] : [];
 
   @override
   Future<void> flushPendingWrites() async {}

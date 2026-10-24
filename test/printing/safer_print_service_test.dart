@@ -1,6 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:bloc_test/bloc_test.dart';
+import 'package:otzaria/settings/engine/settings_bloc.dart';
+import 'package:otzaria/settings/engine/settings_event.dart';
+import 'package:otzaria/settings/engine/settings_state.dart';
+import 'package:otzaria/settings/engine/settings_repository.dart';
+import 'package:otzaria/core/windowing/dialog_owner.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart' hide Printer;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/plugins/services/plugin_print_service.dart';
@@ -20,9 +28,54 @@ class _PdfWebView extends Fake implements InAppWebViewController {
   }) async => Uint8List.fromList([37, 80, 68, 70]);
 }
 
+class _SettingsBloc extends MockBloc<SettingsEvent, SettingsState>
+    implements SettingsBloc {}
+
+class _SettingsRepo extends Fake implements SettingsRepository {}
+
+class _WaitingPdfWebView extends _PdfWebView {
+  final pdf = Completer<Uint8List?>();
+
+  @override
+  Future<Uint8List?> createPdf({
+    // ignore: deprecated_member_use
+    IOSWKPDFConfiguration? iosWKPdfConfiguration,
+    PDFConfiguration? pdfConfiguration,
+  }) => pdf.future;
+}
+
 class _PendingPrinting extends PrintingPlatform {
   final jobs = <Completer<bool>>[];
   final layouts = <LayoutCallback>[];
+  final owners = <int?>[];
+
+  @override
+  Future<bool> layoutPdfForWindow(
+    Printer? printer,
+    LayoutCallback onLayout,
+    String name,
+    PdfPageFormat format,
+    bool dynamicLayout,
+    bool usePrinterSettings,
+    OutputType outputType,
+    bool forceCustomPrintPaper,
+    bool windowsModernDialog, {
+    int? windowHandle,
+    int? viewId,
+  }) {
+    owners.add(windowHandle);
+    return layoutPdf(
+      printer,
+      onLayout,
+      name,
+      format,
+      dynamicLayout,
+      usePrinterSettings,
+      outputType,
+      forceCustomPrintPaper,
+      windowsModernDialog,
+    );
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -51,6 +104,20 @@ void main() {
   late PrintingPlatform original;
   late _PendingPrinting platform;
 
+  Widget withSettings(Widget child) {
+    final bloc = _SettingsBloc();
+    whenListen(
+      bloc,
+      const Stream<SettingsState>.empty(),
+      initialState: SettingsState.initial(),
+    );
+    addTearDown(bloc.close);
+    return RepositoryProvider<SettingsRepository>.value(
+      value: _SettingsRepo(),
+      child: BlocProvider<SettingsBloc>.value(value: bloc, child: child),
+    );
+  }
+
   setUp(() {
     original = PrintingPlatform.instance;
     platform = _PendingPrinting();
@@ -60,6 +127,7 @@ void main() {
   tearDown(() {
     PrintingPlatform.instance = original;
     debugDefaultTargetPlatformOverride = null;
+    DialogOwner.resetForTest();
     expect(PrintWorkStatus.hasActiveJobs, isFalse);
   });
 
@@ -68,6 +136,64 @@ void main() {
     onLayout: (_) => Uint8List.fromList([37, 80, 68, 70]),
     onSpooling: onSpooling,
   );
+
+  testWidgets('ui.print retains its owner while PDF generation is pending', (
+    tester,
+  ) async {
+    DialogOwner.mainWindowHwnd = 101;
+    late BuildContext origin;
+    await tester.pumpWidget(
+      withSettings(
+        Builder(
+          builder: (context) {
+            origin = context;
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+    final webView = _WaitingPdfWebView();
+    final printing = const PluginPrintService().printWebView(
+      webView,
+      jobName: 'תוסף',
+      context: origin,
+    );
+    DialogOwner.mainWindowHwnd = 202;
+    webView.pdf.complete(Uint8List.fromList([37, 80, 68, 70]));
+    await tester.pump();
+    expect(platform.owners, [101]);
+    platform.jobs.single.complete(false);
+    expect(await printing, isFalse);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('ui.print cancels when the originating view is disposed', (
+    tester,
+  ) async {
+    late BuildContext origin;
+    await tester.pumpWidget(
+      withSettings(
+        Builder(
+          builder: (context) {
+            origin = context;
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+    final webView = _WaitingPdfWebView();
+    final printing = const PluginPrintService().printWebView(
+      webView,
+      jobName: 'תוסף',
+      context: origin,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    webView.pdf.complete(Uint8List.fromList([37, 80, 68, 70]));
+    await tester.pump();
+    expect(platform.jobs, isEmpty);
+    expect(await printing, isFalse);
+    debugDefaultTargetPlatformOverride = null;
+  });
 
   test('מעקב מתחיל לפני onLayout גם ללא callback ומסתיים בביטול', () async {
     final printing = print();

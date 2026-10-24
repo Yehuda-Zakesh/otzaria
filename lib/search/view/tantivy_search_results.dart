@@ -660,6 +660,17 @@ class _TantivySearchResultsState extends State<TantivySearchResults> {
             unawaited(_warnForStaleResults(state.results));
           },
           child: BlocBuilder<SearchBloc, SearchState>(
+            // השדות שהרשימה מציגה; "איתור ספר" וספירות העץ אינם ביניהם.
+            buildWhen: (previous, current) =>
+                !identical(previous.results, current.results) ||
+                !identical(previous.configuration, current.configuration) ||
+                previous.isLoading != current.isLoading ||
+                previous.searchQuery != current.searchQuery ||
+                previous.negativeQuery != current.negativeQuery ||
+                previous.totalResults != current.totalResults ||
+                previous.totalGroups != current.totalGroups ||
+                previous.errorMessage != current.errorMessage ||
+                previous.resultsTruncated != current.resultsTruncated,
             builder: (context, state) {
               // עכשיו רק מציגים את התוצאות - השורה התחתונה מוצגת במקום אחר
               return _buildResultsContent(state, constrains);

@@ -8,7 +8,6 @@ import 'package:otzaria/attached_libraries/repository/attached_library_probe.dar
 import 'package:otzaria/attached_libraries/repository/attached_library_registry.dart';
 import 'package:otzaria/attached_libraries/repository/attached_library_store.dart';
 import 'package:otzaria/attached_libraries/repository/update/attached_update_file_swap.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:path/path.dart' as p;
 
 import '../helpers/seforim_fixture_db.dart';
@@ -227,8 +226,6 @@ void main() {
   });
 
   group('סרק', () {
-    tearDown(() => WindowRole.isSecondary = false);
-
     test('מסד שהמנוע לא נגע בו משתחרר בו ונשאר מוגדר', () async {
       registry = AttachedLibraryRegistry();
       await build().importFile(fixture('a'));
@@ -247,19 +244,6 @@ void main() {
       registry.closeIdle(now: DateTime.now().add(const Duration(minutes: 12)));
       await registry.engineSourcesSettled;
       expect(calls, hasLength(3), reason: 'בלי שימוש חדש אין מה לשחרר');
-    });
-
-    test('בחלון משני הקובץ משתחרר אחרי סרק קצר', () async {
-      WindowRole.isSecondary = true;
-      registry = AttachedLibraryRegistry();
-      await build().importFile(fixture('a'));
-      await registry.enableEngineSources();
-      registry.noteEngineUse();
-
-      registry.closeIdle(now: DateTime.now().add(const Duration(minutes: 1)));
-      await registry.engineSourcesSettled;
-
-      expect(calls, ['a=a.db', 'a=null', 'a=a.db']);
     });
   });
 

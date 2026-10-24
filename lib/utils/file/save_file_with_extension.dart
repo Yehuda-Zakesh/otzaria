@@ -22,17 +22,24 @@ Future<String?> saveFileWithExtension({
   BuildContext? context,
 }) async {
   final effectiveContext = context ?? navigatorKey.currentContext;
+  if (effectiveContext != null && !effectiveContext.mounted) return null;
+  // לפני ההמתנה: הבעלים הוא החלון שביקש, גם אם הפוקוס עבר בינתיים.
+  final windowsOptions = modalWindowsOptions(effectiveContext);
   if (effectiveContext != null &&
       !await verifySaferModePassword(effectiveContext)) {
     return null;
   }
-  final uri = await FilePicker.saveFile(
-    dialogTitle: dialogTitle,
-    fileName: fileName,
-    initialDirectory: initialDirectory,
-    bytes: bytes,
-    windowsOptions: kModalWindowsOptions,
-    linuxOptions: kModalLinuxOptions,
+  if (effectiveContext != null && !effectiveContext.mounted) return null;
+  final uri = await withFilePickerOwner(
+    effectiveContext,
+    () => FilePicker.saveFile(
+      dialogTitle: dialogTitle,
+      fileName: fileName,
+      initialDirectory: initialDirectory,
+      bytes: bytes,
+      windowsOptions: windowsOptions,
+      linuxOptions: kModalLinuxOptions,
+    ),
   );
   if (uri == null) return null;
   // ב-Android השמירה חוזרת כ-content:// — אין נתיב מקומי לתקן, אבל היא הצליחה.

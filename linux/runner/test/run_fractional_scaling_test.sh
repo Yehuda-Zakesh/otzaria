@@ -12,3 +12,9 @@ trap 'rm -rf "$fixture_dir"' EXIT
   $(pkg-config --cflags --libs gio-2.0 glib-2.0) \
   -o "$fixture_dir/fractional_scaling_test"
 "$fixture_dir/fractional_scaling_test"
+
+# מדיניות היציאה בהסתרת חלון; כאן כדי לרוץ באותו צעד CI בלי לשנות את ה-workflow.
+"${CXX:-c++}" -std=c++17 -Wall -Wextra -Werror -Wpedantic \
+  "$test_dir/main_hide_policy_test.cc" \
+  -o "$fixture_dir/main_hide_policy_test"
+"$fixture_dir/main_hide_policy_test"

@@ -4,10 +4,8 @@ import 'package:otzaria/search/models/external_search_summary.dart';
 ExternalSearchSummary _summary({
   List<ExternalSearchBook> namedOtherBooks = const [],
 }) => ExternalSearchSummary(
-  provider: 'hebrewbooks',
   sourceTitle: 'היברובוקס',
   totalBooks: 4,
-  totalHits: 11,
   categoryBookCounts: const {'/הלכה': 1},
   otherBooks: 3,
   namedOtherBooks: namedOtherBooks,

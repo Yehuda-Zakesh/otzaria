@@ -49,11 +49,9 @@ void main() {
       Library(categories: const []),
     );
     final tabs = <TextBookTab>[];
-    final blocs = <_TestTextBookBloc>[];
     for (final title in ['ספר א', 'ספר ב']) {
       final book = TextBook(title: title);
       final bloc = _TestTextBookBloc(_loadedState(book));
-      blocs.add(bloc);
       tabs.add(TextBookTab(book: book, index: 0, blocOverride: bloc));
     }
     tester.view.physicalSize = const Size(1600, 900);
@@ -70,12 +68,6 @@ void main() {
     addTearDown(() async {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(seconds: 1));
-      for (final bloc in blocs) {
-        await bloc.close();
-      }
-      for (final tab in tabs) {
-        tab.dispose();
-      }
       await tabsBloc.close();
       await tourCubit.close();
       await settingsBloc.close();

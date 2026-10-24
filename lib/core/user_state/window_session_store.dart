@@ -13,7 +13,7 @@ class WindowSession {
     this.boundsJson,
   });
 
-  /// המשבצת באפיק (ראה `UserStateSlot`).
+  /// משבצת החלון (ראה `UserStateSlot`).
   final int slot;
   final String tabsJson;
   final int currentIndex;
@@ -159,6 +159,7 @@ class WindowSessionStore {
 
   /// מסדר את הסשנים של שאר החלונות במשבצות רצופות אחרי [host] (עד
   /// [maxSlot]), בטרנזקציה אחת. כשלמארח אין סשן, הראשון שבתור הופך לשלו.
+  /// הכרטיסיות של סשנים שאין להם מקום מצורפות למארח ולא נמחקות.
   /// מחזיר את המשבצות שקיבלו סשן, לפי הסדר.
   Future<List<int>> compactAround(int host, int maxSlot) async {
     final db = await _database.database;
@@ -187,9 +188,13 @@ class WindowSessionStore {
         ]);
       }
       var next = 1;
+      final overflow = <dynamic>[];
       for (final tmp in pending) {
         if (next == host) next++;
         if (next > maxSlot) {
+          // מעבר לתקרה (למשל חזרה מ-8 חלונות למודל של 4): מצורף למארח.
+          final row = _loadIn(db, tmp);
+          if (row != null) overflow.addAll(_tabsOf(row));
           db.execute('DELETE FROM window_sessions WHERE slot = ?', [tmp]);
           continue;
         }
@@ -199,6 +204,17 @@ class WindowSessionStore {
         ]);
         targets.add(next++);
       }
+      if (overflow.isEmpty) return;
+      final own = _loadIn(db, host);
+      db.execute(
+        'UPDATE window_sessions SET tabs_json = ?, updated_at = ? '
+        'WHERE slot = ?',
+        [
+          jsonEncode([if (own != null) ..._tabsOf(own), ...overflow]),
+          _now(),
+          host,
+        ],
+      );
     });
     return targets;
   }

@@ -64,7 +64,7 @@ class _FakeRepository implements FindRefRepository {
 
 class _FakeTabsRepository implements TabsRepository {
   @override
-  List<OpenedTab> loadTabs() => [];
+  List<OpenedTab> loadTabs({bool newRuntime = false}) => [];
   @override
   Future<void> flushPendingWrites() async {}
   @override

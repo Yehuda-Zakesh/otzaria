@@ -9,7 +9,6 @@ import 'package:otzaria/attached_libraries/repository/attached_library_registry.
 import 'package:otzaria/attached_libraries/repository/external_link_core.dart';
 import 'package:otzaria/attached_libraries/repository/external_link_repository.dart';
 import 'package:otzaria/core/app_paths.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:otzaria/data/constants/database_constants.dart';
 import 'package:otzaria/data/data_providers/database_library_provider.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
@@ -1356,42 +1355,6 @@ void main() {
       await links.sync();
       expect(links.tooLargeSlugs.value, contains(library.slug));
       expect(indexRows(library.slug), 0);
-    });
-
-    test('חלון משני אינו משנה אינדקס שבנייתו מושהית בחלון הראשי', () async {
-      slowBuild();
-      final library = await attach(attachedDb('windows', rows: fiveRows()));
-      void pause() {
-        if (links.buildingSlugs.value.isNotEmpty) links.pauseBuild();
-      }
-
-      links.buildingSlugs.addListener(pause);
-      final first = links.sync();
-      await waitFor(() => doneOf(library.slug) >= 1);
-      final savedRows = indexRows(library.slug);
-      final savedMeta = metaSignature(library.slug);
-      final secondary = ExternalLinkRepository(
-        registry: registry,
-        cacheDbPath: () async => cachePath(),
-      );
-      final previousRole = WindowRole.isSecondary;
-      try {
-        WindowRole.isSecondary = true;
-        await secondary.sync(autoResume: true);
-        await secondary.rebuild(library.slug);
-        secondary.requestResume(library.slug);
-        secondary.requestRebuild(library.slug);
-        await secondary.sync();
-        expect(indexRows(library.slug), savedRows);
-        expect(metaSignature(library.slug), savedMeta);
-      } finally {
-        WindowRole.isSecondary = previousRole;
-        links.buildingSlugs.removeListener(pause);
-        links.resumeBuild();
-        await first;
-      }
-      expect(indexRows(library.slug), 5);
-      expect(links.incompleteSlugs.value, isEmpty);
     });
 
     test('סריקת יעדים חסרים מכבדת השהיה, עצירה ומנות חסכוניות', () async {

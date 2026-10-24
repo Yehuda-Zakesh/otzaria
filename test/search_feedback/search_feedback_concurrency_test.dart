@@ -8,7 +8,6 @@ import 'package:otzaria/search_feedback/search_feedback_identity.dart';
 import 'package:otzaria/search_feedback/search_feedback_service.dart';
 import 'package:otzaria/search_feedback/search_feedback_queue.dart';
 import 'package:otzaria/search_feedback/search_feedback_sender.dart';
-import 'package:otzaria/settings/engine/settings_repository.dart';
 import 'search_feedback_test_support.dart';
 
 class NoTimer implements Timer {
@@ -22,7 +21,7 @@ class NoTimer implements Timer {
 
 void main() {
   test(
-    'primary must discover events created later by secondary window',
+    'a sender must discover events queued later by another writer',
     () async {
       final dir = await Directory.systemTemp.createTemp('audit1758_discovery_');
       addTearDown(() => dir.delete(recursive: true));
@@ -30,11 +29,10 @@ void main() {
         ..state = 'granted'
         ..version = 1;
       final posts = <http.Request>[];
-      SearchFeedbackService service(bool secondary) => SearchFeedbackService(
+      SearchFeedbackService service() => SearchFeedbackService(
         storageDirectory: () async => dir,
         consentPersistence: consent,
         clock: () => kStart.add(const Duration(seconds: 5)),
-        isSecondaryWindow: () => secondary,
         buildAllowsSending: true,
         sendingAllowed: () => true,
         appVersion: () => '1.2.3',
@@ -42,7 +40,6 @@ void main() {
         osVersion: () => '10.0',
         locale: () => 'he',
         timerFactory: (_, _) => NoTimer(),
-        settingsChangesFromOtherWindows: const Stream.empty(),
         client: MockClient((r) async {
           posts.add(r);
           if (r.url.path.endsWith('/register')) {
@@ -60,9 +57,9 @@ void main() {
         }),
         baseUrl: Uri.parse('https://example.test'),
       );
-      final primary = service(false);
+      final primary = service();
       await primary.flush(); // loads empty shared directory
-      final secondary = service(true);
+      final secondary = service();
       secondary.recordSearch(searchContext());
       await secondary.whenQueued();
       expect(
@@ -75,59 +72,6 @@ void main() {
       expect(posts.where((p) => p.url.path.endsWith('/events')), hasLength(1));
     },
   );
-  test('revoke in primary removes an in-flight secondary append', () async {
-    final dir = await Directory.systemTemp.createTemp('audit1758_revoke_');
-    addTearDown(() => dir.delete(recursive: true));
-    final consent = MemoryConsentPersistence()
-      ..state = 'granted'
-      ..version = 1;
-    final changes = StreamController<String>();
-    addTearDown(changes.close);
-    final appendPaused = Completer<void>();
-    final resumeAppend = Completer<void>();
-    var secondaryDirectoryCalls = 0;
-    final secondary = SearchFeedbackService(
-      storageDirectory: () async {
-        secondaryDirectoryCalls++;
-        if (secondaryDirectoryCalls == 2) {
-          appendPaused.complete();
-          await resumeAppend.future;
-        }
-        return dir;
-      },
-      consentPersistence: consent,
-      settingsChangesFromOtherWindows: changes.stream,
-      isSecondaryWindow: () => true,
-      buildAllowsSending: false,
-      timerFactory: (_, _) => NoTimer(),
-      clock: () => kStart,
-      appVersion: () => '1.2.3',
-      platform: () => 'windows',
-      osVersion: () => '10.0',
-      locale: () => 'he',
-    );
-    final primary = SearchFeedbackService(
-      storageDirectory: () async => dir,
-      consentPersistence: consent,
-      isSecondaryWindow: () => false,
-      buildAllowsSending: false,
-      settingsChangesFromOtherWindows: const Stream.empty(),
-      timerFactory: (_, _) => NoTimer(),
-    );
-    secondary.recordSearch(searchContext());
-    await appendPaused.future;
-    await primary.revoke();
-    changes.add(SettingsRepository.keySearchFeedbackConsent);
-    await pumpEventQueue();
-    expect(secondary.isCollecting, isFalse);
-    resumeAppend.complete();
-    await secondary.whenQueued();
-    expect(
-      dir.listSync().where((f) => f.path.endsWith('.jsonl')),
-      isEmpty,
-      reason: 'pending event must not reappear after revoke completes',
-    );
-  });
   test('shared queue caps apply globally across writers', () async {
     final dir = await Directory.systemTemp.createTemp('audit1758_caps_');
     addTearDown(() => dir.delete(recursive: true));
@@ -177,7 +121,6 @@ void main() {
           platform: () => platform,
           buildAllowsSending: true,
           sendingAllowed: () => true,
-          settingsChangesFromOtherWindows: const Stream.empty(),
           timerFactory: (_, _) => NoTimer(),
           client: MockClient((_) async {
             posts++;
@@ -215,32 +158,28 @@ void main() {
     expect((await sending).kind, SearchFeedbackOutcomeKind.retryLater);
     expect(posts, 0);
   });
-  test('secondary stale consent cannot enqueue after primary revoke', () async {
+  test('stale consent cannot enqueue after another instance revokes', () async {
     final dir = await Directory.systemTemp.createTemp('sf_stale_consent');
     addTearDown(() => dir.delete(recursive: true));
-    SearchFeedbackService service(
-      MemoryConsentPersistence consent,
-      bool secondary,
-    ) => SearchFeedbackService(
-      storageDirectory: () async => dir,
-      consentPersistence: consent,
-      platform: () => 'windows',
-      isSecondaryWindow: () => secondary,
-      buildAllowsSending: false,
-      settingsChangesFromOtherWindows: const Stream.empty(),
-      timerFactory: (_, _) => NoTimer(),
-      appVersion: () => '1.2.3',
-      osVersion: () => '10.0',
-      locale: () => 'he',
-    );
+    SearchFeedbackService service(MemoryConsentPersistence consent) =>
+        SearchFeedbackService(
+          storageDirectory: () async => dir,
+          consentPersistence: consent,
+          platform: () => 'windows',
+          buildAllowsSending: false,
+          timerFactory: (_, _) => NoTimer(),
+          appVersion: () => '1.2.3',
+          osVersion: () => '10.0',
+          locale: () => 'he',
+        );
     final primaryConsent = MemoryConsentPersistence()
       ..state = 'granted'
       ..version = 1;
     final secondaryConsent = MemoryConsentPersistence()
       ..state = 'granted'
       ..version = 1;
-    final primary = service(primaryConsent, false);
-    final secondary = service(secondaryConsent, true);
+    final primary = service(primaryConsent);
+    final secondary = service(secondaryConsent);
     await primary.revoke();
     secondary.recordSearch(searchContext());
     await secondary.whenQueued();
@@ -251,8 +190,7 @@ void main() {
     expect(
       segments,
       isEmpty,
-      reason:
-          'revoke completed; secondary SettingsSync notification may still be pending',
+      reason: 'revoke completed; secondary consent may still be stale',
     );
   });
 }

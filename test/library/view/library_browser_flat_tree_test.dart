@@ -36,25 +36,13 @@ Library _library(List<Category> categories) {
 TextBook _book(String title, {int order = 999}) =>
     TextBook(title: title, order: order);
 
-/// סדר קטגוריות עליונות לפי מיקום ברשימה קבועה — מדמה את
-/// _getTopCategoryOrder של המסך בלי תלות ב-State.
-int Function(Category) _topOrderOf(List<String> orderedTitles) => (category) {
-  final idx = orderedTitles.indexOf(category.title);
-  return idx >= 0 ? idx : orderedTitles.length + category.order;
-};
-
-int _normalizeOrder(int order) => order >= 0 ? order : 1000 + order.abs();
-
 List<FlatLibraryRow> _rows(
   Category root, {
   Set<String> expanded = const {},
-  List<String> topOrder = const [],
   Set<String> talmudTextTitles = const {},
 }) => buildFlatLibraryRows(
   category: root,
   expandedPaths: expanded,
-  topCategoryOrder: _topOrderOf(topOrder),
-  normalizeOrder: _normalizeOrder,
   talmudTextTitles: talmudTextTitles,
 );
 
@@ -66,7 +54,7 @@ void main() {
         _category('תנ"ך', books: [_book('ספר ב')]),
       ]);
 
-      final rows = _rows(root, topOrder: ['תנ"ך', 'הלכה']);
+      final rows = _rows(root);
 
       expect(rows, hasLength(2));
       expect(rows[0].kind, FlatLibraryRowKind.categoryHeader);

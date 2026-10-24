@@ -48,7 +48,7 @@ lib/migration/database/
 ## עלייה
 
 `_runDeferredAttachedLibraries` ב-`main.dart` רץ אחרי חשיפת החלון (שער reveal עם
-timeout), מוגן ב-`WindowRole.isSecondary` לעבודה ברמת מחשב, ונכשל ללא הפלה
+timeout), פעם אחת לתהליך, ונכשל ללא הפלה
 (`_logNonFatalInitializationError`). שום דבר מהפיצ'ר לא נוסף למסלול לפני הפריים הראשון.
 
 ## כלל היתומים באינדקס

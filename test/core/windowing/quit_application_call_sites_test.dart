@@ -40,7 +40,7 @@ void main() {
       filesCalling('.quitApplication('),
       {'lib/core/window_listener.dart'},
       reason:
-          'סגירת חלון בודד היא MultiWindowService.closeSelf, ויציאת התהליך '
+          'סגירת חלון בודד היא RunnerWindowChannel.closeSelf, ויציאת התהליך '
           'ב-Windows היא forceTerminate של ה-runner',
     );
   });

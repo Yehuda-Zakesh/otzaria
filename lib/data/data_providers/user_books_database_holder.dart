@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/migration/database/daos/database.dart';
 import 'package:otzaria/migration/database/repository/seforim_repository.dart';
@@ -47,10 +46,8 @@ class UserBooksDatabaseHolder {
   /// נתיב המסד הפתוח, או null כשהוא סגור.
   String? get openDbPath => _repository == null ? null : _dbPath;
 
-  /// מקור השורות של המנוע גלובלי לתהליך: רק החלון הראשי, שבו רץ האינדוקס,
-  /// מגדיר אותו — סגירה בחלון משני הייתה מנתקת אותו גם לראשי.
+  /// מקור השורות של המנוע, גלובלי לתהליך.
   static Future<void> configureSearchLineSource(String? dbPath) async {
-    if (!ProcessDuties.current.isProcessOwner) return;
     await LibraryLineSource.configureUserBooks(dbPath);
   }
 

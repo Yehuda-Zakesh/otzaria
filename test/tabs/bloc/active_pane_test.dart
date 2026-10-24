@@ -320,7 +320,7 @@ class _FakeTabsRepository extends TabsRepository {
   int saveCount = 0;
 
   @override
-  List<OpenedTab> loadTabs() => const [];
+  List<OpenedTab> loadTabs({bool newRuntime = false}) => const [];
 
   @override
   int loadCurrentTabIndex() => 0;

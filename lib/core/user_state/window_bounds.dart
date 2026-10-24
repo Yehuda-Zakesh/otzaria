@@ -70,10 +70,12 @@ class WindowBounds {
     'maximized': maximized,
   });
 
-  /// המסגרת בפיקסלים פיזיים, כפי שה-runner מצפה ב-`openWindow`.
-  ({int left, int top, int width, int height})? toPhysical() {
+  /// מסגרת לפתיחה: macOS בנקודות עם [screenPoints], ובשאר בפיקסלים פיזיים.
+  ({int left, int top, int width, int height})? toPhysical({
+    bool screenPoints = false,
+  }) {
     if (!hasRect) return null;
-    final scale = (dpr != null && dpr! > 0) ? dpr! : 1.0;
+    final scale = !screenPoints && (dpr != null && dpr! > 0) ? dpr! : 1.0;
     return (
       left: (left! * scale).round(),
       top: (top! * scale).round(),

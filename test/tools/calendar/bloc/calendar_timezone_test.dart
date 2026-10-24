@@ -71,7 +71,6 @@ void main() {
         store: RepositoryCalendarAlertsStore(settings),
         notifications: notifications,
         pluginEvents: () async => const [],
-        broadcast: (_) {},
         dedupeDuplicates: false,
       );
       calendarCubit = CalendarCubit(

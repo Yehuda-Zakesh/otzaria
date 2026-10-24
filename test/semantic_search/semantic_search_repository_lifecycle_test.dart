@@ -101,7 +101,6 @@ void main() {
         diskSpace: (_) async =>
             const DiskSpaceInfo(volumeId: 'audit', freeBytes: -1),
         modelReleases: testModelReleases,
-        isSecondaryWindow: () => false,
       );
       final first = repo.enableAndDownload();
       await waitFor(() => downloads.urls.isNotEmpty);

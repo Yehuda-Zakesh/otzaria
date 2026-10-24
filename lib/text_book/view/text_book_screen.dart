@@ -689,7 +689,9 @@ class _TextBookViewerBlocState extends State<TextBookViewerBloc>
         successMessage = TextBookMessages.textFileSaved;
       }
 
+      if (!mounted) return;
       final path = await saveFileWithExtension(
+        context: context,
         dialogTitle: 'ייצוא הספר',
         fileName:
             '${sanitizeTextBookExportFileName(state.book.title)}.$extension',

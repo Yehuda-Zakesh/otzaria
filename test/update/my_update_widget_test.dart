@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/messages/library_messages.dart';
-import 'package:otzaria/core/windowing/window_role.dart';
 import 'package:path/path.dart' as p;
 import 'package:otzaria/update/my_update_widget.dart';
 import 'package:otzaria/update/updat_compat.dart';
@@ -133,10 +132,7 @@ void main() {
       operatingSystem: Platform.operatingSystem,
     );
 
-    test('לא-בעלים של התהליך אינו מנהל, גם כש-WindowRole אומר ראשי', () {
-      final old = WindowRole.isSecondary;
-      addTearDown(() => WindowRole.isSecondary = old);
-      WindowRole.isSecondary = false;
+    test('לא-בעלים של התהליך אינו מנהל', () {
       final notOwner = ProcessDuties(isProcessOwner: () => false);
       expect(managesUpdatesHere(isDebug: false, duties: notOwner), isFalse);
       ProcessDuties.debugOverride = notOwner;

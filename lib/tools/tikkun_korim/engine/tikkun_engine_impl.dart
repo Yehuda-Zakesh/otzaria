@@ -6,12 +6,9 @@ library;
 import 'package:otzaria/tools/tikkun_korim/data/tikkun_data.dart';
 import 'package:otzaria/tools/tikkun_korim/engine/line_paginator.dart'
     as paginator;
-import 'package:otzaria/tools/tikkun_korim/engine/raw_text_cleaner.dart'
-    as cleaner;
 import 'package:otzaria/tools/tikkun_korim/engine/stam_width_model.dart';
 import 'package:otzaria/tools/tikkun_korim/engine/tikkun_processor.dart'
     as processor;
-import 'package:otzaria/tools/tikkun_korim/engine/tokenizer.dart' as tokenizer;
 import 'package:otzaria/tools/tikkun_korim/engine/verse_range_slicer.dart'
     as slicer;
 import 'package:otzaria/tools/tikkun_korim/models/tikkun_models.dart';
@@ -19,13 +16,6 @@ import 'package:otzaria/tools/tikkun_korim/repository/tikkun_contracts.dart';
 
 class TikkunEngineImpl implements TikkunEngine {
   const TikkunEngineImpl();
-
-  @override
-  String cleanRawText(String raw) => cleaner.cleanRawText(raw);
-
-  @override
-  List<TikkunToken> tokenizeText(String cleaned) =>
-      tokenizer.tokenizeText(cleaned);
 
   @override
   List<TikkunLine> paginateAllTokens(

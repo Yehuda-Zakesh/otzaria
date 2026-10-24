@@ -122,12 +122,6 @@ namespace {
 HWND g_user_activated = nullptr;
 ULONGLONG g_user_activated_at = 0;
 
-// החלון האחרון שקיבל הפעלה, בלי קשר לשאלה מי יזם אותה.
-//
-// ⚠️ נפרד מ-[g_user_activated] במכוון: זה נועד לבחירה מפורשת בלחיצה
-// ומשמש שער חסימה, וכאן נדרשת גם הפעלה במקלדת (Alt-Tab).
-HWND g_last_activated = nullptr;
-
 // כמה זמן בחירת המשתמש "מוגנת" מפני הפעלה תוכניתית של חלון אחר שלנו.
 //
 // חלון בסדר גודל של חצי שנייה: ארוך מספיק כדי לכסות את ההפעלה החוזרת
@@ -147,11 +141,6 @@ bool IsOtzariaWindow(HWND window) {
 void Win32Window::NoteUserActivation(HWND window) {
   g_user_activated = window;
   g_user_activated_at = ::GetTickCount64();
-}
-
-HWND Win32Window::LastActivatedWindow() {
-  if (!::IsWindow(g_last_activated)) return nullptr;
-  return g_last_activated;
 }
 
 bool Win32Window::ShouldVetoActivation(HWND window) {
@@ -177,35 +166,23 @@ Win32Window::~Win32Window() {
 
 bool Win32Window::Create(const std::wstring& title,
                          const Point& origin,
-                         const Size& size,
-                         DWORD extended_style) {
+                         const Size& size) {
   const POINT target_point = {static_cast<LONG>(origin.x),
                               static_cast<LONG>(origin.y)};
   HMONITOR monitor = MonitorFromPoint(target_point, MONITOR_DEFAULTTONEAREST);
   UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
   double scale_factor = dpi / 96.0;
 
-  RECT frame{};
-  frame.left = Scale(origin.x, scale_factor);
-  frame.top = Scale(origin.y, scale_factor);
-  frame.right = frame.left + Scale(size.width, scale_factor);
-  frame.bottom = frame.top + Scale(size.height, scale_factor);
-  return CreatePhysical(title, frame, extended_style);
-}
-
-bool Win32Window::CreatePhysical(const std::wstring& title,
-                                 const RECT& frame,
-                                 DWORD extended_style) {
   Destroy();
 
   const wchar_t* window_class =
       WindowClassRegistrar::GetInstance()->GetWindowClass();
 
-  HWND window = CreateWindowEx(
-      extended_style, window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
-      frame.left, frame.top, frame.right - frame.left,
-      frame.bottom - frame.top, nullptr, nullptr, GetModuleHandle(nullptr),
-      this);
+  HWND window = CreateWindow(
+      window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
+      Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
+      Scale(size.width, scale_factor), Scale(size.height, scale_factor),
+      nullptr, nullptr, GetModuleHandle(nullptr), this);
 
   if (!window) {
     return false;
@@ -218,13 +195,6 @@ bool Win32Window::CreatePhysical(const std::wstring& title,
 
 bool Win32Window::Show() {
   return ShowWindow(window_handle_, SW_SHOW);
-}
-
-void Win32Window::AllowActivation(HWND window) {
-  if (!window) return;
-  const LONG_PTR ex = ::GetWindowLongPtrW(window, GWL_EXSTYLE);
-  if ((ex & WS_EX_NOACTIVATE) == 0) return;
-  ::SetWindowLongPtrW(window, GWL_EXSTYLE, ex & ~WS_EX_NOACTIVATE);
 }
 
 // static
@@ -267,8 +237,6 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
 
     case WM_DESTROY:
-      // Windows ממחזר HWND — בלי האיפוס IsWindow היה מאשר חלון זר.
-      if (hwnd == g_last_activated) g_last_activated = nullptr;
       window_handle_ = nullptr;
       Destroy();
       if (quit_on_close_) {
@@ -325,11 +293,6 @@ Win32Window::MessageHandler(HWND hwnd,
       // ~16ms בין שלושה חלונות (783 הפעלות בהרצה של 40 שניות; עם הבדיקה
       // הזו: 77, ובלי לולאה). הגידור ב-`WA_INACTIVE` לבדו שבר רק את
       // המקרה הפשוט של שני חלונות.
-      // ⚠️ נרשם גם כשאין מה למקד: זהו מקור האמת ל"החלון הפעיל האחרון"
-      // שאליו מנותב קישור `otzaria://`.
-      if (LOWORD(wparam) != WA_INACTIVE && ::IsWindowVisible(hwnd)) {
-        g_last_activated = hwnd;
-      }
       if (LOWORD(wparam) != WA_INACTIVE && child_content_ != nullptr &&
           ::IsWindowVisible(hwnd) && ::GetFocus() != child_content_) {
         SetFocus(child_content_);
@@ -369,14 +332,8 @@ void Win32Window::SetChildContent(HWND content) {
   MoveWindow(content, frame.left, frame.top, frame.right - frame.left,
              frame.bottom - frame.top, true);
 
-  // ⚠️ **רק כשהחלון כבר גלוי.** `SetFocus` על ילד מפעיל גם את החלון העליון
-  // שלו, וחלון אוצריא נוצר **מוסתר** ונחשף רק בפריים הראשון — כשנייה
-  // שלמה אחר כך. השורה הזו (מקוד ה-runner הסטנדרטי, שנכתב לחלון יחיד)
-  // גנבה אפוא את הפוקוס מהחלון הראשי לפני שהיה בכלל מה לראות: המשתמש
-  // המשיך להקליד, וההקלדה הלכה לחלון בלתי-נראה.
-  //
-  // אין כאן אובדן: `WM_ACTIVATE` שמעל מעביר את הפוקוס לתוכן בכל הפעלה,
-  // כולל זו שהחשיפה (`RevealOnFirstFrame`) מייצרת.
+  // רק כשהחלון גלוי: `SetFocus` על ילד מפעיל את החלון העליון, והראשי נוצר
+  // מוסתר. `WM_ACTIVATE` ממקד את התוכן בחשיפה.
   if (::IsWindowVisible(window_handle_)) {
     SetFocus(child_content_);
   }

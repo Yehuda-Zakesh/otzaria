@@ -1,20 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:otzaria/app_scope/process_duties.dart';
-import 'package:otzaria/core/windowing/settings_sync.dart';
-import 'package:otzaria/core/windowing/window_bus.dart';
-import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:otzaria/tools/calendar/services/calendar_alerts_owner.dart';
 
 /// למה פקודה לא אושרה.
 enum CalendarAlertsFailure {
-  /// אין בעלים זמין. דבר לא נכתב.
-  noOwner,
-
-  /// הבעלים לא ענה בזמן. ייתכן שהפקודה הוחלה; המצב יתיישר בעדכון הבא.
-  timeout,
-
   /// הבעלים דחה את הפקודה או נכשל בה.
   rejected,
 }
@@ -62,11 +52,9 @@ class CalendarAlertsAck {
 
 /// הדרך של חלון לשנות את מצב ההתראות: תמיד דרך הבעלים.
 abstract class CalendarAlertsClient {
-  /// הבעלים עצמו בחלון הראשי ובחלון יחיד, ואפיק החלונות בחלון משני.
+  /// כל החלונות באותו isolate עם הבעלים.
   static CalendarAlertsClient forCurrentWindow() =>
-      ProcessDuties.current.isProcessOwner
-      ? LocalCalendarAlertsClient.instance
-      : RemoteCalendarAlertsClient.instance;
+      LocalCalendarAlertsClient.instance;
 
   Future<CalendarAlertsAck> send(
     String op, [
@@ -77,9 +65,6 @@ abstract class CalendarAlertsClient {
   Stream<CalendarAlertsUpdate> get updates;
 
   Stream<CalendarScheduleStatus> get scheduleStatuses;
-
-  /// האם המצב המקומי עלול להיות ישן ויש לבקש snapshot בפתיחה.
-  bool get needsSnapshot;
 }
 
 /// מסנן עדכונים לפי epoch ו-revision, ומפרסם רק את החדשים.
@@ -97,8 +82,6 @@ mixin _OrderedUpdates {
   /// ה-revision האחרון שהוחל בחלון הזה; -1 לפני העדכון הראשון.
   int get appliedRevision => _revision;
 
-  Future<bool> _applyValues(Map<String, Object?> values) async => true;
-
   /// ההגדרות המקומיות נמחקו: המצב הבא מהבעלים מוחל גם אם ה-revision שלו כבר הוחל.
   void forgetAppliedRevision() {
     _epoch = null;
@@ -113,7 +96,6 @@ mixin _OrderedUpdates {
     Future<bool> apply() async {
       // עדכון חדש יותר הגיע בינתיים: הוא שיוחל ויפורסם.
       if (_epoch != update.epoch || _revision != update.revision) return false;
-      await _applyValues(update.values);
       _updates.add(update);
       return true;
     }
@@ -130,7 +112,7 @@ mixin _OrderedUpdates {
   }
 }
 
-/// הבעלים באותו isolate: בלי אפיק ובלי עותק נפרד של ההגדרות.
+/// הבעלים באותו isolate, ולכן גם אותן הגדרות.
 class LocalCalendarAlertsClient
     with _OrderedUpdates
     implements CalendarAlertsClient {
@@ -145,9 +127,6 @@ class LocalCalendarAlertsClient
   final CalendarAlertsOwner owner;
 
   @override
-  bool get needsSnapshot => false;
-
-  @override
   Stream<CalendarScheduleStatus> get scheduleStatuses => owner.scheduleStatuses;
 
   @override
@@ -159,98 +138,5 @@ class LocalCalendarAlertsClient
     final update = ack.update;
     if (update != null) await accept(update);
     return ack;
-  }
-}
-
-/// חלון משני: כל פקודה נשלחת לבעלים, והערכים המאושרים מוחלים על ההגדרות
-/// המקומיות דרך [SettingsSync.applyAuthoritativeValues].
-class RemoteCalendarAlertsClient
-    with _OrderedUpdates
-    implements CalendarAlertsClient {
-  RemoteCalendarAlertsClient({
-    WindowBus? bus,
-    Future<bool> Function(Map<String, Object?> values)? applyValues,
-    this.timeout = const Duration(seconds: 10),
-    this.userTimeout = const Duration(minutes: 5),
-  }) : _bus = bus ?? WindowBus.instance,
-       _apply = applyValues ?? _applyChangedValues;
-
-  static final RemoteCalendarAlertsClient instance =
-      RemoteCalendarAlertsClient();
-
-  final WindowBus _bus;
-  final Future<bool> Function(Map<String, Object?> values) _apply;
-  final Duration timeout;
-
-  /// לפקודות שעשויות להמתין לדיאלוג הרשאות של המערכת.
-  final Duration userTimeout;
-
-  static const Set<String> _waitsForUser = {'ensurePermission', 'sendTest'};
-
-  /// רק מה שהשתנה: כל מפתח שמוחל מרענן את ההגדרות של החלון.
-  static Future<bool> _applyChangedValues(Map<String, Object?> values) {
-    final changed = {
-      for (final entry in values.entries)
-        if (Settings.getValue<Object>(entry.key) != entry.value)
-          entry.key: entry.value,
-    };
-    if (changed.isEmpty) return Future.value(true);
-    return SettingsSync.instance.applyAuthoritativeValues(changed);
-  }
-
-  final StreamController<CalendarScheduleStatus> _statuses =
-      StreamController<CalendarScheduleStatus>.broadcast();
-
-  @override
-  bool get needsSnapshot => true;
-
-  @override
-  Stream<CalendarScheduleStatus> get scheduleStatuses => _statuses.stream;
-
-  @override
-  Future<bool> _applyValues(Map<String, Object?> values) => _apply(values);
-
-  @override
-  Future<CalendarAlertsAck> send(
-    String op, [
-    Map<String, Object?> args = const {},
-  ]) async {
-    final owner = _bus.ownerPort;
-    if (owner == null) {
-      return const CalendarAlertsAck.failed(CalendarAlertsFailure.noOwner);
-    }
-    final response = await _bus.requestPortDetailed(
-      owner,
-      {'type': CalendarAlertsOwner.requestCommand, 'op': op, 'args': args},
-      timeout: _waitsForUser.contains(op) ? userTimeout : timeout,
-      label: 'calendar alerts $op',
-    );
-    final ack = switch (response.failure) {
-      WindowBusFailure.timeout => const CalendarAlertsAck.failed(
-        CalendarAlertsFailure.timeout,
-      ),
-      WindowBusFailure.error => const CalendarAlertsAck.failed(
-        CalendarAlertsFailure.rejected,
-      ),
-      null => CalendarAlertsAck.fromReply(response.result),
-    };
-    final update = ack.update;
-    if (update != null) await accept(update);
-    return ack;
-  }
-
-  /// מטפל בשידורי הבעלים. מחזיר null כשההודעה אינה שלנו.
-  Future<Object?> handleBusMessage(Map<String, dynamic> message) async {
-    switch (message['type']) {
-      case CalendarAlertsOwner.requestStateChanged:
-        final update = CalendarAlertsUpdate.fromJson(message);
-        return update != null && await accept(update);
-      case CalendarAlertsOwner.requestScheduleStatus:
-        final status = CalendarScheduleStatus.fromJson(message);
-        if (status == null) return false;
-        _statuses.add(status);
-        return true;
-    }
-    return null;
   }
 }

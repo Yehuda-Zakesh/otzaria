@@ -295,6 +295,32 @@ void main() {
     });
   });
 
+  testWidgets('בנייה על אותם קישורים אינה גוזרת את מפתחות כל המפרשים (perf)', (
+    tester,
+  ) async {
+    await _pump(tester, surfaceSize: const Size(800, 300));
+    await _settleAnchorScroll(tester);
+    final state = _lastBloc!.state as TextBookLoaded;
+    final offscreen = [
+      for (final link in state.links.cast<_CountingLink>())
+        if (link.path2 == '${_commentators.last}.txt' &&
+            link.index2 <= _segmentsPerCommentator)
+          link,
+    ];
+    expect(offscreen, hasLength(_segmentsPerCommentator));
+    expect(find.text(_commentators.last, skipOffstage: false), findsNothing);
+
+    for (final link in offscreen) {
+      link.index1Reads = 0;
+    }
+    _lastBloc!.emitState(state.copyWith(fontSize: state.fontSize + 1));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text(_commentators.first), findsOneWidget);
+    expect([for (final link in offscreen) link.index1Reads], everyElement(0));
+  });
+
   testWidgets('בניית UI שומרת מיפוי ומיקום; שינוי הרחבה מעדכן אותם', (
     tester,
   ) async {
@@ -659,15 +685,16 @@ const int _lineCount = 2;
 ///
 /// כל הקישורים של אותה שורה חולקים `index1` ונבדלים ב-`index2` — בדיוק
 /// המצב שבו מפרש אחד מופיע כמה פעמים על אותו סעיף.
-Link _link({required String title, required int segment, int line = 0}) => Link(
-  heRef: 'קטע ${segment + 1}',
-  index1: line + 1,
-  path2: '$title.txt',
-  index2: line * _segmentsPerCommentator + segment + 1,
-  connectionType: LinkTypes.commentary,
-  targetCategoryId: 1,
-  targetFileType: 'txt',
-);
+Link _link({required String title, required int segment, int line = 0}) =>
+    _CountingLink(
+      heRef: 'קטע ${segment + 1}',
+      index1: line + 1,
+      path2: '$title.txt',
+      index2: line * _segmentsPerCommentator + segment + 1,
+      connectionType: LinkTypes.commentary,
+      targetCategoryId: 1,
+      targetFileType: 'txt',
+    );
 
 List<Link> _linksForLine(int line) => [
   for (final title in _commentators)
@@ -709,6 +736,27 @@ TextBookLoaded _loadedState({
   pinLeftPane: false,
   searchText: '',
 );
+
+/// סופר קריאות של [index1], שממנו נגזר מפתח הפריט.
+class _CountingLink extends Link {
+  _CountingLink({
+    required super.heRef,
+    required super.index1,
+    required super.path2,
+    required super.index2,
+    required super.connectionType,
+    super.targetCategoryId,
+    super.targetFileType,
+  });
+
+  int index1Reads = 0;
+
+  @override
+  int get index1 {
+    index1Reads++;
+    return super.index1;
+  }
+}
 
 class _TestTextBookBloc extends Bloc<TextBookEvent, TextBookState>
     implements TextBookBloc {

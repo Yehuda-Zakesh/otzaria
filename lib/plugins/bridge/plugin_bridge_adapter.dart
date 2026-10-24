@@ -4437,14 +4437,20 @@ class PluginBridgeAdapter {
 
   /// בורר התיקיות המוגדר כברירת מחדל — דיאלוג המערכת דרך [FilePicker].
   Future<String?> _defaultPickFolder({String? title}) async {
-    final context = navigatorKey.currentContext;
-    if (context != null && !await verifySaferModePassword(context)) {
+    final context = rpcWindowContext;
+    if (context == null || !context.mounted) return null;
+    final windowsOptions = modalWindowsOptions(context);
+    if (!await verifySaferModePassword(context)) {
       return null;
     }
-    return FilePicker.getDirectoryPath(
-      windowsOptions: kModalWindowsOptions,
-      linuxOptions: kModalLinuxOptions,
-      dialogTitle: title,
+    if (!context.mounted) return null;
+    return withFilePickerOwner(
+      context,
+      () => FilePicker.getDirectoryPath(
+        windowsOptions: windowsOptions,
+        linuxOptions: kModalLinuxOptions,
+        dialogTitle: title,
+      ),
     );
   }
 
@@ -4693,6 +4699,7 @@ class PluginBridgeAdapter {
     _requireController(pluginId, instanceId),
     jobName: jobName,
     layout: layout,
+    context: rpcWindowContext,
   );
 
   Future<Uint8List> _defaultCapturePagePdf(
@@ -5084,18 +5091,24 @@ class PluginBridgeAdapter {
     List<String>? allowedExtensions,
     String? title,
   }) async {
-    final context = navigatorKey.currentContext;
-    if (context != null && !await verifySaferModePassword(context)) {
+    final context = rpcWindowContext;
+    if (context == null || !context.mounted) return null;
+    final windowsOptions = modalWindowsOptions(context);
+    if (!await verifySaferModePassword(context)) {
       return null;
     }
     final hasExtensions =
         allowedExtensions != null && allowedExtensions.isNotEmpty;
-    final result = await FilePicker.pickFile(
-      dialogTitle: title,
-      windowsOptions: kModalWindowsOptions,
-      linuxOptions: kModalLinuxOptions,
-      type: hasExtensions ? FileType.custom : FileType.any,
-      allowedExtensions: hasExtensions ? allowedExtensions : null,
+    if (!context.mounted) return null;
+    final result = await withFilePickerOwner(
+      context,
+      () => FilePicker.pickFile(
+        dialogTitle: title,
+        windowsOptions: windowsOptions,
+        linuxOptions: kModalLinuxOptions,
+        type: hasExtensions ? FileType.custom : FileType.any,
+        allowedExtensions: hasExtensions ? allowedExtensions : null,
+      ),
     );
     return result?.path;
   }
@@ -5325,19 +5338,25 @@ class PluginBridgeAdapter {
     List<String>? allowedExtensions,
     String? title,
   }) async {
-    final context = navigatorKey.currentContext;
-    if (context != null && !await verifySaferModePassword(context)) {
+    final context = rpcWindowContext;
+    if (context == null || !context.mounted) return null;
+    final windowsOptions = modalWindowsOptions(context);
+    if (!await verifySaferModePassword(context)) {
       return null;
     }
-    final folder = await FilePicker.getDirectoryPath(
-      dialogTitle: pluginSaveFolderDialogTitle(title),
-      windowsOptions: kModalWindowsOptions,
-      linuxOptions: kModalLinuxOptions,
+    if (!context.mounted) return null;
+    final folder = await withFilePickerOwner(
+      context,
+      () => FilePicker.getDirectoryPath(
+        dialogTitle: pluginSaveFolderDialogTitle(title),
+        windowsOptions: windowsOptions,
+        linuxOptions: kModalLinuxOptions,
+      ),
     );
     if (folder == null) return null;
 
-    final dialogContext = navigatorKey.currentContext;
-    if (dialogContext == null || !dialogContext.mounted) return null;
+    final dialogContext = context;
+    if (!dialogContext.mounted) return null;
     final typed = await showInputDialog(
       context: dialogContext,
       title: title ?? 'שמירת קובץ',
@@ -5345,7 +5364,7 @@ class PluginBridgeAdapter {
       initialValue: suggestedName,
       confirmText: 'שמור',
     );
-    if (typed == null) return null;
+    if (typed == null || !dialogContext.mounted) return null;
 
     final fileName = pluginSaveFileName(typed, allowedExtensions?.firstOrNull);
     final target = pluginSaveTargetPath(folder: folder, fileName: fileName);
@@ -5357,7 +5376,7 @@ class PluginBridgeAdapter {
         content: 'הקובץ „$fileName” כבר קיים בתיקייה שנבחרה.',
         subtitle: 'התוכן הקיים יוחלף.',
       );
-      if (!replace) return null;
+      if (!replace || !dialogContext.mounted) return null;
     }
     return target;
   }
@@ -6811,13 +6830,7 @@ class PluginBridgeAdapter {
   ]) async {
     final ack = await _alerts.send(op, {...args, 'pluginId': plugin.pluginId});
     if (ack.ok) return ack.value;
-    throw Exception(
-      ack.error ??
-          switch (ack.failure) {
-            CalendarAlertsFailure.timeout => 'error.timeout: main window',
-            _ => 'error.unavailable: main window',
-          },
-    );
+    throw Exception(ack.error ?? 'error.unavailable: calendar alerts');
   }
 
   // flutter_local_notifications דוחה מזהה שאינו נכנס ב-32 ביט.

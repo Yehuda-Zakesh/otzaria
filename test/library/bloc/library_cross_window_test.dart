@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/data/data_providers/file_system_data_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/library/bloc/library_bloc.dart';
@@ -55,8 +54,6 @@ void main() {
     repo = DataRepository()..library = Future.value(before);
   });
 
-  tearDown(() => MultiViewMode.debugOverride = null);
-
   LibraryBloc loaded() {
     final bloc = LibraryBloc(repository: repo, hiddenStore: _Store());
     bloc.emit(LibraryState(library: before, currentCategory: before));
@@ -70,7 +67,6 @@ void main() {
     test(
       'שינוי נתיב היברובוקס מסנכרן את העץ בחלון האחר: remove=$remove',
       () async {
-        MultiViewMode.debugOverride = true;
         final oldFiles = FileSystemData.instance;
         final oldLibrary =
             DataRepository.instance.cachedLibraryFutureForTesting;
@@ -108,7 +104,6 @@ void main() {
   }
 
   test('עץ שנבנה מחדש בחלון אחד נבנה מחדש גם בשני, בלי הד חוזר', () async {
-    MultiViewMode.debugOverride = true;
     final a = loaded();
     final b = loaded();
     final aStates = <LibraryState>[];
@@ -128,23 +123,7 @@ void main() {
     await b.close();
   });
 
-  test('בלי הדגל ה-bloc של חלון אחר אינו נוגע בעץ', () async {
-    final a = loaded();
-    final b = loaded();
-
-    repo.library = Future.value(_library('אחרי'));
-    a.add(const HiddenBooksChanged());
-    await settle();
-
-    expect(a.state.library!.subCategories.single.title, 'אחרי');
-    expect(b.state.library, same(before));
-
-    await a.close();
-    await b.close();
-  });
-
   test('bloc שנסגר אינו מקבל עוד הודעות', () async {
-    MultiViewMode.debugOverride = true;
     final a = loaded();
     final b = loaded();
     await b.close();

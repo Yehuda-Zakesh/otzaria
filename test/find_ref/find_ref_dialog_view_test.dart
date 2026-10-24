@@ -8,7 +8,7 @@ import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:otzaria/core/focus_repository.dart';
-import 'package:otzaria/core/windowing/settings_sync.dart';
+import 'package:otzaria/find_ref/find_ref_personal_books_setting.dart';
 import 'package:otzaria/find_ref/bloc/find_ref_bloc.dart';
 import 'package:otzaria/find_ref/bloc/find_ref_event.dart';
 import 'package:otzaria/find_ref/find_ref_recent_store.dart';
@@ -897,47 +897,6 @@ void main() {
     expect(find.text('איתור מקור מדויק'), findsOneWidget);
   });
 
-  testWidgets('שינוי הסתרה בחלון אחר מרוקן תוצאה ישנה ומריץ את השאילתה מחדש', (
-    tester,
-  ) async {
-    final repo = _GatedRepository(
-      first: [_ref('בראשית פרק קנ')],
-      second: [_ref('בראשית פרק קנא')],
-    );
-    addTearDown(() {
-      if (!repo.gate.isCompleted) repo.gate.complete();
-    });
-    final sync = SettingsSync.instance;
-    final previousApply = sync.applyLocally;
-    sync.applyLocally = (key, value) => Settings.setValue<String>(
-      key,
-      value as String,
-    );
-    addTearDown(() => sync.applyLocally = previousApply);
-    await _pumpDialog(tester, repository: repo);
-
-    await tester.enterText(find.byType(TextField), 'בראשית');
-    await tester.pump(_pastDebounce);
-    await tester.pump();
-    expect(find.text('בראשית פרק קנ'), findsOneWidget);
-
-    expect(
-      await sync.applyAuthoritativeValues({
-        HiddenLibraryStore.bookKeysSetting: '["o__11__בראשית"]',
-      }),
-      isTrue,
-    );
-    await tester.pump();
-    expect(find.text('בראשית פרק קנ'), findsNothing);
-
-    await tester.pump(_pastDebounce);
-    expect(repo.calls, 2);
-    repo.gate.complete();
-    await tester.pump();
-    expect(find.text('בראשית פרק קנא'), findsOneWidget);
-    await tester.pump(const Duration(milliseconds: 500));
-  });
-
   testWidgets('שמירת הסתרה מקומית מרעננת דיאלוג פתוח פעם אחת', (tester) async {
     final store = HiddenLibraryStore();
     await store.save(const HiddenLibrarySelection());
@@ -1118,20 +1077,13 @@ void main() {
     tester,
   ) async {
     final repo = _FakeRepository([_ref('בראשית פרק א')]);
-    final sync = SettingsSync.instance;
-    final previousApply = sync.applyLocally;
-    sync.applyLocally = (key, value) =>
-        Settings.setValue<bool>(key, value as bool);
-    addTearDown(() => sync.applyLocally = previousApply);
     await _pumpDialog(tester, repository: repo);
     await tester.enterText(find.byType(TextField), 'בראשית');
     await tester.pump(_pastDebounce);
     await tester.pump();
     expect(repo.personalBooksFlags, [false]);
 
-    await sync.applyAuthoritativeValues({
-      'key-find-ref-include-personal-books': true,
-    });
+    await FindRefPersonalBooksSetting.save(true);
     await tester.pump();
     expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
     // Enter לפני שהחיפוש החוזר הסתיים ממתין לו ופותח את תוצאתו.
@@ -1154,11 +1106,6 @@ void main() {
         'סנכרון המתג הלוך וחזור בתוך debounce ($initialValue, Enter: $submitDuringDebounce)',
         (tester) async {
           final repo = _FakeRepository([_ref('בראשית פרק א')]);
-          final sync = SettingsSync.instance;
-          final previousApply = sync.applyLocally;
-          sync.applyLocally = (key, value) =>
-              Settings.setValue<bool>(key, value as bool);
-          addTearDown(() => sync.applyLocally = previousApply);
           await Settings.setValue<bool>(
             'key-find-ref-include-personal-books',
             initialValue,
@@ -1168,18 +1115,14 @@ void main() {
           await tester.pump(_pastDebounce);
           await tester.pump();
 
-          await sync.applyAuthoritativeValues({
-            'key-find-ref-include-personal-books': !initialValue,
-          });
+          await FindRefPersonalBooksSetting.save(!initialValue);
           await tester.pump(const Duration(milliseconds: 180));
           if (submitDuringDebounce) {
             await tester.testTextInput.receiveAction(TextInputAction.done);
             await tester.pump();
             expect(FindRefRecentStore.load(), isEmpty);
           }
-          await sync.applyAuthoritativeValues({
-            'key-find-ref-include-personal-books': initialValue,
-          });
+          await FindRefPersonalBooksSetting.save(initialValue);
           await tester.pump(_pastDebounce);
           await tester.pump();
 

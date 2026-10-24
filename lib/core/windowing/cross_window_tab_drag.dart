@@ -6,9 +6,8 @@ import 'package:otzaria/core/messages/window_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
 import 'package:otzaria/core/windowing/app_window_id.dart';
 import 'package:otzaria/core/windowing/drag_preview_colors.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
+import 'package:otzaria/core/windowing/runner_window_channel.dart';
 import 'package:otzaria/core/windowing/multiview/in_process_tab_drop.dart';
-import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:otzaria/core/windowing/window_opener.dart';
 import 'package:otzaria/core/windowing/tab_drag_preview.dart';
 import 'package:otzaria/tabs/bloc/tabs_bloc.dart';
@@ -31,24 +30,23 @@ class CrossWindowTabDrag {
 
   final InProcessTabDrops? _inProcessOverride;
 
-  /// ריבוי תצוגות: היעדים הם חלונות התהליך, וההעברה ישירה ולא דרך האפיק.
-  InProcessTabDrops? get _inProcess => MultiViewMode.enabled
-      ? (_inProcessOverride ?? InProcessTabDrops.instance)
-      : null;
+  /// היעדים הם חלונות התהליך, וההעברה ישירה בין ה-blocs שלהם.
+  InProcessTabDrops get _inProcess =>
+      _inProcessOverride ?? InProcessTabDrops.instance;
 
   /// החלון שהרצועה יושבת בו; מולו נמדד "שחרור מעל החלון עצמו".
   AppWindowId _sourceWindow = AppWindowId.primary;
 
-  int? get _selfHwnd => _inProcess?.hwndOf(_sourceWindow);
+  int? get _selfHwnd => _inProcess.hwndOf(_sourceWindow);
 
   /// ⚠️ קצב קבוע ולא `onDragUpdate`: `Draggable` מדווח עשרות עדכונים
-  /// בשנייה, וכל אחד היה קריאת ערוץ ובקשת אפיק. 60ms מספיקים כדי שהחיווי
+  /// בשנייה, וכל אחד היה קריאת ערוץ. 60ms מספיקים כדי שהחיווי
   /// ירגיש רציף, ומורידים את התעבורה בסדר גודל.
   static const Duration _pollInterval = Duration(milliseconds: 60);
 
   /// המסירה המוקדמת משאירה ל-Windows תנועה שתפעיל את Snap Layouts.
   /// יציאה מהרצועה מבדילה אותה מסידור כרטיסיות מקומי.
-  static const MultiWindowService _service = MultiWindowService();
+  static const RunnerWindowChannel _service = RunnerWindowChannel();
 
   /// ההעברה סוגרת את הכרטיסיה במקור ומסיימת סשן תיקון שבה, ולכן קודמת לה
   /// בדיקת שינויים שלא נשמרו כמו ב"העבר לחלון" שבתפריט.
@@ -86,7 +84,7 @@ class CrossWindowTabDrag {
 
   /// האם הכרטיסיה שורדת העברה. נבדק **פעם אחת** בתחילת הגרירה.
   ///
-  /// ⚠️ [MultiWindowService.canTransfer] בונה כרטיסיה מלאה — BLoC,
+  /// ⚠️ [RunnerWindowChannel.canTransfer] בונה כרטיסיה מלאה — BLoC,
   /// repository ומנויים — ולכן קריאה לה בלולאת הפעימות של 60ms בנתה וזרקה
   /// BLoC חדש כל 60ms לכל אורך הגרירה, בלי שום חיווי למשתמש.
   bool _transferable = true;
@@ -129,7 +127,7 @@ class CrossWindowTabDrag {
     VoidCallback? cancelDrag,
     AppWindowId? sourceWindow,
   }) {
-    if (!MultiWindowService.canDragTabsOut) return;
+    if (!RunnerWindowChannel.canDragTabsOut) return;
     _sourceWindow = sourceWindow ?? AppWindowId.primary;
     _draggedTitle = tab.title;
     _draggedTab = tab;
@@ -145,7 +143,7 @@ class CrossWindowTabDrag {
     _leftStrip = false;
     _dragGeneration++;
     // פעם אחת לכל גרירה — ראו [_transferable].
-    _transferable = MultiWindowService.canTransfer(tab);
+    _transferable = RunnerWindowChannel.canTransfer(tab);
     _snapshotSent = false;
     _pollsSinceStart = 0;
     // דוגם לפני פעימת המעקב הראשונה.
@@ -177,7 +175,7 @@ class CrossWindowTabDrag {
   /// 3. `snapped` גובר על היעד שתחת הסמן, ולכן שחרור מעל חלון אוצריא אחר
   ///    פתח חלון **חדש** במסגרת של 176×40 במקום להעביר אליו.
   void applySnapshot(TabWindowPreview preview, int generation) {
-    if (!MultiWindowService.canDragTabsOut || generation != _dragGeneration) {
+    if (!RunnerWindowChannel.canDragTabsOut || generation != _dragGeneration) {
       preview.image.dispose();
       return;
     }
@@ -236,7 +234,7 @@ class CrossWindowTabDrag {
   ///
   /// ⚠️ [_remoteDropIndex] **אינו** מתאפס כאן: השחרור צריך את המיקום.
   void end() {
-    if (!MultiWindowService.canDragTabsOut) return;
+    if (!RunnerWindowChannel.canDragTabsOut) return;
     // ⚠️ הגרירה כבר בידי Windows. `freezeTabDrag` כאן היה מחזיר את הרוח
     // אחרי שהחלון האמיתי הסתיר אותה, ו-`notifyDragLeave` היה מנקה חיווי
     // של חלון שכבר אינו רלוונטי.
@@ -251,8 +249,8 @@ class CrossWindowTabDrag {
     unawaited(_service.freezeTabDrag());
   }
 
-  /// ⚠️ חובה בסגירת החלון. הטיימר שולח בקשות אפיק כל 60ms, ולולאה שנשארה
-  /// אחרי שהחלון נסגר מציפה חלונות אחרים בהודעות על גרירה שאיננה.
+  /// ⚠️ חובה בסגירת החלון. הטיימר שואל את ה-runner כל 60ms, ולולאה שנשארה
+  /// אחרי שהחלון נסגר ממשיכה לעדכן חיווי של גרירה שאיננה.
   void dispose() {
     _timer?.cancel();
     _timer = null;
@@ -349,13 +347,13 @@ class CrossWindowTabDrag {
 
   /// האם [tab] ניתנת להעברה, בלי לבנות אותה מחדש כשכבר נבדקה.
   ///
-  /// ⚠️ הבדיקה עצמה יקרה (ראו [MultiWindowService.canTransfer]), ולכן
+  /// ⚠️ הבדיקה עצמה יקרה (ראו [RunnerWindowChannel.canTransfer]), ולכן
   /// התוצאה של [begin] נשמרת. הנפילה-לאחור קיימת למסלול שבו [begin] לא רץ
   /// כלל — רצועה שחיברה `onDroppedOutside` בלי `onDragStarted` — ושם עדיף
   /// לשלם על בדיקה אחת מלאבד כרטיסיה.
   bool _canTransfer(OpenedTab tab) => identical(tab, _draggedTab)
       ? _transferable
-      : MultiWindowService.canTransfer(tab);
+      : RunnerWindowChannel.canTransfer(tab);
 
   /// עוצר את הגרירה החוצה ומודיע למשתמש. פעם אחת לכל גרירה.
   void _rejectTransfer() {
@@ -517,16 +515,11 @@ class CrossWindowTabDrag {
     int x,
     int y,
   ) async {
-    final drops = _inProcess;
     final index =
         _remoteDropIndex ??
-        await (drops != null
-            ? drops.notifyDragOver(slot, x, y, tab.title)
-            : _service.notifyDragOver(slot, x, y, tab.title));
+        await _inProcess.notifyDragOver(slot, x, y, tab.title);
     _remoteDropIndex = null;
-    final moved = await (drops != null
-        ? drops.sendTabToWindow(slot, tab, index: index)
-        : _service.sendTabToWindow(slot, tab, index: index));
+    final moved = await _inProcess.sendTabToWindow(slot, tab, index: index);
     if (moved == true) {
       bloc.add(RemoveTab(tab));
       return;
@@ -616,27 +609,21 @@ class CrossWindowTabDrag {
   bool _outsideWorkArea(int? slot, bool inWorkArea) =>
       slot == null && !inWorkArea;
 
-  /// ה-runner מסתיר את הרוח כשחלון מנוע נחשף, אבל אינו מכיר חלונות Dart.
-  void _hideAfterViewOpened() {
-    if (_inProcess != null) _hidePreview();
-  }
+  /// ה-runner אינו מכיר חלונות Dart, ולכן הרוח מוסתרת כאן כשחלון נפתח.
+  void _hideAfterViewOpened() => _hidePreview();
 
-  void _notifyDragLeave(int slot) {
-    final drops = _inProcess;
-    if (drops != null) return drops.notifyDragLeave(slot);
-    _service.notifyDragLeave(slot);
-  }
+  void _notifyDragLeave(int slot) => _inProcess.notifyDragLeave(slot);
 
-  /// מה שתחת הסמן. בריבוי תצוגות המשבצת היא של חלון התהליך שה-HWND שלו
-  /// תחת הסמן, ו-isSelf נמדד מול חלון המקור ולא תמיד מול החלון הראשי.
+  /// מה שתחת הסמן: המשבצת היא של חלון התהליך שה-HWND שלו תחת הסמן, ו-isSelf
+  /// נמדד מול חלון המקור ולא תמיד מול החלון הראשי.
   Future<CursorTarget?> _windowAtCursor() async {
     final drops = _inProcess;
     final target = await _service.windowAtCursor(
       selfHwnd: _selfHwnd,
-      withHwnd: drops != null,
+      withHwnd: true,
     );
-    if (target == null || drops == null) return target;
-    final slot = drops.resolve(hwnd: target.hwnd, busSlot: target.slot);
+    if (target == null) return target;
+    final slot = drops.resolve(hwnd: target.hwnd, runnerSlot: target.slot);
     return (
       slot: slot,
       isSelf: target.isSelf || _isSourceSlot(drops, slot),
@@ -654,10 +641,10 @@ class CrossWindowTabDrag {
     final drops = _inProcess;
     final outcome = await _service.dragOutToSystem(
       selfHwnd: _selfHwnd,
-      withHwnd: drops != null,
+      withHwnd: true,
     );
-    if (outcome == null || drops == null) return outcome;
-    final slot = drops.resolve(hwnd: outcome.hwnd, busSlot: outcome.slot);
+    if (outcome == null) return outcome;
+    final slot = drops.resolve(hwnd: outcome.hwnd, runnerSlot: outcome.slot);
     return (
       ran: outcome.ran,
       snapped: outcome.snapped,

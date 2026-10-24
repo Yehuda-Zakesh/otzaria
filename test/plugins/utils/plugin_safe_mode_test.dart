@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -41,34 +40,15 @@ void main() {
     expect(PluginSafeMode.isActive, isFalse);
   });
 
-  test('secondary follows both transitions without a marker', () async {
-    await PluginSafeMode.initializeSession(
-      isSecondary: true,
-      waitForPrimary: () async => true,
-    );
-    expect(PluginSafeMode.isActive, isTrue);
-    await PluginSafeMode.initializeSession(
-      isSecondary: true,
-      waitForPrimary: () async => false,
-    );
-    expect(PluginSafeMode.isActive, isFalse);
-    expect(marker().existsSync(), isFalse);
-  });
-
   test(
     'unwritable or undeletable legacy marker cannot affect session choices',
     () async {
       final blocked = Directory(marker().path)..createSync();
       File(p.join(blocked.path, 'child')).writeAsStringSync('keep');
-      await PluginSafeMode.initializeSession(isSecondary: false);
+      await PluginSafeMode.initializeSession();
       for (final mode in [true, false]) {
         await PluginSafeMode.set(mode);
-        await PluginSafeMode.initializeSession(isSecondary: false);
-        expect(PluginSafeMode.isActive, mode);
-        await PluginSafeMode.initializeSession(
-          isSecondary: true,
-          waitForPrimary: () async => mode,
-        );
+        await PluginSafeMode.initializeSession();
         expect(PluginSafeMode.isActive, mode);
         expect(await blocked.exists(), isTrue);
         expect(
@@ -80,59 +60,18 @@ void main() {
   );
 
   test(
-    'secondary waits for the primary decision before loading plugins',
-    () async {
-      final primary = Completer<bool>();
-      var completed = false;
-      final secondary = PluginSafeMode.initializeSession(
-        isSecondary: true,
-        waitForPrimary: () => primary.future,
-      ).then((_) => completed = true);
-      await pumpEventQueue();
-      expect(completed, isFalse);
-      await PluginSafeMode.set(true);
-      PluginSafeMode.active.value = false;
-      primary.complete(true);
-      await secondary;
-      expect(PluginSafeMode.isActive, isTrue);
-      // A later secondary does not wait for a request that already completed.
-      await PluginSafeMode.initializeSession(
-        isSecondary: true,
-        waitForPrimary: () => primary.future,
-      );
-      expect(PluginSafeMode.isActive, isTrue);
-    },
-  );
-
-  test(
-    'failed primary coordination releases readiness with plugins disabled',
-    () async {
-      Object? reported;
-      PluginSafeMode.ready = PluginSafeMode.initializeSession(
-        isSecondary: true,
-        waitForPrimary: () =>
-            Future<bool>.error(TimeoutException('primary unavailable')),
-        onError: (error, _) => reported = error,
-      );
-      await expectLater(PluginSafeMode.ready, completes);
-      expect(reported, isA<TimeoutException>());
-      expect(PluginSafeMode.isActive, isTrue);
-    },
-  );
-
-  test(
     'primary preserves the session choice on soft restart',
     () async {
-      await PluginSafeMode.initializeSession(isSecondary: false);
+      await PluginSafeMode.initializeSession();
       final attempts = File(
         p.join(dataRoot.path, StartupCrashCounter.attemptsFileName),
       );
       expect(await attempts.readAsString(), '1');
       await PluginSafeMode.set(true);
-      await PluginSafeMode.initializeSession(isSecondary: false);
+      await PluginSafeMode.initializeSession();
       expect(PluginSafeMode.isActive, isTrue);
       await PluginSafeMode.set(false);
-      await PluginSafeMode.initializeSession(isSecondary: false);
+      await PluginSafeMode.initializeSession();
       expect(PluginSafeMode.isActive, isFalse);
       expect(await attempts.readAsString(), '1');
     },
@@ -144,7 +83,7 @@ void main() {
       File(
         p.join(dataRoot.path, StartupCrashCounter.attemptsFileName),
       ).writeAsStringSync('2');
-      await PluginSafeMode.initializeSession(isSecondary: false);
+      await PluginSafeMode.initializeSession();
       expect(PluginSafeMode.isActive, isTrue);
       expect(PluginSafeMode.enteredAfterCrashes, isTrue);
       expect(marker().existsSync(), isFalse);
@@ -156,7 +95,7 @@ void main() {
       p.join(dataRoot.path, StartupCrashCounter.attemptsFileName),
     ).createSync();
     await expectLater(
-      PluginSafeMode.initializeSession(isSecondary: false),
+      PluginSafeMode.initializeSession(),
       completes,
     );
   });

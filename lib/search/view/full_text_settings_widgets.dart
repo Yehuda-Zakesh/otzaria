@@ -711,6 +711,9 @@ class _SearchTermsDisplayState extends State<SearchTermsDisplay> {
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<SearchBloc, SearchState>(
+      buildWhen: (previous, current) =>
+          previous.searchQuery != current.searchQuery ||
+          previous.configuration.searchMode != current.configuration.searchMode,
       builder: (context, state) {
         // נציג את הטקסט מה-state של החיפוש (לא מה-controller שמשתנה)
         final displayText = widget.query ?? state.searchQuery;
@@ -786,6 +789,7 @@ class OrderOfResults extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<SearchBloc, SearchState>(
+      buildWhen: (previous, current) => previous.sortBy != current.sortBy,
       builder: (context, state) {
         if (iconOnly) {
           return AppPopupMenuButton<ResultsOrder>(
@@ -847,6 +851,8 @@ class GroupingOfResults extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<SearchBloc, SearchState>(
+      buildWhen: (previous, current) =>
+          previous.resultGrouping != current.resultGrouping,
       builder: (context, state) {
         if (iconOnly) {
           return AppPopupMenuButton<ResultGroupingMode>(

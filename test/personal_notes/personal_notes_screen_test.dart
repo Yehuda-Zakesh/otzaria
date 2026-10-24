@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 // ignore: depend_on_referenced_packages
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 import 'package:otzaria/core/app_paths.dart';
+import 'package:otzaria/core/windowing/dialog_owner.dart';
 import 'package:otzaria/personal_notes/services/personal_notes_import_export_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
@@ -285,9 +286,12 @@ void main() {
         );
       });
       final previousPicker = FilePickerPlatform.instance;
+      final previousOwner = DialogOwner.hwnd();
       FilePickerPlatform.instance = _ImportPicker();
+      DialogOwner.mainWindowHwnd = 7;
       addTearDown(() async {
         FilePickerPlatform.instance = previousPicker;
+        DialogOwner.mainWindowHwnd = previousOwner;
         await database.close();
         AppPaths.debugOverrideDataRootPath(null);
         await root.delete(recursive: true);

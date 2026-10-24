@@ -47,9 +47,6 @@ enum SemanticFailureKind {
   /// release בלי SHA-256 של המניפסט שפורסם מחוצה לו.
   releaseUnverified,
 
-  /// חלון משני לא הצליח להעביר למארח הורדה, התקנה או מחיקה.
-  mainWindowUnavailable,
-
   /// מיקום הספרייה מועבר כעת.
   libraryMoving;
 

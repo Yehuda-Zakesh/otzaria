@@ -39,7 +39,7 @@ abstract interface class AppWindowController {
   /// ⚠️ **אין לקרוא לזה ב-Windows.** הריסת המנוע בעוד Dart רץ עליו מפילה
   /// את התהליך (`0xc0000409` ב-`flutter_windows.dll`), וכשפתוחים עוד
   /// חלונות הם נסגרים איתו. מסלול היציאה שם הוא `forceTerminate` של
-  /// ה-runner, וסגירת חלון בודד היא `MultiWindowService.closeSelf`.
+  /// ה-runner, וסגירת חלון בודד היא `RunnerWindowChannel.closeSelf`.
   ///
   /// הקורא היחיד המותר הוא `AppWindowListener`, בענף שאינו Windows —
   /// אינווריאנטה שנאכפת ב-`test/core/windowing/quit_application_call_sites_test.dart`.

@@ -188,7 +188,7 @@ class LibraryUpdateRepository implements LibraryUpdateService {
   final LibraryRuntimeRefreshService refreshService;
   final FullDbExtractor fullDbExtractor;
 
-  /// משעה את הספרייה בכל החלונות לפני החלפת קובץ המסד.
+  /// סוגר את הספרייה בתהליך לפני החלפת קובץ המסד.
   final LibraryAccessGate accessGate;
 
   /// ניתנים להזרקה לצורך בדיקות.
@@ -934,7 +934,7 @@ class LibraryUpdateRepository implements LibraryUpdateService {
       // ייתכן שהפעולה המתינה זמן רב מאחורי כתיבה אחרת. ביטול שהגיע בזמן
       // ההמתנה חייב לעצור לפני סגירת ה-runtime ולפני יצירת גיבוי כבד.
       _throwIfCancelled(isCancelled);
-      // חלון משני מחזיק handle משלו, ו-rename עליו נכשל ב-Windows.
+      // rename על מסד פתוח נכשל ב-Windows.
       await accessGate.runExclusive(
         dbPath: dbPath,
         body: (scope) async {

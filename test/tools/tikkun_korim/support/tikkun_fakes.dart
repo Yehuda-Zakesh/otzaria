@@ -38,10 +38,8 @@ class FakeTikkunEngine implements TikkunEngine {
   Object? throwOnProcessTorah;
   TikkunDecalogueTaam? lastDecalogueTaam;
 
-  @override
   String cleanRawText(String raw) => raw.trim();
 
-  @override
   List<TikkunToken> tokenizeText(String cleaned) => [
     for (final part in cleaned.split(RegExp(r'\s+')))
       if (part.isNotEmpty) TikkunToken.word(part),

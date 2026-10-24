@@ -16,7 +16,6 @@ import 'package:otzaria/core/windowing/app_virtual_window_frame.dart';
 import 'package:otzaria/core/windowing/app_window_keys.dart';
 import 'package:otzaria/core/windowing/app_window_scope.dart';
 import 'package:otzaria/core/windowing/mac_menu_bar.dart';
-import 'package:otzaria/core/windowing/multiview/multiview_flag.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:otzaria/navigation/view/main_window_screen.dart';
 import 'package:otzaria/settings/settings_exports.dart';
@@ -53,9 +52,7 @@ class App extends StatelessWidget {
             !kIsWeb &&
             (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
         // `VirtualWindowFrame` מאזין לחלון הראשי; לחלון Dart מסגרת משלו.
-        final isViewWindow =
-            MultiViewMode.enabled &&
-            AppWindowScope.roleOf(context).isViewWindow;
+        final isViewWindow = AppWindowScope.roleOf(context).isViewWindow;
         return ValueListenableBuilder<bool>(
           valueListenable: DeveloperDiagnostics.instance.performanceOverlay,
           builder: (context, showPerformanceOverlay, _) => MaterialApp(

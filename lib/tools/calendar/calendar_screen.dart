@@ -405,7 +405,6 @@ class CalendarWidgetState extends State<CalendarWidget> {
                     // ── גוף: Topbar + תוכן ──────────────────────────────
                     body: Column(
                       children: [
-                        // סרגל עליון חדש (לא appBar)
                         CalendarTopBar(
                           state: state,
                           onJumpToToday: () =>
@@ -670,7 +669,6 @@ class CalendarWidgetState extends State<CalendarWidget> {
 
   Widget _buildSidePanel(BuildContext context, CalendarState state) {
     return CalendarSidePanel(
-      state: state,
       activeView: _sidePanelView,
       timesPanel: CalendarTimesPanel(
         state: state,

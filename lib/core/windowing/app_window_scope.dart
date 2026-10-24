@@ -26,7 +26,7 @@ class AppWindowScope extends InheritedWidget {
   /// [AppWindowKeys.of].
   final AppWindowKeys? keys;
 
-  /// תפקיד החלון; `null` — [AppWindowRole.current]. נשלף דרך [roleOf].
+  /// תפקיד החלון; `null` — [AppWindowRole.main]. נשלף דרך [roleOf].
   final AppWindowRole? role;
 
   static AppWindowController controllerOf(BuildContext context) =>
@@ -35,11 +35,11 @@ class AppWindowScope extends InheritedWidget {
   static AppWindowGeometry geometryOf(BuildContext context) =>
       _of(context).geometry;
 
-  /// בלי scope מעל (בדיקות) — [AppWindowRole.current]. אינו רושם תלות:
+  /// בלי scope מעל (בדיקות) — [AppWindowRole.main]. אינו רושם תלות:
   /// התפקיד קבוע לכל חיי החלון, ונקרא גם מתוך `create` של ספקים.
   static AppWindowRole roleOf(BuildContext context) =>
       context.getInheritedWidgetOfExactType<AppWindowScope>()?.role ??
-      AppWindowRole.current;
+      AppWindowRole.main;
 
   static AppWindowScope _of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<AppWindowScope>();

@@ -16,8 +16,6 @@ abstract class PluginMessages {
   static const String correctionDraftSaved = 'טיוטת התיקון נשמרה.';
   static const String correctionOwnershipLost =
       'סשן התיקון הסתיים כי הספר נפתח לעריכה בחלון אחר. תיקונים שלא נשמרו נשמרים בטיוטה כהתנגשויות.';
-  static const String correctionQuitUnverified =
-      'לא ניתן לוודא שכל תיקוני התוספים נשמרו. היציאה בוטלה.';
   static const String correctionQuitFlushFailed =
       'שמירת תיקוני התוספים נכשלה בחלון אחד לפחות. היציאה בוטלה.';
   static const String nativeTextReader = 'קורא רגיל';

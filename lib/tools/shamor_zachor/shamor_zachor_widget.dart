@@ -157,7 +157,6 @@ class _ShamorZachorWidgetState extends State<ShamorZachorWidget>
         return MaterialPageRoute(
           builder: (context) => BookDetailScreen(
             topLevelCategoryKey: args['topLevelCategoryKey'] as String,
-            categoryName: args['categoryName'] as String,
             bookName: args['bookName'] as String,
             bookId: args['bookId'] as int?, // העברת ה-ID
           ),

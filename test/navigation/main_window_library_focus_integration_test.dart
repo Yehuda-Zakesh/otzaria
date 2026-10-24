@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:otzaria/settings/engine/app_settings_store.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/app_paths.dart';
 import 'package:otzaria/core/focus_repository.dart';
 import 'package:otzaria/core/windowing/app_window_controller.dart';
@@ -68,10 +69,13 @@ void main() {
       'מעבר מ${start.name} לספרייה ממקד את החיפוש במסך הראשי (issue #1723)',
       (tester) async {
         await Settings.init(cacheProvider: MemoryCacheProvider());
-        final oldSecondary = WindowRole.isSecondary;
-        final oldOpenedWithTab = WindowRole.openedWithTab;
-        WindowRole.isSecondary = true;
-        WindowRole.openedWithTab = true;
+        // כמו חלון שאינו בעל התהליך: בלי ניקוז הפעלות חיצוניות.
+        if (ProcessDuties.current.isProcessOwner) {
+          ProcessDuties.debugOverride = ProcessDuties(
+            isProcessOwner: () => false,
+          );
+          addTearDown(() => ProcessDuties.debugOverride = null);
+        }
         await tester.binding.setSurfaceSize(const Size(1200, 900));
         final navigation = _NavigationBloc();
         final changes = StreamController<NavigationState>.broadcast();
@@ -152,8 +156,6 @@ void main() {
           }
           focus.librarySearchFocusNode.unfocus();
           focus.librarySearchController.clear();
-          WindowRole.isSecondary = oldSecondary;
-          WindowRole.openedWithTab = oldOpenedWithTab;
           await tester.binding.setSurfaceSize(null);
         });
         const window = _FakeWindow(AppWindowId('test-window'));
@@ -161,6 +163,10 @@ void main() {
           AppWindowScope(
             controller: window,
             geometry: window,
+            role: const AppWindowRole(
+              isPrimaryView: false,
+              openedWithTab: true,
+            ),
             child: RepositoryProvider<FocusRepository>.value(
               value: focus,
               child: MultiBlocProvider(

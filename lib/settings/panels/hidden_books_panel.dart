@@ -4,11 +4,8 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:otzaria/app_scope/process_duties.dart';
 import 'package:otzaria/core/messages/settings_messages.dart';
 import 'package:otzaria/core/ui_snack.dart';
-import 'package:otzaria/core/windowing/multi_window_service.dart';
-import 'package:otzaria/core/windowing/settings_sync.dart';
 import 'package:otzaria/data/data_providers/tantivy_data_provider.dart';
 import 'package:otzaria/data/repository/data_repository.dart';
 import 'package:otzaria/indexing/repository/indexing_repository.dart';
@@ -30,6 +27,7 @@ import 'package:otzaria/settings/search/settings_search_models.dart';
 import 'package:otzaria/settings/view/settings_screen.dart';
 import 'package:otzaria/settings/widgets/settings_widgets_exports.dart';
 import 'package:otzaria/settings/services/per_book_settings_service.dart';
+import 'package:otzaria/utils/file/file_picker_dialog_options.dart';
 import 'package:otzaria/widgets/widgets_exports.dart';
 
 /// מסך ניהול הספרים והקטגוריות שהוסתרו מהממשק (issue #1448).
@@ -52,13 +50,6 @@ class HiddenBooksPanel extends StatefulWidget {
   /// מתזמן אינדוקס של ספרים שחזרו להיות גלויים; ניתן להחלפה בבדיקות.
   final void Function(List<Book> books, Library library)? indexAdder;
 
-  /// מחליף את בקשת המארח בבדיקות חלון משני.
-  final Future<VisibilityChangeResult> Function(
-    HiddenLibrarySelection base,
-    HiddenLibrarySelection requested,
-  )?
-  visibilityRequester;
-
   const HiddenBooksPanel({
     super.key,
     this.store = const HiddenLibraryStore(),
@@ -66,7 +57,6 @@ class HiddenBooksPanel extends StatefulWidget {
     this.libraryLoader,
     this.indexDropper,
     this.indexAdder,
-    this.visibilityRequester,
   });
 
   /// פריטי חיפוש בהגדרות. נסרק על-ידי tool/generate_search_index.dart.
@@ -95,7 +85,7 @@ class HiddenBooksPanel extends StatefulWidget {
 
 class _HiddenBooksPanelState extends State<HiddenBooksPanel> {
   late HiddenLibrarySelection _hidden = widget.store.load();
-  StreamSubscription<String>? _settingsChanges;
+  StreamSubscription<HiddenLibrarySelection>? _hiddenChanges;
 
   /// מפתח ספר → כותרת להצגה. ספר שאינו בספרייה יוצג לפי המפתח הגולמי, כדי
   /// שהמשתמש יוכל להסיר גם הסתרה של ספר שנעלם.
@@ -104,20 +94,16 @@ class _HiddenBooksPanelState extends State<HiddenBooksPanel> {
   @override
   void initState() {
     super.initState();
-    _settingsChanges = SettingsSync.instance.changes.listen((key) {
-      if (!mounted ||
-          (key != HiddenLibraryStore.bookKeysSetting &&
-              key != HiddenLibraryStore.categoryPathsSetting)) {
-        return;
-      }
-      setState(() => _hidden = widget.store.load());
+    // גם שמירה מפאנל פתוח בחלון אחר: כל החלונות כותבים לאותה חנות.
+    _hiddenChanges = widget.store.changes.listen((selection) {
+      if (mounted) setState(() => _hidden = selection);
     });
     unawaited(_loadTitles());
   }
 
   @override
   void dispose() {
-    unawaited(_settingsChanges?.cancel());
+    unawaited(_hiddenChanges?.cancel());
     super.dispose();
   }
 
@@ -153,35 +139,6 @@ class _HiddenBooksPanelState extends State<HiddenBooksPanel> {
   }) async {
     if (next == base) return true;
     if (!mounted) return false;
-    // ברמת ה-isolate ולא `of(context)`: חלון Dart חולק אותו עם הבעלים ושומר
-    // מקומית; העברה דרך האפיק לא הייתה מגיעה לאיש.
-    if (!ProcessDuties.current.isProcessOwner) {
-      final response =
-          await (widget.visibilityRequester?.call(base, next) ??
-              const MultiWindowService().requestVisibilityChange(base, next));
-      final applied = response.selection;
-      if (applied == null) {
-        UiSnack.showError(
-          response.uncertain
-              ? SettingsMessages.hiddenBooksIndexUpdateUnconfirmed
-              : SettingsMessages.hiddenBooksSelectionSaveFailed,
-        );
-        return false;
-      }
-      final beforeLocal = widget.store.load();
-      final appliedLocally = await widget.store.applyFromOwner(applied);
-      final localActual = widget.store.load();
-      if (!mounted) return false;
-      setState(() => _hidden = localActual);
-      if (localActual != beforeLocal) {
-        context.read<LibraryBloc>().add(const HiddenBooksChanged());
-      }
-      if (!appliedLocally || !response.saved) {
-        UiSnack.showError(SettingsMessages.hiddenBooksSelectionSaveFailed);
-        return false;
-      }
-      return true;
-    }
     final fullLibrary = library ?? await _library();
     if (!mounted) return false;
     final indexing = widget.indexDropper == null && widget.indexAdder == null
@@ -324,9 +281,14 @@ class _HiddenBooksPanelState extends State<HiddenBooksPanel> {
   }
 
   Future<String?> _pickFile() async {
-    final result = await FilePicker.pickFile(
-      type: FileType.custom,
-      allowedExtensions: const ['csv', 'json', 'txt'],
+    final result = await withFilePickerOwner(
+      context,
+      () => FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: const ['csv', 'json', 'txt'],
+        windowsOptions: modalWindowsOptions(context),
+        linuxOptions: kModalLinuxOptions,
+      ),
     );
     return result?.path;
   }

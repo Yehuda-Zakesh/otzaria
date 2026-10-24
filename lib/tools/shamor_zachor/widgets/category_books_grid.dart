@@ -425,10 +425,7 @@ class _CategoryBooksGridState extends State<CategoryBooksGrid> {
       }
 
       if (details.id != null) {
-        await progressProvider.clearBookProgressById(
-          details.id!,
-          bookDetails: details,
-        );
+        await progressProvider.clearBookProgressById(details.id!);
         await dataProvider.removeBookFromTracking(details.id!);
       }
 
