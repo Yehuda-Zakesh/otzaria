@@ -12,6 +12,52 @@ import 'package:otzaria/settings/l10n/settings_l10n_exports.dart';
 import 'package:otzaria/widgets/text/rtl_hard_break_workaround.dart';
 import 'package:otzaria/widgets/text/rtl_selection_shortcuts.dart';
 
+/// בקר גולמי שמדגיש את כל ההופעות של [highlight] כמו `<mark>` בקורא.
+class _HighlightingController extends TextEditingController {
+  String _highlight;
+
+  _HighlightingController(super.value, this._highlight) : super.fromValue();
+
+  set highlight(String value) {
+    if (_highlight == value) return;
+    _highlight = value;
+    notifyListeners();
+  }
+
+  @override
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    final query = _highlight.trim();
+    if (query.isEmpty || (withComposing && value.isComposingRangeValid)) {
+      return super.buildTextSpan(
+        context: context,
+        style: style,
+        withComposing: withComposing,
+      );
+    }
+    final marked = (style ?? const TextStyle()).copyWith(
+      backgroundColor: const Color(0xFFFFFF00),
+      color: const Color(0xFF000000),
+    );
+    final spans = <InlineSpan>[];
+    var from = 0;
+    for (
+      var at = text.indexOf(query);
+      at >= 0;
+      at = text.indexOf(query, from)
+    ) {
+      if (at > from) spans.add(TextSpan(text: text.substring(from, at)));
+      spans.add(TextSpan(text: query, style: marked));
+      from = at + query.length;
+    }
+    spans.add(TextSpan(text: text.substring(from)));
+    return TextSpan(style: style, children: spans);
+  }
+}
+
 /// שדה קלט עם ניווט, בחירה ותפריט הקשר מותאמים ל-RTL.
 class RtlTextField extends StatefulWidget {
   final TextEditingController? controller;
@@ -32,6 +78,10 @@ class RtlTextField extends StatefulWidget {
   final bool obscureText;
   final Color? cursorColor;
   final ScrollController? scrollController;
+
+  /// ביטוי להדגשה בתוך השדה הרב-שורתי, כמו `<mark>` בקורא: רקע צהוב וטקסט
+  /// שחור. משמש עורכים שמחליפים טקסט מוצג בשדה ועדיין צריכים הדגשת חיפוש.
+  final String highlightText;
 
   /// ממלא את הגובה הזמין. מחייב `maxLines: null` ו-`minLines: null`.
   final bool expands;
@@ -57,6 +107,7 @@ class RtlTextField extends StatefulWidget {
     this.cursorColor,
     this.scrollController,
     this.expands = false,
+    this.highlightText = '',
   });
 
   @override
@@ -134,6 +185,10 @@ class _RtlTextFieldState extends State<RtlTextField> {
       _setUpHardBreakWorkaround();
       _boundController.addListener(_restartCursorBlink);
     }
+    if (widget.highlightText != oldWidget.highlightText) {
+      final raw = _rawController;
+      if (raw is _HighlightingController) raw.highlight = widget.highlightText;
+    }
     // עדכון focusNode אם השתנה
     if (widget.focusNode != oldWidget.focusNode) {
       _effectiveFocusNode.removeListener(_handleFocusChange);
@@ -166,8 +221,9 @@ class _RtlTextFieldState extends State<RtlTextField> {
     if (widget.maxLines == 1) return;
     // לא משנים כאן את ה-controller של הקורא: זה רץ בזמן build, ומאזינים שלו
     // היו מופעלים באמצע הבנייה. \r שכבר היה בטקסט ינוקה בפעולה הראשונה בשדה.
-    _rawController = TextEditingController.fromValue(
+    _rawController = _HighlightingController(
       _expandMapper.map(_effectiveController.value),
+      widget.highlightText,
     );
     _rawController!.addListener(_syncCleanFromRawLive);
     _effectiveController.addListener(_syncRawFromCleanExternally);

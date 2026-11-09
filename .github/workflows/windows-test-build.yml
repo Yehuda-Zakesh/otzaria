@@ -1,0 +1,60 @@
+name: "Windows test build (portable ZIP)"
+
+# בנייה קלה לבדיקות: רק Windows x64, בלי release, בלי פרסום ובלי secrets.
+# התוצר הוא ZIP נייד שמורידים מלשונית Artifacts של ההרצה.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/correction-editor-bugs]
+
+jobs:
+  build_windows:
+    runs-on: windows-2025
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - name: Fetch biographies data
+        uses: ./.github/actions/fetch-biographies
+
+      - name: Prepare Flutter dependencies
+        shell: pwsh
+        run: |
+          git config --global core.longpaths true
+          flutter pub get --enforce-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dart run tool/generate_search_index.dart
+          dart run tool/generate_settings_l10n.dart
+
+      - name: Build Flutter Windows app
+        shell: pwsh
+        run: flutter build windows --release "--dart-define=OTZARIA_BUILD_COMMIT=$(git rev-parse --short=12 HEAD)"
+
+      - name: Zip portable build
+        shell: pwsh
+        run: |
+          $relDir = Get-ChildItem -Directory build\windows |
+                    Where-Object { Test-Path "$($_.FullName)\runner\Release" } |
+                    Select-Object -First 1 -ExpandProperty FullName
+          if (-not $relDir) { throw 'Release directory not found' }
+          $marker = Join-Path $relDir 'runner\Release\portable.marker'
+          New-Item -ItemType File -Path $marker -Force | Out-Null
+          Compress-Archive -Path "$relDir\runner\Release\*" -DestinationPath otzaria-windows-test.zip
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: otzaria-windows-test
+          path: otzaria-windows-test.zip
+          if-no-files-found: error
+          retention-days: 14
