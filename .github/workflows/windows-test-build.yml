@@ -3,7 +3,7 @@ name: "Windows test build (portable ZIP)"
 # בנייה קלה לבדיקות: רק Windows x64, בלי release, בלי פרסום ובלי secrets.
 # התוצר הוא ZIP נייד שמורידים מלשונית Artifacts של ההרצה.
 permissions:
-  contents: read
+  contents: write
 
 on:
   workflow_dispatch:
@@ -50,6 +50,29 @@ jobs:
           $marker = Join-Path $relDir 'runner\Release\portable.marker'
           New-Item -ItemType File -Path $marker -Force | Out-Null
           Compress-Archive -Path "$relDir\runner\Release\*" -DestinationPath otzaria-windows-test.zip
+
+      # מסנני רשת (למשל NetFree) עלולים לשנות ZIP שעובר בהורדה מ-Artifacts.
+      # לכן מפרסמים גם כ-prerelease בפורק, עם סכום בקרה וארכיון מוצפן
+      # (סיסמה: otzaria) שהמסנן אינו יכול לסרוק ולשנות.
+      - name: Package encrypted copy and checksums
+        shell: pwsh
+        run: |
+          $rel = Get-ChildItem -Directory build/windows | Where-Object { Test-Path "$($_.FullName)/runner/Release" } | Select-Object -First 1 -ExpandProperty FullName
+          7z a -t7z -mx=1 -mhe=on -potzaria otzaria-windows-test-encrypted.7z "$rel/runner/Release/*"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-FileHash otzaria-windows-test.zip, otzaria-windows-test-encrypted.7z -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } | Set-Content SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+
+      - name: Publish prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "windows-test-${{ github.run_number }}"
+          gh release create $tag otzaria-windows-test.zip otzaria-windows-test-encrypted.7z SHA256SUMS.txt `
+            --prerelease --target ${{ github.sha }} --title "Windows test build ${{ github.run_number }}" `
+            --notes "Test build of ${{ github.sha }}. ZIP is portable. If the ZIP is damaged by a filter, use the .7z (password: otzaria) and compare SHA256SUMS.txt."
 
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v7.0.2
