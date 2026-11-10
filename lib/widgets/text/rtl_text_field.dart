@@ -15,12 +15,20 @@ import 'package:otzaria/widgets/text/rtl_selection_shortcuts.dart';
 /// בקר גולמי שמדגיש את כל ההופעות של [highlight] כמו `<mark>` בקורא.
 class _HighlightingController extends TextEditingController {
   String _highlight;
+  RtlFormattedLeaves? _leaves;
 
-  _HighlightingController(super.value, this._highlight) : super.fromValue();
+  _HighlightingController(super.value, this._highlight, this._leaves)
+    : super.fromValue();
 
   set highlight(String value) {
     if (_highlight == value) return;
     _highlight = value;
+    notifyListeners();
+  }
+
+  set leaves(RtlFormattedLeaves? value) {
+    if (_leaves == value) return;
+    _leaves = value;
     notifyListeners();
   }
 
@@ -30,33 +38,56 @@ class _HighlightingController extends TextEditingController {
     TextStyle? style,
     required bool withComposing,
   }) {
-    final query = _highlight.trim();
-    if (query.isEmpty || (withComposing && value.isComposingRangeValid)) {
+    final composing = withComposing && value.isComposingRangeValid;
+    final formatted = composing ? null : _leaves?.call(text);
+    final query = composing ? '' : _highlight.trim();
+    if (formatted == null && query.isEmpty) {
       return super.buildTextSpan(
         context: context,
         style: style,
         withComposing: withComposing,
       );
     }
-    final marked = (style ?? const TextStyle()).copyWith(
-      backgroundColor: const Color(0xFFFFFF00),
-      color: const Color(0xFF000000),
-    );
+    final leaves = formatted ?? [TextSpan(text: text)];
+    if (query.isEmpty) return TextSpan(style: style, children: leaves);
+    // ההדגשה מונחת מעל העלים: כל עלה נחתך בגבולות ההתאמה ושומר על סגנונו.
     final spans = <InlineSpan>[];
-    var from = 0;
-    for (
-      var at = text.indexOf(query);
-      at >= 0;
-      at = text.indexOf(query, from)
-    ) {
-      if (at > from) spans.add(TextSpan(text: text.substring(from, at)));
-      spans.add(TextSpan(text: query, style: marked));
-      from = at + query.length;
+    var leafStart = 0;
+    var match = text.indexOf(query);
+    for (final leaf in leaves) {
+      final leafText = leaf.text ?? '';
+      final leafEnd = leafStart + leafText.length;
+      var from = leafStart;
+      while (from < leafEnd) {
+        while (match >= 0 && match + query.length <= from) {
+          match = text.indexOf(query, match + query.length);
+        }
+        final inMatch = match >= 0 && match <= from;
+        final until = inMatch
+            ? (match + query.length < leafEnd ? match + query.length : leafEnd)
+            : (match >= 0 && match < leafEnd ? match : leafEnd);
+        spans.add(
+          TextSpan(
+            text: leafText.substring(from - leafStart, until - leafStart),
+            style: inMatch
+                ? (leaf.style ?? const TextStyle()).copyWith(
+                    backgroundColor: const Color(0xFFFFFF00),
+                    color: const Color(0xFF000000),
+                  )
+                : leaf.style,
+          ),
+        );
+        from = until;
+      }
+      leafStart = leafEnd;
     }
-    spans.add(TextSpan(text: text.substring(from)));
     return TextSpan(style: style, children: spans);
   }
 }
+
+/// עלים מעוצבים (טקסט וסגנון, בלי ילדים) לטקסט השדה, או null לטקסט פשוט.
+/// הטקסט המחובר של העלים חייב להיות שווה ל-[text].
+typedef RtlFormattedLeaves = List<TextSpan>? Function(String text);
 
 /// שדה קלט עם ניווט, בחירה ותפריט הקשר מותאמים ל-RTL.
 class RtlTextField extends StatefulWidget {
@@ -82,6 +113,11 @@ class RtlTextField extends StatefulWidget {
   /// ביטוי להדגשה בתוך השדה הרב-שורתי, כמו `<mark>` בקורא: רקע צהוב וטקסט
   /// שחור. משמש עורכים שמחליפים טקסט מוצג בשדה ועדיין צריכים הדגשת חיפוש.
   final String highlightText;
+
+  /// עיצוב הטקסט בשדה רב-שורתי (מודגש, גודל, וכו'), למשל כדי שעורך יישבר
+  /// לשורות בדיוק כמו התצוגה שהוא מחליף. נקרא בכל בנייה, ולכן צריך להיות זול.
+  final RtlFormattedLeaves? formattedLeaves;
+  final StrutStyle? strutStyle;
 
   /// ממלא את הגובה הזמין. מחייב `maxLines: null` ו-`minLines: null`.
   final bool expands;
@@ -112,6 +148,8 @@ class RtlTextField extends StatefulWidget {
     this.expands = false,
     this.scrollPadding = const EdgeInsets.all(20.0),
     this.highlightText = '',
+    this.formattedLeaves,
+    this.strutStyle,
   });
 
   @override
@@ -193,6 +231,10 @@ class _RtlTextFieldState extends State<RtlTextField> {
       final raw = _rawController;
       if (raw is _HighlightingController) raw.highlight = widget.highlightText;
     }
+    if (widget.formattedLeaves != oldWidget.formattedLeaves) {
+      final raw = _rawController;
+      if (raw is _HighlightingController) raw.leaves = widget.formattedLeaves;
+    }
     // עדכון focusNode אם השתנה
     if (widget.focusNode != oldWidget.focusNode) {
       _effectiveFocusNode.removeListener(_handleFocusChange);
@@ -228,6 +270,7 @@ class _RtlTextFieldState extends State<RtlTextField> {
     _rawController = _HighlightingController(
       _expandMapper.map(_effectiveController.value),
       widget.highlightText,
+      widget.formattedLeaves,
     );
     _rawController!.addListener(_syncCleanFromRawLive);
     _effectiveController.addListener(_syncRawFromCleanExternally);
@@ -442,6 +485,7 @@ class _RtlTextFieldState extends State<RtlTextField> {
       obscureText: widget.obscureText,
       cursorWidth: 1.0, // דק יותר מברירת המחדל (2.0)
       scrollPadding: widget.scrollPadding,
+      strutStyle: widget.strutStyle,
       // שקוף בשלב ה"כבוי" של ההבהוב ולאחר שנעצר (ראו ניהול ההבהוב למעלה)
       cursorColor: _cursorVisible ? widget.cursorColor : Colors.transparent,
       // ברירת המחדל max מציירת בטקסט RTL רב-שורתי כל בחירה עד הקצה השמאלי.
